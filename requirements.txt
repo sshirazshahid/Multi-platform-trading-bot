@@ -1,0 +1,30 @@
+# Core exchange connectivity
+ccxt>=4.2.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Logging
+loguru>=0.7.0
+
+# Environment / config
+python-dotenv>=1.0.0
+
+# Scheduling
+schedule>=1.2.0
+
+# HTTP requests (news scanner, Claude API)
+requests>=2.31.0
+
+# Terminal dashboard
+rich>=13.0.0
+
+# Email reports
+# (uses stdlib smtplib — no extra package needed)
+
+# AI integration (optional — bot works without it using embedded logic)
+# anthropic>=0.25.0
+
+# Optional: PyInstaller for building a standalone .exe
+# pyinstaller>=6.0.0
