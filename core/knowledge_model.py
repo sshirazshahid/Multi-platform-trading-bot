@@ -137,15 +137,22 @@ class KnowledgeModel:
             self._model["live_trades"] = count
 
         # ── Strategy scores ───────────────────────────────────────────
+        # Bug 2D — t.get("pnl_pct") is None marks a "reconciled_no_context"
+        # close (Binance income event with no entry/size to derive pct). Skip
+        # such rows from count-based WR/trades aggregations, but still include
+        # the dollar pnl in net_pnl for ledger integrity. Sibling fix to
+        # position_tracker.reconcile_closed_pnl (Bug 2A).
         strat_buckets = defaultdict(lambda: {
             "trades": 0, "wins": 0, "net_pnl": 0.0, "total_fees": 0.0
         })
         for t in trades:
             s = t.get("strategy", "unknown")
             d = strat_buckets[s]
-            d["trades"]     += 1
-            d["net_pnl"]    += t.get("pnl") or 0.0
+            d["net_pnl"]    += t.get("pnl") or 0.0           # dollar ledger
             d["total_fees"] += t.get("total_fees") or 0.0
+            if t.get("pnl_pct") is None:
+                continue  # reconciled_no_context: skip from WR/trades count
+            d["trades"]     += 1
             if (t.get("pnl") or 0) > 0:
                 d["wins"] += 1
 
@@ -174,8 +181,10 @@ class KnowledgeModel:
             sym   = t.get("symbol", "unknown")
             strat = t.get("strategy", "unknown")
             d     = sym_buckets[sym]
+            d["net_pnl"] += t.get("pnl") or 0.0           # dollar ledger always
+            if t.get("pnl_pct") is None:
+                continue  # reconciled_no_context: skip from WR/trades count (Bug 2D)
             d["trades"]  += 1
-            d["net_pnl"] += t.get("pnl") or 0.0
             d["strategy_trades"][strat] += 1
             if (t.get("pnl") or 0) > 0:
                 d["wins"] += 1
@@ -209,6 +218,8 @@ class KnowledgeModel:
             "trades": 0, "wins": 0
         }))
         for t in trades:
+            if t.get("pnl_pct") is None:
+                continue  # reconciled_no_context: skip from WR sample (Bug 2D)
             s = t.get("strategy", "unknown")
             r = _regime(s)
             regime_buckets[r][s]["trades"] += 1
@@ -237,9 +248,11 @@ class KnowledgeModel:
             ot = t.get("open_time", 0)
             if ot:
                 h = datetime.fromtimestamp(ot).hour
-                hour_buckets[h]["trades"]     += 1
-                hour_buckets[h]["net_pnl"]    += t.get("pnl") or 0.0
+                hour_buckets[h]["net_pnl"]    += t.get("pnl") or 0.0   # dollar ledger
                 hour_buckets[h]["total_fees"] += t.get("total_fees") or 0.0
+                if t.get("pnl_pct") is None:
+                    continue  # reconciled_no_context: skip WR (Bug 2D)
+                hour_buckets[h]["trades"]     += 1
                 if (t.get("pnl") or 0) > 0:
                     hour_buckets[h]["wins"] += 1
         for h, d in hour_buckets.items():
