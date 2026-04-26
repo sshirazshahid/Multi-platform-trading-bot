@@ -15,6 +15,22 @@ from loguru import logger
 from config import RISK
 
 PEAKS_FILE = Path("data/trailing_peaks.json")
+PARAMS_FILE = Path("data/trailing_params.json")
+
+
+def _load_fitted_params() -> tuple[float | None, float | None]:
+    """Load (activation_pct, lock_fraction) from data/trailing_params.json
+    if it exists. Falls back to (None, None) so callers can use defaults."""
+    try:
+        if PARAMS_FILE.exists():
+            data = json.loads(PARAMS_FILE.read_text(encoding="utf-8"))
+            a = data.get("activation_pct")
+            L = data.get("lock_fraction")
+            if a is not None and L is not None:
+                return float(a), float(L)
+    except Exception:
+        pass
+    return None, None
 
 
 def _fee_rate(market_type: str) -> float:
@@ -34,9 +50,21 @@ class TrailingStopManager:
         # self.activation retained for backwards compat, but _adaptive_activation
         # reads RISK live on every call so config edits take immediate effect.
         self.activation = RISK.get("trailing_activation", 0.008)
+        # Phase 2 / Task D: prefer fitted params from data/trailing_params.json
+        # when present; fall back to RISK defaults. _lock_override applies
+        # only to the BASE lock fraction; the graduated _lock_fraction(peak_pnl)
+        # tiers still scale on top of it.
+        fitted_a, fitted_L = _load_fitted_params()
+        if fitted_a is not None:
+            self.activation = fitted_a
+        self._lock_override = fitted_L  # None when not fitted
         self.enabled = RISK.get("trailing_stop", True)
         if self._tracking:
             logger.info(f"[Trail] Loaded {len(self._tracking)} peaks from disk")
+        if fitted_a is not None or fitted_L is not None:
+            logger.info(
+                f"[Trail] Fitted params loaded: activation={self.activation:.3%} "
+                f"lock_override={self._lock_override}")
 
     def _breakeven_price(self, position, side: str) -> float:
         """Calculate breakeven price including round-trip fees.
@@ -150,9 +178,22 @@ class TrailingStopManager:
         if dirty: self._save_peaks()
         return False, "", sl
 
-    @staticmethod
-    def _lock_fraction(peak_pnl: float) -> float:
+    def _lock_fraction(self, peak_pnl: float) -> float:
         """Graduated profit lock — protect bigger winners more aggressively.
+
+        When `data/trailing_params.json` provided a fitted base lock fraction
+        we honour it for the small/medium-win tiers (where the fit dominates)
+        and let the high-tier protections take over for exceptional winners
+        (those tiers are sample-poor — only 4 historical TP hits at the time
+        of writing — so the fit cannot speak to them).
+        """
+        if getattr(self, "_lock_override", None) is not None and peak_pnl < 0.05:
+            return float(self._lock_override)
+        return self.__class__._lock_fraction_default(peak_pnl)
+
+    @staticmethod
+    def _lock_fraction_default(peak_pnl: float) -> float:
+        """Hardcoded graduated lock table — used when no fit is available.
         2026-04-24 retune: lowered low-peak locks so winners have room to reach
         target TP instead of exiting at ~0.6% clipped profit. Prior config
         (0.60/0.70/0.75/0.80) produced 55W trailing @ $0.09 avg vs 4 full TPs
