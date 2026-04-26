@@ -123,3 +123,85 @@ def test_decision_gate_recommends_stop_when_negative(diag):
     by_strat = diag.per_group_report(rows, "strategy_family")
     text = diag.format_report(overall, by_strat, by_strat)
     assert "STOP" in text or "stop" in text.lower()
+
+
+# ── Phase 2 / Task E: re-gate flags ───────────────────────────────────
+
+
+def test_parse_since_iso_date(diag):
+    ts = diag._parse_since("2026-04-27")
+    from datetime import datetime, timezone
+    expected = datetime(2026, 4, 27, tzinfo=timezone.utc).timestamp()
+    assert ts == pytest.approx(expected)
+
+
+def test_parse_since_relative_days(diag):
+    import time
+    before = time.time()
+    ts = diag._parse_since("7d")
+    delta = before - ts
+    assert 7 * 86400 - 5 < delta < 7 * 86400 + 5
+
+
+def test_parse_since_relative_hours(diag):
+    import time
+    before = time.time()
+    ts = diag._parse_since("24h")
+    delta = before - ts
+    assert 24 * 3600 - 5 < delta < 24 * 3600 + 5
+
+
+def test_parse_since_iso_datetime(diag):
+    ts = diag._parse_since("2026-04-27T12:00:00")
+    from datetime import datetime, timezone
+    expected = datetime(2026, 4, 27, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert ts == pytest.approx(expected)
+
+
+def test_parse_since_rejects_garbage(diag):
+    with pytest.raises(ValueError):
+        diag._parse_since("not-a-date")
+    with pytest.raises(ValueError):
+        diag._parse_since("")
+
+
+def test_zero_cost_predicate_matches_backfill_rows(diag):
+    """All three cost fields == 0 → predicate fires (the pre-Task-A blind spot)."""
+    assert diag._is_zero_cost_backfill(
+        {"spread": 0.0, "slippage": 0.0, "funding": 0.0})
+    # None values coerce to 0
+    assert diag._is_zero_cost_backfill(
+        {"spread": None, "slippage": None, "funding": None})
+
+
+def test_zero_cost_predicate_misses_real_rows(diag):
+    """Any non-zero cost field → row is real, predicate misses."""
+    assert not diag._is_zero_cost_backfill(
+        {"spread": 0.01, "slippage": 0.0, "funding": 0.0})
+    assert not diag._is_zero_cost_backfill(
+        {"spread": 0.0, "slippage": 0.001, "funding": 0.0})
+    assert not diag._is_zero_cost_backfill(
+        {"spread": 0.0, "slippage": 0.0, "funding": 0.05})
+
+
+def test_format_report_surfaces_backfill_count(diag):
+    rows = _make_rows(50, alpha_mean=0.1, alpha_std=1.0)
+    overall = diag.per_group_report([{**r, "_all": "ALL"} for r in rows], "_all")[0]
+    by_strat = diag.per_group_report(rows, "strategy_family")
+    by_sym = diag.per_group_report(rows, "symbol")
+    text = diag.format_report(
+        overall, by_strat, by_sym,
+        n_zero_cost=42, n_total=50, since="2026-04-27",
+    )
+    assert "Backfill blind spot" in text
+    assert "42 of 50" in text
+    assert "2026-04-27" in text
+
+
+def test_format_report_omits_backfill_section_when_clean(diag):
+    rows = _make_rows(50, alpha_mean=0.1, alpha_std=1.0)
+    overall = diag.per_group_report([{**r, "_all": "ALL"} for r in rows], "_all")[0]
+    by_strat = diag.per_group_report(rows, "strategy_family")
+    text = diag.format_report(overall, by_strat, by_strat)
+    # default n_total=0 → section absent
+    assert "Backfill blind spot" not in text

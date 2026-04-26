@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,6 +38,50 @@ from core.warehouse import get_warehouse  # noqa: E402
 
 # Minimum rows in a group before we'll compute a CI / emit a verdict.
 MIN_GROUP_N = 10
+
+
+def _parse_since(raw: str) -> float:
+    """Parse a `--since` arg into a unix timestamp.
+
+    Accepts:
+      - ISO-8601 date:    2026-04-27
+      - ISO-8601 datetime: 2026-04-27T00:00:00 (timezone-aware or naive UTC)
+      - relative duration: 7d, 24h, 30d
+    """
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("empty --since")
+    if s.endswith("d") and s[:-1].isdigit():
+        return time.time() - int(s[:-1]) * 86400.0
+    if s.endswith("h") and s[:-1].isdigit():
+        return time.time() - int(s[:-1]) * 3600.0
+    # ISO date / datetime
+    try:
+        if "T" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError as e:
+        raise ValueError(
+            f"--since must be ISO date (2026-04-27), ISO datetime, or "
+            f"a relative duration like 7d/24h: got {raw!r}"
+        ) from e
+
+
+def _is_zero_cost_backfill(row: dict) -> bool:
+    """A row is 'zero-cost backfill' when spread, slippage, AND funding are
+    all exactly zero. Newly-attributed trades from Phase 2 / Task A onward
+    will carry non-zero spread (live spread ≥ 1bp on any real fill) so this
+    predicate cleanly partitions backfilled-in-bulk historical rows from
+    cleanly-attributed forward rows."""
+    return (
+        float(row.get("spread") or 0.0) == 0.0
+        and float(row.get("slippage") or 0.0) == 0.0
+        and float(row.get("funding") or 0.0) == 0.0
+    )
 
 
 def verdict(lb: float, ub: float) -> str:
@@ -100,6 +145,10 @@ def format_report(
     overall: dict | None,
     by_strategy: list[dict],
     by_symbol: list[dict],
+    *,
+    n_zero_cost: int = 0,
+    n_total: int = 0,
+    since: str | None = None,
 ) -> str:
     L = []
     L.append("# Attribution Diagnostic Report")
@@ -110,6 +159,15 @@ def format_report(
         "alpha on those rows is gross PnL. Phase 1.4 wires real-mid capture "
         "so newly-closed trades carry full decomposition.\n"
     )
+    if since:
+        L.append(f"**Window:** ts_entry >= `{since}`\n")
+    if n_total > 0:
+        pct = (n_zero_cost / n_total * 100.0) if n_total else 0.0
+        L.append(
+            f"**Backfill blind spot:** {n_zero_cost} of {n_total} matched rows "
+            f"({pct:.1f}%) carry spread=slippage=funding=0. Use "
+            f"`--exclude-zero-cost` to drop them for a clean re-gate.\n"
+        )
 
     if overall:
         L.append("## Overall (all closed trades)\n")
@@ -208,6 +266,18 @@ def main():
         "--tag", default=None,
         help="Tag to embed in the saved filename (e.g. live_only)",
     )
+    parser.add_argument(
+        "--since", default=None,
+        help=("Filter trades by ts_entry. Accepts ISO date (2026-04-27), "
+              "ISO datetime, or relative duration like 7d/24h. Use this to "
+              "re-gate against post-Phase-2 trades only."),
+    )
+    parser.add_argument(
+        "--exclude-zero-cost", action="store_true",
+        help=("Skip rows where spread=slippage=funding=0 (the pre-Task-A "
+              "backfill blind spot). Recommended for any --since that "
+              "post-dates the forward-attribution wire-up."),
+    )
     args = parser.parse_args()
 
     wh = get_warehouse()
@@ -229,6 +299,10 @@ def main():
         placeholders = ",".join("?" * len(args.exclude_symbol))
         sql += f" AND t.symbol NOT IN ({placeholders})"
         params.extend(args.exclude_symbol)
+    if args.since:
+        since_ts = _parse_since(args.since)
+        sql += " AND t.ts_entry >= ?"
+        params.append(since_ts)
     rows = wh.query(sql, params)
     if not rows:
         print(
@@ -238,12 +312,34 @@ def main():
         )
         sys.exit(1)
 
+    n_pre_filter = len(rows)
+    n_zero_cost = sum(1 for r in rows if _is_zero_cost_backfill(r))
+    if args.exclude_zero_cost and n_zero_cost > 0:
+        rows = [r for r in rows if not _is_zero_cost_backfill(r)]
+        print(
+            f"[diagnostic] --exclude-zero-cost: skipped {n_zero_cost} of "
+            f"{n_pre_filter} rows with spread=slippage=funding=0 "
+            f"(pre-Task-A backfill blind spot)",
+            file=sys.stderr,
+        )
+    if not rows:
+        print(
+            "All rows excluded. The warehouse only contains pre-Task-A "
+            "backfill so far — wait for forward-attributed trades to "
+            "accumulate, or drop --exclude-zero-cost to inspect history.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     overall = _agg(rows)
     overall["group"] = "ALL"
     by_strategy = per_group_report(rows, "strategy_family")
     by_symbol = per_group_report(rows, "symbol")
 
-    report = format_report(overall, by_strategy, by_symbol)
+    report = format_report(
+        overall, by_strategy, by_symbol,
+        n_zero_cost=n_zero_cost, n_total=n_pre_filter, since=args.since,
+    )
     print(report)
 
     if args.save:
