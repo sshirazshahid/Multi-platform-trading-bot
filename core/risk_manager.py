@@ -360,20 +360,22 @@ class RiskManager:
                 return 0.0
         elif self.sizing_mode == "volatility" and atr_pct:
             # Phase 2 / Task C: replace the ad-hoc `1% target_risk / atr` with
-            # a proper portfolio-vol-targeting sizer. The clamps inside
-            # VolTarget preserve the existing 5%-floor / 3×lev×pct ceiling.
+            # a proper portfolio-vol-targeting sizer. VolTarget.size() is a
+            # @staticmethod that returns a notional in USD already clamped
+            # to [floor_pct, ceiling_pct] of balance — we feed
+            # notional_ceiling_pct = max_position_pct * 3 * leverage to
+            # match the prior envelope, then apply leverage to convert
+            # notional → contract qty.
             from core.vol_target import VolTarget
-            sized = VolTarget().size(
-                balance=balance_usdt, price=price, atr_pct=atr_pct,
-                leverage=leverage, max_position_pct=self.max_position_pct,
+            notional = VolTarget.size(
+                balance_usd=balance_usdt,
+                vol_forecast=atr_pct,
+                notional_ceiling_pct=self.max_position_pct * 3 * leverage,
             )
-            qty = sized.notional / price if price > 0 else 0.0
+            qty = (notional * leverage) / price if price > 0 else 0.0
             logger.info(
                 f"[Risk] VolTarget: atr%={atr_pct*100:.2f}% "
-                f"daily_vol={sized.daily_vol_pct*100:.2f}% "
-                f"target={sized.target_daily_vol_pct*100:.2f}% "
-                f"notional=${sized.notional:.2f} qty={qty:.8f} "
-                f"lev={leverage}x clamp={sized.clamped}")
+                f"notional=${notional:.2f} qty={qty:.8f} lev={leverage}x")
             return qty
         else:
             pct = self.max_position_pct
