@@ -117,15 +117,24 @@ class RiskManager:
             pass
 
     def _load_state(self):
-        """Load persisted risk state on startup. Handles same-day resume vs new-day reset."""
+        """Load persisted risk state on startup. Handles same-day resume vs new-day reset.
+
+        The Spec §12 review-flag is honoured authoritatively: it is checked
+        AFTER the risk_state.json branches AND on every early-return path
+        (missing file, corrupt JSON, invalid trading_day). This guarantees a
+        bot whose `risk_state.json` was lost cannot accidentally come up
+        unhalted while `data/review_required.json` still sits on disk.
+        """
         path = Path("data/risk_state.json")
         if not path.exists():
+            self._honour_review_flag_if_present()
             return
 
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"[Risk] Could not load risk state: {e}")
+            self._honour_review_flag_if_present()
             return
 
         saved_day_str = state.get("trading_day", "")
@@ -133,6 +142,7 @@ class RiskManager:
             saved_day = date.fromisoformat(saved_day_str)
         except (ValueError, TypeError):
             logger.warning("[Risk] Invalid trading_day in saved state — starting fresh")
+            self._honour_review_flag_if_present()
             return
 
         # Always restore trade history (used by Kelly sizing across days)
@@ -173,56 +183,66 @@ class RiskManager:
                 f"[Risk] New day — daily counters reset. "
                 f"Carried over {len(self._trade_history)} trade history entries")
 
-        # Spec §12: review_required.json is the authoritative halt record.
-        # If the flag file is present, honour it regardless of what
-        # risk_state.json says. This fixes the class of bugs where
-        # `is_halted` got cleared in memory (new-day branch above, silent
-        # unlink failure in _should_auto_resume) while the flag file
-        # remained on disk and the halt was never actually lifted.
-        if _REVIEW_FLAG_PATH.exists():
-            try:
-                flag_data = json.loads(
-                    _REVIEW_FLAG_PATH.read_text(encoding="utf-8"))
-                # File format is a list of event dicts (see _write_review_flag).
-                # Accept a bare dict for backwards compatibility.
-                if isinstance(flag_data, list):
-                    flag_state = flag_data[-1] if flag_data else {}
-                elif isinstance(flag_data, dict):
-                    flag_state = flag_data
-                else:
-                    flag_state = {}
-                if not isinstance(flag_state, dict):
-                    flag_state = {}
-                flag_ts = float(flag_state.get("ts", 0.0) or 0.0)
-                flag_reason = str(flag_state.get("reason", "unknown"))
-                flag_action = str(flag_state.get("action", ""))
-            except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
-                logger.warning(
-                    f"[Risk] review_required.json present but unreadable "
-                    f"({e}) — failing safe (halted)")
-                flag_ts = _time.time()
-                flag_reason = "review_flag_unreadable"
-                flag_action = "force_observation_mode"
+        # Spec §12: review_required.json is the authoritative halt record on
+        # both same-day AND new-day branches. See _honour_review_flag_if_present.
+        self._honour_review_flag_if_present()
 
-            elapsed_min = (_time.time() - flag_ts) / 60 if flag_ts > 0 else 0
-            remaining_min = max(0, SPEC12_AUTO_RESUME_COOLDOWN_MIN - elapsed_min)
+    def _honour_review_flag_if_present(self) -> None:
+        """If `data/review_required.json` exists, override in-memory halt state
+        from it. Runs after every `_load_state` branch (including early
+        returns) so a missing/corrupt risk_state.json cannot wipe a valid
+        halt that the flag still attests to.
 
-            # Reconstruct halt state from the flag. Use a reason string that
-            # `_should_auto_resume` recognises so the cooldown check fires.
-            self._halted = True
-            self._halt_time = flag_ts or _time.time()
-            if "consecutive" in flag_reason or "global" in flag_reason:
-                self._halt_reason = "spec12:consec_global_losses"
+        Fix 1A: same-day AND new-day AND missing-state-file paths all hit this.
+        Fix 1D: emits a WARNING with elapsed minutes + remaining cooldown.
+        """
+        if not _REVIEW_FLAG_PATH.exists():
+            return
+
+        try:
+            flag_data = json.loads(_REVIEW_FLAG_PATH.read_text(encoding="utf-8"))
+            # File format is a list of event dicts (see _write_review_flag).
+            # Accept a bare dict for backwards compatibility.
+            if isinstance(flag_data, list):
+                flag_state = flag_data[-1] if flag_data else {}
+            elif isinstance(flag_data, dict):
+                flag_state = flag_data
             else:
-                # Outlier losses and manual review flags are also honoured —
-                # treat as halted until the operator removes the flag.
-                self._halt_reason = f"spec12:flag:{flag_action or 'review_required'}"
-
+                flag_state = {}
+            if not isinstance(flag_state, dict):
+                flag_state = {}
+            flag_ts = float(flag_state.get("ts", 0.0) or 0.0)
+            flag_reason = str(flag_state.get("reason", "unknown"))
+            flag_action = str(flag_state.get("action", ""))
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
             logger.warning(
-                f"[Risk/Spec12] review_required.json present "
-                f"(reason='{flag_reason}', action='{flag_action}', "
-                f"age={elapsed_min:.1f}min, cooldown remaining={remaining_min:.1f}min). "
-                f"Halt restored from flag — risk_state.json value ignored.")
+                f"[Risk] review_required.json present but unreadable "
+                f"({e}) — failing safe (halted)")
+            flag_ts = _time.time()
+            flag_reason = "review_flag_unreadable"
+            flag_action = "force_observation_mode"
+
+        elapsed_min = (_time.time() - flag_ts) / 60 if flag_ts > 0 else 0
+        remaining_min = max(0.0, SPEC12_AUTO_RESUME_COOLDOWN_MIN - elapsed_min)
+
+        # Reconstruct halt state from the flag. Use a reason string that
+        # `_should_auto_resume` recognises so the cooldown check fires.
+        # Fix 1C: _halted=True is paired with _halt_time set in the same block.
+        self._halted = True
+        self._halt_time = flag_ts or _time.time()
+        if "consecutive" in flag_reason or "global" in flag_reason:
+            self._halt_reason = "spec12:consec_global_losses"
+        else:
+            # Outlier losses and manual review flags are also honoured —
+            # treat as halted until the operator removes the flag.
+            self._halt_reason = f"spec12:flag:{flag_action or 'review_required'}"
+
+        # Fix 1D: WARNING so operators can see Spec §12 state at startup.
+        logger.warning(
+            f"[Risk/Spec12] review_required.json present "
+            f"(reason='{flag_reason}', action='{flag_action}', "
+            f"age={elapsed_min:.1f}min, cooldown remaining={remaining_min:.1f}min). "
+            f"Halt restored from flag — risk_state.json value ignored.")
 
     # ── Trading gate with SMART RECOVERY ─────────────────────────────
 
