@@ -117,7 +117,7 @@ class BaseStrategy(ABC):
                         except (TypeError, ValueError):
                             pass
 
-            # Standard ccxt (Binance, MEXC, Bitget)
+            # Standard ccxt (Binance, Bitget)
             usdt = bal_data.get("USDT")
             if isinstance(usdt, dict):
                 v = usdt.get("free") or usdt.get("total") or 0.0

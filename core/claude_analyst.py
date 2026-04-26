@@ -45,7 +45,7 @@ ANALYSIS_FILE = Path("data/claude_analysis.json")
 ANALYSIS_HTML = Path("data/claude_analysis.html")
 HISTORY_FILE  = Path("data/claude_analysis_history.json")
 RESEARCH_FILE = Path("data/research/report_latest.json")
-MODEL         = "claude-sonnet-4-20250514"
+MODEL         = "claude-opus-4-7"
 MAX_TOKENS    = 1500
 
 # Framework weights — must sum to 1.0
@@ -207,14 +207,23 @@ class ClaudeAnalyst:
             return None
 
         try:
-            text = strip_markdown_fences(text)
-            result = json.loads(text)
+            from utils.claude_client import validate_json_response
+            result = validate_json_response(
+                text,
+                required_fields=["market_bias", "risk_multiplier", "coins"],
+                field_types={
+                    "risk_multiplier": float,
+                },
+            )
+            if not result:
+                logger.error("[Claude] Response failed schema validation")
+                return None
             logger.info("[Claude] Success: bias={} rm={}".format(
                 result.get("market_bias", "?"),
                 result.get("risk_multiplier", "?")))
             return result
-        except json.JSONDecodeError as e:
-            logger.error("[Claude] JSON parse error: {} — text: {}".format(
+        except Exception as e:
+            logger.error("[Claude] Parse/validation error: {} — text: {}".format(
                 e, text[:200]))
             return None
 

@@ -127,6 +127,10 @@ def update_env(key, value):
     print(f"  [OK] {key} updated.")
 
 
+def set_env_var(key: str, value: str):
+    update_env(key, value)
+
+
 def set_dry(value: str):
     update_env("DRY_RUN", value.lower())
     mode = "DRY RUN (paper trading)" if value.lower() == "true" else "LIVE TRADING"
@@ -167,13 +171,12 @@ def show_trading_mode():
 
 def scan_portfolio():
     try:
-        from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
+        from exchanges import BinanceClient, BybitClient, BitgetClient
         import portfolio_scanner as ps
 
         exchanges = {}
         for name, cls in [
             ("binance", BinanceClient),
-            ("mexc",    MEXCClient),
             ("bybit",   BybitClient),
             ("bitget",  BitgetClient),
         ]:
@@ -232,7 +235,6 @@ def update_email(sender: str, password: str, recipient: str):
 
 
 def write_env(binance_key, binance_sec, binance_testnet,
-              mexc_key, mexc_sec, mexc_testnet,
               gmail_sender, gmail_pass, gmail_recv, dry_run):
     lines = [
         "# Trading Bot Configuration",
@@ -241,11 +243,6 @@ def write_env(binance_key, binance_sec, binance_testnet,
         f"BINANCE_API_KEY={binance_key}",
         f"BINANCE_SECRET_KEY={binance_sec}",
         f"BINANCE_TESTNET={binance_testnet}",
-        "",
-        "# MEXC",
-        f"MEXC_API_KEY={mexc_key}",
-        f"MEXC_SECRET_KEY={mexc_sec}",
-        f"MEXC_TESTNET={mexc_testnet}",
         "",
         "# Bybit",
         "BYBIT_API_KEY=your_bybit_api_key_here",
@@ -358,7 +355,6 @@ def test_connection():
     results = []
     for name, cls_name in [
         ("Binance",    "binance"),
-        ("MEXC",       "mexc"),
         ("Bybit",      "bybit"),
         ("Bitget",     "bitget"),
     ]:
@@ -402,7 +398,11 @@ if __name__ == "__main__":
     elif cmd == "update_email":
         update_email(sys.argv[2], sys.argv[3], sys.argv[4])
     elif cmd == "write_env":
-        write_env(*sys.argv[2:12])
+        args_w = sys.argv[2:12]
+        if len(args_w) < 10:
+            print(f"  ERROR: write_env requires 10 arguments, got {len(args_w)}")
+            sys.exit(1)
+        write_env(*args_w)
     elif cmd == "fix_ghosts":
         fix_ghost_positions()
     elif cmd == "test_connection":

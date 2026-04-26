@@ -33,16 +33,45 @@ RESULTS_DIR = Path("data/backtest_results")
 
 def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0):
     """Run a single backtest and return results dict."""
+    import pandas as pd
     from core.backtester import Backtester
-    
+    from config import RISK
+
     cfg = STRATEGIES.get(strategy_name, {"timeframe": "1h", "market": "futures"})
     timeframe = cfg["timeframe"]
     market_type = cfg["market"]
-    
+    leverage = RISK.get("default_leverage", 5) if market_type == "futures" else 1
+
     try:
-        bt = Backtester(exchange, symbol, strategy_name, 
-                       timeframe=timeframe, days=days, balance=balance)
-        result = bt.run()
+        # Fetch OHLCV data
+        _tf_mins = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+        limit = days * 24 * 60 // _tf_mins.get(timeframe, 60)
+        raw = exchange.fetch_ohlcv(symbol, timeframe, limit=min(limit, 1000),
+                                    market_type=market_type)
+        if not raw or len(raw) < 50:
+            return {"symbol": symbol, "strategy": strategy_name,
+                    "exchange": exchange.name, "error": "insufficient data"}
+        df = pd.DataFrame(raw, columns=["timestamp","open","high","low","close","volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df.set_index("timestamp", inplace=True)
+
+        # Build strategy object
+        from core.order_manager import OrderManager
+        from core.risk_manager import RiskManager
+        from core.strategy_selector import _make_strategy
+        risk = RiskManager()
+        om = OrderManager(tracker=None, risk=risk, exchanges={}, dry_run=True)
+        strategy = _make_strategy(strategy_name, om, risk, market_type)
+        if not strategy:
+            return {"symbol": symbol, "strategy": strategy_name,
+                    "exchange": exchange.name, "error": "unknown strategy"}
+
+        bt = Backtester(
+            sl_pct=RISK.get("default_stop_loss", 0.04),
+            tp_pct=RISK.get("default_take_profit", 0.10),
+            initial_balance=balance, leverage=leverage,
+        )
+        result = bt.run(strategy, df, symbol)
         return {
             "symbol": symbol,
             "strategy": strategy_name,
@@ -50,7 +79,10 @@ def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0
             "timeframe": timeframe,
             "market_type": market_type,
             "days": days,
-            **result,
+            "total_trades": result.total_trades,
+            "win_rate": result.win_rate,
+            "total_pnl": result.total_pnl,
+            "sharpe": result.sharpe,
         }
     except Exception as e:
         return {
@@ -63,16 +95,16 @@ def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0
 
 def run_all_backtests(days=30):
     """Run all strategies on all pairs on all connected exchanges."""
-    from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
-    
+    from exchanges import BinanceClient, BybitClient, BitgetClient
+
     logger.info("=" * 60)
     logger.info("  AUTO-BACKTEST — All Strategies × All Pairs × All Exchanges")
     logger.info(f"  Period: {days} days | Balance: $1000 USDT")
     logger.info("=" * 60)
-    
+
     # Connect exchanges
     exchanges = {}
-    for name, cls in [("binance", BinanceClient), ("mexc", MEXCClient),
+    for name, cls in [("binance", BinanceClient),
                       ("bybit", BybitClient), ("bitget", BitgetClient)]:
         try:
             ex = cls()
@@ -104,7 +136,7 @@ def run_all_backtests(days=30):
                     
                     if "error" not in result:
                         wr = result.get("win_rate", 0)
-                        pnl = result.get("net_pnl", 0)
+                        pnl = result.get("total_pnl", 0)
                         trades = result.get("total_trades", 0)
                         wrc = "\033[92m" if wr >= 60 else ("\033[93m" if wr >= 50 else "\033[91m")
                         logger.info(
@@ -143,7 +175,7 @@ def _print_summary(results):
         return
     
     # Rank by win rate × PnL
-    valid.sort(key=lambda r: (r.get("win_rate", 0), r.get("net_pnl", 0)), reverse=True)
+    valid.sort(key=lambda r: (r.get("win_rate", 0), r.get("total_pnl", 0)), reverse=True)
     
     logger.info("\n" + "=" * 80)
     logger.info("  BACKTEST RESULTS RANKED BY WIN RATE")
@@ -154,7 +186,7 @@ def _print_summary(results):
     
     for r in valid[:20]:
         wr = r.get("win_rate", 0)
-        pnl = r.get("net_pnl", 0)
+        pnl = r.get("total_pnl", 0)
         trades = r.get("total_trades", 0)
         best = r.get("best_trade", 0)
         worst = r.get("worst_trade", 0)
@@ -176,7 +208,7 @@ def _print_summary(results):
     
     for sym, r in sorted(by_symbol.items()):
         logger.info(f"    {sym:<12} → {r['strategy']} on {r['exchange']} "
-                    f"(WR={r.get('win_rate',0):.0f}% PnL={r.get('net_pnl',0):+.2f})")
+                    f"(WR={r.get('win_rate',0):.0f}% PnL={r.get('total_pnl',0):+.2f})")
 
 
 def _build_summary_text(results):
@@ -197,7 +229,7 @@ def _build_summary_text(results):
     for r in valid:
         lines.append(
             f"{r['strategy']:<16} {r['symbol']:<12} {r['exchange']:<10} "
-            f"{r.get('win_rate',0):>5.1f}% {r.get('net_pnl',0):>+9.2f} "
+            f"{r.get('win_rate',0):>5.1f}% {r.get('total_pnl',0):>+9.2f} "
             f"{r.get('total_trades',0):>7}")
     
     return "\n".join(lines)

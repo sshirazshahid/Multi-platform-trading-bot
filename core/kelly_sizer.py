@@ -32,15 +32,27 @@ class KellySizer:
 
     def update_from_trades(self, closed_trades: list):
         """Rebuild stats from closed trades.
-        IMPORTANT: Only use non-paper trades for Kelly stats.
-        Paper trade results are unrealistic (no slippage, no spread, no partial fills)
-        and were previously contaminating live trade blocking decisions.
+
+        2026-04-16 (post-audit): previously skipped paper trades so Kelly
+        would only block in live mode. But the bot runs in PAPER mode
+        during the learning-first phase, so the block-on-negative-edge
+        rule was structurally inert — SOL/XRP accumulated 16-22% WR
+        without ever triggering a Kelly block.
+
+        Now includes paper trades when running in PAPER/OBSERVATION —
+        the SimExecution model already applies slippage, wick SL/TP,
+        and funding, so paper stats are a reasonable proxy for live.
+        In CONTROLLED_LIVE we still exclude paper noise.
         """
+        try:
+            from config import OPERATING_MODE
+            controlled_live = OPERATING_MODE == "CONTROLLED_LIVE"
+        except Exception:
+            controlled_live = False
+
         self._stats = {}
         for t in closed_trades:
-            # Skip paper trades — their stats are unrealistic and were
-            # causing Kelly to block live trades with artificially low WR
-            if t.get("paper_trade", False):
+            if controlled_live and t.get("paper_trade", False):
                 continue
 
             strat = t.get("strategy", "unknown")
@@ -97,10 +109,16 @@ class KellySizer:
         kelly = (p * b - q) / b
 
         if kelly <= 0:
-            logger.warning(
-                f"[Kelly] {strat}: NEGATIVE edge! "
-                f"WR={p:.0%} R={b:.2f} Kelly={kelly:.1%} — blocking trade")
-            return 0.0
+            if kelly < -0.25:
+                logger.warning(
+                    f"[Kelly] {strat}: SEVERE negative edge! "
+                    f"WR={p:.0%} R={b:.2f} Kelly={kelly:.1%} — blocking trade")
+                return 0.0
+            # Mildly negative: trade at minimum size (aligned with should_block_trade threshold)
+            logger.info(
+                f"[Kelly] {strat}: mild negative edge "
+                f"WR={p:.0%} R={b:.2f} Kelly={kelly:.1%} — using MIN_POSITION")
+            return self.MIN_POSITION
 
         # Apply fractional Kelly
         position_pct = kelly * self.KELLY_FRACTION
@@ -197,8 +215,8 @@ class KellySizer:
             wr = stats["wins"] / total
             avg_win  = stats["total_win"]  / max(stats["wins"], 1)
             avg_loss = stats["total_loss"] / max(stats["losses"], 1)
-            b = avg_win / avg_loss if avg_loss > 0 else 0
-            kelly = (wr * b - (1 - wr)) / b if b > 0 else 0
+            b = avg_win / avg_loss if avg_loss > 0 else float('inf')
+            kelly = 1.0 if b == float('inf') else (wr * b - (1 - wr)) / b
             result[strat] = {
                 "trades": total, "win_rate": round(wr * 100, 1),
                 "r_multiple": round(b, 2),

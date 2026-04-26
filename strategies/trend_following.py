@@ -17,8 +17,8 @@ def _ema(s, p): return s.ewm(span=p, adjust=False).mean()
 
 def _rsi(s, p=14):
     d = s.diff()
-    g = d.clip(lower=0).ewm(span=p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(span=p, adjust=False).mean()
+    g = d.clip(lower=0).ewm(com=p-1, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(com=p-1, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def _macd(s, fast=12, slow=26, sig=9):
@@ -30,7 +30,7 @@ def _atr(high, low, close, p=14):
     tr = pd.concat([high - low,
                     (high - close.shift(1)).abs(),
                     (low  - close.shift(1)).abs()], axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 def _adx(high, low, close, p=14):
     tr   = _atr(high, low, close, p)
@@ -38,10 +38,10 @@ def _adx(high, low, close, p=14):
     down = -low.diff()
     pdm  = up.where((up > down) & (up > 0), 0)
     mdm  = down.where((down > up) & (down > 0), 0)
-    pdi  = 100 * pdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
-    mdi  = 100 * mdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
+    pdi  = 100 * pdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
+    mdi  = 100 * mdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
     dx   = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
-    return dx.ewm(span=p, adjust=False).mean()
+    return dx.ewm(com=p-1, adjust=False).mean()
 
 
 class TrendFollowingStrategy(BaseStrategy):
@@ -51,6 +51,7 @@ class TrendFollowingStrategy(BaseStrategy):
         self.cfg = CFG
 
     def generate_signal(self, df: pd.DataFrame):
+        df = df.copy()
         df["ema_fast"]  = _ema(df["close"], self.cfg["fast_ema"])
         df["ema_slow"]  = _ema(df["close"], self.cfg["slow_ema"])
         df["ema_trend"] = _ema(df["close"], self.cfg["trend_ema"])

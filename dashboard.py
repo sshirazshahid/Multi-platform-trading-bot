@@ -2,7 +2,7 @@
 dashboard.py -- LIVE Real-Time Trading Dashboard (Optimized)
 
 Features:
-  - Live prices + balances from all 4 exchanges (parallel fetching)
+  - Live prices + balances from all 3 exchanges (parallel fetching)
   - Unrealized PnL with live price tracking
   - Strategy performance breakdown
   - ROI%, profit factor, win/loss streaks
@@ -78,7 +78,6 @@ _BG_LAST_ERR = None
 
 EX_COLOUR = {
     "binance": "\033[38;5;220m",
-    "mexc":    "\033[38;5;45m",
     "bybit":   "\033[38;5;214m",
     "bitget":  "\033[38;5;48m",
 }
@@ -126,6 +125,26 @@ def clr():
 
 def col(text, code):
     return code + str(text) + RESET
+
+
+# ── ANSI-aware width helpers ──────────────────────────────────────────
+# `col()` wraps text in ANSI escape codes which Python's str.format counts
+# toward field width (e.g. "{:<11}".format(col("Period", DIM)) sees a
+# 14-char string for a 6-char visible word and skips padding entirely).
+# Use vlen / vljust / vrjust to align colored cells visibly.
+import re as _re
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
+def vlen(s):
+    """Visible length of a string after stripping ANSI escape sequences."""
+    return len(_ANSI_RE.sub("", s)) if s else 0
+def vljust(s, width):
+    """Left-justify `s` to `width` visible columns, ignoring ANSI codes."""
+    pad = max(0, width - vlen(s))
+    return (s if s is not None else "") + " " * pad
+def vrjust(s, width):
+    """Right-justify `s` to `width` visible columns, ignoring ANSI codes."""
+    pad = max(0, width - vlen(s))
+    return " " * pad + (s if s is not None else "")
 
 
 def pnl_str(val, suffix=" USDT"):
@@ -202,7 +221,7 @@ _file_cache = FileCache()
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Balance extractor — handles all 4 exchange response formats
+# Balance extractor — handles all 3 exchange response formats
 # ══════════════════════════════════════════════════════════════════════
 
 def extract_usdt(bal: dict, exchange_name: str = "") -> float:
@@ -211,31 +230,71 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
     ex = exchange_name.lower()
 
     if ex == "bybit":
-        # Priority 1: Raw Bybit v5 API — totalEquity matches Bybit app display
-        # (includes wallet balance + unrealized PnL from open positions)
+        # Bybit Unified Account has several balance fields with very different meanings:
+        #   totalEquity           = wallet + unrealized PnL + USD value of every non-USDT
+        #                           spot holding (BTC/ETH/DOGE/... all counted as collateral).
+        #                           Matches the Bybit app's top-line "Total Equity" number
+        #                           but over-states spendable USDT by the value of non-USDT
+        #                           spot coins — for the dashboard we want to report actual
+        #                           USDT, not total equity.
+        #   totalAvailableBalance = free USDT-equivalent margin for new orders
+        #   availableToWithdraw   = free USDT (excludes locked margin)
+        # Priority order below matches core/bot_engine.py._extract_usdt (2026-04-12 fix)
+        # so dashboard and sizing agree on the same number.
         try:
-            result_list = bal.get("info", {}).get("result", {}).get("list", [{}])
-            if result_list:
-                equity = result_list[0].get("totalEquity")
-                if equity:
-                    v = float(equity)
-                    if v > 0: return v
-                wb = result_list[0].get("totalWalletBalance")
-                if wb:
-                    v = float(wb)
-                    if v > 0: return v
+            result_list = bal.get("info", {}).get("result", {}).get("list", [])
+            if result_list and isinstance(result_list, list):
+                acct = result_list[0] if result_list else {}
+                for field in ("totalAvailableBalance",
+                              "totalMarginBalance",
+                              "totalWalletBalance"):
+                    val = acct.get(field)
+                    if val is not None:
+                        try:
+                            v = float(val)
+                            if v > 0:
+                                return v
+                        except (TypeError, ValueError):
+                            pass
+                # Per-coin USDT free balance
+                coins = acct.get("coin", [])
+                if isinstance(coins, list):
+                    for c in coins:
+                        if c.get("coin") == "USDT":
+                            for f2 in ("availableToWithdraw",
+                                       "availableBalance",
+                                       "walletBalance"):
+                                val2 = c.get(f2)
+                                if val2 is not None:
+                                    try:
+                                        v2 = float(val2)
+                                        if v2 > 0:
+                                            return v2
+                                    except (TypeError, ValueError):
+                                        pass
+                # Last-resort: totalEquity. Over-states by spot-coin value but
+                # better than reporting 0 when the preferred fields are missing.
+                te = acct.get("totalEquity")
+                if te is not None:
+                    try:
+                        v = float(te)
+                        if v > 0:
+                            return v
+                    except (TypeError, ValueError):
+                        pass
         except Exception:
             pass
-        # Fallback: ccxt parsed fields
+        # Fallback 2: ccxt parsed fields — total.USDT or USDT.total
         usdt = bal.get("USDT") or {}
         if isinstance(usdt, dict):
-            total = usdt.get("total")
-            if total is not None:
-                try:
-                    v = float(total)
-                    if v > 0: return v
-                except (TypeError, ValueError):
-                    pass
+            for key in ("total", "free"):
+                val = usdt.get(key)
+                if val is not None:
+                    try:
+                        v = float(val)
+                        if v > 0: return v
+                    except (TypeError, ValueError):
+                        pass
         total_dict = bal.get("total") or {}
         if isinstance(total_dict, dict):
             val = total_dict.get("USDT")
@@ -285,10 +344,10 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
                     pass
         return 0.0
 
-    # Standard ccxt (Binance, MEXC)
+    # Standard ccxt (Binance)
     usdt = bal.get("USDT")
     if isinstance(usdt, dict):
-        for key in ("free", "total"):
+        for key in ("total", "free"):
             val = usdt.get(key)
             if val is not None:
                 try:
@@ -366,13 +425,12 @@ class LiveFetcher:
     def _init_exchanges(self):
         try:
             sys.path.insert(0, str(Path(__file__).parent))
-            from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
+            from exchanges import BinanceClient, BybitClient, BitgetClient
             from config import DRY_RUN, TRADING_MODE
             self._dry_run = DRY_RUN
             self._trading_mode = TRADING_MODE
             candidates = {
                 "binance": BinanceClient,
-                "mexc":    MEXCClient,
                 "bybit":   BybitClient,
                 "bitget":  BitgetClient,
             }
@@ -469,9 +527,7 @@ class LiveFetcher:
                     name, usdt = f.result()
                     with self._lock:
                         self._balances[name] = usdt
-                        # Only mark OK if we actually got balance data
-                        if usdt > 0 or name not in self._ex_status:
-                            self._ex_status[name] = "OK"
+                        self._ex_status[name] = "OK"
                 except Exception:
                     pass
 
@@ -491,8 +547,11 @@ class LiveFetcher:
                             self._prices["{}:{}".format(name, sym)] = price
                             if sym not in self._prices:
                                 self._prices[sym] = price
+                                self._prices[f"{sym}:count"] = 1
                             else:
-                                self._prices[sym] = (self._prices[sym] + price) / 2
+                                cnt = self._prices.get(f"{sym}:count", 1)
+                                self._prices[sym] = (self._prices[sym] * cnt + price) / (cnt + 1)
+                                self._prices[f"{sym}:count"] = cnt + 1
                 except Exception:
                     pass
 
@@ -650,19 +709,48 @@ class LiveFetcher:
                         "_from_exchange": True,
                     })
                 return results
-            except Exception:
+            except Exception as e:
+                # 2026-04-16: Was silently swallowed — now logged at warning
+                # so a dead exchange client (e.g. Bybit init failure) is visible.
+                logger.warning(f"[Dashboard] {name} futures fetch failed: {str(e)[:150]}")
                 return []
+
+        def _avg_cost_from_trades(ex, symbol, held_qty):
+            """Try to compute average buy cost from recent trade history."""
+            try:
+                trades = ex.exchange.fetch_my_trades(symbol, limit=50)
+                if not trades:
+                    return 0.0
+                # Walk backwards through buys to find cost basis for held_qty
+                total_cost = 0.0
+                total_qty = 0.0
+                for t in reversed(trades):
+                    if t.get("side") != "buy":
+                        continue
+                    qty = float(t.get("amount", 0))
+                    px = float(t.get("price", 0))
+                    if qty <= 0 or px <= 0:
+                        continue
+                    need = held_qty - total_qty
+                    take = min(qty, need)
+                    total_cost += take * px
+                    total_qty += take
+                    if total_qty >= held_qty * 0.99:  # close enough
+                        break
+                if total_qty > 0:
+                    return total_cost / total_qty
+            except Exception:
+                pass
+            return 0.0
 
         def _fetch_spot_holdings(name, ex):
             """Fetch non-USDT spot holdings as open SPOT positions."""
             try:
                 bal = ex.fetch_balance("spot")
                 results = []
-                # Parse ccxt balance format: {"BTC": {"free": 0.001, "total": 0.001}, ...}
-                for asset_key in ("free", "total"):
-                    asset_dict = bal.get(asset_key, {})
-                    if not isinstance(asset_dict, dict):
-                        continue
+                # Only use "total" for holdings display — includes assets in open orders
+                asset_dict = bal.get("total", {})
+                if isinstance(asset_dict, dict):
                     for asset, amount in asset_dict.items():
                         if asset in ("USDT", "USD", "BUSD", "USDC"):
                             continue
@@ -680,6 +768,8 @@ class LiveFetcher:
                         price = self.get_price(name, symbol)
                         if price and amt * price < 1.0:
                             continue
+                        # Try to get actual average buy cost from trade history
+                        avg_cost = _avg_cost_from_trades(ex, symbol, amt)
                         pid = "SPOT-{}-{}-buy".format(name, symbol)
                         results.append({
                             "id": pid,
@@ -688,7 +778,8 @@ class LiveFetcher:
                             "side": "buy",
                             "market_type": "spot",
                             "strategy": "holding",
-                            "entry_price": price or 0,
+                            "entry_price": avg_cost,  # 0 if trade history unavailable
+                            "current_price": price or 0,
                             "size": amt,
                             "stop_loss": 0,
                             "take_profit": 0,
@@ -697,10 +788,9 @@ class LiveFetcher:
                             "paper_trade": False,
                             "_from_exchange": True,
                         })
-                    if results:
-                        break  # "free" was enough, skip "total"
                 return results
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[Dashboard] {name} spot holdings fetch failed: {str(e)[:150]}")
                 return []
 
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -740,7 +830,8 @@ def load_positions(fetcher: "LiveFetcher" = None):
             if pid in seen_ids:
                 continue
             # LIVE mode: skip paper trades — only show real positions
-            if is_live and pos.get("paper_trade", True):
+            # Default False: positions missing the key are assumed real (not paper)
+            if is_live and pos.get("paper_trade", False):
                 continue
             seen_ids.add(pid)
             all_open.append(pos)
@@ -749,7 +840,7 @@ def load_positions(fetcher: "LiveFetcher" = None):
             if pid in seen_ids:
                 continue
             # LIVE mode: skip paper trades in history too
-            if is_live and pos.get("paper_trade", True):
+            if is_live and pos.get("paper_trade", False):
                 continue
             seen_ids.add(pid)
             all_closed.append(pos)
@@ -758,15 +849,58 @@ def load_positions(fetcher: "LiveFetcher" = None):
     for profile in ("conservative", "moderate", "aggressive"):
         _ingest(_file_cache.load("data/profiles/{}/positions.json".format(profile)))
 
-    # Merge live exchange positions not already tracked locally
+    tracked_syms = set()
+    for p in all_open:
+        ex = (p.get("exchange") or "").lower()
+        sym = p.get("symbol", "")
+        side = p.get("side", "")
+        tracked_syms.add((ex, sym, side))
+
+    # 2026-04-16: Merge bot engine's universal exchange snapshot.
+    # This is the authoritative cross-exchange view written by
+    # bot_engine._fetch_all_exchange_positions(). It surfaces manual
+    # positions even when the dashboard's own LiveFetcher failed to
+    # initialize (e.g. Bybit API error at startup).
+    try:
+        ex_snap = _file_cache.load("data/exchange_positions.json") or {}
+        snap_ts = float(ex_snap.get("ts") or 0)
+        # Treat as fresh if written within last 5 minutes
+        if snap_ts and (time.time() - snap_ts) < 300:
+            for ep in ex_snap.get("positions", []):
+                ex = (ep.get("exchange") or "").lower()
+                sym = ep.get("symbol", "")
+                side = ep.get("side", "")
+                if not ex or not sym or not side:
+                    continue
+                if (ex, sym, side) in tracked_syms:
+                    continue
+                # Normalize to dashboard position shape
+                mapped = {
+                    "id": ep.get("id") or "ENG-{}-{}-{}".format(ex, sym, side),
+                    "exchange": ex.capitalize(),
+                    "symbol": sym,
+                    "side": side,
+                    "market_type": ep.get("market_type", "futures"),
+                    "strategy": "manual",
+                    "entry_price": float(ep.get("entry_price") or 0),
+                    "current_price": float(ep.get("current_price") or 0),
+                    "size": float(ep.get("size") or 0),
+                    "stop_loss": float(ep.get("stop_loss") or ep.get("liquidation_price") or 0),
+                    "take_profit": float(ep.get("take_profit") or 0),
+                    "leverage": int(ep.get("leverage") or 1),
+                    "open_time": time.time(),
+                    "paper_trade": False,
+                    "_live_upnl": float(ep.get("pnl") or 0),
+                    "_from_exchange": True,
+                }
+                all_open.append(mapped)
+                tracked_syms.add((ex, sym, side))
+    except Exception as _e:
+        logger.debug(f"[Dashboard] exchange_positions snapshot merge: {_e}")
+
+    # Merge live exchange positions not already tracked locally (LiveFetcher path)
     if fetcher:
         live_pos = fetcher.get_live_positions()
-        tracked_syms = set()
-        for p in all_open:
-            ex = (p.get("exchange") or "").lower()
-            sym = p.get("symbol", "")
-            side = p.get("side", "")
-            tracked_syms.add((ex, sym, side))
         for lp in live_pos:
             ex = (lp.get("exchange") or "").lower()
             sym = lp.get("symbol", "")
@@ -780,19 +914,180 @@ def load_positions(fetcher: "LiveFetcher" = None):
 
 
 def load_news():       return _file_cache.load("data/news_cache.json")
-def load_comparison(): return _file_cache.load("data/profiles/comparison.json")
-def load_claude():     return _file_cache.load("data/claude_analysis.json")
-def load_arb():        return _file_cache.load("data/arbitrage/opportunities.json")
+def load_auto_mut():   return _file_cache.load("data/auto_mutations.json")
+def load_post_mortem():return _file_cache.load("data/post_mortem.json")
+def load_risk_state(): return _file_cache.load("data/risk_state.json")
+
+
+def load_warehouse_stats() -> dict:
+    """Warehouse-backed stats for the dashboard.
+
+    Reads data/warehouse.sqlite directly (no ORM, no core/__init__).
+    Returns {} if the DB doesn't exist or an error occurs.
+    """
+    out: dict = {"per_symbol": [], "per_family": [], "slippage": {}}
+    db_path = Path("data/warehouse.sqlite")
+    if not db_path.exists():
+        return out
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+
+        # Per-symbol expectancy + PF (closed trades only)
+        rows = conn.execute(
+            """SELECT symbol,
+                      COUNT(*) AS n,
+                      SUM(realized_pnl) AS net,
+                      SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END) AS gw,
+                      SUM(CASE WHEN realized_pnl < 0 THEN -realized_pnl ELSE 0 END) AS gl,
+                      SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+                 FROM trades
+                WHERE status='CLOSED'
+                GROUP BY symbol
+                ORDER BY n DESC
+                LIMIT 8"""
+        ).fetchall()
+        out["per_symbol"] = [dict(r) for r in rows]
+
+        # Per-strategy-family net PnL + count
+        fam = conn.execute(
+            """SELECT COALESCE(strategy_family,'unknown') AS fam,
+                      COUNT(*) AS n,
+                      SUM(realized_pnl) AS net,
+                      SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+                 FROM trades
+                WHERE status='CLOSED'
+                GROUP BY fam
+                ORDER BY n DESC
+                LIMIT 6"""
+        ).fetchall()
+        out["per_family"] = [dict(r) for r in fam]
+
+        # Slippage vs fee ratio — only rows where both are non-null
+        slip = conn.execute(
+            """SELECT AVG(slippage) AS avg_slip,
+                      AVG(fee)      AS avg_fee,
+                      COUNT(*)      AS n
+                 FROM trades
+                WHERE status='CLOSED' AND slippage IS NOT NULL AND fee IS NOT NULL"""
+        ).fetchone()
+        if slip:
+            out["slippage"] = dict(slip)
+
+        # Counts for header line
+        tot = conn.execute(
+            "SELECT COUNT(*) AS c FROM trades WHERE status='CLOSED'"
+        ).fetchone()
+        cnd = conn.execute(
+            "SELECT COUNT(*) AS c FROM candidates"
+        ).fetchone()
+        out["total_trades"] = int(tot["c"]) if tot else 0
+        out["total_candidates"] = int(cnd["c"]) if cnd else 0
+        conn.close()
+    except Exception as e:
+        out["_error"] = str(e)
+    return out
+
+
+def load_block_reasons(tail_lines: int = 800) -> dict:
+    """Parse today's bot log tail to count recent block reasons.
+
+    Returns {"BLACKLIST": N, "DYN_BL": N, "UNIVERSE": N, "RISK": N,
+             "HOUR": N, "TIER": N, "RR": N, "OTHER": N, "total": N,
+             "claude_empty": N, "algo_zero": N}
+
+    Used by the dashboard "WHY NO TRADES" panel to expose why the bot
+    is idle so the user doesn't have to tail the log manually.
+    """
+    out = {
+        "BLACKLIST": 0, "DYN_BL": 0, "UNIVERSE": 0, "RISK": 0,
+        "HOUR": 0, "TIER": 0, "RR": 0, "SHORTS": 0, "LEV": 0,
+        "OTHER": 0, "total": 0,
+        "claude_empty": 0, "algo_zero": 0, "actions": 0,
+    }
+    try:
+        log_path = Path("logs") / ("bot_" + datetime.now().strftime("%Y-%m-%d") + ".log")
+        if not log_path.exists():
+            return out
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            # Read last ~tail_lines lines cheaply
+            try:
+                f.seek(0, 2)
+                size = f.tell()
+                # ~200 chars per line avg → read that many bytes
+                back = min(size, tail_lines * 260)
+                f.seek(max(0, size - back))
+                f.readline()  # discard partial line
+                lines = f.readlines()[-tail_lines:]
+            except Exception:
+                f.seek(0)
+                lines = f.readlines()[-tail_lines:]
+        for ln in lines:
+            if "BLOCKED by" in ln or "BLOCKED:" in ln or "blocked by" in ln.lower():
+                out["total"] += 1
+                lnl = ln.lower()
+                if "blacklist_hard" in lnl or "hard blacklist" in lnl:
+                    out["BLACKLIST"] += 1
+                elif "dyn" in lnl and "blacklist" in lnl:
+                    out["DYN_BL"] += 1
+                elif "universe" in lnl or "spread" in lnl or "atr" in lnl or "depth" in lnl:
+                    out["UNIVERSE"] += 1
+                elif "risk" in lnl or "halt" in lnl or "daily loss" in lnl:
+                    out["RISK"] += 1
+                elif "hour" in lnl or "blocked hour" in lnl:
+                    out["HOUR"] += 1
+                elif "tier" in lnl or "leverage tier" in lnl:
+                    out["TIER"] += 1
+                elif "r:r" in lnl or "risk/reward" in lnl or "rr<" in lnl:
+                    out["RR"] += 1
+                elif "short" in lnl:
+                    out["SHORTS"] += 1
+                elif "leverage cap" in lnl:
+                    out["LEV"] += 1
+                else:
+                    out["OTHER"] += 1
+            if "Claude returned empty" in ln or "No trades:" in ln or '"actions":[]' in ln:
+                out["claude_empty"] += 1
+            if "Algorithmic fallback: 0 actions" in ln:
+                out["algo_zero"] += 1
+            if "Algorithmic fallback:" in ln and " actions" in ln:
+                try:
+                    n = int(ln.split("Algorithmic fallback:")[1].split(" actions")[0].strip())
+                    out["actions"] += n
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return out
+
+
+def _hour_class(hour: int) -> tuple:
+    """Classify a UTC hour against config trading gates.
+    Returns (label, ansi color)."""
+    try:
+        from config import (
+            ALLOWED_HOURS_UTC, PEAK_HOURS_UTC,
+            WARMUP_HOURS_UTC, BLOCKED_HOURS_UTC,
+        )
+    except Exception:
+        return ("?", DIM)
+    if hour in BLOCKED_HOURS_UTC:
+        return ("BLOCKED", RED)
+    if hour in PEAK_HOURS_UTC:
+        return ("PEAK",    GOLD + BOLD)
+    if hour in WARMUP_HOURS_UTC:
+        return ("WARMUP",  YELLOW)
+    # Default: allowed (any hour not explicitly blocked/warmup/peak)
+    return ("ALLOWED", GREEN)
 
 
 def load_mode():
     try:
-        for line in Path(".env").read_text(encoding="utf-8").splitlines():
-            if line.strip().lower().startswith("dry_run"):
-                return "false" not in line.lower()
+        from config import DRY_RUN
+        return DRY_RUN
     except Exception:
-        pass
-    return True
+        return True
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -812,23 +1107,44 @@ def calc_unrealized(open_pos: list, fetcher: LiveFetcher) -> dict:
         exname = (pos.get("exchange") or "").lower()
 
         live_price = fetcher.get_price(exname, sym)
-        if not live_price or not entry or not size:
-            result[pid] = {"price": 0.0, "upnl": None, "upnl_pct": None, "move_pct": 0.0}
+        if not live_price or not size:
+            # Still check for exchange-provided uPnL (e.g., Bybit/Binance futures)
+            live_upnl = pos.get("_live_upnl")
+            if live_upnl is not None and live_upnl != 0:
+                result[pid] = {"price": 0.0, "upnl": float(live_upnl),
+                               "upnl_pct": None, "move_pct": 0.0}
+            else:
+                result[pid] = {"price": 0.0, "upnl": None, "upnl_pct": None, "move_pct": 0.0}
+            continue
+
+        # Exchange-provided uPnL is authoritative for live futures positions
+        live_upnl = pos.get("_live_upnl")
+        if live_upnl is not None and pos.get("_from_exchange") and mtype == "futures":
+            upnl = float(live_upnl)
+            move_pct = (live_price - entry) / entry * 100 if entry > 0 else 0
+            margin = (size * entry) / max(lev, 1) if entry > 0 else 1
+            upnl_pct = (upnl / max(margin, 0.0001)) * 100 if margin > 0 else 0
+            result[pid] = {"price": live_price, "upnl": upnl, "upnl_pct": upnl_pct,
+                           "move_pct": move_pct}
+            continue
+
+        # Holdings with unknown entry: estimate value but no PnL
+        if not entry:
+            value = live_price * size
+            result[pid] = {"price": live_price, "upnl": None, "upnl_pct": None,
+                           "move_pct": 0.0, "value": value}
             continue
 
         move_pct = (live_price - entry) / entry * 100
-        if mtype == "futures":
-            upnl = (live_price - entry) * size if side == "buy" else (entry - live_price) * size
-        else:
+        if side == "buy":
             upnl = (live_price - entry) * size
+        else:
+            upnl = (entry - live_price) * size
 
-        # Subtract fees: stored entry_fee + estimated exit_fee at current price
-        fee_rate = 0.0005 if mtype == "futures" else 0.001
-        entry_fee = float(pos.get("entry_fee", 0) or 0)
-        if entry_fee == 0:
-            entry_fee = size * entry * fee_rate
-        exit_fee_est = size * live_price * fee_rate
-        upnl -= (entry_fee + exit_fee_est)
+        # NOTE: entry_fee is already deducted from exchange balance at open time.
+        # Unrealized PnL shows raw price movement only — fees are NOT subtracted
+        # because entry fee is already paid (double-counting) and exit fee is
+        # not yet incurred.  Net PnL after fees is shown on close.
 
         margin   = (size * entry) / max(lev, 1)
         upnl_pct = (upnl / max(margin, 0.0001)) * 100
@@ -837,9 +1153,12 @@ def calc_unrealized(open_pos: list, fetcher: LiveFetcher) -> dict:
 
 
 def calc_stats(closed):
-    today   = datetime.now().date()
+    today     = datetime.now().date()
+    yesterday = today - timedelta(days=1)
     t_pnl = t_gross = t_fees = 0.0
     t_n   = t_wins  = 0
+    y_pnl = y_gross = y_fees = 0.0
+    y_n   = y_wins  = 0
     a_pnl = a_gross = a_fees = 0.0
     a_wins = 0; a_best = 0.0; a_worst = 0.0
     win_amounts = []; loss_amounts = []
@@ -857,9 +1176,17 @@ def calc_stats(closed):
             win_amounts.append(pnl)
         elif pnl < 0:
             loss_amounts.append(abs(pnl))
-        if ct and datetime.fromtimestamp(ct).date() == today:
-            t_pnl += pnl; t_gross += gross; t_fees += fees; t_n += 1
-            if pnl > 0: t_wins += 1
+        if ct:
+            try:
+                d = datetime.fromtimestamp(ct).date()
+            except (OSError, ValueError, OverflowError):
+                d = None
+            if d == today:
+                t_pnl += pnl; t_gross += gross; t_fees += fees; t_n += 1
+                if pnl > 0: t_wins += 1
+            elif d == yesterday:
+                y_pnl += pnl; y_gross += gross; y_fees += fees; y_n += 1
+                if pnl > 0: y_wins += 1
 
     total_n = len(closed)
 
@@ -889,6 +1216,8 @@ def calc_stats(closed):
     return {
         "today_pnl": t_pnl, "today_n": t_n, "today_wins": t_wins,
         "today_wr":  (t_wins / t_n * 100) if t_n else 0,
+        "yesterday_pnl":  y_pnl, "yesterday_n": y_n, "yesterday_wins": y_wins,
+        "yesterday_wr":   (y_wins / y_n * 100) if y_n else 0,
         "all_pnl":   a_pnl, "all_gross": a_gross, "all_fees": a_fees,
         "total_n":   total_n, "all_wins": a_wins,
         "all_wr":    (a_wins / total_n * 100) if total_n else 0,
@@ -977,6 +1306,68 @@ def calc_daily_pnl(closed, days=7):
     return result
 
 
+def _bucket_stats(trades):
+    """Aggregate stats over an arbitrary slice of closed trades."""
+    if not trades:
+        return {"n": 0, "wins": 0, "losses": 0, "wr": 0.0, "pnl": 0.0,
+                "pf": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+                "best": 0.0, "worst": 0.0, "fees": 0.0}
+    wins = [t.get("pnl", 0) or 0 for t in trades if (t.get("pnl") or 0) > 0]
+    losses = [abs(t.get("pnl", 0) or 0) for t in trades if (t.get("pnl") or 0) < 0]
+    pnls = [t.get("pnl", 0) or 0 for t in trades]
+    wsum = sum(wins); lsum = sum(losses)
+    return {
+        "n":       len(trades),
+        "wins":    len(wins),
+        "losses":  len(losses),
+        "wr":      (len(wins) / len(trades) * 100) if trades else 0.0,
+        "pnl":     sum(pnls),
+        "pf":      (wsum / lsum) if lsum > 0 else (999.0 if wsum > 0 else 0.0),
+        "avg_win": (wsum / len(wins)) if wins else 0.0,
+        "avg_loss":(lsum / len(losses)) if losses else 0.0,
+        "best":    max(pnls) if pnls else 0.0,
+        "worst":   min(pnls) if pnls else 0.0,
+        "fees":    sum(t.get("total_fees", 0) or 0 for t in trades),
+    }
+
+
+def calc_weekly_stats(closed):
+    """This-week / last-week buckets + a per-day breakdown for the current week.
+
+    Returns dict with:
+      - this_week:     stats for trades closed in the last 7 days
+      - last_week:     stats for trades closed 7-14 days ago
+      - best_day:      (date, pnl, n) — best day in the current week
+      - worst_day:     (date, pnl, n) — worst day in the current week
+      - active_days:   number of days in the current week with at least 1 trade
+    """
+    now_ts = time.time()
+    cutoff_this = now_ts - 7 * 86400
+    cutoff_prev = now_ts - 14 * 86400
+
+    this_trades = []
+    prev_trades = []
+    for t in closed:
+        ct = t.get("close_time", 0) or 0
+        if ct >= cutoff_this:
+            this_trades.append(t)
+        elif ct >= cutoff_prev:
+            prev_trades.append(t)
+
+    daily = calc_daily_pnl(closed, days=7)
+    active = [d for d in daily if d["trades"] > 0]
+    best_day = max(active, key=lambda d: d["pnl"]) if active else None
+    worst_day = min(active, key=lambda d: d["pnl"]) if active else None
+
+    return {
+        "this_week":  _bucket_stats(this_trades),
+        "last_week":  _bucket_stats(prev_trades),
+        "best_day":   best_day,
+        "worst_day":  worst_day,
+        "active_days": len(active),
+    }
+
+
 def sparkline(values):
     if not values: return ""
     max_abs = max(abs(v) for v in values) or 1
@@ -997,14 +1388,19 @@ def sparkline(values):
 
 def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     now   = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
-    mode  = "DRY RUN" if dry_run else "LIVE"
-    mc    = YELLOW if dry_run else GREEN + BOLD
+    try:
+        from config import OPERATING_MODE as _OP_MODE
+    except ImportError:
+        _OP_MODE = "PAPER" if dry_run else "CONTROLLED_LIVE"
+    _mode_labels = {
+        "PAPER": ("PAPER", YELLOW),
+        "OBSERVATION": ("OBSERVATION", BLUE),
+        "CONTROLLED_LIVE": ("CONTROLLED_LIVE", RED + BOLD),
+    }
+    mode, mc = _mode_labels.get(_OP_MODE, ("PAPER", YELLOW))
     s     = calc_stats(closed)
     ex_s  = calc_exchange_stats(closed, open_pos)
     news  = load_news()
-    comp  = load_comparison()
-    clai  = load_claude()
-    arb   = load_arb()
     W     = DASH_WIDTH
 
     upnl_map   = calc_unrealized(open_pos, fetcher)
@@ -1012,9 +1408,17 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     statuses   = fetcher.all_statuses()
     wallet_bal = fetcher.wallet_balances()
     coin_bals  = fetcher.coin_balances()
+    bal_detail = fetcher.balance_detail()
     age_s      = int(fetcher.seconds_since_fetch())
     age_col    = GREEN if age_s < 15 else (YELLOW if age_s < 30 else RED)
-    total_upnl = sum(v["upnl"] for v in upnl_map.values() if v.get("upnl") is not None)
+    # Only count unrealized PnL from FUTURES positions — spot holdings are
+    # already valued in coin_bals, counting them here would double-count.
+    _futures_ids = {p.get("id", "") for p in open_pos if p.get("market_type") == "futures"}
+    total_upnl = sum(v["upnl"] for pid, v in upnl_map.items()
+                     if v.get("upnl") is not None and pid in _futures_ids)
+    upnl_count = sum(1 for pid, v in upnl_map.items()
+                     if v.get("upnl") is not None and pid in _futures_ids)
+    upnl_total_count = len(_futures_ids)
     tm         = fetcher.trading_mode().upper()
 
     # ── Box-drawing helpers ───────────────────────────────────────────
@@ -1055,7 +1459,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
 
     # Status bar
     ex_icons = []
-    for e in ["binance", "mexc", "bybit", "bitget"]:
+    for e in ["binance", "bybit", "bitget"]:
         if e not in statuses:
             continue
         ok = statuses.get(e) == "OK"
@@ -1070,6 +1474,48 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         col("Uptime:", DIM), col(_uptime_str(), WHITE),
         col(B_V, DIM),
         col("Data:", DIM), col("{}s ago".format(age_s), age_col)))
+
+    # ── Bot Heartbeat Status ──────────────────────────────────────────
+    try:
+        hb_path = Path("data/heartbeat.json")
+        if hb_path.exists():
+            hb = json.loads(hb_path.read_text(encoding="utf-8"))
+            hb_uptime = hb.get("uptime_seconds", 0)
+            hb_hours = hb_uptime // 3600
+            hb_mins = (hb_uptime % 3600) // 60
+            hb_cycle = hb.get("cycle_count", 0)
+            hb_mem = hb.get("memory_mb", 0)
+            hb_halted = hb.get("is_halted", False)
+            hb_halt_reason = hb.get("halt_reason") or ""
+            hb_ts = hb.get("timestamp", "")
+            # Calculate age of heartbeat
+            hb_age_s = "?"
+            try:
+                from datetime import datetime as _dt
+                hb_dt = _dt.fromisoformat(hb_ts.replace("Z", "+00:00"))
+                hb_age_s = str(int((datetime.now(timezone.utc) - hb_dt).total_seconds()))
+            except Exception:
+                pass
+            # Status indicator
+            if hb_halted:
+                hb_status = col("HALTED", RED + BOLD)
+                hb_reason = "  " + col(hb_halt_reason, YELLOW) if hb_halt_reason else ""
+            else:
+                hb_status = col("RUNNING", GREEN + BOLD)
+                hb_reason = ""
+            print("  {} {}  {} {}h {}m  {} {}  {} {:.0f}MB  {} {}s ago{}".format(
+                col("Bot:", DIM), hb_status,
+                col("Up:", DIM), hb_hours, hb_mins,
+                col("Cycle:", DIM), col(str(hb_cycle), WHITE),
+                col("Mem:", DIM), hb_mem,
+                col("HB:", DIM), hb_age_s,
+                hb_reason))
+        else:
+            print("  {} {}".format(
+                col("Bot:", DIM),
+                col("No heartbeat -- bot may not be running", YELLOW)))
+    except Exception:
+        pass
     print()
 
     # ══════════════════════════════════════════════════════════════════
@@ -1088,7 +1534,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 start_bal = wd.get("start", 100.0)
         except Exception:
             start_bal = 100.0
-        for ex_name in ["binance", "mexc", "bybit", "bitget"]:
+        for ex_name in ["binance", "bybit", "bitget"]:
             if ex_name not in statuses:
                 continue
             ec  = EX_COLOUR.get(ex_name, WHITE)
@@ -1097,8 +1543,8 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             diff = bal - start_bal
             total_live += bal
             st_s = col("OK", GREEN) if st == "OK" else col(st[:15], RED)
-            row("{} {:<8}  {:>10.2f} USDT  [{}]  {:>+.2f}".format(
-                col("●", ec), col(ex_name.upper(), ec), bal, st_s, diff))
+            row("{} {}  {:>10.2f} USDT  [{}]  {:>+.2f}".format(
+                col("●", ec), vljust(col(ex_name.upper(), ec), 8), bal, st_s, diff))
         start_total = start_bal * max(len([e for e in statuses if statuses[e] == "OK"]), 1)
         roi_pct = ((total_live - start_total) / start_total * 100) if start_total > 0 else 0
         rc = GREEN if roi_pct >= 0 else RED
@@ -1110,7 +1556,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         bal_det = fetcher.balance_detail()
         grand_coins = {}
         grand_usdt_vals = {}
-        for ex_name in ["binance", "mexc", "bybit", "bitget"]:
+        for ex_name in ["binance", "bybit", "bitget"]:
             if ex_name not in live_bals and ex_name not in statuses:
                 continue
             ec   = EX_COLOUR.get(ex_name, WHITE)
@@ -1126,10 +1572,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 f_bal = det.get("futures", 0.0)
                 detail_s = "{}:{:.2f}  {}:{:.2f}".format(
                     col("Spot", CYAN), s_bal, col("Fut", ORANGE), f_bal)
-            row("{} {:<8}  {:>10.2f} USDT  [{}]  {}".format(
-                col("●", ec), col(ex_name.upper(), ec), bal, st_s, detail_s))
+            row("{} {}  {:>10.2f} USDT  [{}]  {}".format(
+                col("●", ec), vljust(col(ex_name.upper(), ec), 8), bal, st_s, detail_s))
             # Coin holdings for this exchange
             ex_coins = coin_bals.get(ex_name, {})
+            is_unified = det.get("unified", False)
             coin_rows = []
             for asset, info in ex_coins.items():
                 amt = info.get("total", 0)
@@ -1144,8 +1591,12 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 if usdt_val < 0.01:
                     continue
                 coin_rows.append((asset, amt, usdt_val))
-                grand_coins[asset] = grand_coins.get(asset, 0.0) + amt
-                grand_usdt_vals[asset] = grand_usdt_vals.get(asset, 0.0) + usdt_val
+                # Unified exchanges (Bybit): totalEquity in total_live already
+                # includes all coin values, so skip adding to grand totals to
+                # avoid double-counting in Est. Total.
+                if not is_unified:
+                    grand_coins[asset] = grand_coins.get(asset, 0.0) + amt
+                    grand_usdt_vals[asset] = grand_usdt_vals.get(asset, 0.0) + usdt_val
             coin_rows.sort(key=lambda r: (0 if r[0] in _stables else 1, -r[2]))
             if coin_rows:
                 parts = []
@@ -1163,27 +1614,39 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
 
         box_mid("PORTFOLIO TOTALS")
         row("  {} {:>10.2f} USDT".format(
-            col("Free Balance:", WHITE), total_live))
-        if total_upnl != 0:
+            col("USDT Balance:", WHITE), total_live))
+        if total_upnl != 0 or upnl_count > 0:
             uc = GREEN if total_upnl >= 0 else RED
-            row("  {} {}".format(
+            cnt_s = " ({} futures)".format(upnl_count) if upnl_count > 0 else ""
+            row("  {} {}{}".format(
                 col("Unrealized:  ", WHITE),
-                col("{:>+10.4f} USDT".format(total_upnl), uc)))
-        # Aggregated holdings
+                col("{:>+10.4f} USDT".format(total_upnl), uc),
+                col(cnt_s, DIM)))
+        # Aggregated coin holdings (non-stable only)
+        # Excludes unified exchange coins (Bybit) — already in USDT Balance
         if grand_coins:
-            agg_rows = []
+            non_stable = []
             for asset, amt in grand_coins.items():
+                if asset in _stables:
+                    continue
                 uval = grand_usdt_vals.get(asset, 0.0)
-                agg_rows.append((asset, amt, uval))
-            agg_rows.sort(key=lambda r: (0 if r[0] in _stables else 1, -r[2]))
-            total_est = sum(r[2] for r in agg_rows) + total_upnl
-            non_stable = [r for r in agg_rows if r[0] not in _stables and r[2] >= 0.01]
+                if uval >= 0.01:
+                    non_stable.append((asset, amt, uval))
+            non_stable.sort(key=lambda r: -r[2])
+            non_stable_val = sum(r[2] for r in non_stable)
             if non_stable:
                 hld = "  ".join("{} {:.6g}".format(col(r[0], CYAN), r[1])
                                for r in non_stable[:10])
-                row("  {} {}".format(col("Coins:       ", WHITE), hld))
+                row("  {} {} {}".format(
+                    col("Coins:       ", WHITE), hld,
+                    col("~{:.0f}$".format(non_stable_val), DIM)))
+            # Est. Total = USDT balances + non-stable coin value + futures unrealized
+            total_est = total_live + non_stable_val + total_upnl
             row("  {} {:>10.2f} USDT".format(
                 col("Est. Total:  ", BOLD + WHITE), total_est))
+        else:
+            row("  {} {:>10.2f} USDT".format(
+                col("Est. Total:  ", BOLD + WHITE), total_live + total_upnl))
     box_bot()
     print()
 
@@ -1191,7 +1654,9 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     #  PERFORMANCE
     # ══════════════════════════════════════════════════════════════════
     box_top("PERFORMANCE")
-    tl = s["today_n"] - s["today_wins"]; al = s["total_n"] - s["all_wins"]
+    tl = s["today_n"]     - s["today_wins"]
+    yl = s["yesterday_n"] - s["yesterday_wins"]
+    al = s["total_n"]     - s["all_wins"]
 
     sk = s["streak"]; stype = s["streak_type"]
     streak_s = col("{}{}".format(sk, stype), GREEN if stype == "W" else RED) if sk > 0 else col("--", DIM)
@@ -1199,12 +1664,20 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     pf_c = GREEN if pf >= 1.5 else (YELLOW if pf >= 1.0 else RED)
     pf_s = col("{:.2f}".format(min(pf, 99.99)), pf_c)
 
-    row("  {:<11} {}  trades:{}  W:{} L:{}  WR:{}".format(
-        col("Today", WHITE), pnl_str(s["today_pnl"]),
+    row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
+        vljust(col("Today", WHITE), 11), pnl_str(s["today_pnl"]),
         s["today_n"], col(s["today_wins"], GREEN), col(tl, RED),
         col("{:.1f}%".format(s["today_wr"]), wr_col(s["today_wr"]))))
-    row("  {:<11} {}  trades:{}  W:{} L:{}  WR:{}".format(
-        col("All Time", WHITE), pnl_str(s["all_pnl"]),
+    if s["yesterday_n"]:
+        row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
+            vljust(col("Yesterday", WHITE), 11), pnl_str(s["yesterday_pnl"]),
+            s["yesterday_n"], col(s["yesterday_wins"], GREEN), col(yl, RED),
+            col("{:.1f}%".format(s["yesterday_wr"]), wr_col(s["yesterday_wr"]))))
+    else:
+        row("  {}  {}".format(vljust(col("Yesterday", WHITE), 11),
+                              col("no closed trades", DIM)))
+    row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
+        vljust(col("All Time", WHITE), 11), pnl_str(s["all_pnl"]),
         s["total_n"], col(s["all_wins"], GREEN), col(al, RED),
         col("{:.1f}%".format(s["all_wr"]), wr_col(s["all_wr"]))))
     row("  Avg Win: {}  Avg Loss: {}  PF: {}  Streak: {}".format(
@@ -1217,6 +1690,178 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             col("-{:.4f}".format(s["all_fees"]), RED)))
     box_bot()
     print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  TRADING GATES — hour gate + whitelist/blacklist + BTC macro + tiers
+    # ══════════════════════════════════════════════════════════════════
+    try:
+        from config import (
+            WHITELIST_SYMBOLS, BLACKLIST_HARD, LEVERAGE_TIERS,
+            MAX_LOSS_PER_TRADE_PCT, SHORTS_REQUIRE_BTC_BEAR,
+            BTC_TREND_TIMEFRAME,
+        )
+        cur_utc = datetime.now(timezone.utc)
+        cur_hour = cur_utc.hour
+        hc_label, hc_color = _hour_class(cur_hour)
+
+        box_top("TRADING GATES")
+        # Line 1: UTC hour status
+        row("  {} {}  hour {:02d} → {}   Loss clamp: {}".format(
+            col("UTC:", DIM),
+            col(cur_utc.strftime("%H:%M"), WHITE),
+            cur_hour,
+            col(hc_label, hc_color),
+            col("{:.1f}%".format(MAX_LOSS_PER_TRADE_PCT * 100),
+                YELLOW)))
+
+        # Line 2: static whitelist / blacklist sizes
+        row("  {} {} symbols   {} {} symbols".format(
+            col("Whitelist:", DIM),
+            col(str(len(WHITELIST_SYMBOLS)), GREEN),
+            col("Blacklist:", DIM),
+            col(str(len(BLACKLIST_HARD)), RED)))
+
+        # Line 3: leverage tiers
+        tier_parts = []
+        for tname, tcfg in LEVERAGE_TIERS.items():
+            tier_parts.append("{}: {}x/{:.1f}%SL/conf{:.0f}%".format(
+                col(tname[:4], CYAN),
+                tcfg.get("leverage", 1),
+                tcfg.get("sl_pct", 0) * 100,
+                tcfg.get("min_confidence", 0) * 100))
+        row("  Tiers: " + "  ".join(tier_parts))
+
+        # Line 4: BTC macro + shorts gate
+        btc_trend = "?"
+        btc_col = DIM
+        try:
+            # Try to read cached BTC trend if the engine has persisted it
+            btc_state = _file_cache.load("data/btc_trend.json") or {}
+            btc_slope = btc_state.get("ema200_slope", 0)
+            if btc_slope > 0:
+                btc_trend = "BULL"
+                btc_col = GREEN
+            elif btc_slope < 0:
+                btc_trend = "BEAR"
+                btc_col = RED
+            else:
+                btc_trend = "FLAT"
+                btc_col = YELLOW
+        except Exception:
+            pass
+        shorts_ok = (not SHORTS_REQUIRE_BTC_BEAR) or (btc_trend == "BEAR")
+        shorts_s = col("ALLOWED", GREEN) if shorts_ok else col("BLOCKED (needs BTC bear)", RED)
+        row("  BTC {}: {}   Shorts: {}".format(
+            BTC_TREND_TIMEFRAME, col(btc_trend, btc_col), shorts_s))
+        box_bot()
+        print()
+    except Exception as _e:
+        # Config changed or not importable — skip silently
+        pass
+
+    # ══════════════════════════════════════════════════════════════════
+    #  AUTO-MUTATIONS — closed-loop post-mortem learner state
+    # ══════════════════════════════════════════════════════════════════
+    amut = load_auto_mut()
+    if amut:
+        box_top("AUTO-MUTATIONS  (post-mortem learner)")
+        # Dynamic blacklist
+        dbl = amut.get("blacklist", {})
+        now_ts = time.time()
+        active_bl = [(sym, float(expires) - now_ts)
+                     for sym, expires in dbl.items()
+                     if float(expires) > now_ts]
+        if active_bl:
+            active_bl.sort(key=lambda x: -x[1])
+            parts = ["{} ({:.0f}h)".format(
+                col(sym.split("/")[0], RED), secs / 3600)
+                for sym, secs in active_bl[:6]]
+            row("  {} {}".format(
+                col("Dyn-blacklist:", DIM), "  ".join(parts)))
+            if len(active_bl) > 6:
+                row("  " + col("  +{} more".format(len(active_bl) - 6), DIM))
+        else:
+            row("  {} {}".format(
+                col("Dyn-blacklist:", DIM), col("(empty)", DIM)))
+
+        # Leverage cap
+        lev_cap = amut.get("leverage_cap")
+        lev_until = float(amut.get("leverage_cap_until", 0) or 0)
+        if lev_cap and lev_until > now_ts:
+            hours_left = (lev_until - now_ts) / 3600
+            row("  {} {}x for {:.1f}h".format(
+                col("Leverage cap:", DIM),
+                col(str(int(lev_cap)), YELLOW),
+                hours_left))
+        else:
+            row("  {} {}".format(
+                col("Leverage cap:", DIM), col("(none)", DIM)))
+
+        # Shorts block
+        sb_until = float(amut.get("shorts_blocked_until", 0) or 0)
+        if sb_until > now_ts:
+            hours_left = (sb_until - now_ts) / 3600
+            row("  {} {} for {:.1f}h".format(
+                col("Shorts:", DIM), col("BLOCKED", RED), hours_left))
+        else:
+            row("  {} {}".format(
+                col("Shorts:", DIM), col("allowed", GREEN)))
+
+        # Last scan
+        last_scan = float(amut.get("last_scan_at", 0) or 0)
+        if last_scan > 0:
+            mins_ago = (now_ts - last_scan) / 60
+            tail = amut.get("last_scan_loss_tail", 0)
+            age_c = GREEN if mins_ago < 10 else (YELLOW if mins_ago < 30 else DIM)
+            row("  {} {}m ago   lookback={} losses".format(
+                col("Last scan:", DIM),
+                col("{:.0f}".format(mins_ago), age_c),
+                tail))
+        box_bot()
+        print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  WHY NO TRADES — block-reason telemetry from today's log tail
+    # ══════════════════════════════════════════════════════════════════
+    try:
+        br = load_block_reasons()
+        if br.get("total", 0) > 0 or br.get("claude_empty", 0) > 0:
+            box_top("WHY NO TRADES  (last ~800 log lines)")
+            parts = []
+            for k, label, c in [
+                ("BLACKLIST", "static-BL",  RED),
+                ("DYN_BL",    "dyn-BL",     RED),
+                ("UNIVERSE",  "universe",   YELLOW),
+                ("RISK",      "risk-mgr",   YELLOW),
+                ("HOUR",      "hour-gate",  YELLOW),
+                ("TIER",      "tier",       CYAN),
+                ("RR",        "r:r",        CYAN),
+                ("SHORTS",    "shorts",     CYAN),
+                ("LEV",       "lev-cap",    CYAN),
+                ("OTHER",     "other",      DIM),
+            ]:
+                v = br.get(k, 0)
+                if v:
+                    parts.append("{}:{}".format(col(label, c), v))
+            if parts:
+                row("  Blocks: " + "  ".join(parts) +
+                    "  " + col("total={}".format(br["total"]), BOLD + WHITE))
+            else:
+                row("  " + col("No blocks in recent tail", GREEN))
+            ce = br.get("claude_empty", 0)
+            az = br.get("algo_zero", 0)
+            ap = br.get("actions", 0)
+            row("  {} {}   {} {}   {} {}".format(
+                col("Claude empty:", DIM),
+                col(str(ce), RED if ce > 10 else YELLOW if ce else GREEN),
+                col("Algo 0-action:", DIM),
+                col(str(az), RED if az > 10 else YELLOW if az else GREEN),
+                col("Algo-proposed:", DIM),
+                col(str(ap), GREEN if ap else DIM)))
+            box_bot()
+            print()
+    except Exception:
+        pass
 
     # ══════════════════════════════════════════════════════════════════
     #  OPEN POSITIONS
@@ -1279,8 +1924,15 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                     tag, col(side, sc), mt_tag, col(sym, WHITE), lev_s, prof_s, at))
                 # Line 2: entry, live, move, upnl, duration
                 price_lbl = "Buy" if side == "BUY" else "Sell"
-                row("      {} @{:.6g}  Now:{}  {}  uPnL:{}  {}m".format(
-                    price_lbl, entry, live_s, move_s, upnl_s, dur))
+                if entry and entry > 0:
+                    row("      {} @{:.6g}  Now:{}  {}  uPnL:{}  {}m".format(
+                        price_lbl, entry, live_s, move_s, upnl_s, dur))
+                else:
+                    # Holdings with unknown entry price — show value instead
+                    val = ud.get("value", sz * live_px if live_px else 0)
+                    val_s = col("${:.2f}".format(val), WHITE) if val else col("--", DIM)
+                    row("      Now:{}  Value:{}  Qty:{:.6g}  {}m".format(
+                        live_s, val_s, sz, dur))
                 # Line 3: SL/TP or value
                 if sl and tp:
                     if entry > 0:
@@ -1307,7 +1959,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         box_top("EXCHANGE BREAKDOWN  (Spot vs Futures)")
         total_spot_pnl = 0.0
         total_futures_pnl = 0.0
-        for ex_name in ["binance", "mexc", "bybit", "bitget"]:
+        for ex_name in ["binance", "bybit", "bitget"]:
             if ex_name not in ex_s:
                 continue
             d    = ex_s[ex_name]
@@ -1317,8 +1969,8 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             wr   = (wins / n * 100) if n > 0 else 0
             live_b = live_bals.get(ex_name)
             bal_s  = col("bal:{:.2f}".format(live_b), DIM) if live_b else ""
-            row("{} {:<8} trades:{:>3}  WR:{}  PnL:{}  open:{}  {}".format(
-                col("●", ec), col(ex_name.upper(), ec),
+            row("{} {} trades:{:>3}  WR:{}  PnL:{}  open:{}  {}".format(
+                col("●", ec), vljust(col(ex_name.upper(), ec), 8),
                 n, col("{:.1f}%".format(wr), wr_col(wr)),
                 col("{:+.4f}".format(pnl), GREEN if pnl >= 0 else RED),
                 col(str(open_n), CYAN if open_n > 0 else DIM), bal_s))
@@ -1359,9 +2011,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     strat_s = calc_strategy_stats(closed)
     if strat_s:
         box_top("STRATEGY BREAKDOWN")
-        row("  {:<20} {:>6}  {:>7}  {:>12}".format(
-            col("Strategy", DIM), col("Trades", DIM),
-            col("WR", DIM), col("PnL", DIM)))
+        row("  {} {}  {}  {}".format(
+            vljust(col("Strategy", DIM), 20),
+            vrjust(col("Trades", DIM), 6),
+            vrjust(col("WR", DIM), 7),
+            vrjust(col("PnL", DIM), 12)))
         row("  " + col("─" * 52, DIM))
         sorted_strats = sorted(strat_s.items(), key=lambda x: x[1]["pnl"], reverse=True)
         for sname, sd in sorted_strats:
@@ -1370,46 +2024,10 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             wc = wr_col(wr)
             star = col(" ★", GOLD) if sd == sorted_strats[0][1] and sd["pnl"] > 0 else ""
             row("  {:<20} {:>6}  {}  {}{}".format(
-                sname, sd["n"],
-                col("{:>6.1f}%".format(wr), wc),
-                col("{:>+11.4f}".format(sd["pnl"]), pc), star))
-        box_bot()
-        print()
-
-    # ══════════════════════════════════════════════════════════════════
-    #  MULTI-PROFILE COMPARISON
-    # ══════════════════════════════════════════════════════════════════
-    if comp and comp.get("profiles"):
-        profiles  = comp.get("profiles", {})
-        ranked    = comp.get("ranked",   [])
-        leader    = comp.get("leader",   "")
-        scans     = comp.get("scan_count", 0)
-        recommend = comp.get("recommendation", "")
-        PROF_C    = {"conservative": GREEN, "moderate": YELLOW, "aggressive": RED}
-
-        box_top("MULTI-PROFILE  --  Scan #{}".format(scans))
-        row("  {:<14} {:>9} {:>9} {:>7} {:>10} {:>7}".format(
-            "Profile", "Balance", "Return", "WR", "PnL", "DD%"))
-        row("  " + col("─" * 60, DIM))
-        for name in ranked:
-            d    = profiles.get(name, {})
-            pc   = PROF_C.get(name, WHITE)
-            bal  = d.get("balance", 0); ret = d.get("return_pct", 0)
-            wr   = d.get("win_rate",  0); pnl = d.get("net_pnl",   0)
-            dd   = d.get("max_drawdown", 0)
-            halt = d.get("is_halted", False)
-            lf   = col(" << LEADER", GREEN + BOLD) if name == leader else ""
-            hf   = col(" HALTED", RED) if halt else ""
-            row("  {}{:<14}{} {:>9.2f} {}{:>+8.2f}%{} {}{:>5.1f}%{} "
-                "{}{:>+9.4f}{} {:>6.1f}%{}{}".format(
-                pc, name.upper(), RESET, bal,
-                GREEN if ret >= 0 else RED, ret, RESET,
-                GREEN if wr >= 55 else (YELLOW if wr >= 45 else RED), wr, RESET,
-                GREEN if pnl >= 0 else RED, pnl, RESET,
-                dd, lf, hf))
-        if recommend:
-            rc = GREEN if "READY" in recommend else (YELLOW if "leads" in recommend else DIM)
-            row("  " + col(recommend[:72], rc))
+                sname[:20], sd["n"],
+                vrjust(col("{:.1f}%".format(wr), wc), 7),
+                vrjust(col("{:+.4f}".format(sd["pnl"]), pc), 12),
+                star))
         box_bot()
         print()
 
@@ -1421,8 +2039,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     if has_data:
         box_top("DAILY PnL  (7 days)")
         row("  " + sparkline([d["pnl"] for d in daily]))
-        row("  {:<12} {:>9}  {:>5}  {:>6}  {}".format(
-            col("Date", DIM), col("PnL", DIM), col("Trd", DIM), col("WR%", DIM), ""))
+        row("  {} {}  {}  {}  {}".format(
+            vljust(col("Date", DIM), 12),
+            vrjust(col("PnL", DIM), 9),
+            vrjust(col("Trd", DIM), 5),
+            vrjust(col("WR%", DIM), 6), ""))
         row("  " + col("─" * 50, DIM))
         max_abs = max(abs(v["pnl"]) for v in daily if v["trades"] > 0) or 1
         for d in daily:
@@ -1434,19 +2055,120 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             bar_l= int(abs(pnl) / max_abs * 14) if n > 0 else 0
             bar  = col("█" * bar_l, GREEN if pnl > 0 else RED) if bar_l else col("·", DIM)
             if n == 0:
-                row("  {:<12} {:>9}  {:>5}  {:>6}  {}".format(
-                    ds, col("--", DIM), col("0", DIM), col("--", DIM), col("no trades", DIM)))
+                row("  {:<12} {}  {}  {}  {}".format(
+                    ds,
+                    vrjust(col("--", DIM), 9),
+                    vrjust(col("0", DIM), 5),
+                    vrjust(col("--", DIM), 6),
+                    col("no trades", DIM)))
             else:
-                row("  {:<12} {:>9}  {:>5}  {:>5.1f}%  {}".format(
-                    ds, col("{}{:.4f}".format(sign, pnl), pc), col(str(n), WHITE), wr, bar))
+                row("  {:<12} {}  {}  {}  {}".format(
+                    ds,
+                    vrjust(col("{}{:.4f}".format(sign, pnl), pc), 9),
+                    vrjust(col(str(n), WHITE), 5),
+                    vrjust("{:.1f}%".format(wr), 6),
+                    bar))
         wk_pnl = sum(d["pnl"] for d in daily); wk_t = sum(d["trades"] for d in daily)
         wk_w   = sum(d["wins"] for d in daily); wk_wr = (wk_w / wk_t * 100) if wk_t else 0
         wc     = GREEN if wk_pnl >= 0 else RED
         row("  " + col("─" * 50, DIM))
-        row("  {:<12} {:>9}  {:>5}  {:>5.1f}%".format(
-            col("WEEK TOTAL", BOLD + WHITE),
-            col("{}{:.4f}".format("+" if wk_pnl >= 0 else "", wk_pnl), wc),
-            col(str(wk_t), WHITE), wk_wr))
+        row("  {}  {}  {}  {}".format(
+            vljust(col("WEEK TOTAL", BOLD + WHITE), 12),
+            vrjust(col("{}{:.4f}".format("+" if wk_pnl >= 0 else "", wk_pnl), wc), 9),
+            vrjust(col(str(wk_t), WHITE), 5),
+            vrjust("{:.1f}%".format(wk_wr), 6)))
+        box_bot()
+        print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  WEEKLY PERFORMANCE  (rolling 7d vs prior 7d)
+    # ══════════════════════════════════════════════════════════════════
+    wk = calc_weekly_stats(closed)
+    tw, lw = wk["this_week"], wk["last_week"]
+    if tw["n"] > 0 or lw["n"] > 0:
+        box_top("WEEKLY PERFORMANCE")
+        # Column widths: label=11, trd=5, W:L=7, WR%=7, PnL=10, PF=6, AvgW=8, AvgL=8, Best=8, Worst=8
+        row("  {} {} {} {} {} {} {} {} {} {}".format(
+            vljust(col("Period", DIM), 11),
+            vrjust(col("Trd",   DIM),  5),
+            vrjust(col("W:L",   DIM),  7),
+            vrjust(col("WR%",   DIM),  7),
+            vrjust(col("PnL",   DIM), 10),
+            vrjust(col("PF",    DIM),  6),
+            vrjust(col("AvgW",  DIM),  8),
+            vrjust(col("AvgL",  DIM),  8),
+            vrjust(col("Best",  DIM),  8),
+            vrjust(col("Worst", DIM),  8)))
+        row("  " + col("─" * (DASH_WIDTH - 4), DIM))
+
+        def _row(label, b, label_col=BOLD + WHITE):
+            if b["n"] == 0:
+                row("  {} {} {} {} {} {} {} {} {} {}".format(
+                    vljust(col(label, label_col), 11),
+                    vrjust(col("0",  DIM),  5),
+                    vrjust(col("--", DIM),  7),
+                    vrjust(col("--", DIM),  7),
+                    vrjust(col("--", DIM), 10),
+                    vrjust(col("--", DIM),  6),
+                    vrjust(col("--", DIM),  8),
+                    vrjust(col("--", DIM),  8),
+                    vrjust(col("--", DIM),  8),
+                    vrjust(col("--", DIM),  8)))
+                return
+            pc  = GREEN if b["pnl"] >= 0 else RED
+            pfc = GREEN if b["pf"] >= 1.0 else RED
+            wrc = wr_col(b["wr"])
+            row("  {} {} {} {} {} {} {} {} {} {}".format(
+                vljust(col(label, label_col), 11),
+                vrjust(col(str(b["n"]), WHITE), 5),
+                vrjust(col("{}:{}".format(b["wins"], b["losses"]), WHITE), 7),
+                vrjust(col("{:.1f}%".format(b["wr"]), wrc), 7),
+                vrjust(col("{}{:.4f}".format("+" if b["pnl"] >= 0 else "", b["pnl"]), pc), 10),
+                vrjust(col("{:.2f}".format(b["pf"]) if b["pf"] < 999 else "∞", pfc), 6),
+                vrjust(col("{:.3f}".format(b["avg_win"]),  GREEN), 8),
+                vrjust(col("{:.3f}".format(b["avg_loss"]), RED),   8),
+                vrjust(col("{:+.3f}".format(b["best"]),    GREEN), 8),
+                vrjust(col("{:+.3f}".format(b["worst"]),   RED),   8)))
+
+        _row("This week", tw, BOLD + WHITE)
+        _row("Last week", lw, DIM)
+
+        # Δ comparison row
+        if lw["n"] > 0 and tw["n"] > 0:
+            d_n   = tw["n"]   - lw["n"]
+            d_pnl = tw["pnl"] - lw["pnl"]
+            d_wr  = tw["wr"]  - lw["wr"]
+            d_pf  = tw["pf"]  - lw["pf"] if (lw["pf"] < 999 and tw["pf"] < 999) else 0.0
+            row("  " + col("─" * (DASH_WIDTH - 4), DIM))
+            row("  {} {} {} {} {} {}".format(
+                vljust(col("Δ vs prev", BOLD + CYAN), 11),
+                vrjust(col("{:+d}".format(d_n), GREEN if d_n >= 0 else RED), 5),
+                " " * 7,
+                vrjust(col("{:+.1f}".format(d_wr), GREEN if d_wr >= 0 else RED), 7),
+                vrjust(col("{:+.4f}".format(d_pnl), GREEN if d_pnl >= 0 else RED), 10),
+                vrjust(col("{:+.2f}".format(d_pf) if d_pf else "--",
+                           GREEN if d_pf >= 0 else RED), 6)))
+
+        # Best / worst day this week
+        if wk["best_day"] or wk["worst_day"]:
+            row("  " + col("─" * (DASH_WIDTH - 4), DIM))
+            if wk["best_day"]:
+                bd = wk["best_day"]
+                row("  {} {} on {} ({} trades)".format(
+                    col("Best day :", DIM),
+                    col("{:+.4f} USDT".format(bd["pnl"]), GREEN),
+                    col(bd["date"].strftime("%a %d %b"), WHITE),
+                    bd["trades"]))
+            if wk["worst_day"]:
+                wd = wk["worst_day"]
+                row("  {} {} on {} ({} trades)".format(
+                    col("Worst day:", DIM),
+                    col("{:+.4f} USDT".format(wd["pnl"]), RED),
+                    col(wd["date"].strftime("%a %d %b"), WHITE),
+                    wd["trades"]))
+            row("  {} {} / 7".format(
+                col("Active   :", DIM),
+                col(str(wk["active_days"]), WHITE)))
         box_bot()
         print()
 
@@ -1508,55 +2230,29 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     print()
 
     # ══════════════════════════════════════════════════════════════════
-    #  ARBITRAGE
+    #  MARKET INTELLIGENCE  (Fear&Greed, trending, news headlines)
     # ══════════════════════════════════════════════════════════════════
-    if arb:
-        box_top("ARBITRAGE")
-        arb_pnl = arb.get("total_pnl", 0)
-        row("  Scan #{} {} Open:{} {} PnL:{}".format(
-            arb.get("scan_count", 0), col(B_V, DIM),
-            arb.get("open_arbs", 0), col(B_V, DIM),
-            col("{:+.4f} USDT".format(arb_pnl), GREEN if arb_pnl >= 0 else RED)))
-        for o in arb.get("opportunities", [])[:3]:
-            ns = o.get("net_spread", 0) * 100
-            row("  {:<12} buy:{:<8} sell:{:<8} {}".format(
-                o.get("symbol", "?"), o.get("buy_ex", "?")[:7], o.get("sell_ex", "?")[:7],
-                col("{:.3f}%".format(ns), GREEN if ns >= 0.5 else YELLOW)))
-        box_bot()
-        print()
-
-    # ══════════════════════════════════════════════════════════════════
-    #  MARKET SENTIMENT & AI
-    # ══════════════════════════════════════════════════════════════════
-    has_sentiment = news or (clai and clai.get("coins"))
-    if has_sentiment:
+    # 2026-04-26: ARBITRAGE block removed (engine vestigial per CLAUDE.md,
+    # opportunities.json file 28d stale). CLAUDE AI sub-block removed
+    # (claude_analysis.json 23d stale; live decisions now route through
+    # MCP-Brain, not the legacy analysis file).
+    if news:
         box_top("MARKET INTELLIGENCE")
-        if news:
-            fg   = news.get("fear_greed", {})
-            glb  = news.get("global", {})
-            chg  = glb.get("market_cap_change_24h", 0)
-            row("  Fear & Greed: {}   MCap 24h: {}".format(
-                fg_str(fg.get("value", 50)),
-                col("{:+.2f}%".format(chg), GREEN if chg >= 0 else RED)))
-            trend = news.get("trending", [])
-            if trend:
-                row("  Trending: " + "  ".join(
-                    col(c.get("symbol", "?"), YELLOW) for c in trend[:5]))
-            for a in news.get("news", [])[:2]:
-                sent = a.get("sentiment", 0)
-                icon = col("▲", GREEN) if sent > 0 else (col("▼", RED) if sent < 0 else col("·", DIM))
-                row("  {} {}  {}".format(icon, a.get("title", "")[:60],
-                                         col(a.get("source", "")[:12], DIM)))
-        if clai and clai.get("coins"):
-            if news:
-                box_mid("CLAUDE AI")
-            bias = clai.get("market_bias", "neutral"); rm = clai.get("risk_multiplier", 1.0)
-            bc   = GREEN if bias == "bullish" else (RED if bias == "bearish" else YELLOW)
-            note = clai.get("market_note", "")
-            row("  Bias: {}  Risk: {}{}".format(
-                col(bias.upper(), bc),
-                col("{:.2f}x".format(rm), GREEN if rm <= 1.0 else YELLOW),
-                "  " + col(note[:48], DIM) if note else ""))
+        fg   = news.get("fear_greed", {})
+        glb  = news.get("global", {})
+        chg  = glb.get("market_cap_change_24h", 0)
+        row("  Fear & Greed: {}   MCap 24h: {}".format(
+            fg_str(fg.get("value", 50)),
+            col("{:+.2f}%".format(chg), GREEN if chg >= 0 else RED)))
+        trend = news.get("trending", [])
+        if trend:
+            row("  Trending: " + "  ".join(
+                col(c.get("symbol", "?"), YELLOW) for c in trend[:5]))
+        for a in news.get("news", [])[:2]:
+            sent = a.get("sentiment", 0)
+            icon = col("▲", GREEN) if sent > 0 else (col("▼", RED) if sent < 0 else col("·", DIM))
+            row("  {} {}  {}".format(icon, a.get("title", "")[:60],
+                                     col(a.get("source", "")[:12], DIM)))
         box_bot()
         print()
 
@@ -1632,9 +2328,12 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         # Kelly criterion stats
         if kelly_st:
             box_mid("KELLY STATS")
-            row("  {:<18} {:>6}  {:>6}  {:>8}  {:>10}".format(
-                col("Strategy", DIM), col("Trades", DIM),
-                col("WR%", DIM), col("R-Mult", DIM), col("Kelly%", DIM)))
+            row("  {} {}  {}  {}  {}".format(
+                vljust(col("Strategy", DIM), 18),
+                vrjust(col("Trades", DIM), 6),
+                vrjust(col("WR%",    DIM), 6),
+                vrjust(col("R-Mult", DIM), 8),
+                vrjust(col("Kelly%", DIM), 10)))
             row("  " + col("─" * 56, DIM))
             for strat_name, stats in sorted(kelly_st.items(),
                     key=lambda x: x[1].get("wins", 0) + x[1].get("losses", 0), reverse=True):
@@ -1654,9 +2353,9 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 wrc = GREEN if wr_k >= 55 else (YELLOW if wr_k >= 45 else RED)
                 row("  {:<18} {:>6}  {}  {:>8.2f}  {}".format(
                     strat_name[:18], total_k,
-                    col("{:>5.1f}%".format(wr_k), wrc),
+                    vrjust(col("{:.1f}%".format(wr_k), wrc), 6),
                     r_mult,
-                    col("{:>+9.1f}%".format(kelly_f), kc)))
+                    vrjust(col("{:+.1f}%".format(kelly_f), kc), 10)))
         box_bot()
         print()
 
@@ -1673,9 +2372,13 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             "unknown":       (DIM,    "UNKNOWN  "),
         }
         box_top("MARKET REGIME  (ADX + Hurst + Volatility)")
-        row("  {:<12} {:<14} {:>5}  {:>6}  {:>9}  {}".format(
-            col("Symbol", DIM), col("Regime", DIM), col("ADX", DIM),
-            col("Hurst", DIM), col("Vol", DIM), col("Strategies", DIM)))
+        row("  {} {} {}  {}  {}  {}".format(
+            vljust(col("Symbol",     DIM), 12),
+            vljust(col("Regime",     DIM), 14),
+            vrjust(col("ADX",        DIM),  5),
+            vrjust(col("Hurst",      DIM),  6),
+            vrjust(col("Vol",        DIM),  9),
+            col("Strategies", DIM)))
         row("  " + col("─" * 66, DIM))
         for sym in sorted(regime_data.keys()):
             rd = regime_data[sym]
@@ -1704,12 +2407,12 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             elif rec is not None and not rec:
                 rec_s = col("ALL PAUSED", RED)
 
-            row("  {:<12} {}  {}  {}  {}  {}".format(
+            row("  {:<12} {} {}  {}  {}  {}".format(
                 sym[:12],
-                col(ic_t, ic_c),
-                col("{:>5.1f}".format(adx_v), adx_c),
-                col("{:>5.3f}".format(hurst_v), hurst_c),
-                col("{:>4} {:>4.2f}%".format(vt, atr_p), vc),
+                vljust(col(ic_t, ic_c), 14),
+                vrjust(col("{:.1f}".format(adx_v),  adx_c),   5),
+                vrjust(col("{:.3f}".format(hurst_v), hurst_c), 6),
+                vrjust(col("{:>4} {:.2f}%".format(vt, atr_p), vc), 9),
                 rec_s))
         box_bot()
         print()
@@ -1733,8 +2436,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                         count += 1
                         sz = float(p.get("size", 0) or 0)
                         ep = float(p.get("entry_price", 0) or 0)
-                        lev = int(p.get("leverage", 1) or 1)
-                        notional += sz * ep * lev
+                        notional += sz * ep
                 if count > 0:
                     group_usage[gname] = {
                         "count": count, "notional": notional,
@@ -1745,15 +2447,19 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             if group_usage:
                 box_top("CORRELATION EXPOSURE")
                 total_notional = sum(
-                    float(p.get("size", 0) or 0) * float(p.get("entry_price", 0) or 0) *
-                    int(p.get("leverage", 1) or 1) for p in open_pos
+                    float(p.get("size", 0) or 0) * float(p.get("entry_price", 0) or 0)
+                    for p in open_pos
                 )
                 if total_notional <= 0:
                     total_notional = total_live if total_live > 0 else 1.0
 
-                row("  {:<14} {:>5}  {:>10}  {:>6}  {:>6}  {}".format(
-                    col("Group", DIM), col("Pos", DIM), col("Notional", DIM),
-                    col("Used%", DIM), col("Max%", DIM), col("Fill", DIM)))
+                row("  {} {}  {}  {}  {}  {}".format(
+                    vljust(col("Group",    DIM), 14),
+                    vrjust(col("Pos",      DIM),  5),
+                    vrjust(col("Notional", DIM), 10),
+                    vrjust(col("Used%",    DIM),  6),
+                    vrjust(col("Max%",     DIM),  6),
+                    col("Fill", DIM)))
                 row("  " + col("─" * 62, DIM))
                 for gname in sorted(group_usage.keys()):
                     gu = group_usage[gname]
@@ -1944,17 +2650,22 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
 
         # Drawdown bar
         if risk_data:
-            dd_pct = risk_data.get("drawdown_pct", 0) * 100
+            # risk_manager writes "max_drawdown_pct" and "is_halted"; accept both old+new keys
+            dd_pct = risk_data.get("max_drawdown_pct",
+                                   risk_data.get("drawdown_pct", 0)) * 100
             peak = risk_data.get("peak_balance", 0)
             daily_pnl = risk_data.get("daily_pnl", 0)
-            halted = risk_data.get("halted", False)
+            halted = risk_data.get("is_halted",
+                                   risk_data.get("halted", False))
             halt_reason = risk_data.get("halt_reason", "")
+            trades_today = risk_data.get("trades_today", 0)
         else:
             dd_pct = 0
             peak = total_live
             daily_pnl = s.get("today_pnl", 0)
             halted = False
             halt_reason = ""
+            trades_today = s.get("today_n", 0)
 
         if risk_avail:
             max_dd_limit = RISK_CFG.get("max_drawdown_pct", 0.25) * 100
@@ -2000,15 +2711,147 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         row("  Positions:   {} {} / {} max".format(
             pos_bar, n_open, max_positions))
 
-        # Halt status
+        # Halt status + trades today
         if halted:
             row("  {}  {}".format(
                 col("!! TRADING HALTED !!", RED + BOLD),
                 col(halt_reason, YELLOW)))
         else:
-            row("  Status: {}  MaxLev: {}x".format(
-                col("ACTIVE", GREEN + BOLD), max_leverage))
+            row("  Status: {}  MaxLev: {}x  Trades Today: {}".format(
+                col("ACTIVE", GREEN + BOLD), max_leverage,
+                col(str(trades_today), WHITE)))
 
+        # Live safety nets
+        if _OP_MODE == "CONTROLLED_LIVE":
+            try:
+                from config import MAX_LOSS_PER_TRADE_USD, LEVERAGE_TIERS
+                _max_pos = RISK_CFG.get("max_position_pct", 0.01) * 100
+                _tiers = "  ".join(
+                    "{}:{}x".format(t, v["leverage"])
+                    for t, v in LEVERAGE_TIERS.items())
+                row("  {}  Size: {}%  MaxLoss: ${:.2f}  Tiers: {}  Hold: 2h min".format(
+                    col("LIVE SAFETY:", CYAN + BOLD), _max_pos,
+                    MAX_LOSS_PER_TRADE_USD, _tiers))
+            except Exception:
+                pass
+
+        box_bot()
+        print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  WAREHOUSE: PER-SYMBOL EDGE  (Spec §15)
+    # ══════════════════════════════════════════════════════════════════
+    wh = load_warehouse_stats()
+    if wh and wh.get("total_trades", 0) > 0:
+        box_top("PER-SYMBOL EDGE (warehouse)")
+        row("  {}  candidates: {}   closed trades: {}".format(
+            col("Source:", DIM),
+            col(str(wh.get("total_candidates", 0)), WHITE),
+            col(str(wh.get("total_trades", 0)), WHITE)))
+        row("  {:<14} {:>4} {:>9} {:>6} {:>7} {:>9}".format(
+            "Symbol", "N", "Net", "WR", "PF", "Expect"))
+        for r_ in wh["per_symbol"]:
+            n = int(r_["n"] or 0)
+            net = float(r_["net"] or 0.0)
+            gw  = float(r_["gw"]  or 0.0)
+            gl  = float(r_["gl"]  or 0.0)
+            wins = int(r_["wins"] or 0)
+            wr = (wins / n * 100) if n else 0.0
+            pf = (gw / gl) if gl > 0 else (999.0 if gw > 0 else 0.0)
+            exp_ = (net / n) if n else 0.0
+            net_c = GREEN if net > 0 else (RED if net < 0 else DIM)
+            pf_c  = GREEN if pf >= 1.0 else RED
+            row("  {:<14} {:>4d} {} {:>5.1f}% {} {}".format(
+                (r_["symbol"] or "?")[:14],
+                n,
+                vrjust(col("{:+.2f}".format(net), net_c), 9),
+                wr,
+                vrjust(col(("{:.2f}".format(pf) if pf < 99 else "inf"), pf_c), 7),
+                vrjust(col("{:+.4f}".format(exp_), net_c), 9)))
+        box_bot()
+        print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  LOSS-CLUSTER MONITOR  (Spec §12 pauses)
+    # ══════════════════════════════════════════════════════════════════
+    rstate = load_risk_state()
+    if (wh and wh.get("per_family")) or rstate:
+        box_top("LOSS-CLUSTER MONITOR")
+        sym_pauses = (rstate or {}).get("symbol_pauses", {}) or {}
+        fam_pauses = (rstate or {}).get("family_pauses", {}) or {}
+        gstreak = (rstate or {}).get("global_streak", []) or []
+
+        # Global streak marker (last 20)
+        recent_losses = 0
+        for ok in reversed(gstreak):
+            if not ok:
+                recent_losses += 1
+            else:
+                break
+        glob_c = GREEN if recent_losses < 2 else (YELLOW if recent_losses < 5 else RED)
+        row("  {} {}   {} {}".format(
+            col("Global streak:", DIM),
+            col("{} consecutive losses".format(recent_losses), glob_c),
+            col("last 20:", DIM),
+            "".join(col("W", GREEN) if ok else col("L", RED)
+                    for ok in gstreak[-20:]) or col("(none)", DIM)))
+
+        # Per-family rollup
+        now_ts = time.time()
+        if wh.get("per_family"):
+            row("  {:<18} {:>4} {:>9} {:>6}   {}".format(
+                "Family", "N", "Net", "WR", "Pause"))
+            for r_ in wh["per_family"]:
+                fam = (r_["fam"] or "unknown")[:18]
+                n = int(r_["n"] or 0)
+                net = float(r_["net"] or 0.0)
+                wins = int(r_["wins"] or 0)
+                wr = (wins / n * 100) if n else 0.0
+                net_c = GREEN if net > 0 else (RED if net < 0 else DIM)
+                until = float(fam_pauses.get(fam, 0.0) or 0.0)
+                if until > now_ts:
+                    mins = int((until - now_ts) / 60)
+                    pause_txt = col("PAUSED {}m".format(mins), RED + BOLD)
+                else:
+                    pause_txt = col("active", DIM)
+                row("  {:<18} {:>4d} {} {:>5.1f}%   {}".format(
+                    fam, n,
+                    vrjust(col("{:+.2f}".format(net), net_c), 9),
+                    wr, pause_txt))
+
+        # Paused symbols (if any)
+        live_sym_pauses = [(k, v) for k, v in sym_pauses.items() if float(v) > now_ts]
+        if live_sym_pauses:
+            row("  {} {}".format(
+                col("Paused symbols:", DIM),
+                ", ".join(col("{} ({}m)".format(k, int((float(v)-now_ts)/60)),
+                              YELLOW) for k, v in live_sym_pauses[:6])))
+        box_bot()
+        print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  SLIPPAGE vs FEE RATIO  (execution-quality decay)
+    # ══════════════════════════════════════════════════════════════════
+    if wh and wh.get("slippage", {}).get("n", 0):
+        box_top("SLIPPAGE vs FEE RATIO")
+        s = wh["slippage"]
+        n = int(s.get("n") or 0)
+        slip = float(s.get("avg_slip") or 0.0)
+        fee  = float(s.get("avg_fee")  or 0.0)
+        ratio = (slip / fee) if fee > 0 else 0.0
+        # Healthy when slippage cost is < fee cost (ratio < 1).
+        ratio_c = GREEN if ratio < 1.0 else (YELLOW if ratio < 2.0 else RED)
+        row("  {} {}   {} {}   {} {}".format(
+            col("Avg slippage:", DIM),
+            col("{:.4f} USDT".format(slip), WHITE),
+            col("Avg fee:", DIM),
+            col("{:.4f} USDT".format(fee), WHITE),
+            col("Ratio:", DIM),
+            col("{:.2f}x".format(ratio), ratio_c)))
+        hint = ("healthy" if ratio < 1.0 else
+                ("watch" if ratio < 2.0 else "execution decay"))
+        row("  {} {}   {} trades sampled".format(
+            col("Status:", DIM), col(hint, ratio_c), col(str(n), WHITE)))
         box_bot()
         print()
 
@@ -2052,6 +2895,26 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     if _BG_LAST_ERR:
         err_show = _BG_LAST_ERR if len(_BG_LAST_ERR) <= W - 8 else _BG_LAST_ERR[: W - 12] + "..."
         print("  {} {}".format(col("Fetch warning:", RED + BOLD), col(err_show, YELLOW)))
+
+    # DRY_RUN sim-realism note: show slippage model applied to paper fills
+    # so users know the paper curve already reflects LIVE execution costs.
+    if dry_run:
+        try:
+            from config import SLIPPAGE as _SL_CFG
+            if _SL_CFG.get("enabled", True):
+                bp_open  = _SL_CFG.get("pct_open",      0.0005) * 10000
+                bp_close = _SL_CFG.get("pct_close",     0.0005) * 10000
+                bp_stop  = _SL_CFG.get("pct_stop_loss", 0.0010) * 10000
+                wick_on  = "wick" if _SL_CFG.get("wick_sl_tp", True) else "poll"
+                fund_on  = "fund" if _SL_CFG.get("funding",    True) else "-"
+                print("  {} open {:.0f}bp close {:.0f}bp stop {:.0f}bp  [{} {}]  {}".format(
+                    col("Sim-realism:", DIM),
+                    bp_open, bp_close, bp_stop,
+                    col(wick_on, CYAN), col(fund_on, CYAN),
+                    col("(paper fills match LIVE book costs)", DIM)))
+        except Exception:
+            pass
+
     print("  {} {} Refresh:{}s {} tick #{} {} up {}".format(
         col("Ctrl+C to exit", YELLOW), col(B_V, DIM),
         REFRESH_SECONDS, col(B_V, DIM),
@@ -2072,7 +2935,8 @@ def background_fetch(fetcher: LiveFetcher, stop_event: threading.Event,
     while not stop_event.is_set():
         try:
             # Fetch live exchange positions first (so they're available for merge)
-            fetcher.fetch_live_positions()
+            if not fetcher._dry_run:
+                fetcher.fetch_live_positions()
             open_pos, _ = load_positions(fetcher)
             symbols = {p.get("symbol","") for p in open_pos if p.get("symbol")}
             # Add symbols for all coins in wallet so we can estimate USDT values

@@ -1,0 +1,5999 @@
+{
+  "analyses": [
+    {
+      "timestamp": 1774861702.8376036,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.635,
+      "close_price": 8.997,
+      "pnl": -5.337964224261896,
+      "pnl_pct": -21.06330052113492,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 497.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (21.1%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861705.7825253,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 81.57,
+      "close_price": 84.43,
+      "pnl": -4.3168994736901105,
+      "pnl_pct": -17.6327081034695,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 497.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (17.6%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861708.6410086,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 1.3291,
+      "close_price": 1.3587,
+      "pnl": -2.61364084834229,
+      "pnl_pct": -11.23646828681065,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 496.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (11.2%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861711.7844036,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 1991.59,
+      "close_price": 2061.51,
+      "pnl": -3.902987835622111,
+      "pnl_pct": -17.655569168353004,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 496.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (17.7%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861714.5529194,
+      "symbol": "ADA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.2411,
+      "close_price": 0.2494,
+      "pnl": -3.638272563660501,
+      "pnl_pct": -17.314496059726256,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 496.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (17.3%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861718.2748513,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 610.76,
+      "close_price": 619.1,
+      "pnl": -1.3727761303391393,
+      "pnl_pct": -6.928241862597447,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 475.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (6.9%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861743.9068642,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 82.147,
+      "close_price": 84.381,
+      "pnl": -3.427482179295227,
+      "pnl_pct": -13.69893483632996,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 475.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (13.7%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774861747.06284,
+      "symbol": "XAG/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 68.71,
+      "close_price": 70.91,
+      "pnl": -3.831446705421504,
+      "pnl_pct": -16.110915441711562,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 475.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (16.1%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774884955.652703,
+      "symbol": "BCH/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 459.48,
+      "close_price": 465.0,
+      "pnl": -1.1224895999999964,
+      "pnl_pct": -6.107390963698074,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 26.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (6.1%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774895189.5216763,
+      "symbol": "GRASS/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.2835,
+      "close_price": 0.2763,
+      "pnl": 2.714727599999994,
+      "pnl_pct": 12.599682539682513,
+      "close_reason": "take_profit",
+      "leverage": 5,
+      "duration_min": 197.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1774898373.578276,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.853,
+      "close_price": 8.75,
+      "pnl": -1.5714044999999963,
+      "pnl_pct": -5.916655371060644,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 102.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.9%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774898709.0866702,
+      "symbol": "QTUM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.825,
+      "close_price": 0.797,
+      "pnl": 3.6885084999999886,
+      "pnl_pct": 16.87139393939389,
+      "close_reason": "take_profit",
+      "leverage": 5,
+      "duration_min": 194.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774898714.0621064,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.674,
+      "close_price": 8.577,
+      "pnl": -0.9872509999999953,
+      "pnl_pct": -5.6908635001152605,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 74.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.7%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774900556.4910772,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.3174,
+      "close_price": 1.3222,
+      "pnl": -0.30383760000000826,
+      "pnl_pct": -1.9219523303477068,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 9.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1774901209.651553,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 83.8,
+      "close_price": 82.71,
+      "pnl": 1.5563560500000049,
+      "pnl_pct": 6.404230310262552,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 317.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774901711.0741136,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 84.135,
+      "close_price": 82.729,
+      "pnl": 1.389313600000006,
+      "pnl_pct": 8.25645450763657,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 306.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774904996.7021654,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.3226,
+      "close_price": 1.3274,
+      "pnl": -0.27857499999999535,
+      "pnl_pct": -1.9147890518675017,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 51.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1774905008.707514,
+      "symbol": "ADA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.2434,
+      "close_price": 0.2445,
+      "pnl": -0.28719749999999744,
+      "pnl_pct": -2.3598808545603736,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 37.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905033.3099828,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.3221,
+      "close_price": 1.3278,
+      "pnl": -0.44737425000000286,
+      "pnl_pct": -2.25587701384163,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 115.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905070.6934114,
+      "symbol": "ADA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.2437,
+      "close_price": 0.2448,
+      "pnl": -0.5054939999999956,
+      "pnl_pct": -2.357098892080406,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 9.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905073.30185,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 82.72,
+      "close_price": 83.1,
+      "pnl": -0.5948729999999932,
+      "pnl_pct": -2.3971349129593538,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 9.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905076.5703638,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.3249,
+      "close_price": 1.3298,
+      "pnl": -0.5087987950000125,
+      "pnl_pct": -1.9493810853649811,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 9.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1774905079.7331545,
+      "symbol": "ADA/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.2435,
+      "close_price": 0.245,
+      "pnl": -0.8363790000000008,
+      "pnl_pct": -3.1803901437371698,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 9.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.2%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905085.7735596,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 82.711,
+      "close_price": 83.102,
+      "pnl": -0.20379065000000268,
+      "pnl_pct": -2.4638881164537083,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 8.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905118.87419,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 82.72,
+      "close_price": 83.09,
+      "pnl": -0.5218843500000062,
+      "pnl_pct": -2.33668399419732,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 10.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905154.5388048,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.2343,
+      "close_price": 1.2391,
+      "pnl": -0.5350180400000146,
+      "pnl_pct": -2.044616381754897,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 10.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905160.10723,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 609.59,
+      "close_price": 611.48,
+      "pnl": -0.20121069999999863,
+      "pnl_pct": -1.6503773027772652,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 53.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1774905391.6569595,
+      "symbol": "BTC/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 66532.6,
+      "close_price": 66821.2,
+      "pnl": -0.3019353799999913,
+      "pnl_pct": -2.2690784667966626,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 57.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774905892.4449508,
+      "symbol": "GRASS/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.2779,
+      "close_price": 0.2799,
+      "pnl": -0.5756184000000005,
+      "pnl_pct": -3.6987765383231417,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 161.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.7%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774907656.5520418,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.06261,
+      "close_price": 0.06158,
+      "pnl": 1.327943204999995,
+      "pnl_pct": 8.1263456316882,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 191.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1774916396.387609,
+      "symbol": "XAG/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 70.06,
+      "close_price": 69.2,
+      "pnl": -0.8739259999999995,
+      "pnl_pct": -6.236982586354549,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 273.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (6.2%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774917043.7015963,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.06112,
+      "close_price": 0.06066,
+      "pnl": 0.3716922600000017,
+      "pnl_pct": 3.6634653141361424,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 140.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774917850.4745393,
+      "symbol": "GRASS/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.2822,
+      "close_price": 0.28,
+      "pnl": 0.3751614999999965,
+      "pnl_pct": 3.7983345145286673,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 153.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774917989.8894098,
+      "symbol": "BCH/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 466.74,
+      "close_price": 463.77,
+      "pnl": 0.4315423500000041,
+      "pnl_pct": 3.081961048978047,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 489.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774918129.5529447,
+      "symbol": "IOTA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.0554,
+      "close_price": 0.0551,
+      "pnl": 0.601304949999989,
+      "pnl_pct": 2.607851985559519,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 581.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774920765.7623465,
+      "symbol": "BTC/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 66840.1,
+      "close_price": 67904.7,
+      "pnl": -0.5390372399999956,
+      "pnl_pct": -8.06457859877522,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 218.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (8.1%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1774921147.8896844,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.857,
+      "close_price": 9.007,
+      "pnl": 2.2232040000000053,
+      "pnl_pct": 8.367031726318187,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 256.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774921341.0122304,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.87,
+      "close_price": 8.995,
+      "pnl": 1.78659575,
+      "pnl_pct": 6.945518602029313,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 258.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774921344.1110013,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 8.812,
+      "close_price": 8.994,
+      "pnl": 1.8021940000000038,
+      "pnl_pct": 10.22579437131187,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 451.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774932471.3204553,
+      "symbol": "ACT/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.01196,
+      "close_price": 0.01177,
+      "pnl": 1.592015095000008,
+      "pnl_pct": 7.84393812709034,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 819.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774951171.9670763,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 1.2432,
+      "close_price": 1.2312,
+      "pnl": 1.228142520000001,
+      "pnl_pct": 4.7267374517374545,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 755.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774951782.6315587,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 612.99,
+      "close_price": 601.9,
+      "pnl": 1.6452766500000047,
+      "pnl_pct": 8.946729147294434,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 766.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774951815.9038062,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 612.8,
+      "close_price": 601.4,
+      "pnl": 2.255715999999995,
+      "pnl_pct": 9.202496736292408,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 766.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1774951879.6177242,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 612.34,
+      "close_price": 601.76,
+      "pnl": 0.522929500000002,
+      "pnl_pct": 8.539855309142014,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 736.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1775044098.5985396,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "spot",
+      "strategy": "MeanReversion",
+      "entry_price": 9.338,
+      "close_price": 9.197,
+      "pnl": 0.12246500000000002,
+      "pnl_pct": 1.3114692653673166,
+      "close_reason": "trailing_stop",
+      "leverage": 1,
+      "duration_min": 235.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MeanReversion"
+      ]
+    },
+    {
+      "timestamp": 1775151596.5940788,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1072,
+      "close_price": 0.1073,
+      "pnl": 0.09220596000000336,
+      "pnl_pct": 0.36632462686568495,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775152564.016716,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1066,
+      "close_price": 0.1067,
+      "pnl": 0.04700532500000171,
+      "pnl_pct": 0.36899624765479766,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775153520.461558,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1078,
+      "close_price": 0.1079,
+      "pnl": 0.04169085999999415,
+      "pnl_pct": 0.3638218923932699,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775153668.866977,
+      "symbol": "VET/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.006688,
+      "close_price": 0.006683,
+      "pnl": 0.03304026000000598,
+      "pnl_pct": 0.2738486842105759,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 3.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775154555.163583,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 1.219,
+      "close_price": 1.218,
+      "pnl": 0.03365535000000498,
+      "pnl_pct": 0.31021328958167016,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775154650.4958336,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1081,
+      "close_price": 0.1082,
+      "pnl": 0.04154670000000152,
+      "pnl_pct": 0.362580943570781,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 2.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775155981.39534,
+      "symbol": "SUI/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.8525,
+      "close_price": 0.8595,
+      "pnl": -0.5306688000000005,
+      "pnl_pct": -4.205982404692086,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 41.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.2%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775156683.0662777,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1083,
+      "close_price": 0.1084,
+      "pnl": 0.04347315000000159,
+      "pnl_pct": 0.36163434903048414,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775157489.0764663,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1078,
+      "close_price": 0.1079,
+      "pnl": 0.043881584999993846,
+      "pnl_pct": 0.36377551020403054,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 0.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775158581.263783,
+      "symbol": "SEI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.05071,
+      "close_price": 0.05079,
+      "pnl": -0.09691125000000396,
+      "pnl_pct": -0.8888779333465163,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 3.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775158881.3662758,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1083,
+      "close_price": 0.1084,
+      "pnl": 0.04151490000000152,
+      "pnl_pct": 0.3616343490304842,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 8.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775217387.2550213,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.07414,
+      "close_price": 0.0742,
+      "pnl": 0.046520980000004625,
+      "pnl_pct": 0.3045994065282202,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 1.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775217760.6409886,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.415,
+      "close_price": 2.435,
+      "pnl": 0.6498495000000006,
+      "pnl_pct": 4.040372670807457,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 27.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775219109.7729244,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.432,
+      "close_price": 2.433,
+      "pnl": 0.0036036249999979036,
+      "pnl_pct": 0.023334703947354846,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 0.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775219885.8845577,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.432,
+      "close_price": 2.442,
+      "pnl": 0.1546284300000039,
+      "pnl_pct": 1.1333470394737126,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775220983.1911805,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.431,
+      "close_price": 2.43,
+      "pnl": -0.02818429499999829,
+      "pnl_pct": -0.2233854380913069,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775221926.975545,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.431,
+      "close_price": 2.428,
+      "pnl": -0.054747305000001634,
+      "pnl_pct": -0.4701563142739753,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775221930.1396768,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.0749,
+      "close_price": 0.07509,
+      "pnl": 0.07128072000000416,
+      "pnl_pct": 0.6608878504673283,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 0.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775222914.9270253,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.426,
+      "close_price": 2.427,
+      "pnl": 0.0021965049999987316,
+      "pnl_pct": 0.02363973619124768,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775222918.7489626,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.07429,
+      "close_price": 0.07474,
+      "pnl": 0.14795626000000206,
+      "pnl_pct": 1.716899986539262,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 0.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775223898.577623,
+      "symbol": "LUMIA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.07468,
+      "close_price": 0.07476,
+      "pnl": 0.017684959999998955,
+      "pnl_pct": 0.22131762185322743,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775226415.730615,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1199,
+      "close_price": 0.1189,
+      "pnl": -0.18872370000000016,
+      "pnl_pct": -2.60166805671393,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 27.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775235819.8166027,
+      "symbol": "ORDI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 2.437,
+      "close_price": 2.437,
+      "pnl": -0.006458049999999999,
+      "pnl_pct": -0.1,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 1.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775240784.778108,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1225,
+      "close_price": 0.1225,
+      "pnl": -0.006186250000000001,
+      "pnl_pct": -0.1,
+      "close_reason": "mcp_brain_close",
+      "leverage": 3,
+      "duration_min": 3.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775276130.6990402,
+      "symbol": "MANA/USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "spot",
+      "strategy": "TrendFollowing",
+      "entry_price": 0.088,
+      "close_price": 0.088,
+      "pnl": -0.0423368,
+      "pnl_pct": -0.2,
+      "close_reason": "mcp_brain_close",
+      "leverage": 1,
+      "duration_min": 3.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775404966.8862712,
+      "symbol": "BCH/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 424.49,
+      "close_price": 421.93,
+      "pnl": 0.24753580000000022,
+      "pnl_pct": 2.915684703997741,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 35.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775425133.5448134,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1212,
+      "close_price": 0.1221,
+      "pnl": 0.30648449999999927,
+      "pnl_pct": 3.6124999999999914,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 6.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775429229.8233519,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1215,
+      "close_price": 0.1221,
+      "pnl": 0.20147400000000115,
+      "pnl_pct": 2.3688888888889026,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 5.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775431131.7517002,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1222,
+      "close_price": 0.124,
+      "pnl": 0.5814369499999987,
+      "pnl_pct": 7.26423895253681,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 19.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775444145.5472124,
+      "symbol": "OP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1065,
+      "close_price": 0.112,
+      "pnl": -3.092236000000003,
+      "pnl_pct": -25.924178403755892,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 325.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (25.9%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775448955.2319348,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1215,
+      "close_price": 0.1224,
+      "pnl": 0.2714390999999994,
+      "pnl_pct": 3.603333333333325,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 291.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775455682.38416,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 0.1228,
+      "close_price": 0.1235,
+      "pnl": 0.19923414999999775,
+      "pnl_pct": 2.749877850162835,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 11.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775503346.0741825,
+      "symbol": "LTC/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 53.96,
+      "close_price": 53.95,
+      "pnl": -0.1014600799999903,
+      "pnl_pct": -0.19265196441806903,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 93.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775513104.9703758,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 604.93,
+      "close_price": 605.42,
+      "pnl": 0.14758720000000364,
+      "pnl_pct": 0.30496751690278967,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 255.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on Supertrend"
+      ]
+    },
+    {
+      "timestamp": 1775521886.9266217,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 1.3377,
+      "close_price": 1.3232,
+      "pnl": -3.0565806299999907,
+      "pnl_pct": -5.5192083426777145,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 402.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.5%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775521890.4738846,
+      "symbol": "APT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.8587,
+      "close_price": 0.8386,
+      "pnl": -5.614715210000002,
+      "pnl_pct": -11.802567835099573,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 401.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (11.8%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775521893.151385,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 1.3382,
+      "close_price": 1.3236,
+      "pnl": -0.6689780999999976,
+      "pnl_pct": -5.554543416529646,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 398.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.6%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775521895.8455887,
+      "symbol": "MANTA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.06169,
+      "close_price": 0.06072,
+      "pnl": -0.9350934319999987,
+      "pnl_pct": -7.961103906629913,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 398.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (8.0%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775525089.2279737,
+      "symbol": "BTC/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 69746.2,
+      "close_price": 68708.9,
+      "pnl": -0.5255727550000014,
+      "pnl_pct": -7.535503798056402,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 421.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (7.5%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775525093.5094774,
+      "symbol": "SEI/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.05417,
+      "close_price": 0.05342,
+      "pnl": -0.7683665900000007,
+      "pnl_pct": -7.021958648698548,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 193.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (7.0%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775540723.1101704,
+      "symbol": "ETC/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 8.242,
+      "close_price": 8.188,
+      "pnl": 1.743484770000009,
+      "pnl_pct": 3.1762254307207147,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 48.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on MultiTF"
+      ]
+    },
+    {
+      "timestamp": 1775591169.8097327,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 79.4,
+      "close_price": 81.62,
+      "pnl": -7.714551899999996,
+      "pnl_pct": -14.081246851385382,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 137.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (14.1%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775596378.0723505,
+      "symbol": "UNI/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 3.07,
+      "close_price": 3.152,
+      "pnl": -7.022870000000026,
+      "pnl_pct": -13.456351791530995,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 207.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (13.5%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775601386.3300211,
+      "symbol": "APT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "Supertrend",
+      "entry_price": 0.8338,
+      "close_price": 0.8573,
+      "pnl": -7.349261759999989,
+      "pnl_pct": -14.19352362676899,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 165.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (14.2%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775604350.1904805,
+      "symbol": "ETC/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "MultiTF",
+      "entry_price": 8.244,
+      "close_price": 8.878,
+      "pnl": -12.714244000000006,
+      "pnl_pct": -38.55605288694811,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 1115.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (38.6%) \u2014 SL too wide or leverage too high",
+        "SHORT stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775707226.4515486,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.779,
+      "close_price": 1.781,
+      "pnl": 0.0033286000000000288,
+      "pnl_pct": 0.012366498032602693,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 59.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775711035.7516434,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1012,
+      "close_price": 0.1017,
+      "pnl": 0.12733672500000015,
+      "pnl_pct": 0.39382411067193723,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 122.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775713612.6539445,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1017,
+      "close_price": 0.1018,
+      "pnl": -0.0006852999999988757,
+      "pnl_pct": -0.0017207472959657115,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 35.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1775715108.0438633,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2179.18,
+      "close_price": 2182.68,
+      "pnl": 0.025062330000000008,
+      "pnl_pct": 0.060530566543378725,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 120.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775716933.5275342,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.792,
+      "close_price": 1.789,
+      "pnl": -0.10740301000000256,
+      "pnl_pct": -0.26732700892857775,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 121.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775719822.1127174,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1016,
+      "close_price": 0.1016,
+      "pnl": -0.03872992,
+      "pnl_pct": -0.1,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 93.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1775720596.6046257,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.78,
+      "close_price": 8.743,
+      "pnl": -0.14964010499999683,
+      "pnl_pct": -0.5212015945330186,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 121.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775740321.1232543,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1019,
+      "close_price": 0.1015,
+      "pnl": -0.212369609999999,
+      "pnl_pct": -0.49234543670264735,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 298.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775740948.6022937,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.2378,
+      "close_price": 0.2392,
+      "pnl": 0.21023149999999718,
+      "pnl_pct": 0.4884356602186645,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 308.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775745140.828549,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.799,
+      "close_price": 1.782,
+      "pnl": -0.31098277499999843,
+      "pnl_pct": -1.0444969427459647,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 347.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775749118.9101257,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1015,
+      "close_price": 0.1042,
+      "pnl": 1.0708049449999977,
+      "pnl_pct": 2.5587684729063978,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 89.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775751272.9095843,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.155,
+      "close_price": 9.339,
+      "pnl": 0.6990120000000042,
+      "pnl_pct": 1.9088257782632556,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 71.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775754110.653538,
+      "symbol": "AAVE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 91.5,
+      "close_price": 91.41,
+      "pnl": -0.0004364999999989759,
+      "pnl_pct": -0.0015901639344224987,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 61.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1775761971.295535,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2205.62,
+      "close_price": 2213.27,
+      "pnl": 0.10337054500000173,
+      "pnl_pct": 0.24666783036062837,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 133.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775763728.3053544,
+      "symbol": "MANA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.0933,
+      "close_price": 0.092,
+      "pnl": -0.5793423999999981,
+      "pnl_pct": -1.4926580921757724,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 66.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775770923.4067988,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1026,
+      "close_price": 0.1061,
+      "pnl": 1.3803317250000013,
+      "pnl_pct": 3.3096003898635513,
+      "close_reason": "mcp_take_profit",
+      "leverage": 5,
+      "duration_min": 247.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775773270.610323,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3,
+      "close_price": 1.339,
+      "pnl": 1.0776622999999979,
+      "pnl_pct": 2.898499999999994,
+      "close_reason": "mcp_take_profit",
+      "leverage": 5,
+      "duration_min": 191.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775773274.0217855,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1075,
+      "close_price": 0.1083,
+      "pnl": 0.24569549999999823,
+      "pnl_pct": 0.6438139534883675,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 31.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775773287.2054179,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2204.36,
+      "close_price": 2228.57,
+      "pnl": 0.3518965600000006,
+      "pnl_pct": 0.997728819249126,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 176.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775773290.0320358,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.016,
+      "close_price": 9.116,
+      "pnl": 0.3791947799999985,
+      "pnl_pct": 1.0085847382431194,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 81.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775776603.274352,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.794,
+      "close_price": 1.805,
+      "pnl": 0.15420037999999833,
+      "pnl_pct": 0.5128483835005517,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 312.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775780211.240373,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.567,
+      "close_price": 9.34,
+      "pnl": -0.709360500000001,
+      "pnl_pct": -2.4715532559841153,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 116.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775780214.1570237,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.328,
+      "close_price": 1.292,
+      "pnl": -1.167803000000001,
+      "pnl_pct": -2.8094879518072315,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 101.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775780217.0487819,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1089,
+      "close_price": 0.1075,
+      "pnl": -0.5771881399999994,
+      "pnl_pct": -1.3849403122130381,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 101.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775780219.7992392,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.08,
+      "close_price": 8.934,
+      "pnl": -0.7114821300000036,
+      "pnl_pct": -1.7071255506608016,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 100.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775780222.6740277,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 608.33,
+      "close_price": 602.48,
+      "pnl": -0.32277025000000115,
+      "pnl_pct": -1.0611682803741427,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 100.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775783975.0746403,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.109,
+      "close_price": 0.109,
+      "pnl": -0.037070900000000004,
+      "pnl_pct": -0.1,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 34.5,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1775784879.0241225,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2193.15,
+      "close_price": 2195.34,
+      "pnl": -6.791999999912479e-05,
+      "pnl_pct": -0.00019355721222649155,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 130.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775788256.2853131,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.329,
+      "close_price": 9.362,
+      "pnl": 0.0946179999999979,
+      "pnl_pct": 0.25355879515488766,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 122.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775788259.0195222,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.295,
+      "close_price": 1.295,
+      "pnl": -0.04182849999999999,
+      "pnl_pct": -0.1,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 122.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775789444.4602656,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.911,
+      "close_price": 8.936,
+      "pnl": 0.07555955000000167,
+      "pnl_pct": 0.18041185052183092,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 141.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775790963.7282052,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1098,
+      "close_price": 0.1094,
+      "pnl": -0.1721428799999992,
+      "pnl_pct": -2.3205828779599162,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 87.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775792263.630562,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.0923,
+      "close_price": 0.09222,
+      "pnl": -0.06649235999999874,
+      "pnl_pct": -0.9331527627302099,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 156.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775793706.5881262,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2198.9,
+      "close_price": 2185.27,
+      "pnl": -0.25315336000000177,
+      "pnl_pct": -3.5977272727272975,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 133.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.6%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775798380.912274,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 83.38,
+      "close_price": 83.18,
+      "pnl": -0.124643199999995,
+      "pnl_pct": -1.698728711921256,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 165.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775798384.3926969,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.921,
+      "close_price": 8.945,
+      "pnl": 0.06087068000000369,
+      "pnl_pct": 0.8444681089564463,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 125.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775802000.3689432,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1116,
+      "close_price": 0.1091,
+      "pnl": -0.9052693800000008,
+      "pnl_pct": -11.695116487455207,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 27.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (11.7%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775802746.6779766,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.293,
+      "close_price": 1.294,
+      "pnl": -0.008129949999996899,
+      "pnl_pct": -0.1134957463263295,
+      "close_reason": "stop_loss",
+      "leverage": 5,
+      "duration_min": 222.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1775812833.3970153,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 83.34,
+      "close_price": 83.36,
+      "pnl": -0.030408000000001913,
+      "pnl_pct": -0.3800695944324693,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 240.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1775812912.3712647,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09269,
+      "close_price": 0.09235,
+      "pnl": -0.1816583999999971,
+      "pnl_pct": -2.3331535224942987,
+      "close_reason": "mcp_brain_close",
+      "leverage": 5,
+      "duration_min": 257.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1775874039.8615255,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2237.08,
+      "close_price": 2245.99,
+      "pnl": 0.12003236999999736,
+      "pnl_pct": 1.4904395461941136,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 96.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775925780.2380931,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2248.27,
+      "close_price": 2259.07,
+      "pnl": 0.09400963000000198,
+      "pnl_pct": 1.9006458299048112,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 27.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775931867.8547869,
+      "symbol": "ETH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2258.0,
+      "close_price": 2261.1,
+      "pnl": 0.009244949999999003,
+      "pnl_pct": 0.18610496014169828,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1775948080.460482,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.234,
+      "close_price": 9.119,
+      "pnl": -0.3501777300000006,
+      "pnl_pct": -6.7238737275287095,
+      "close_reason": "Trend flipped down, -1.2% cut loss",
+      "leverage": 5,
+      "duration_min": 155.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (6.7%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1776000449.9740083,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1113,
+      "close_price": 0.1119,
+      "pnl": 0.11203896000000077,
+      "pnl_pct": 2.194070080862549,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 76.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776000837.8787796,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 595.11,
+      "close_price": 592.81,
+      "pnl": 0.06824160000000273,
+      "pnl_pct": 1.4333820638201913,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776002773.1545055,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1045,
+      "close_price": 0.1035,
+      "pnl": 0.2214912000000002,
+      "pnl_pct": 4.287081339712923,
+      "close_reason": "systematic_close",
+      "leverage": 5,
+      "duration_min": 122.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776006910.6522655,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 592.53,
+      "close_price": 591.24,
+      "pnl": 0.027924599999998544,
+      "pnl_pct": 0.5890967545946734,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776008092.1582558,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1111,
+      "close_price": 0.1103,
+      "pnl": -0.2094610000000021,
+      "pnl_pct": -4.0985598559856395,
+      "close_reason": "systematic_close",
+      "leverage": 5,
+      "duration_min": 45.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.1%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1776010764.3183584,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.223,
+      "close_price": 1.223,
+      "pnl": -0.025560700000000002,
+      "pnl_pct": -0.5,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776011076.9555926,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1036,
+      "close_price": 0.1025,
+      "pnl": 0.25232804500000094,
+      "pnl_pct": 4.8115347490347675,
+      "close_reason": "trailing_stop",
+      "leverage": 5,
+      "duration_min": 114.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776014314.2228467,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 591.85,
+      "close_price": 591.74,
+      "pnl": -0.019271799999999454,
+      "pnl_pct": -0.4070245839317279,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776014317.9825873,
+      "symbol": "BCH/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 423.6,
+      "close_price": 422.8,
+      "pnl": 0.022608000000000683,
+      "pnl_pct": 0.4447592067988803,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776028009.7761567,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1033,
+      "close_price": 0.1034,
+      "pnl": -0.05272865500000075,
+      "pnl_pct": -0.9842691190706817,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776031254.3287272,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 592.46,
+      "close_price": 592.84,
+      "pnl": -0.03890599999999982,
+      "pnl_pct": -0.8208571042770781,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 100.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776085180.1831894,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3316,
+      "close_price": 1.3318,
+      "pnl": -0.029868150000003903,
+      "pnl_pct": -0.5751351757285221,
+      "close_reason": "systematic_close",
+      "leverage": 5,
+      "duration_min": 4.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776091550.0670395,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1033,
+      "close_price": 0.105,
+      "pnl": -0.45590870499999825,
+      "pnl_pct": -8.732575024201322,
+      "close_reason": "systematic_close",
+      "leverage": 5,
+      "duration_min": 110.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (8.7%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1776092386.6966505,
+      "symbol": "ADA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.2398,
+      "close_price": 0.2429,
+      "pnl": -0.3708898499999991,
+      "pnl_pct": -6.966951626355278,
+      "close_reason": "systematic_close",
+      "leverage": 5,
+      "duration_min": 130.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (7.0%) \u2014 SL too wide or leverage too high",
+        "High leverage (5x) amplified loss"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Cap leverage at 3x when ATR% > 3%"
+      ]
+    },
+    {
+      "timestamp": 1776132861.791941,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 86.19,
+      "close_price": 86.14,
+      "pnl": -0.04084949999999915,
+      "pnl_pct": -0.7899118227172361,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 90.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776133028.273627,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.279,
+      "close_price": 9.259,
+      "pnl": -0.08429471999999877,
+      "pnl_pct": -1.5771634874447449,
+      "close_reason": "STALE",
+      "leverage": 5,
+      "duration_min": 93.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776180970.882735,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 621.24,
+      "close_price": 621.68,
+      "pnl": -0.005443800000001773,
+      "pnl_pct": -0.08762796986674673,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 90.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776192390.1636858,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09545,
+      "close_price": 0.09297693,
+      "pnl": -0.5134566929999987,
+      "pnl_pct": -8.068989413305376,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 148.5,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (8.1%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776192434.5606687,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3881,
+      "close_price": 1.3531455000000001,
+      "pnl": -0.5158167430499968,
+      "pnl_pct": -7.850685703479529,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 281.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (7.9%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776279516.2179468,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 622.1209049999999,
+      "close_price": 622.74,
+      "pnl": -3.335452499870616e-05,
+      "pnl_pct": -0.0016084265002494734,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 90.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776290993.4966056,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 85.44,
+      "close_price": 85.36,
+      "pnl": -0.023155999999999764,
+      "pnl_pct": -0.3871722846441908,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 135.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776307649.5765355,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09485,
+      "close_price": 0.09595,
+      "pnl": 0.13461639999999864,
+      "pnl_pct": 2.118292040063236,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 84.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776308030.7286563,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3962,
+      "close_price": 1.4044,
+      "pnl": 0.06391717999999985,
+      "pnl_pct": 0.9740295086663778,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 96.5,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776312227.0512164,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09588,
+      "close_price": 0.09674,
+      "pnl": 0.09927969999999996,
+      "pnl_pct": 1.593012098456403,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 65.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776325567.1633835,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.4078,
+      "close_price": 1.407,
+      "pnl": -0.02052881999999918,
+      "pnl_pct": -0.3135956812047041,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 90.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776330969.4473782,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09665,
+      "close_price": 0.09651,
+      "pnl": -0.030045660000000158,
+      "pnl_pct": -0.4895602690119012,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 126.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776430409.8714998,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09861,
+      "close_price": 0.09999,
+      "pnl": 0.08580689999999949,
+      "pnl_pct": 3.896257986005453,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 70.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776431420.5916767,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09992,
+      "close_price": 0.10066,
+      "pnl": 0.0422208600000003,
+      "pnl_pct": 1.9206665332265949,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 16.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776443345.5835352,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1308,
+      "close_price": 0.1315,
+      "pnl": 0.027185341500000293,
+      "pnl_pct": 1.3047018348623993,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 53.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776444182.676518,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.10069,
+      "close_price": 0.10118,
+      "pnl": 0.12761332000000142,
+      "pnl_pct": 1.1591965438474654,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 92.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776444547.315117,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.132,
+      "close_price": 0.1325,
+      "pnl": 0.0877083750000001,
+      "pnl_pct": 0.8357954545454553,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 15.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776457857.7318394,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.785,
+      "close_price": 9.617,
+      "pnl": -0.14216079999999942,
+      "pnl_pct": -5.44816555952987,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 319.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SL hit after 4+ hours \u2014 trend reversed, should have taken partial profit",
+        "Large loss (5.4%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Set trailing stop after 2h of profit",
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776457923.3104777,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1327,
+      "close_price": 0.1328,
+      "pnl": -0.00778140000000262,
+      "pnl_pct": -0.07403918613416208,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 110.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776458008.3172507,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.10126,
+      "close_price": 0.09954,
+      "pnl": -0.5952707999999999,
+      "pnl_pct": -5.393245111593916,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 198.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.4%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776458190.3439355,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 643.6,
+      "close_price": 639.2,
+      "pnl": -0.10082799999999956,
+      "pnl_pct": -2.349937849596012,
+      "close_reason": "AGE_LIMIT",
+      "leverage": 3,
+      "duration_min": 360.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776487876.0891175,
+      "symbol": "BTC/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 77010.1,
+      "close_price": 77049.9,
+      "pnl": -0.0037230000000011646,
+      "pnl_pct": -0.14503292425283817,
+      "close_reason": "ALGO stale 194m pnl=+0.2%",
+      "leverage": 3,
+      "duration_min": 194.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776488387.4600441,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.09933,
+      "close_price": 0.0983,
+      "pnl": -0.08014586500000022,
+      "pnl_pct": -3.409287224403513,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 324.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.4%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776492763.8187056,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1303,
+      "close_price": 0.1317,
+      "pnl": 0.31217400000000306,
+      "pnl_pct": 2.9217191097467667,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 146.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776494898.6692681,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.332,
+      "close_price": 1.334,
+      "pnl": 0.009938300000000025,
+      "pnl_pct": 0.15022522522522558,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 240.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776500163.7171607,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1328,
+      "close_price": 0.1329,
+      "pnl": -0.008189505000002751,
+      "pnl_pct": -0.0742093373494225,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 22.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776501212.9332771,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.3353,
+      "close_price": 1.31,
+      "pnl": -0.2822000899999987,
+      "pnl_pct": -5.981273871040189,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 39.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (6.0%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776506696.4989545,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.557,
+      "close_price": 9.42,
+      "pnl": -0.14648850000000047,
+      "pnl_pct": -4.598362456837934,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 23.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.6%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776510776.390332,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1309,
+      "close_price": 0.1276,
+      "pnl": -0.4228265249999996,
+      "pnl_pct": -7.859243697478985,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 91.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (7.9%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776512381.3203957,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.312,
+      "close_price": 1.283,
+      "pnl": -0.3817485000000017,
+      "pnl_pct": -6.927782012195152,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 118.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (6.9%) \u2014 SL too wide or leverage too high",
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage",
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776524361.8896708,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.398,
+      "close_price": 9.399,
+      "pnl": -0.007558650000000497,
+      "pnl_pct": -0.2680942753777576,
+      "close_reason": "take_profit",
+      "leverage": 3,
+      "duration_min": 0.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776549131.9914732,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1272,
+      "close_price": 0.1273,
+      "pnl": -0.0033572000000013594,
+      "pnl_pct": -0.06426886792455432,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 40.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776552861.019682,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1275,
+      "close_price": 0.1284,
+      "pnl": 0.0924915899999981,
+      "pnl_pct": 1.8165882352940803,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 59.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776556918.8582487,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1073,
+      "close_price": 0.1067,
+      "pnl": 0.07212590000000049,
+      "pnl_pct": 1.3783783783783876,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 58.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776583263.2872577,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.2153,
+      "close_price": 0.2141,
+      "pnl": 0.15075089999999675,
+      "pnl_pct": 1.3729215048768864,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 15.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776593500.10654,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1249,
+      "close_price": 0.125,
+      "pnl": -0.026949010000000342,
+      "pnl_pct": -0.1801040832666156,
+      "close_reason": "ALGO stale 181m pnl=+0.0%",
+      "leverage": 1,
+      "duration_min": 180.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776597089.704642,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.2139,
+      "close_price": 0.2167,
+      "pnl": -0.22011689999999978,
+      "pnl_pct": -4.229032258064511,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 134.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.2%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776601167.6435153,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.2182,
+      "close_price": 0.218,
+      "pnl": -0.028848900000000396,
+      "pnl_pct": -0.1916131989000943,
+      "close_reason": "take_profit",
+      "leverage": 1,
+      "duration_min": 0.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776605086.5870702,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.2194,
+      "close_price": 0.2207,
+      "pnl": 0.1652323499999993,
+      "pnl_pct": 0.4922288058340909,
+      "close_reason": "trailing_stop",
+      "leverage": 1,
+      "duration_min": 22.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776608845.3623617,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.106,
+      "close_price": 0.1055,
+      "pnl": 0.11311032500000011,
+      "pnl_pct": 1.115801886792454,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 58.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776617008.7190537,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1053,
+      "close_price": 0.1054,
+      "pnl": -0.06109162499999672,
+      "pnl_pct": -0.5850427350427037,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 135.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776619930.0716739,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.2156,
+      "close_price": 0.2145,
+      "pnl": 0.1353973500000027,
+      "pnl_pct": 0.41045918367347756,
+      "close_reason": "trailing_stop",
+      "leverage": 1,
+      "duration_min": 115.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776621319.231647,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.105,
+      "close_price": 0.1045,
+      "pnl": 0.11185575000000013,
+      "pnl_pct": 1.1292857142857156,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 40.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776622400.0804448,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1044,
+      "close_price": 0.1036,
+      "pnl": -0.25583200000000256,
+      "pnl_pct": -2.5977011494253133,
+      "close_reason": "ALGO loss -1.7% + 1h trend reversed",
+      "leverage": 3,
+      "duration_min": 12.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776623199.3787546,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1253,
+      "close_price": 0.1243,
+      "pnl": 0.1048489600000001,
+      "pnl_pct": 2.0954509177972884,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 78.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776625202.9228096,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.10416,
+      "close_price": 0.1035,
+      "pnl": 0.07547226900000106,
+      "pnl_pct": 1.6018721198156907,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 59.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776628158.6638558,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1243,
+      "close_price": 0.1253,
+      "pnl": 0.1048489600000001,
+      "pnl_pct": 2.112308930008047,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 82.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776630732.1549377,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1038,
+      "close_price": 0.1032,
+      "pnl": 0.14567310000000094,
+      "pnl_pct": 1.4349710982659054,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 34.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776631886.6773753,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1253,
+      "close_price": 0.1246,
+      "pnl": 0.06889098999999907,
+      "pnl_pct": 1.376815642458082,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 60.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776636027.5754774,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.2125,
+      "close_price": 0.2129,
+      "pnl": -0.09251770000000173,
+      "pnl_pct": -0.8649882352941338,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 240.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776641801.9795017,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1222,
+      "close_price": 0.1216,
+      "pnl": 0.05727638000000039,
+      "pnl_pct": 1.1737315875613827,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 79.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776650506.212494,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1247,
+      "close_price": 0.1257,
+      "pnl": 0.1048010400000001,
+      "pnl_pct": 2.104570970328791,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 27.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776651857.9984457,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1257,
+      "close_price": 0.1249,
+      "pnl": 0.08082906000000108,
+      "pnl_pct": 1.610262529832957,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 17.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776653415.0471544,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.067,
+      "close_price": 9.13,
+      "pnl": -0.21629550000000183,
+      "pnl_pct": -2.3855244292489446,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 143.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776658120.3175156,
+      "symbol": "AAVE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 93.58,
+      "close_price": 93.09,
+      "pnl": 0.11899949999999847,
+      "pnl_pct": 1.2716338961316358,
+      "close_reason": "trailing_stop",
+      "leverage": 3,
+      "duration_min": 31.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776662468.586463,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.074,
+      "close_price": 9.072,
+      "pnl": -0.0084875999999992,
+      "pnl_pct": -0.23384394974650652,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 173.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776664946.3261747,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1019,
+      "close_price": 0.1016,
+      "pnl": 0.04861090000000211,
+      "pnl_pct": 0.5836604514229891,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 64.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776667494.1408076,
+      "symbol": "TRX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.33177,
+      "close_price": 0.33149,
+      "pnl": -0.06055137000000024,
+      "pnl_pct": -0.5530608554118839,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 146.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776669946.1962838,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.194,
+      "close_price": 9.283,
+      "pnl": 0.2392844999999959,
+      "pnl_pct": 2.6026158364150085,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 4.5,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776670540.889622,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1279666666667,
+      "close_price": 0.1265,
+      "pnl": -0.5728476600119881,
+      "pnl_pct": -3.736676217842268,
+      "close_reason": "ALGO loss -3.0% + 1h trend reversed",
+      "leverage": 3,
+      "duration_min": 8.5,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.7%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776673379.4317815,
+      "symbol": "TRX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.3314,
+      "close_price": 0.3296,
+      "pnl": -0.21091949999999687,
+      "pnl_pct": -1.9286360893180161,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 81.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "LONG stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776676905.8457282,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1022,
+      "close_price": 0.103,
+      "pnl": -0.20958371999999886,
+      "pnl_pct": -2.649510763209379,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 134.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776679998.9048214,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.179,
+      "close_price": 9.247,
+      "pnl": -0.07721299999999962,
+      "pnl_pct": -2.5235755528924595,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 105.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1776692957.719515,
+      "symbol": "TRX/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.32842,
+      "close_price": 0.32823,
+      "pnl": -0.013694175000003174,
+      "pnl_pct": -0.12635497229160714,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 138.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776697277.6267247,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1027,
+      "close_price": 0.1021,
+      "pnl": 0.150275200000001,
+      "pnl_pct": 0.4845180136319409,
+      "close_reason": "trailing_stop",
+      "leverage": 1,
+      "duration_min": 84.8,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776697422.8984838,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1020821192053,
+      "close_price": 0.1017,
+      "pnl": -0.14617110000060013,
+      "pnl_pct": -1.4224144306680504,
+      "close_reason": "take_profit",
+      "leverage": 3,
+      "duration_min": 0.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776705651.660165,
+      "symbol": "AAVE/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 88.78,
+      "close_price": 88.74,
+      "pnl": -0.007313999999999062,
+      "pnl_pct": -0.1647668393782172,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776720811.9119322,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.128,
+      "close_price": 0.1279,
+      "pnl": -0.029086419999998593,
+      "pnl_pct": -0.5342578124999742,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776728101.9693956,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.127,
+      "close_price": 0.1269,
+      "pnl": -0.02911768499999859,
+      "pnl_pct": -0.5361023622046984,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776732541.674593,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 632.31,
+      "close_price": 632.2,
+      "pnl": -0.037112749999995004,
+      "pnl_pct": -0.3521634957536178,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776740064.311942,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 628.84,
+      "close_price": 628.83,
+      "pnl": -0.03194174999999955,
+      "pnl_pct": -0.30476830354302725,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776751355.1476705,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.299,
+      "close_price": 9.36,
+      "pnl": -0.10549424999999991,
+      "pnl_pct": -2.268937520163457,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 71.6,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776757329.4029965,
+      "symbol": "AVAX/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.3025,
+      "close_price": 9.353,
+      "pnl": -0.08974162499999931,
+      "pnl_pct": -1.9294087610857147,
+      "close_reason": "1h/15m EMA=up conflicts with short",
+      "leverage": 3,
+      "duration_min": 92.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776768278.511096,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 632.71,
+      "close_price": 639.6,
+      "pnl": 0.18761534999999957,
+      "pnl_pct": 2.965266077665906,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 210.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776768646.0904734,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 633.27,
+      "close_price": 639.98,
+      "pnl": 0.060733750000000364,
+      "pnl_pct": 2.8771495570609864,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 202.2,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776769067.5045953,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 633.7,
+      "close_price": 639.2,
+      "pnl": 0.0486355,
+      "pnl_pct": 2.3024538425122296,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 151.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776800476.5322142,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 634.69,
+      "close_price": 627.24,
+      "pnl": -0.4040482500000023,
+      "pnl_pct": -3.8196434479825006,
+      "close_reason": "506m open, -3.2% past SL, MACD neg, 15m EMA down",
+      "leverage": 3,
+      "duration_min": 508.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.8%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776802696.4678888,
+      "symbol": "AAVE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 90.46,
+      "close_price": 91.42,
+      "pnl": -0.3152820000000024,
+      "pnl_pct": -3.4853194782224457,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 11.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.5%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776815483.8609316,
+      "symbol": "AAVE/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 90.99,
+      "close_price": 92.16,
+      "pnl": -0.12615750000000017,
+      "pnl_pct": -4.159495548961431,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 161.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.2%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776858503.0534089,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1287,
+      "close_price": 0.1272,
+      "pnl": -0.08736939300000007,
+      "pnl_pct": -3.7946386946386976,
+      "close_reason": "-3.7% past SL; 15m mixed+RSI42 no recovery",
+      "leverage": 3,
+      "duration_min": 147.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.8%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776860796.502807,
+      "symbol": "GRT/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.02535,
+      "close_price": 0.0252,
+      "pnl": -0.08814579750000041,
+      "pnl_pct": -2.0742603550295957,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 70.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776863922.2120264,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.8994,
+      "close_price": 1.886,
+      "pnl": -0.11316598000000058,
+      "pnl_pct": -2.415399599873657,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 133.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776880715.8772993,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.13,
+      "close_price": 0.1319,
+      "pnl": 0.19803865099999832,
+      "pnl_pct": 4.0826538461538115,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 36.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776884919.7548609,
+      "symbol": "DOT/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.2916,
+      "close_price": 1.285,
+      "pnl": -0.06231757000000128,
+      "pnl_pct": -1.832215856302298,
+      "close_reason": "4h ADX=15.4 below 20, 15m EMA down, MACD negative",
+      "leverage": 3,
+      "duration_min": 100.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776889190.31536,
+      "symbol": "MANA/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.0933,
+      "close_price": 0.0921,
+      "pnl": -0.19519769999999892,
+      "pnl_pct": -4.15659163987136,
+      "close_reason": "Past SL at -3.5%; breach confirmed",
+      "leverage": 3,
+      "duration_min": 111.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.2%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776893108.526037,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.4553,
+      "close_price": 1.4389,
+      "pnl": -0.37835851999999937,
+      "pnl_pct": -1.2263519549233814,
+      "close_reason": "systematic_close",
+      "leverage": 1,
+      "duration_min": 136.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776894695.0226161,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1305,
+      "close_price": 0.1319,
+      "pnl": 0.31529679999999616,
+      "pnl_pct": 2.9167816091953664,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 104.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776901243.2052815,
+      "symbol": "APT/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.9577,
+      "close_price": 0.9446,
+      "pnl": -0.20316557785,
+      "pnl_pct": -4.401529706588702,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 253.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.4%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776903150.8906991,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 644.0,
+      "close_price": 636.4,
+      "pnl": -0.16480400000000048,
+      "pnl_pct": -3.8386024844720605,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 410.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.8%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776903153.9963524,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 87.72,
+      "close_price": 86.52,
+      "pnl": -0.1287120000000003,
+      "pnl_pct": -4.401915184678533,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 285.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.4%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776903398.9342208,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 644.05,
+      "close_price": 633.8,
+      "pnl": -0.2177785,
+      "pnl_pct": -5.072086794503532,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 0.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.1%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776903498.7162554,
+      "symbol": "FET/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.2065,
+      "close_price": 0.2045,
+      "pnl": 0.06101130000000006,
+      "pnl_pct": 2.606949152542376,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 23.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776904707.3944106,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.876,
+      "close_price": 1.858,
+      "pnl": -0.16767747999999824,
+      "pnl_pct": -3.177025586353912,
+      "close_reason": "Past 2.5% SL, 1h EMA mixed",
+      "leverage": 3,
+      "duration_min": 62.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.2%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776904711.3095129,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09613,
+      "close_price": 0.09623,
+      "pnl": 0.0002712200000002038,
+      "pnl_pct": 0.011921356496420068,
+      "close_reason": "Trend=down, lock +0.5% profit",
+      "leverage": 3,
+      "duration_min": 75.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776914511.055838,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.12707,
+      "close_price": 0.12483,
+      "pnl": -0.2607276899999991,
+      "pnl_pct": -5.585779491618775,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 178.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.6%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776915016.0810082,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.127075,
+      "close_price": 0.12484,
+      "pnl": -0.2601775164999986,
+      "pnl_pct": -5.573773362187655,
+      "close_reason": "Manual long -5.3% no confirmed SL; double ARB exposure",
+      "leverage": 3,
+      "duration_min": 6.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (5.6%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776964074.331627,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.8524,
+      "close_price": 1.8843,
+      "pnl": 0.21022155000000028,
+      "pnl_pct": 4.863687648456064,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 506.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1776964402.8923042,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1019,
+      "close_price": 0.1031,
+      "pnl": -0.41341349999999766,
+      "pnl_pct": -3.834641805691833,
+      "close_reason": "15m EMA reversed up, OB +0.393 bullish vs short",
+      "leverage": 3,
+      "duration_min": 608.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.8%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776964405.584273,
+      "symbol": "BNB/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 633.0,
+      "close_price": 637.0,
+      "pnl": 0.0673,
+      "pnl_pct": 1.5947867298578202,
+      "close_reason": "Lock +2%; OB imb -0.712 heavy sell pressure",
+      "leverage": 3,
+      "duration_min": 319.5,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1776972503.4077146,
+      "symbol": "ALGO/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1019,
+      "close_price": 0.103,
+      "pnl": -0.3632601449999969,
+      "pnl_pct": -3.5400883218841694,
+      "close_reason": "Past SL at -3.5%; SL limit was 2.5%",
+      "leverage": 3,
+      "duration_min": 97.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.5%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776972506.789394,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.8838,
+      "close_price": 1.8713,
+      "pnl": -0.10064284999999969,
+      "pnl_pct": -2.289661853699961,
+      "close_reason": "Duplicate ATOM exposure; -2.2% near SL",
+      "leverage": 3,
+      "duration_min": 134.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1776982800.9720106,
+      "symbol": "GRT/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.02442,
+      "close_price": 0.02464,
+      "pnl": -0.14118584799999884,
+      "pnl_pct": -3.003931203931179,
+      "close_reason": "systematic_close",
+      "leverage": 3,
+      "duration_min": 121.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.0%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1776995426.527662,
+      "symbol": "GRT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.02462,
+      "close_price": 0.02459,
+      "pnl": 0.006743749999998473,
+      "pnl_pct": 0.0657392363931614,
+      "close_reason": "stop_loss",
+      "leverage": 3,
+      "duration_min": 56.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777018961.697597,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.92,
+      "close_price": 1.943,
+      "pnl": 0.8522208250000054,
+      "pnl_pct": 3.291953125000021,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 264.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777054592.1504762,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.952,
+      "close_price": 1.98,
+      "pnl": 1.039797960000001,
+      "pnl_pct": 4.001127049180331,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 273.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777079166.9501126,
+      "symbol": "MANA/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.0944,
+      "close_price": 0.0956,
+      "pnl": 1.144780000000007,
+      "pnl_pct": 3.5116525423729033,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 52.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777088884.6888928,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2.008,
+      "close_price": 2.027,
+      "pnl": 0.8326519750000063,
+      "pnl_pct": 2.537226095617549,
+      "close_reason": "mcp_take_profit",
+      "leverage": 3,
+      "duration_min": 71.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777131026.5929692,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2.0412,
+      "close_price": 2.0414,
+      "pnl": -0.0331326000000004,
+      "pnl_pct": -0.2705320399764877,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 5.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1777141645.6222239,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 2.0365,
+      "close_price": 2.018,
+      "pnl": -0.36949050000000727,
+      "pnl_pct": -3.0239013012522076,
+      "close_reason": "sl_placement_failed",
+      "leverage": 3,
+      "duration_min": 30.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (3.0%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    },
+    {
+      "timestamp": 1777148346.0202894,
+      "symbol": "TRX/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.32378,
+      "close_price": 0.32359,
+      "pnl": -0.017245364999996973,
+      "pnl_pct": -0.12386651429981148,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 240.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1777154772.6117382,
+      "symbol": "APT/USDT:USDT",
+      "exchange": "Binance",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.9613,
+      "close_price": 0.9647,
+      "pnl": 0.19861549999999661,
+      "pnl_pct": 0.7605326120877848,
+      "close_reason": "STALE",
+      "leverage": 3,
+      "duration_min": 240.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777203993.6254728,
+      "symbol": "ATOM/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 2.0204,
+      "close_price": 2.0209,
+      "pnl": -0.027523764999996987,
+      "pnl_pct": -0.2257943971490547,
+      "close_reason": "AGE_LIMIT",
+      "leverage": 3,
+      "duration_min": 503.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1777205213.6935053,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.1314,
+      "close_price": 0.1325,
+      "pnl": 0.2534645315000046,
+      "pnl_pct": 2.2101598173516384,
+      "close_reason": "ghost_sync",
+      "leverage": 3,
+      "duration_min": 52.6,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1777207016.4232347,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1314,
+      "close_price": 0.1303,
+      "pnl": -0.32227345549999736,
+      "pnl_pct": -2.8101598173515754,
+      "close_reason": "ghost_sync",
+      "leverage": 3,
+      "duration_min": 23.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1777207804.5065165,
+      "symbol": "ARB/USDT:USDT",
+      "exchange": "bitget",
+      "side": "buy",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.1314,
+      "close_price": 0.1298,
+      "pnl": -0.4531229979999974,
+      "pnl_pct": -3.9511415525113933,
+      "close_reason": "ghost_sync",
+      "leverage": 3,
+      "duration_min": 6.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Large loss (4.0%) \u2014 SL too wide or leverage too high"
+      ],
+      "lessons": [
+        "Reduce SL to 1.5x ATR or lower leverage"
+      ]
+    }
+  ],
+  "lessons": {
+    "symbol:AVAX/USDT:USDT": {
+      "count": 8,
+      "last_seen": 1776757329.4029965
+    },
+    "strategy:Supertrend": {
+      "count": 22,
+      "last_seen": 1775601386.3300211
+    },
+    "side:sell:futures": {
+      "count": 57,
+      "last_seen": 1777148346.0202894
+    },
+    "AVAX/USDT:USDT:Supertrend": {
+      "count": 2,
+      "last_seen": 1774898373.578276
+    },
+    "symbol:SOL/USDT:USDT": {
+      "count": 11,
+      "last_seen": 1776903153.9963524
+    },
+    "SOL/USDT:USDT:Supertrend": {
+      "count": 3,
+      "last_seen": 1775591169.8097327
+    },
+    "symbol:XRP/USDT:USDT": {
+      "count": 11,
+      "last_seen": 1776893108.526037
+    },
+    "XRP/USDT:USDT:Supertrend": {
+      "count": 3,
+      "last_seen": 1775521893.151385
+    },
+    "symbol:ETH/USDT:USDT": {
+      "count": 3,
+      "last_seen": 1775793706.5881262
+    },
+    "ETH/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774861711.7844036
+    },
+    "symbol:ADA/USDT:USDT": {
+      "count": 5,
+      "last_seen": 1776092386.6966505
+    },
+    "ADA/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774861714.5529194
+    },
+    "symbol:BNB/USDT:USDT": {
+      "count": 13,
+      "last_seen": 1776903398.9342208
+    },
+    "BNB/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774861718.2748513
+    },
+    "symbol:XAG/USDT:USDT": {
+      "count": 2,
+      "last_seen": 1774916396.387609
+    },
+    "XAG/USDT:USDT:Supertrend": {
+      "count": 2,
+      "last_seen": 1774916396.387609
+    },
+    "symbol:BCH/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1774884955.652703
+    },
+    "BCH/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774884955.652703
+    },
+    "side:buy:futures": {
+      "count": 92,
+      "last_seen": 1777207804.5065165
+    },
+    "symbol:LINK/USDT:USDT": {
+      "count": 8,
+      "last_seen": 1776524361.8896708
+    },
+    "LINK/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774898714.0621064
+    },
+    "strategy:MultiTF": {
+      "count": 24,
+      "last_seen": 1775604350.1904805
+    },
+    "XRP/USDT:USDT:MultiTF": {
+      "count": 4,
+      "last_seen": 1774905076.5703638
+    },
+    "ADA/USDT:USDT:MultiTF": {
+      "count": 3,
+      "last_seen": 1774905079.7331545
+    },
+    "SOL/USDT:USDT:MultiTF": {
+      "count": 3,
+      "last_seen": 1774905118.87419
+    },
+    "symbol:DOT/USDT:USDT": {
+      "count": 8,
+      "last_seen": 1776884919.7548609
+    },
+    "DOT/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1774905154.5388048
+    },
+    "BNB/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1774905160.10723
+    },
+    "symbol:BTC/USDT:USDT": {
+      "count": 4,
+      "last_seen": 1776487876.0891175
+    },
+    "BTC/USDT:USDT:MultiTF": {
+      "count": 2,
+      "last_seen": 1775525089.2279737
+    },
+    "symbol:GRASS/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1774905892.4449508
+    },
+    "GRASS/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1774905892.4449508
+    },
+    "BTC/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1774920765.7623465
+    },
+    "symbol:SUI/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775155981.39534
+    },
+    "SUI/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1775155981.39534
+    },
+    "symbol:SEI/USDT:USDT": {
+      "count": 2,
+      "last_seen": 1775525093.5094774
+    },
+    "SEI/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1775158581.263783
+    },
+    "symbol:ORDI/USDT:USDT": {
+      "count": 3,
+      "last_seen": 1775235819.8166027
+    },
+    "ORDI/USDT:USDT:MultiTF": {
+      "count": 3,
+      "last_seen": 1775235819.8166027
+    },
+    "symbol:ALGO/USDT:USDT": {
+      "count": 10,
+      "last_seen": 1776972503.4077146
+    },
+    "ALGO/USDT:USDT:MultiTF": {
+      "count": 2,
+      "last_seen": 1775240784.778108
+    },
+    "symbol:MANA/USDT": {
+      "count": 1,
+      "last_seen": 1775276130.6990402
+    },
+    "strategy:TrendFollowing": {
+      "count": 1,
+      "last_seen": 1775276130.6990402
+    },
+    "side:buy:spot": {
+      "count": 1,
+      "last_seen": 1775276130.6990402
+    },
+    "MANA/USDT:TrendFollowing": {
+      "count": 1,
+      "last_seen": 1775276130.6990402
+    },
+    "symbol:OP/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775444145.5472124
+    },
+    "OP/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1775444145.5472124
+    },
+    "symbol:LTC/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775503346.0741825
+    },
+    "LTC/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1775503346.0741825
+    },
+    "symbol:APT/USDT:USDT": {
+      "count": 3,
+      "last_seen": 1776901243.2052815
+    },
+    "APT/USDT:USDT:Supertrend": {
+      "count": 2,
+      "last_seen": 1775601386.3300211
+    },
+    "symbol:MANTA/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775521895.8455887
+    },
+    "MANTA/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1775521895.8455887
+    },
+    "SEI/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1775525093.5094774
+    },
+    "symbol:UNI/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775596378.0723505
+    },
+    "UNI/USDT:USDT:Supertrend": {
+      "count": 1,
+      "last_seen": 1775596378.0723505
+    },
+    "symbol:ETC/USDT:USDT": {
+      "count": 1,
+      "last_seen": 1775604350.1904805
+    },
+    "ETC/USDT:USDT:MultiTF": {
+      "count": 1,
+      "last_seen": 1775604350.1904805
+    },
+    "symbol:ARB/USDT:USDT": {
+      "count": 21,
+      "last_seen": 1777207804.5065165
+    },
+    "strategy:claude_portfolio": {
+      "count": 78,
+      "last_seen": 1777203993.6254728
+    },
+    "ARB/USDT:USDT:claude_portfolio": {
+      "count": 15,
+      "last_seen": 1776914511.055838
+    },
+    "symbol:ATOM/USDT:USDT": {
+      "count": 8,
+      "last_seen": 1777203993.6254728
+    },
+    "ATOM/USDT:USDT:claude_portfolio": {
+      "count": 7,
+      "last_seen": 1777203993.6254728
+    },
+    "LINK/USDT:USDT:claude_portfolio": {
+      "count": 4,
+      "last_seen": 1776133028.273627
+    },
+    "symbol:AAVE/USDT:USDT": {
+      "count": 4,
+      "last_seen": 1776815483.8609316
+    },
+    "AAVE/USDT:USDT:claude_portfolio": {
+      "count": 3,
+      "last_seen": 1776815483.8609316
+    },
+    "symbol:MANA/USDT:USDT": {
+      "count": 2,
+      "last_seen": 1776889190.31536
+    },
+    "MANA/USDT:USDT:claude_portfolio": {
+      "count": 2,
+      "last_seen": 1776889190.31536
+    },
+    "AVAX/USDT:USDT:claude_portfolio": {
+      "count": 4,
+      "last_seen": 1776751355.1476705
+    },
+    "DOT/USDT:USDT:claude_portfolio": {
+      "count": 5,
+      "last_seen": 1776884919.7548609
+    },
+    "BNB/USDT:USDT:claude_portfolio": {
+      "count": 9,
+      "last_seen": 1776903150.8906991
+    },
+    "ETH/USDT:USDT:claude_portfolio": {
+      "count": 2,
+      "last_seen": 1775793706.5881262
+    },
+    "symbol:DOGE/USDT:USDT": {
+      "count": 6,
+      "last_seen": 1776488387.4600441
+    },
+    "DOGE/USDT:USDT:claude_portfolio": {
+      "count": 5,
+      "last_seen": 1776458008.3172507
+    },
+    "SOL/USDT:USDT:claude_portfolio": {
+      "count": 5,
+      "last_seen": 1776903153.9963524
+    },
+    "ALGO/USDT:USDT:claude_portfolio": {
+      "count": 6,
+      "last_seen": 1776972503.4077146
+    },
+    "XRP/USDT:USDT:claude_portfolio": {
+      "count": 3,
+      "last_seen": 1776325567.1633835
+    },
+    "ADA/USDT:USDT:claude_portfolio": {
+      "count": 1,
+      "last_seen": 1776092386.6966505
+    },
+    "strategy:manual": {
+      "count": 25,
+      "last_seen": 1777207804.5065165
+    },
+    "LINK/USDT:USDT:manual": {
+      "count": 3,
+      "last_seen": 1776524361.8896708
+    },
+    "BNB/USDT:USDT:manual": {
+      "count": 2,
+      "last_seen": 1776903398.9342208
+    },
+    "BTC/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1776487876.0891175
+    },
+    "DOGE/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1776488387.4600441
+    },
+    "DOT/USDT:USDT:manual": {
+      "count": 2,
+      "last_seen": 1776512381.3203957
+    },
+    "ARB/USDT:USDT:manual": {
+      "count": 6,
+      "last_seen": 1777207804.5065165
+    },
+    "symbol:FET/USDT:USDT": {
+      "count": 3,
+      "last_seen": 1776636027.5764794
+    },
+    "FET/USDT:USDT:claude_portfolio": {
+      "count": 1,
+      "last_seen": 1776597089.704642
+    },
+    "FET/USDT:USDT:manual": {
+      "count": 2,
+      "last_seen": 1776636027.577183
+    },
+    "ALGO/USDT:USDT:manual": {
+      "count": 2,
+      "last_seen": 1776697422.8984838
+    },
+    "AVAX/USDT:USDT:manual": {
+      "count": 2,
+      "last_seen": 1776757329.4029965
+    },
+    "symbol:TRX/USDT:USDT": {
+      "count": 4,
+      "last_seen": 1777148346.0202894
+    },
+    "TRX/USDT:USDT:claude_portfolio": {
+      "count": 3,
+      "last_seen": 1777148346.0202894
+    },
+    "TRX/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1776692957.719515
+    },
+    "AAVE/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1776705651.660165
+    },
+    "symbol:GRT/USDT:USDT": {
+      "count": 2,
+      "last_seen": 1776982800.9720106
+    },
+    "GRT/USDT:USDT:claude_portfolio": {
+      "count": 2,
+      "last_seen": 1776982800.9720106
+    },
+    "XRP/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1776893108.526037
+    },
+    "APT/USDT:USDT:claude_portfolio": {
+      "count": 1,
+      "last_seen": 1776901243.2052815
+    },
+    "ATOM/USDT:USDT:manual": {
+      "count": 1,
+      "last_seen": 1777141645.6222239
+    }
+  },
+  "saved_at": "2026-04-26T17:50:04.506516"
+}

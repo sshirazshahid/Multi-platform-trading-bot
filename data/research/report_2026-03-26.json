@@ -1,0 +1,1478 @@
+{
+  "goldman": {
+    "framework": "Goldman Sachs Screener",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "coins": [
+      {
+        "coin": "ethereum",
+        "ticker": "ETH",
+        "price": 2050.06,
+        "score": 66.6,
+        "mktcap": 247424867166,
+        "vol_24h": 16582428793,
+        "chg_24h": -5.56,
+        "chg_7d": -3.63,
+        "chg_30d": 10.49,
+        "rsi": 48.4,
+        "sma50": 2040.4031,
+        "sma200": 3115.4315,
+        "trend": "Bear",
+        "nvt": 14.9,
+        "nvt_rating": "Cheap",
+        "max_dd_90d": 45.8,
+        "moat": "Strong",
+        "moat_detail": "Smart contract platform monopoly, DeFi/NFT infrastructure, staking yields",
+        "bull_target": 2767.581,
+        "bear_target": 1476.0432,
+        "entry_low": 1968.0576,
+        "entry_high": 2070.5606,
+        "stop_loss": 1886.0552
+      },
+      {
+        "coin": "solana",
+        "ticker": "SOL",
+        "price": 85.76,
+        "score": 65.7,
+        "mktcap": 49071869572,
+        "vol_24h": 3763699776,
+        "chg_24h": -6.53,
+        "chg_7d": -2.47,
+        "chg_30d": 10.02,
+        "rsi": 48.2,
+        "sma50": 86.0762,
+        "sma200": 143.2422,
+        "trend": "Bear",
+        "nvt": 13.0,
+        "nvt_rating": "Cheap",
+        "max_dd_90d": 47.0,
+        "moat": "Moderate",
+        "moat_detail": "High throughput, low fees, developer ecosystem growth",
+        "bull_target": 115.776,
+        "bear_target": 61.7472,
+        "entry_low": 82.3296,
+        "entry_high": 86.6176,
+        "stop_loss": 78.8992
+      },
+      {
+        "coin": "bitcoin",
+        "ticker": "BTC",
+        "price": 68599,
+        "score": 65.4,
+        "mktcap": 1372181102839,
+        "vol_24h": 47570265103,
+        "chg_24h": -3.25,
+        "chg_7d": -1.75,
+        "chg_30d": 6.48,
+        "rsi": 45.0,
+        "sma50": 68861.0365,
+        "sma200": 91760.3951,
+        "trend": "Bear",
+        "nvt": 28.8,
+        "nvt_rating": "Fair",
+        "max_dd_90d": 35.2,
+        "moat": "Strong",
+        "moat_detail": "Store of value narrative, network effect, institutional adoption, scarcity (21M cap)",
+        "bull_target": 92608.65,
+        "bear_target": 49391.28,
+        "entry_low": 65855.04,
+        "entry_high": 69284.99,
+        "stop_loss": 63111.08
+      },
+      {
+        "coin": "binancecoin",
+        "ticker": "BNB",
+        "price": 626.12,
+        "score": 63.9,
+        "mktcap": 85376699927,
+        "vol_24h": 841574798,
+        "chg_24h": -3.09,
+        "chg_7d": -1.82,
+        "chg_30d": 6.47,
+        "rsi": 40.0,
+        "sma50": 631.7723,
+        "sma200": 874.5052,
+        "trend": "Bear",
+        "nvt": 101.4,
+        "nvt_rating": "Very Rich",
+        "max_dd_90d": 38.5,
+        "moat": "Moderate",
+        "moat_detail": "Exchange token utility, BSC ecosystem, burn mechanism",
+        "bull_target": 845.262,
+        "bear_target": 450.8064,
+        "entry_low": 601.0752,
+        "entry_high": 632.3812,
+        "stop_loss": 576.0304
+      },
+      {
+        "coin": "avalanche-2",
+        "ticker": "AVAX",
+        "price": 9.02,
+        "score": 63.4,
+        "mktcap": 3893833991,
+        "vol_24h": 231782693,
+        "chg_24h": -6.81,
+        "chg_7d": -4.67,
+        "chg_30d": 7.62,
+        "rsi": 50.0,
+        "sma50": 9.02,
+        "sma200": 9.02,
+        "trend": "Bear",
+        "nvt": 16.8,
+        "nvt_rating": "Fair",
+        "max_dd_90d": 50,
+        "moat": "Moderate",
+        "moat_detail": "Subnet architecture, EVM compatible, institutional subnets",
+        "bull_target": 12.177,
+        "bear_target": 6.4944,
+        "entry_low": 8.6592,
+        "entry_high": 9.1102,
+        "stop_loss": 8.2984
+      },
+      {
+        "coin": "ripple",
+        "ticker": "XRP",
+        "price": 1.35,
+        "score": 60.5,
+        "mktcap": 82740965152,
+        "vol_24h": 2243487668,
+        "chg_24h": -4.53,
+        "chg_7d": -6.18,
+        "chg_30d": -0.77,
+        "rsi": 50.0,
+        "sma50": 1.35,
+        "sma200": 1.35,
+        "trend": "Bear",
+        "nvt": 36.9,
+        "nvt_rating": "Fair",
+        "max_dd_90d": 50,
+        "moat": "Moderate",
+        "moat_detail": "Banking partnerships, cross-border payment rails, ODL",
+        "bull_target": 1.8225,
+        "bear_target": 0.972,
+        "entry_low": 1.296,
+        "entry_high": 1.3635,
+        "stop_loss": 1.242
+      },
+      {
+        "coin": "dogecoin",
+        "ticker": "DOGE",
+        "price": 0.091157,
+        "score": 59.6,
+        "mktcap": 14000078090,
+        "vol_24h": 1141461502,
+        "chg_24h": -5.42,
+        "chg_7d": -1.61,
+        "chg_30d": -1.01,
+        "rsi": 50.0,
+        "sma50": 0.0912,
+        "sma200": 0.0912,
+        "trend": "Bear",
+        "nvt": 12.3,
+        "nvt_rating": "Cheap",
+        "max_dd_90d": 50,
+        "moat": "Weak",
+        "moat_detail": "Meme culture, no development roadmap, unlimited supply",
+        "bull_target": 0.1231,
+        "bear_target": 0.0656,
+        "entry_low": 0.0875,
+        "entry_high": 0.0921,
+        "stop_loss": 0.0839
+      },
+      {
+        "coin": "cardano",
+        "ticker": "ADA",
+        "price": 0.253579,
+        "score": 58.5,
+        "mktcap": 9345313327,
+        "vol_24h": 408985273,
+        "chg_24h": -6.34,
+        "chg_7d": -4.36,
+        "chg_30d": -2.97,
+        "rsi": 50.0,
+        "sma50": 0.2536,
+        "sma200": 0.2536,
+        "trend": "Bear",
+        "nvt": 22.8,
+        "nvt_rating": "Fair",
+        "max_dd_90d": 50,
+        "moat": "Weak",
+        "moat_detail": "Academic rigor but slow delivery, limited DeFi adoption",
+        "bull_target": 0.3423,
+        "bear_target": 0.1826,
+        "entry_low": 0.2434,
+        "entry_high": 0.2561,
+        "stop_loss": 0.2333
+      }
+    ]
+  },
+  "dcf": {
+    "framework": "Morgan Stanley DCF Valuation",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "assumptions": {
+      "risk_free_rate": "4.5%",
+      "equity_risk_premium": "8.0%",
+      "terminal_growth": "3.0%",
+      "exit_multiple": "20x"
+    },
+    "coins": [
+      {
+        "coin": "bitcoin",
+        "ticker": "BTC",
+        "current_price": 68599,
+        "mktcap_b": 1372.18,
+        "protocol_fees_m": 0,
+        "cagr_5yr": 12.0,
+        "wacc": 12.5,
+        "beta": 1.0,
+        "fcf_projections": {
+          "Y1": 0.0,
+          "Y2": 0.0,
+          "Y3": 0.0,
+          "Y4": 0.0,
+          "Y5": 0.0
+        },
+        "tv_exit_multiple": 0.0,
+        "tv_perpetuity": 0.0,
+        "intrinsic_exit": 0.0,
+        "intrinsic_perp": 0.0,
+        "intrinsic_avg": 0.0,
+        "nvt_fair_value": 21700631.7021,
+        "nvt_current": 0.1,
+        "verdict": "Overvalued",
+        "upside_pct": -100.0,
+        "sensitivity": {
+          "10%": 0.0,
+          "12%": 0.0,
+          "14%": 0.0
+        }
+      },
+      {
+        "coin": "ethereum",
+        "ticker": "ETH",
+        "current_price": 2050.06,
+        "mktcap_b": 247.42,
+        "protocol_fees_m": 2200,
+        "cagr_5yr": 25.0,
+        "wacc": 13.7,
+        "beta": 1.15,
+        "fcf_projections": {
+          "Y1": 2750.0,
+          "Y2": 3437.5,
+          "Y3": 4296.9,
+          "Y4": 5371.1,
+          "Y5": 6713.9
+        },
+        "tv_exit_multiple": 134278.0,
+        "tv_perpetuity": 64629.1,
+        "intrinsic_exit": 707.6944,
+        "intrinsic_perp": 404.0013,
+        "intrinsic_avg": 555.8479,
+        "nvt_fair_value": 1253730.555,
+        "nvt_current": 0.0,
+        "verdict": "Overvalued",
+        "upside_pct": -72.9,
+        "sensitivity": {
+          "12%": 508.0985,
+          "13%": 450.5926,
+          "14%": 404.0013,
+          "15%": 365.5192,
+          "16%": 333.2247
+        }
+      },
+      {
+        "coin": "binancecoin",
+        "ticker": "BNB",
+        "current_price": 626.12,
+        "mktcap_b": 85.38,
+        "protocol_fees_m": 800,
+        "cagr_5yr": 15.0,
+        "wacc": 14.1,
+        "beta": 1.2,
+        "fcf_projections": {
+          "Y1": 920.0,
+          "Y2": 1058.0,
+          "Y3": 1216.7,
+          "Y4": 1399.2,
+          "Y5": 1609.1
+        },
+        "tv_exit_multiple": 32182.0,
+        "tv_perpetuity": 14931.3,
+        "intrinsic_exit": 152.0774,
+        "intrinsic_perp": 86.6589,
+        "intrinsic_avg": 119.3681,
+        "nvt_fair_value": 56317.9765,
+        "nvt_current": 0.3,
+        "verdict": "Overvalued",
+        "upside_pct": -80.9,
+        "sensitivity": {
+          "12%": 107.1437,
+          "13%": 95.8757,
+          "14%": 86.6589,
+          "15%": 78.9839,
+          "16%": 72.4968
+        }
+      },
+      {
+        "coin": "ripple",
+        "ticker": "XRP",
+        "current_price": 1.35,
+        "mktcap_b": 82.74,
+        "protocol_fees_m": 10,
+        "cagr_5yr": 18.0,
+        "wacc": 14.9,
+        "beta": 1.3,
+        "fcf_projections": {
+          "Y1": 11.8,
+          "Y2": 13.9,
+          "Y3": 16.4,
+          "Y4": 19.4,
+          "Y5": 22.9
+        },
+        "tv_exit_multiple": 458.0,
+        "tv_perpetuity": 198.2,
+        "intrinsic_exit": 0.0046,
+        "intrinsic_perp": 0.0025,
+        "intrinsic_avg": 0.0036,
+        "nvt_fair_value": 333.7185,
+        "nvt_current": 0.1,
+        "verdict": "Overvalued",
+        "upside_pct": -99.7,
+        "sensitivity": {
+          "13%": 0.003,
+          "14%": 0.0027,
+          "15%": 0.0025,
+          "16%": 0.0023,
+          "17%": 0.0021
+        }
+      },
+      {
+        "coin": "solana",
+        "ticker": "SOL",
+        "current_price": 85.76,
+        "mktcap_b": 49.07,
+        "protocol_fees_m": 60,
+        "cagr_5yr": 45.0,
+        "wacc": 16.5,
+        "beta": 1.5,
+        "fcf_projections": {
+          "Y1": 87.0,
+          "Y2": 126.2,
+          "Y3": 182.9,
+          "Y4": 265.2,
+          "Y5": 384.6
+        },
+        "tv_exit_multiple": 7692.0,
+        "tv_perpetuity": 2934.4,
+        "intrinsic_exit": 7.3234,
+        "intrinsic_perp": 3.4493,
+        "intrinsic_avg": 5.3864,
+        "nvt_fair_value": 60014.6865,
+        "nvt_current": 0.0,
+        "verdict": "Overvalued",
+        "upside_pct": -93.7,
+        "sensitivity": {
+          "14%": 4.1837,
+          "15%": 3.786,
+          "16%": 3.4493,
+          "18%": 2.9114
+        }
+      },
+      {
+        "coin": "dogecoin",
+        "ticker": "DOGE",
+        "current_price": 0.091157,
+        "mktcap_b": 14.0,
+        "protocol_fees_m": 5,
+        "cagr_5yr": 5.0,
+        "wacc": 17.3,
+        "beta": 1.6,
+        "fcf_projections": {
+          "Y1": 5.2,
+          "Y2": 5.5,
+          "Y3": 5.8,
+          "Y4": 6.1,
+          "Y5": 6.4
+        },
+        "tv_exit_multiple": 128.0,
+        "tv_perpetuity": 46.1,
+        "intrinsic_exit": 0.0005,
+        "intrinsic_perp": 0.0003,
+        "intrinsic_avg": 0.0004,
+        "nvt_fair_value": 67.8233,
+        "nvt_current": 0.0,
+        "verdict": "Overvalued",
+        "upside_pct": -100.0,
+        "sensitivity": {
+          "15%": 0.0003,
+          "16%": 0.0003,
+          "17%": 0.0003,
+          "18%": 0.0002,
+          "19%": 0.0002
+        }
+      },
+      {
+        "coin": "cardano",
+        "ticker": "ADA",
+        "current_price": 0.253579,
+        "mktcap_b": 9.35,
+        "protocol_fees_m": 15,
+        "cagr_5yr": 20.0,
+        "wacc": 15.3,
+        "beta": 1.35,
+        "fcf_projections": {
+          "Y1": 18.0,
+          "Y2": 21.6,
+          "Y3": 25.9,
+          "Y4": 31.1,
+          "Y5": 37.3
+        },
+        "tv_exit_multiple": 746.0,
+        "tv_perpetuity": 312.3,
+        "intrinsic_exit": 0.0122,
+        "intrinsic_perp": 0.0065,
+        "intrinsic_avg": 0.0093,
+        "nvt_fair_value": 101.265,
+        "nvt_current": 0.1,
+        "verdict": "Overvalued",
+        "upside_pct": -99.1,
+        "sensitivity": {
+          "13%": 0.0078,
+          "14%": 0.0071,
+          "15%": 0.0065,
+          "16%": 0.0059,
+          "17%": 0.0055
+        }
+      },
+      {
+        "coin": "avalanche-2",
+        "ticker": "AVAX",
+        "current_price": 9.02,
+        "mktcap_b": 3.89,
+        "protocol_fees_m": 40,
+        "cagr_5yr": 35.0,
+        "wacc": 16.1,
+        "beta": 1.45,
+        "fcf_projections": {
+          "Y1": 54.0,
+          "Y2": 72.9,
+          "Y3": 98.4,
+          "Y4": 132.9,
+          "Y5": 179.4
+        },
+        "tv_exit_multiple": 3588.0,
+        "tv_perpetuity": 1410.5,
+        "intrinsic_exit": 4.6845,
+        "intrinsic_perp": 2.2937,
+        "intrinsic_avg": 3.4891,
+        "nvt_fair_value": 4898.4586,
+        "nvt_current": 0.0,
+        "verdict": "Overvalued",
+        "upside_pct": -61.3,
+        "sensitivity": {
+          "14%": 2.7829,
+          "15%": 2.5174,
+          "16%": 2.2937,
+          "17%": 2.1027,
+          "18%": 1.938
+        }
+      }
+    ]
+  },
+  "bridgewater": {
+    "framework": "Bridgewater Risk Analysis",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "correlation_matrix": {
+      "bitcoin": {
+        "bitcoin": 1.0,
+        "ethereum": 0.934,
+        "binancecoin": 0.916,
+        "solana": 0.928
+      },
+      "ethereum": {
+        "bitcoin": 0.934,
+        "ethereum": 1.0,
+        "binancecoin": 0.9,
+        "solana": 0.933
+      },
+      "binancecoin": {
+        "bitcoin": 0.916,
+        "ethereum": 0.9,
+        "binancecoin": 1.0,
+        "solana": 0.896
+      },
+      "solana": {
+        "bitcoin": 0.928,
+        "ethereum": 0.933,
+        "binancecoin": 0.896,
+        "solana": 1.0
+      }
+    },
+    "sector_exposure": {
+      "Store of Value": 74.4,
+      "Smart Contract L1": 16.6,
+      "Exchange Token": 4.6,
+      "Payment/Remit": 4.4
+    },
+    "tail_risks": [
+      {
+        "scenario": "Regulatory ban (US/EU)",
+        "probability": "12%",
+        "impact": "Severe",
+        "estimated_drawdown": "-60% to -85%",
+        "hedge": "Hold USDC/USDT, reduce altcoin exposure"
+      },
+      {
+        "scenario": "BTC ETF outflows + macro tightening",
+        "probability": "25%",
+        "impact": "Moderate",
+        "estimated_drawdown": "-30% to -50%",
+        "hedge": "Add short BTC futures hedge 10-15% of portfolio"
+      },
+      {
+        "scenario": "Stablecoin de-peg (USDT/USDC)",
+        "probability": "5%",
+        "impact": "Catastrophic",
+        "estimated_drawdown": "-50% to -90%",
+        "hedge": "Diversify stablecoin holdings, hold some fiat"
+      },
+      {
+        "scenario": "Major exchange hack / collapse",
+        "probability": "8%",
+        "impact": "Severe",
+        "estimated_drawdown": "-40% to -70%",
+        "hedge": "Self-custody hardware wallet for >50% of holdings"
+      },
+      {
+        "scenario": "ETH network failure / competitor",
+        "probability": "10%",
+        "impact": "Moderate (ETH specific)",
+        "estimated_drawdown": "-50% to -70% ETH",
+        "hedge": "Diversify L1 exposure across SOL, AVAX, ADA"
+      }
+    ],
+    "hedging_strategies": [
+      {
+        "risk": "General market decline",
+        "strategy": "Short BTC/ETH futures hedge equal to 15% of portfolio notional",
+        "instrument": "BTC/USDT:USDT perpetual futures (short)",
+        "size": "10-15% of portfolio"
+      },
+      {
+        "risk": "Altcoin underperformance vs BTC",
+        "strategy": "Increase BTC allocation to 50%+ during bear signals",
+        "instrument": "Rotate altcoins to BTC/ETH",
+        "size": "Rebalance when BTC.D > 55%"
+      },
+      {
+        "risk": "Tail risk / black swan",
+        "strategy": "Maintain 20-30% stablecoin buffer (USDC)",
+        "instrument": "USDC on Binance or self-custody",
+        "size": "20-30% of total portfolio"
+      }
+    ],
+    "rebalancing_targets": {
+      "bitcoin": 40.0,
+      "ethereum": 25.0,
+      "binancecoin": 10.0,
+      "solana": 8.0,
+      "ripple": 5.0,
+      "cardano": 4.0,
+      "avalanche-2": 5.0,
+      "dogecoin": 3.0
+    },
+    "per_coin": [
+      {
+        "coin": "bitcoin",
+        "ticker": "BTC",
+        "liquidity_rank": 1,
+        "liquidity_label": "Very High",
+        "max_drawdown_90d": 35.2,
+        "stress_mild": -22,
+        "stress_bear": -55,
+        "stress_blk_swan": -80,
+        "target_weight": 40.0
+      },
+      {
+        "coin": "ethereum",
+        "ticker": "ETH",
+        "liquidity_rank": 2,
+        "liquidity_label": "Very High",
+        "max_drawdown_90d": 45.8,
+        "stress_mild": -30,
+        "stress_bear": -65,
+        "stress_blk_swan": -85,
+        "target_weight": 25.0
+      },
+      {
+        "coin": "binancecoin",
+        "ticker": "BNB",
+        "liquidity_rank": 3,
+        "liquidity_label": "High",
+        "max_drawdown_90d": 38.5,
+        "stress_mild": -28,
+        "stress_bear": -62,
+        "stress_blk_swan": -87,
+        "target_weight": 10.0
+      },
+      {
+        "coin": "solana",
+        "ticker": "SOL",
+        "liquidity_rank": 4,
+        "liquidity_label": "High",
+        "max_drawdown_90d": 47.0,
+        "stress_mild": -40,
+        "stress_bear": -78,
+        "stress_blk_swan": -92,
+        "target_weight": 8.0
+      },
+      {
+        "coin": "ripple",
+        "ticker": "XRP",
+        "liquidity_rank": 5,
+        "liquidity_label": "Moderate",
+        "max_drawdown_90d": 0,
+        "stress_mild": -35,
+        "stress_bear": -70,
+        "stress_blk_swan": -88,
+        "target_weight": 5.0
+      },
+      {
+        "coin": "cardano",
+        "ticker": "ADA",
+        "liquidity_rank": 6,
+        "liquidity_label": "Moderate",
+        "max_drawdown_90d": 0,
+        "stress_mild": -38,
+        "stress_bear": -72,
+        "stress_blk_swan": -90,
+        "target_weight": 4.0
+      },
+      {
+        "coin": "dogecoin",
+        "ticker": "DOGE",
+        "liquidity_rank": 7,
+        "liquidity_label": "Low",
+        "max_drawdown_90d": 0,
+        "stress_mild": -45,
+        "stress_bear": -82,
+        "stress_blk_swan": -95,
+        "target_weight": 3.0
+      },
+      {
+        "coin": "avalanche-2",
+        "ticker": "AVAX",
+        "liquidity_rank": 8,
+        "liquidity_label": "Low",
+        "max_drawdown_90d": 0,
+        "stress_mild": -42,
+        "stress_bear": -75,
+        "stress_blk_swan": -91,
+        "target_weight": 5.0
+      }
+    ]
+  },
+  "jpmorgan": {
+    "framework": "JPMorgan Catalyst Analysis",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "fear_greed_current": 10,
+    "fear_greed_7d_avg": 10.9,
+    "fear_greed_trend": "Deteriorating",
+    "coins": [
+      {
+        "coin": "bitcoin",
+        "ticker": "BTC",
+        "price": 68599,
+        "chg_7d": -1.75,
+        "catalysts": [
+          {
+            "event": "Next BTC Halving (estimated Apr 2028)",
+            "impact": "Historically +150-400% within 12 months post-halving",
+            "timing": "~24 months away"
+          },
+          {
+            "event": "US Bitcoin Strategic Reserve policy clarity",
+            "impact": "Bullish -- could add $50-100B institutional demand",
+            "timing": "2025-2026"
+          },
+          {
+            "event": "Spot BTC ETF monthly flows",
+            "impact": "Key demand driver -- watch BlackRock IBIT flows",
+            "timing": "Monthly"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "ethereum",
+        "ticker": "ETH",
+        "price": 2050.06,
+        "chg_7d": -3.63,
+        "catalysts": [
+          {
+            "event": "EIP-4844 full rollout",
+            "impact": "Reduces L2 fees 10x, increases throughput",
+            "timing": "Active"
+          },
+          {
+            "event": "Ethereum ETF staking inclusion",
+            "impact": "Adds yield to ETH ETFs, increases AUM",
+            "timing": "2025-2026"
+          },
+          {
+            "event": "Pectra upgrade",
+            "impact": "Validator improvements, EIP-7702 account abstraction",
+            "timing": "2025"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "solana",
+        "ticker": "SOL",
+        "price": 85.76,
+        "chg_7d": -2.47,
+        "catalysts": [
+          {
+            "event": "Firedancer client mainnet",
+            "impact": "1M+ TPS capacity, reduces outages",
+            "timing": "2025"
+          },
+          {
+            "event": "Solana ETF approval",
+            "impact": "Institutional access -- $5-20B potential inflows",
+            "timing": "2025-2026"
+          },
+          {
+            "event": "Memecoin season volume",
+            "impact": "Network fees surge -- bullish for SOL",
+            "timing": "Cyclical"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "binancecoin",
+        "ticker": "BNB",
+        "price": 626.12,
+        "chg_7d": -1.82,
+        "catalysts": [
+          {
+            "event": "Quarterly BNB burn",
+            "impact": "Deflationary -- reduces supply",
+            "timing": "Quarterly"
+          },
+          {
+            "event": "Binance regulatory resolutions",
+            "impact": "Reducing legal overhang supports BNB",
+            "timing": "Ongoing"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "ripple",
+        "ticker": "XRP",
+        "price": 1.35,
+        "chg_7d": -6.18,
+        "catalysts": [
+          {
+            "event": "XRP ETF approval",
+            "impact": "Grayscale/Bitwise applications pending",
+            "timing": "2025"
+          },
+          {
+            "event": "RLUSD stablecoin adoption",
+            "impact": "Increases XRP Ledger utility and ODL volume",
+            "timing": "2025"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "cardano",
+        "ticker": "ADA",
+        "price": 0.253579,
+        "chg_7d": -4.36,
+        "catalysts": [
+          {
+            "event": "Plomin hard fork (governance)",
+            "impact": "Decentralized governance live",
+            "timing": "Active"
+          },
+          {
+            "event": "Hydra scaling layer adoption",
+            "impact": "Theoretical 1M TPS -- needs real usage",
+            "timing": "2025-2026"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "avalanche-2",
+        "ticker": "AVAX",
+        "price": 9.02,
+        "chg_7d": -4.67,
+        "catalysts": [
+          {
+            "event": "Institutional subnet deployments",
+            "impact": "T-Mobile, AWS, JPMorgan exploring",
+            "timing": "2025"
+          },
+          {
+            "event": "Avalanche9000 upgrade",
+            "impact": "Reduces subnet creation cost by 99%",
+            "timing": "Active"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      },
+      {
+        "coin": "dogecoin",
+        "ticker": "DOGE",
+        "price": 0.091157,
+        "chg_7d": -1.61,
+        "catalysts": [
+          {
+            "event": "Elon Musk / X payment integration",
+            "impact": "If X integrates DOGE: massive retail catalyst",
+            "timing": "Speculative / 2025+"
+          },
+          {
+            "event": "DOGE ETF approval",
+            "impact": "Legitimizes DOGE as asset class",
+            "timing": "2025-2026"
+          }
+        ],
+        "recommended_play": "BUY (accumulate in extreme fear)"
+      }
+    ]
+  },
+  "blackrock": {
+    "framework": "BlackRock Multi-Asset Allocation",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "regime": "ACCUMULATION",
+    "regime_note": "Extreme Fear -- historical best entry period",
+    "fear_greed": 10,
+    "allocation": {
+      "BTC": {
+        "pct": 40,
+        "role": "Core",
+        "rationale": "Safest entry in fear"
+      },
+      "ETH": {
+        "pct": 25,
+        "role": "Core",
+        "rationale": "Ecosystem play"
+      },
+      "SOL": {
+        "pct": 10,
+        "role": "Satellite",
+        "rationale": "High beta growth"
+      },
+      "BNB": {
+        "pct": 8,
+        "role": "Satellite",
+        "rationale": "Exchange utility"
+      },
+      "AVAX": {
+        "pct": 5,
+        "role": "Satellite",
+        "rationale": "L1 diversifier"
+      },
+      "USDC": {
+        "pct": 12,
+        "role": "Cash",
+        "rationale": "Dry powder for dips"
+      }
+    },
+    "etf_picks": {
+      "BTC exposure": [
+        {
+          "ticker": "IBIT",
+          "name": "iShares Bitcoin Trust (BlackRock)",
+          "type": "Spot BTC ETF"
+        },
+        {
+          "ticker": "FBTC",
+          "name": "Fidelity Wise Origin Bitcoin Fund",
+          "type": "Spot BTC ETF"
+        }
+      ],
+      "ETH exposure": [
+        {
+          "ticker": "ETHA",
+          "name": "iShares Ethereum Trust (BlackRock)",
+          "type": "Spot ETH ETF"
+        },
+        {
+          "ticker": "FETH",
+          "name": "Fidelity Ethereum Fund",
+          "type": "Spot ETH ETF"
+        }
+      ],
+      "Broad crypto": [
+        {
+          "ticker": "BITW",
+          "name": "Bitwise 10 Crypto Index Fund",
+          "type": "Index Fund"
+        },
+        {
+          "ticker": "HODL",
+          "name": "VanEck Bitcoin ETF",
+          "type": "Spot BTC ETF"
+        }
+      ],
+      "Direct holding": [
+        {
+          "ticker": "Binance",
+          "name": "Direct purchase on Binance",
+          "type": "Spot/Futures"
+        },
+        {
+          "ticker": "MEXC",
+          "name": "Direct purchase on MEXC",
+          "type": "Spot/Futures"
+        }
+      ]
+    },
+    "expected_return": "40-120%",
+    "max_drawdown": "35-55%",
+    "ips": "INVESTMENT POLICY STATEMENT\nObjective: Grow crypto portfolio over 3-5 year horizon\nRisk Tolerance: High (suitable for sophisticated investors only)\nBenchmark: Bitcoin total return\nRebalancing: Monthly or when any position drifts >10% from target\nCurrent Regime: ACCUMULATION (F&G=10)\nMax Single Position: 50% (BTC only)\nMinimum Cash Buffer: 10% in USDC at all times\nStop-Loss Policy: Exit 25% of position at -20% drawdown from entry\nTax Strategy: Hold >12 months for long-term capital gains treatment\nLeverage Policy: Max 3x on BTC/ETH futures; no leverage on altcoins"
+  },
+  "citadel": {
+    "framework": "Citadel Quantitative Analysis",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "coins": [
+      {
+        "coin": "bitcoin",
+        "ticker": "BTC",
+        "price": 68598.5071,
+        "trend_daily": "Bearish",
+        "trend_weekly": "Bearish",
+        "trend_monthly": "Bearish",
+        "trend_overall": "Strong Downtrend",
+        "sma50": 68861.0365,
+        "sma100": 78654.0032,
+        "sma200": 91760.3951,
+        "price_vs_sma50": -0.4,
+        "price_vs_sma200": -25.2,
+        "rsi": 45.0,
+        "rsi_signal": "Neutral",
+        "macd": -41.2169,
+        "macd_signal": 65.8486,
+        "macd_hist": -107.0655,
+        "macd_cross": "Bearish",
+        "bb_upper": 74425.2593,
+        "bb_lower": 66140.4523,
+        "bb_pct_b": 0.297,
+        "bb_squeeze": true,
+        "support_resistance": {
+          "R2": 78868.0347,
+          "R1": 73733.2709,
+          "Pivot": 69723.3849,
+          "S1": 64588.6212,
+          "S2": 60578.7352
+        },
+        "fibonacci": {
+          "0%": 102897.7607,
+          "23.6%": 86708.513,
+          "38.2%": 76693.131,
+          "50.0%": 68598.5071,
+          "61.8%": 60503.8833,
+          "78.6%": 48979.3341,
+          "100%": 34299.2536
+        },
+        "chart_pattern": "Potential Cup & Handle forming (weekly chart)",
+        "entry": 68735.7042,
+        "stop_loss": 65792.5526,
+        "tp1": 72339.7799,
+        "tp2": 76081.0527,
+        "risk_reward": 1.22,
+        "h52": 102897.7607,
+        "l52": 34299.2536
+      },
+      {
+        "coin": "ethereum",
+        "ticker": "ETH",
+        "price": 2050.0599,
+        "trend_daily": "Bullish",
+        "trend_weekly": "Bearish",
+        "trend_monthly": "Bearish",
+        "trend_overall": "Mixed",
+        "sma50": 2040.4031,
+        "sma100": 2502.5698,
+        "sma200": 3115.4315,
+        "price_vs_sma50": 0.5,
+        "price_vs_sma200": -34.2,
+        "rsi": 48.4,
+        "rsi_signal": "Neutral",
+        "macd": 9.859,
+        "macd_signal": 13.2774,
+        "macd_hist": -3.4184,
+        "macd_cross": "Bearish",
+        "bb_upper": 2314.6043,
+        "bb_lower": 1909.6498,
+        "bb_pct_b": 0.347,
+        "bb_squeeze": false,
+        "support_resistance": {
+          "R2": 2530.7035,
+          "R1": 2290.3817,
+          "Pivot": 2110.8511,
+          "S1": 1870.5293,
+          "S2": 1690.9988
+        },
+        "fibonacci": {
+          "0%": 3075.0898,
+          "23.6%": 2591.2757,
+          "38.2%": 2291.9669,
+          "50.0%": 2050.0599,
+          "61.8%": 1808.1528,
+          "78.6%": 1463.7427,
+          "100%": 1025.0299
+        },
+        "chart_pattern": "Bull flag consolidation after recent breakout",
+        "entry": 2054.16,
+        "stop_loss": 1921.4254,
+        "tp1": 2221.5724,
+        "tp2": 2393.085,
+        "risk_reward": 1.26,
+        "h52": 3075.0898,
+        "l52": 1025.0299
+      },
+      {
+        "coin": "binancecoin",
+        "ticker": "BNB",
+        "price": 626.154,
+        "trend_daily": "Bearish",
+        "trend_weekly": "Bearish",
+        "trend_monthly": "Bearish",
+        "trend_overall": "Strong Downtrend",
+        "sma50": 631.7723,
+        "sma100": 750.9149,
+        "sma200": 874.5052,
+        "price_vs_sma50": -0.9,
+        "price_vs_sma200": -28.4,
+        "rsi": 40.0,
+        "rsi_signal": "Neutral",
+        "macd": -3.7022,
+        "macd_signal": -2.6647,
+        "macd_hist": -1.0375,
+        "macd_cross": "Bearish",
+        "bb_upper": 678.7365,
+        "bb_lower": 609.9634,
+        "bb_pct_b": 0.235,
+        "bb_squeeze": true,
+        "support_resistance": {
+          "R2": 706.8923,
+          "R1": 666.5231,
+          "Pivot": 639.2366,
+          "S1": 598.8674,
+          "S2": 571.5809
+        },
+        "fibonacci": {
+          "0%": 939.2309,
+          "23.6%": 791.4586,
+          "38.2%": 700.0401,
+          "50.0%": 626.154,
+          "61.8%": 552.2678,
+          "78.6%": 447.0739,
+          "100%": 313.077
+        },
+        "chart_pattern": "Pennant formation -- coiling for directional move",
+        "entry": 627.4063,
+        "stop_loss": 601.2964,
+        "tp1": 659.2974,
+        "tp2": 692.4408,
+        "risk_reward": 1.22,
+        "h52": 939.2309,
+        "l52": 313.077
+      },
+      {
+        "coin": "solana",
+        "ticker": "SOL",
+        "price": 85.7644,
+        "trend_daily": "Bearish",
+        "trend_weekly": "Bearish",
+        "trend_monthly": "Bearish",
+        "trend_overall": "Strong Downtrend",
+        "sma50": 86.0762,
+        "sma100": 106.5432,
+        "sma200": 143.2422,
+        "price_vs_sma50": -0.4,
+        "price_vs_sma200": -40.1,
+        "rsi": 48.2,
+        "rsi_signal": "Neutral",
+        "macd": 0.208,
+        "macd_signal": 0.2057,
+        "macd_hist": 0.0023,
+        "macd_cross": "Bullish",
+        "bb_upper": 95.6743,
+        "bb_lower": 81.4182,
+        "bb_pct_b": 0.305,
+        "bb_squeeze": false,
+        "support_resistance": {
+          "R2": 102.4193,
+          "R1": 94.0918,
+          "Pivot": 87.8848,
+          "S1": 79.5573,
+          "S2": 73.3503
+        },
+        "fibonacci": {
+          "0%": 128.6466,
+          "23.6%": 108.4062,
+          "38.2%": 95.8846,
+          "50.0%": 85.7644,
+          "61.8%": 75.6442,
+          "78.6%": 61.2358,
+          "100%": 42.8822
+        },
+        "chart_pattern": "Ascending triangle -- watch breakout above resistance",
+        "entry": 85.9359,
+        "stop_loss": 81.438,
+        "tp1": 91.5329,
+        "tp2": 97.3014,
+        "risk_reward": 1.24,
+        "h52": 128.6466,
+        "l52": 42.8822
+      }
+    ]
+  },
+  "harvard": {
+    "framework": "Harvard Endowment Yield Strategy",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "portfolio_size": 10000,
+    "total_monthly": 46.59,
+    "total_annual": 559.08,
+    "yield_on_portfolio": 5.59,
+    "coins": [
+      {
+        "coin": "XRP",
+        "coin_id": "ripple",
+        "price": 1.35,
+        "yield_pct": 0.0,
+        "method": "No native staking",
+        "safety_score": 10,
+        "notes": "No yield available",
+        "alloc_usd": 0.0,
+        "monthly_income": 0.0,
+        "annual_income": 0.0,
+        "drip_10yr_gain": 0.0,
+        "sustainability": "No yield / minimal"
+      },
+      {
+        "coin": "BTC",
+        "coin_id": "bitcoin",
+        "price": 68599,
+        "yield_pct": 0.0,
+        "method": "No native staking",
+        "safety_score": 10,
+        "notes": "WBTC/lending only (higher risk)",
+        "alloc_usd": 0.0,
+        "monthly_income": 0.0,
+        "annual_income": 0.0,
+        "drip_10yr_gain": 0.0,
+        "sustainability": "No yield / minimal"
+      },
+      {
+        "coin": "DOGE",
+        "coin_id": "dogecoin",
+        "price": 0.091157,
+        "yield_pct": 0.0,
+        "method": "No native staking",
+        "safety_score": 10,
+        "notes": "No yield available",
+        "alloc_usd": 0.0,
+        "monthly_income": 0.0,
+        "annual_income": 0.0,
+        "drip_10yr_gain": 0.0,
+        "sustainability": "No yield / minimal"
+      },
+      {
+        "coin": "ETH",
+        "coin_id": "ethereum",
+        "price": 2050.06,
+        "yield_pct": 3.5,
+        "method": "Liquid staking (Lido/Rocket Pool)",
+        "safety_score": 9,
+        "notes": "Native protocol, battle-tested",
+        "alloc_usd": 1740.33,
+        "monthly_income": 5.08,
+        "annual_income": 60.91,
+        "drip_10yr_gain": 728.06,
+        "sustainability": "Sustainable -- protocol-revenue backed"
+      },
+      {
+        "coin": "SOL",
+        "coin_id": "solana",
+        "price": 85.76,
+        "yield_pct": 6.5,
+        "method": "Native staking via validators",
+        "safety_score": 8,
+        "notes": "High APY, inflation-based",
+        "alloc_usd": 2872.93,
+        "monthly_income": 15.56,
+        "annual_income": 186.74,
+        "drip_10yr_gain": 2620.64,
+        "sustainability": "Sustainable -- protocol-revenue backed"
+      },
+      {
+        "coin": "ADA",
+        "coin_id": "cardano",
+        "price": 0.253579,
+        "yield_pct": 3.0,
+        "method": "Delegation to stake pools",
+        "safety_score": 8,
+        "notes": "Low risk, non-custodial",
+        "alloc_usd": 1325.97,
+        "monthly_income": 3.31,
+        "annual_income": 39.78,
+        "drip_10yr_gain": 463.23,
+        "sustainability": "Sustainable -- protocol-revenue backed"
+      },
+      {
+        "coin": "AVAX",
+        "coin_id": "avalanche-2",
+        "price": 9.02,
+        "yield_pct": 8.0,
+        "method": "Validator delegation",
+        "safety_score": 7,
+        "notes": "Higher yield, lock-up required",
+        "alloc_usd": 3093.92,
+        "monthly_income": 20.63,
+        "annual_income": 247.51,
+        "drip_10yr_gain": 3773.47,
+        "sustainability": "Sustainable -- protocol-revenue backed"
+      },
+      {
+        "coin": "BNB",
+        "coin_id": "binancecoin",
+        "price": 626.12,
+        "yield_pct": 2.5,
+        "method": "BNB locked staking (Binance)",
+        "safety_score": 7,
+        "notes": "Exchange custody risk",
+        "alloc_usd": 966.85,
+        "monthly_income": 2.01,
+        "annual_income": 24.17,
+        "drip_10yr_gain": 274.29,
+        "sustainability": "Sustainable -- protocol-revenue backed"
+      }
+    ]
+  },
+  "bain": {
+    "framework": "Bain Competitive Strategy Analysis",
+    "generated": "2026-03-26T19:45:55.315251+00:00",
+    "l1_landscape": {
+      "ethereum": {
+        "ticker": "ETH",
+        "mktcap_b": 247.4,
+        "moat": "Strong -- Network effect + DeFi/NFT monopoly + EIP-1559 burns",
+        "tps_current": 15,
+        "fees_usd": "$0.50-5.00 (L1) / $0.01-0.10 (L2)",
+        "revenue_m": 2200,
+        "profit_margin_pct": 65,
+        "mktshare_trend": "Declining (58% to 47% of smart contract TVL 2022-2024)",
+        "mgmt_rating": 8,
+        "mgmt_note": "Vitalik Buterin -- long-term thinker, excellent capital allocation",
+        "strengths": [
+          "Largest developer ecosystem",
+          "$50B+ TVL",
+          "ETF approved",
+          "EIP-1559 deflationary"
+        ],
+        "weaknesses": [
+          "High fees vs competitors",
+          "Slow upgrade pace",
+          "L2 fragmentation"
+        ],
+        "opportunities": [
+          "Institutional adoption",
+          "Real-world asset tokenization",
+          "ETH ETF staking"
+        ],
+        "threats": [
+          "Solana speed advantage",
+          "Regulatory security classification",
+          "L2s cannibalizing fees"
+        ]
+      },
+      "solana": {
+        "ticker": "SOL",
+        "mktcap_b": 49.1,
+        "moat": "Moderate -- Speed + cost advantage; centralization concerns",
+        "tps_current": 2000,
+        "fees_usd": "$0.00025 avg",
+        "revenue_m": 60,
+        "profit_margin_pct": 40,
+        "mktshare_trend": "Rising sharply (5% to 18% of smart contract activity 2022-2024)",
+        "mgmt_rating": 7,
+        "mgmt_note": "Anatoly Yakovenko -- technical excellence, execution focus",
+        "strengths": [
+          "1000x lower fees than ETH",
+          "2000 TPS real",
+          "Firedancer 1M TPS",
+          "Memecoin/NFT hub"
+        ],
+        "weaknesses": [
+          "5 major network outages 2022-2024",
+          "VC token concentration",
+          "FTX legacy"
+        ],
+        "opportunities": [
+          "Firedancer mainnet",
+          "SOL ETF",
+          "DePIN ecosystem",
+          "Payments use case"
+        ],
+        "threats": [
+          "ETH L2s catching up on speed",
+          "Outage reputation risk",
+          "Regulatory scrutiny"
+        ]
+      },
+      "avalanche-2": {
+        "ticker": "AVAX",
+        "mktcap_b": 3.9,
+        "moat": "Moderate -- Subnet architecture unique; enterprise focus",
+        "tps_current": 4500,
+        "fees_usd": "$0.01-0.10",
+        "revenue_m": 40,
+        "profit_margin_pct": 35,
+        "mktshare_trend": "Stable (3-5% of L1 activity)",
+        "mgmt_rating": 7,
+        "mgmt_note": "Emin G\u00fcn Sirer -- academic credibility + business development",
+        "strengths": [
+          "Subnet architecture",
+          "EVM compatible",
+          "Institutional subnets",
+          "Fast finality"
+        ],
+        "weaknesses": [
+          "Complex architecture",
+          "Lower developer mindshare",
+          "Smaller ecosystem"
+        ],
+        "opportunities": [
+          "Avalanche9000 -- 99% cost reduction",
+          "T-Mobile subnet",
+          "Gaming subnets"
+        ],
+        "threats": [
+          "ETH L2s as alternative",
+          "SOL speed competition",
+          "VC concentration"
+        ]
+      },
+      "cardano": {
+        "ticker": "ADA",
+        "mktcap_b": 9.3,
+        "moat": "Weak -- Academic rigour but slow execution, limited adoption",
+        "tps_current": 250,
+        "fees_usd": "$0.17 avg",
+        "revenue_m": 15,
+        "profit_margin_pct": 20,
+        "mktshare_trend": "Declining (peaked 2021, minimal DeFi activity)",
+        "mgmt_rating": 5,
+        "mgmt_note": "Charles Hoskinson -- strong narrative, slow delivery vs promises",
+        "strengths": [
+          "Formal verification",
+          "Peer-reviewed research",
+          "Low fees",
+          "Sustainability focus"
+        ],
+        "weaknesses": [
+          "Very slow development",
+          "Minimal real-world usage",
+          "Limited DeFi TVL",
+          "Missing DApps"
+        ],
+        "opportunities": [
+          "Plomin governance",
+          "Hydra scaling",
+          "African market focus",
+          "Midnight privacy chain"
+        ],
+        "threats": [
+          "All competitors outpacing adoption",
+          "Developer migration",
+          "Narrative fatigue"
+        ]
+      },
+      "binancecoin": {
+        "ticker": "BNB",
+        "mktcap_b": 85.4,
+        "moat": "Moderate -- Exchange captive demand + quarterly burns",
+        "tps_current": 2200,
+        "fees_usd": "$0.10-0.50",
+        "revenue_m": 800,
+        "profit_margin_pct": 45,
+        "mktshare_trend": "Stable but declining (regulatory pressure on Binance)",
+        "mgmt_rating": 6,
+        "mgmt_note": "Richard Teng (post-CZ) -- rebuilding trust after DOJ settlement",
+        "strengths": [
+          "Binance volume captive demand",
+          "Quarterly token burns",
+          "BSC DeFi ecosystem"
+        ],
+        "weaknesses": [
+          "Centralized control",
+          "Regulatory risk (ongoing)",
+          "Dependent on Binance health"
+        ],
+        "opportunities": [
+          "Opbnb L2 growth",
+          "Post-regulatory clarity rally",
+          "BNB ETF speculation"
+        ],
+        "threats": [
+          "Exchange regulatory crackdown",
+          "CeDeFi competition",
+          "User migration to DEXs"
+        ]
+      }
+    },
+    "exchange_landscape": {
+      "Binance": {
+        "mktshare_pct": 38,
+        "vol_b_daily": 12,
+        "moat": "Scale + liquidity network effect"
+      },
+      "Coinbase": {
+        "mktshare_pct": 12,
+        "vol_b_daily": 3.5,
+        "moat": "US regulatory compliance + institutional trust"
+      },
+      "OKX": {
+        "mktshare_pct": 10,
+        "vol_b_daily": 3.2,
+        "moat": "Asian market + derivatives depth"
+      },
+      "Bybit": {
+        "mktshare_pct": 9,
+        "vol_b_daily": 2.8,
+        "moat": "Perpetuals + copy trading"
+      },
+      "Kraken": {
+        "mktshare_pct": 5,
+        "vol_b_daily": 1.5,
+        "moat": "Security reputation + fiat on-ramps"
+      },
+      "MEXC": {
+        "mktshare_pct": 4,
+        "vol_b_daily": 1.2,
+        "moat": "New token listings + low fees"
+      },
+      "Hyperliquid": {
+        "mktshare_pct": 3,
+        "vol_b_daily": 0.8,
+        "moat": "DEX perpetuals -- disruptive model"
+      }
+    },
+    "best_pick": {
+      "coin": "Ethereum (ETH)",
+      "rationale": "ETH wins the competitive analysis on 4 of 5 criteria: (1) Strongest moat via network effects + $50B TVL, (2) Highest revenue ($2.2B/yr protocol fees + deflationary), (3) Only L1 with spot ETF AND staking yield narrative, (4) Real-world asset tokenization pipeline (BlackRock BUIDL). Risk: L2 fee cannibalization. Price target 12M: $4,500-$6,000 bull case / $1,800 bear case."
+    }
+  },
+  "generated_at": "2026-03-26T19:45:55.315251+00:00",
+  "fear_greed": 10
+}

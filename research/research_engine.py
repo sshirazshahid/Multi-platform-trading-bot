@@ -721,7 +721,7 @@ def run_portfolio_strategy(market: dict, fg: dict) -> dict:
     # Specific picks with tickers
     etf_picks = [
         {"category": "BTC",         "pick": "BTC/USDT",  "ticker": "BTC",
-         "type": "Core", "note": "Direct spot on Binance/MEXC"},
+         "type": "Core", "note": "Direct spot on Binance/Bybit/Bitget"},
         {"category": "ETH",         "pick": "ETH/USDT",  "ticker": "ETH",
          "type": "Core", "note": "Direct spot or staked ETH"},
         {"category": "Large Alts",  "pick": "BNB/USDT",  "ticker": "BNB",

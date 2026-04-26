@@ -2,7 +2,7 @@
 core/multi_profile_runner.py
 Multi-Profile + Claude AI + Email Reports + Cross-Exchange Arbitrage
 
-Exchanges   : Binance | MEXC | Bybit | Bitget  (all connected ones)
+Exchanges   : Binance | Bybit | Bitget  (all connected ones)
 Profiles    : Conservative | Moderate | Aggressive  ($100 each, simultaneous)
 Arbitrage   : Scans every exchange pair for spread opportunities,
               applies 8 institutional filters + Claude AI confidence
@@ -287,7 +287,7 @@ class MultiProfileRunner:
 
     def __init__(self):
         from exchanges import (
-            BinanceClient, MEXCClient,
+            BinanceClient,
             BybitClient,   BitgetClient,
         )
         from core.strategy_selector import StrategySelector, build_futures_map
@@ -300,15 +300,18 @@ class MultiProfileRunner:
         logger.info("  MULTI-PROFILE + CLAUDE AI + ARBITRAGE + EMAIL")
         logger.info("  Spot LONG | Futures LONG+SHORT | Cross-Exchange ARB")
         logger.info("  Conservative | Moderate | Aggressive  (all simultaneous)")
-        logger.info("  Exchanges: Binance | MEXC | Bybit | Bitget")
+        logger.info("  Exchanges: Binance | Bybit | Bitget")
         logger.info("  Paper wallet: $100 USDT per exchange per profile")
         logger.info("=" * 66)
 
+        if not DRY_RUN:
+            raise RuntimeError(
+                "Multi-profile mode requires DRY_RUN=true. "
+                "Set DRY_RUN=true in .env before running multi-profile.")
         self.dry_run = DRY_RUN
 
         self.exchanges = {
             "binance": BinanceClient(),
-            "mexc":    MEXCClient(),
             "bybit":   BybitClient(),
             "bitget":  BitgetClient(),
         }
@@ -421,10 +424,13 @@ class MultiProfileRunner:
             closed = tracker.close(pos.id, price, reason)
             if closed:
                 wallet.on_close(
-                    pos.exchange, pos.size, price, closed.exit_fee,
-                    entry_price=pos.entry_price,
+                    exchange=pos.exchange, symbol=pos.symbol,
+                    side=pos.side, size=pos.size,
+                    exit_price=price, entry_price=pos.entry_price,
+                    exit_fee=closed.exit_fee,
                     gross_pnl=closed.gross_pnl or 0.0,
                     market_type=pos.market_type,
+                    leverage=pos.leverage,
                 )
                 # FIX: Pass wallet total (not trade notional) for DD tracking
                 risk.record_trade_pnl(

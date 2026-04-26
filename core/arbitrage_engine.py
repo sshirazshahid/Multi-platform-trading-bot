@@ -3,7 +3,7 @@ core/arbitrage_engine.py — Cross-Exchange Arbitrage Engine
 
 8 Institutional Filters + Claude AI confidence scoring.
 Works in DRY_RUN (paper trades) and LIVE (real orders) modes.
-Supports Binance, MEXC, Bybit, Bitget.
+Supports Binance, Bybit, Bitget.
 """
 
 from __future__ import annotations
@@ -27,16 +27,11 @@ ZSCORE_THRESHOLD = 2.0
 LIQUIDITY_MIN    = 10_000
 
 ARB_DATA_FILE = Path("data/arbitrage/opportunities.json")
-ARB_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # Commodity futures symbol map per exchange (ccxt unified format)
 # WTI crude oil is "WTI/USDT:USDT" in ccxt unified format
 _COMMODITY_FUTURES = {
     "binance": {
-        "XAU/USDT:USDT": "Gold",
-        "XAG/USDT:USDT": "Silver",
-    },
-    "mexc": {
         "XAU/USDT:USDT": "Gold",
         "XAG/USDT:USDT": "Silver",
     },
@@ -172,7 +167,7 @@ class ArbitrageEngine:
                     except Exception as e:
                         logger.debug("[Arb] {}/{} {}: {}".format(
                             ex_a, ex_b, symbol, e))
-                time.sleep(0.1)
+                    time.sleep(0.1)
 
         found.sort(key=lambda o: o.net_spread, reverse=True)
 
@@ -340,9 +335,11 @@ class ArbitrageEngine:
             br = 0.85
         scores["blackrock"] = br
 
-        # 6. Citadel — z-score
+        # 6. Citadel — z-score (zscore == 0.0 means < 10 observations — neutral, not reject)
         citadel = min(1.0, max(0.0, zscore / (ZSCORE_THRESHOLD * 2)))
-        if zscore < ZSCORE_THRESHOLD:
+        if zscore == 0.0:
+            citadel = 0.5  # neutral — not enough history to judge
+        elif zscore < ZSCORE_THRESHOLD:
             rejects.append("Citadel: z={:.1f} < {:.1f}".format(
                 zscore, ZSCORE_THRESHOLD))
         scores["citadel"] = round(citadel, 3)
@@ -368,7 +365,7 @@ class ArbitrageEngine:
             "harvard":0.10,"bain":0.07,
         }
         confidence   = sum(scores.get(k,0) * w for k, w in weights.items())
-        spread_bonus = min(0.10, (net_spread - MIN_SPREAD_PCT) / MIN_SPREAD_PCT * 0.05)
+        spread_bonus = max(0.0, min(0.10, (net_spread - MIN_SPREAD_PCT) / MIN_SPREAD_PCT * 0.05))
         confidence   = min(1.0, confidence + spread_bonus)
 
         return scores, round(confidence, 3), "; ".join(rejects) if rejects else ""
@@ -429,22 +426,39 @@ class ArbitrageEngine:
 
         else:
             try:
-                buy_order  = buy_ex.create_order(
+                buy_order = buy_ex.create_order(
                     opp.symbol, "market", "buy", size, market_type="spot")
+            except Exception as e:
+                logger.error("[Arb][LIVE] Buy leg failed: {}".format(e))
+                return False
+            try:
                 sell_order = sell_ex.create_order(
                     opp.symbol, "market", "sell", size, market_type="spot")
-                arb_pos = ArbPosition(
-                    id=arb_id, opportunity=opp, size=size,
-                    buy_order_id=buy_order.get("id","?"),
-                    sell_order_id=sell_order.get("id","?"),
-                )
-                self._open_arbs.append(arb_pos)
-                logger.info("[Arb][LIVE] Orders placed — buy:{} sell:{}".format(
-                    arb_pos.buy_order_id, arb_pos.sell_order_id))
-                return True
             except Exception as e:
-                logger.error("[Arb][LIVE] Order failed: {}".format(e))
+                # Buy succeeded but sell failed — unhedged! Rollback buy leg
+                logger.error(
+                    "[Arb][LIVE] Sell leg failed after buy filled — "
+                    "rolling back buy with market sell: {}".format(e))
+                try:
+                    buy_ex.create_order(
+                        opp.symbol, "market", "sell", size, market_type="spot")
+                    logger.info("[Arb][LIVE] Rollback sell executed on {}".format(
+                        opp.buy_exchange))
+                except Exception as e2:
+                    logger.critical(
+                        "[Arb][LIVE] ROLLBACK FAILED — manual intervention needed! "
+                        "{} {} bought on {} but unsold: {}".format(
+                            size, opp.symbol, opp.buy_exchange, e2))
                 return False
+            arb_pos = ArbPosition(
+                id=arb_id, opportunity=opp, size=size,
+                buy_order_id=buy_order.get("id","?"),
+                sell_order_id=sell_order.get("id","?"),
+            )
+            self._open_arbs.append(arb_pos)
+            logger.info("[Arb][LIVE] Orders placed — buy:{} sell:{}".format(
+                arb_pos.buy_order_id, arb_pos.sell_order_id))
+            return True
 
     def _check_exits(self):
         now = time.time()
@@ -478,13 +492,55 @@ class ArbitrageEngine:
 
     def _get_balance(self, exchange) -> float:
         try:
-            bal  = exchange.fetch_balance("spot")
+            bal = exchange.fetch_balance("spot")
+            ex = exchange.name.lower() if hasattr(exchange, 'name') else ""
+
+            # Bybit unified: raw API totalEquity
+            if ex == "bybit":
+                try:
+                    lst = bal.get("info", {}).get("result", {}).get("list", [])
+                    if lst and isinstance(lst, list):
+                        acct = lst[0] if lst else {}
+                        for field in ("totalEquity", "totalWalletBalance", "totalAvailableBalance"):
+                            val = acct.get(field)
+                            if val is not None:
+                                try:
+                                    v = float(val)
+                                    if v > 0:
+                                        return v
+                                except (TypeError, ValueError):
+                                    pass
+                        coins = acct.get("coin", [])
+                        if isinstance(coins, list):
+                            for c in coins:
+                                if c.get("coin") == "USDT":
+                                    for f2 in ("equity", "walletBalance"):
+                                        val2 = c.get(f2)
+                                        if val2 is not None:
+                                            try:
+                                                v2 = float(val2)
+                                                if v2 > 0:
+                                                    return v2
+                                            except (TypeError, ValueError):
+                                                pass
+                except Exception:
+                    pass
+
+            # Standard: total first (Bybit unified), then free
             usdt = bal.get("USDT")
             if isinstance(usdt, dict):
-                return float(usdt.get("free") or usdt.get("total") or 100)
+                for key in ("total", "free"):
+                    val = usdt.get(key)
+                    if val is not None:
+                        v = float(val)
+                        if v > 0:
+                            return v
+            total = bal.get("total", {})
+            if isinstance(total, dict) and total.get("USDT"):
+                return float(total["USDT"])
             free = bal.get("free", {})
-            if isinstance(free, dict):
-                return float(free.get("USDT") or 100)
+            if isinstance(free, dict) and free.get("USDT"):
+                return float(free["USDT"])
         except Exception:
             pass
         return 100.0

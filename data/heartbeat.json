@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-04-26T13:33:42.744020+00:00",
+  "uptime_seconds": 6611,
+  "cycle_count": 17,
+  "open_positions": 1,
+  "per_exchange_positions": {
+    "binance": 0,
+    "bybit": 1,
+    "bitget": 0
+  },
+  "last_trade_time": null,
+  "active_exchanges": [
+    "binance",
+    "bybit",
+    "bitget"
+  ],
+  "halted_exchanges": [],
+  "api_latency_ms": {
+    "binance": 193.0,
+    "bybit": 117.0,
+    "bitget": 339.0
+  },
+  "is_halted": true,
+  "halt_reason": "drawdown 35.3% (peak $572.49)",
+  "daily_pnl": -0.36805568699998714,
+  "spot_manager_active": true,
+  "capital_allocator_active": true,
+  "memory_mb": 0
+}

@@ -5,13 +5,18 @@ Usage:
     python backtest.py --strategy supertrend --symbol BTC/USDT --days 60
     python backtest.py --strategy multitf --exchange bybit --days 30
     python backtest.py --strategy supertrend --all-exchanges --days 60
+    python backtest.py --strategy supertrend --years 5 --all-exchanges
     python backtest.py --strategy arbitrage --days 30     (arb spread analysis)
 
-Exchanges: binance | mexc | bybit | bitget
+Exchanges: binance | bybit | bitget
+
+Extended history: Use --years for multi-year backtests. Fetches data in
+paginated chunks via ccxt's `since` parameter. Max ~9 years (Binance 2017).
 """
 
 import argparse
 import sys
+import time as _time
 from loguru import logger
 from utils.logger import setup_logger
 
@@ -19,7 +24,7 @@ STRATEGY_CHOICES = [
     "supertrend", "meanreversion", "multitf",
     "trend", "scalping", "grid", "arbitrage",
 ]
-EXCHANGE_CHOICES = ["binance", "mexc", "bybit", "bitget"]
+EXCHANGE_CHOICES = ["binance", "bybit", "bitget"]
 
 
 def parse_args():
@@ -32,11 +37,17 @@ def parse_args():
     p.add_argument("--symbol",    default="BTC/USDT")
     p.add_argument("--strategy",  default="supertrend",  choices=STRATEGY_CHOICES)
     p.add_argument("--timeframe", default=None,          help="Override candle timeframe")
-    p.add_argument("--days",      default=60,  type=int)
+    p.add_argument("--days",      default=60,  type=int,
+                   help="Days of history (default 60, max ~3300)")
+    p.add_argument("--years",     default=None, type=float,
+                   help="Years of history (overrides --days, max ~9)")
     p.add_argument("--sl",        default=None, type=float, help="Override stop loss pct")
     p.add_argument("--tp",        default=None, type=float, help="Override take profit pct")
     p.add_argument("--balance",   default=1000.0, type=float, help="Starting USDT balance")
-    return p.parse_args()
+    a = p.parse_args()
+    if a.years is not None:
+        a.days = int(a.years * 365)
+    return a
 
 
 def _tf_minutes(tf: str) -> int:
@@ -45,11 +56,61 @@ def _tf_minutes(tf: str) -> int:
     return {"m": n, "h": n * 60, "d": n * 1440}.get(unit, 60)
 
 
+def _fetch_ohlcv_extended(exchange, symbol: str, timeframe: str,
+                          days: int, market_type: str = "spot") -> list:
+    """Paginated OHLCV fetch for extended history (multi-year backtests).
+    Fetches in chunks of 1000 candles, advancing `since` each iteration."""
+    tf_ms = _tf_minutes(timeframe) * 60 * 1000
+    candles_needed = days * 24 * 60 // _tf_minutes(timeframe)
+    chunk_size = 1000
+
+    if candles_needed <= chunk_size:
+        return exchange.fetch_ohlcv(symbol, timeframe,
+                                    limit=candles_needed, market_type=market_type)
+
+    now_ms = int(_time.time() * 1000)
+    since_ms = now_ms - (days * 24 * 60 * 60 * 1000)
+    all_candles = []
+    fetched = 0
+
+    while fetched < candles_needed:
+        batch_limit = min(chunk_size, candles_needed - fetched)
+        try:
+            params = {}
+            if market_type == "futures" and hasattr(exchange, '_futures_params'):
+                params = exchange._futures_params()
+            raw = exchange.exchange.fetch_ohlcv(
+                symbol, timeframe, since=since_ms,
+                limit=batch_limit, params=params)
+        except Exception as e:
+            logger.warning(f"[Backtest] Fetch chunk at {since_ms}: {e}")
+            break
+
+        if not raw:
+            break
+
+        all_candles.extend(raw)
+        fetched += len(raw)
+        since_ms = int(raw[-1][0]) + tf_ms
+
+        if len(raw) < batch_limit:
+            break
+
+        logger.debug(f"[Backtest] Fetched {fetched}/{candles_needed} candles...")
+
+    seen = set()
+    deduped = []
+    for c in all_candles:
+        if c[0] not in seen:
+            seen.add(c[0])
+            deduped.append(c)
+    return sorted(deduped, key=lambda x: x[0])
+
+
 def _build_exchange(name: str):
-    from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
+    from exchanges import BinanceClient, BybitClient, BitgetClient
     clients = {
         "binance": BinanceClient,
-        "mexc":    MEXCClient,
         "bybit":   BybitClient,
         "bitget":  BitgetClient,
     }
@@ -112,21 +173,33 @@ def run_backtest_on_exchange(exchange, ex_name: str, args) -> bool:
         return False
 
     timeframe = args.timeframe or default_tf
-    candles_needed = min(args.days * 24 * 60 // _tf_minutes(timeframe), 1000)
+    candles_needed = args.days * 24 * 60 // _tf_minutes(timeframe)
 
     print()
-    print("  ╔══════════════════════════════════════════════════════════╗")
-    print("  ║  Backtest: {} on {} — {}".format(
-        args.strategy.upper(), ex_name.upper(), args.symbol).ljust(58) + "  ║")
-    print("  ╚══════════════════════════════════════════════════════════╝")
+    print("  " + "=" * 58)
+    print("  Backtest: {} on {} - {}".format(
+        args.strategy.upper(), ex_name.upper(), args.symbol))
+    print("  " + "=" * 58)
 
-    logger.info("[Backtest] Fetching {} × {} candles for {} on {} ({} days)...".format(
-        candles_needed, timeframe, args.symbol, ex_name, args.days))
+    years_str = f" ({args.days/365:.1f} years)" if args.days > 365 else ""
+    logger.info("[Backtest] Fetching {} × {} candles for {} on {} ({} days{})...".format(
+        candles_needed, timeframe, args.symbol, ex_name, args.days, years_str))
 
-    raw = exchange.fetch_ohlcv(args.symbol, timeframe, limit=candles_needed)
+    raw = _fetch_ohlcv_extended(exchange, args.symbol, timeframe, args.days)
     if not raw:
         logger.error("[Backtest] No data returned from {} — check symbol and API keys".format(
             ex_name))
+        return False
+
+    if len(raw) < candles_needed:
+        logger.warning(
+            "[Backtest] Requested {} candles but exchange returned only {} "
+            "(coverage may be shorter than {} days)".format(
+                candles_needed, len(raw), args.days))
+
+    raw = [r for r in raw if isinstance(r, (list, tuple)) and len(r) >= 6]
+    if not raw:
+        logger.error("[Backtest] No valid OHLCV data returned")
         return False
 
     df = pd.DataFrame(raw, columns=["timestamp","open","high","low","close","volume"])
@@ -135,8 +208,8 @@ def run_backtest_on_exchange(exchange, ex_name: str, args) -> bool:
     logger.info("[Backtest] Loaded {} candles | {} → {}".format(
         len(df), df.index[0], df.index[-1]))
 
-    sl = args.sl or RISK["default_stop_loss"]
-    tp = args.tp or RISK["default_take_profit"]
+    sl = args.sl if args.sl is not None else RISK["default_stop_loss"]
+    tp = args.tp if args.tp is not None else RISK["default_take_profit"]
 
     bt     = Backtester(sl_pct=sl, tp_pct=tp, initial_balance=args.balance)
     result = bt.run(strategy, df, args.symbol)
@@ -161,19 +234,18 @@ def run_arb_backtest(args):
     Arbitrage backtest: analyse historical price feeds from multiple exchanges
     and compute how many spread opportunities existed and their profitability.
     """
-    from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
+    from exchanges import BinanceClient, BybitClient, BitgetClient
     import pandas as pd
     from config import FEE
 
     print()
-    print("  ╔══════════════════════════════════════════════════════════╗")
-    print("  ║  Arbitrage Spread Backtest — {} days — {}".format(
-        args.days, args.symbol).ljust(58) + "  ║")
-    print("  ╚══════════════════════════════════════════════════════════╝")
+    print("  " + "=" * 58)
+    print("  Arbitrage Spread Backtest - {} days - {}".format(
+        args.days, args.symbol))
+    print("  " + "=" * 58)
 
     all_clients = {
         "binance": BinanceClient(),
-        "mexc":    MEXCClient(),
         "bybit":   BybitClient(),
         "bitget":  BitgetClient(),
     }

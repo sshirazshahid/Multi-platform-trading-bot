@@ -99,9 +99,10 @@ class CorrelationManager:
             pos_base = pos.symbol.split("/")[0].upper()
             if pos_base in group_assets:
                 group_positions.append(pos)
+                # size already includes leverage (from risk_manager: qty = balance * pct * leverage / price)
+                # so entry_price * size = leveraged notional. Do NOT multiply by leverage again.
                 notional = getattr(pos, 'entry_price', 0) * getattr(pos, 'size', 0)
-                leverage = getattr(pos, 'leverage', 1) or 1
-                group_notional += notional * leverage
+                group_notional += notional
 
         current_pct = group_notional / balance if balance > 0 else 0
         remaining_pct = max(0, max_pct - current_pct)
@@ -176,11 +177,16 @@ class CorrelationManager:
         for pos in open_positions:
             pos_base = pos.symbol.split("/")[0].upper()
             if pos_base in group_assets:
-                # Same direction = concentration risk (handled by group_exposure)
-                # Opposite direction = pair trade, always allowed
-                if pos.side != direction:
+                if pos.side == direction:
+                    # Same direction on correlated asset = concentration risk
+                    logger.debug(
+                        f"[Correlation] {symbol} {direction.upper()} blocked — "
+                        f"same direction as {pos.symbol} {pos.side.upper()}")
+                    return False
+                else:
+                    # Opposite direction = pair trade, allowed
                     logger.debug(
                         f"[Correlation] {symbol} {direction.upper()} + "
                         f"{pos.symbol} {pos.side.upper()} = pair trade (allowed)")
                     return True
-        return True
+        return True  # no correlated positions found

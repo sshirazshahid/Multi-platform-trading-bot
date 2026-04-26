@@ -68,13 +68,18 @@ class Position:
     pnl_pct:      Optional[float] = None
     close_reason: Optional[str]   = None
     order_id:     Optional[str]   = None
+    partial_taken: bool            = False
     # ── Mode tag — this is the key field for learning separation ──────
     paper_trade:  bool            = field(default_factory=_is_dry_run)
 
     def __post_init__(self):
-        rate           = _fee_rate(self.market_type)
-        self.entry_fee = self.size * self.entry_price * rate
-        self.total_fees = self.entry_fee
+        rate = _fee_rate(self.market_type)
+        # Only calculate entry_fee if not already set (e.g. loaded from JSON)
+        if self.entry_fee == 0.0:
+            self.entry_fee = self.size * self.entry_price * rate
+        # total_fees = entry_fee + exit_fee (exit_fee is 0 until close())
+        if self.total_fees == 0.0:
+            self.total_fees = self.entry_fee + self.exit_fee
 
     def close(self, exit_price: float, reason: str):
         self.exit_price   = exit_price
@@ -84,14 +89,21 @@ class Position:
         self.exit_fee     = self.size * exit_price * rate
         self.total_fees   = self.entry_fee + self.exit_fee
 
+        # PnL = price_diff * size.  DO NOT multiply by leverage here!
+        # `size` already represents the leveraged position quantity
+        # (risk_manager computes: qty = balance * pct * leverage / price).
+        # The exchange fills `size` units — leverage only affects margin,
+        # not the position size or its P&L.
         if self.side == "buy":
-            self.gross_pnl = (exit_price - self.entry_price) * self.size * self.leverage
+            self.gross_pnl = (exit_price - self.entry_price) * self.size
         else:
-            self.gross_pnl = (self.entry_price - exit_price) * self.size * self.leverage
+            self.gross_pnl = (self.entry_price - exit_price) * self.size
 
         self.pnl     = self.gross_pnl - self.total_fees
+        # pnl_pct = return on margin (accounts for leverage)
         notional     = self.entry_price * self.size
-        self.pnl_pct = (self.pnl / notional * 100) if notional > 0 else 0.0
+        margin       = notional / max(self.leverage, 1)
+        self.pnl_pct = (self.pnl / margin * 100) if margin > 0 else 0.0
 
     @property
     def is_open(self) -> bool:
@@ -115,7 +127,19 @@ class PositionTracker:
     def __init__(self):
         self._open:   dict = {}
         self._closed: list = []
-        self._lock = threading.Lock()
+        # RLock so methods already holding the lock (add/close/sync) can
+        # call _save() — which also acquires the lock — without deadlocking.
+        # Required because bot_engine's _sltp_monitor_loop calls tracker._save()
+        # from a daemon thread concurrently with the main schedule thread.
+        self._lock = threading.RLock()
+        # 2026-04-26: post-close hook. Wired by BotEngine to
+        # OrderManager._finalize_close so warehouse/risk/Spec§12/blacklist/
+        # trailing/notifier all fire for EVERY close path (normal exits AND
+        # ghost-syncs detected during exchange reconciliation). Without this,
+        # exchange-side SL/TP fills and fail-closed cleanups silently bypass
+        # the safety rails — a -$0.64 ghost-reconciled DOT loss on 04-26
+        # never reached daily_pnl, the SELL streak counter, or the warehouse.
+        self.on_close = None
         self._load()
 
     def add(self, position: Position):
@@ -153,10 +177,24 @@ class PositionTracker:
                 f"reason={reason}"
             )
             self._save()
-            return pos
+        # Fire post-close hook OUTSIDE the lock — _finalize_close may take a
+        # while (warehouse write, exchange ledger lookup, notifier email) and
+        # we don't want to block other position-tracker readers. Failures are
+        # swallowed so a hook bug can never lose the close itself.
+        # getattr() instead of attribute access so the multi_profile_runner
+        # path (which builds a tracker via __new__ and skips __init__) does
+        # not AttributeError here.
+        on_close = getattr(self, "on_close", None)
+        if on_close is not None:
+            try:
+                on_close(pos, exit_price, reason)
+            except Exception as e:
+                logger.error(f"[Positions] on_close hook failed for {pos.symbol}: {e}")
+        return pos
 
     def get_open(self, exchange: str = None, symbol: str = None) -> list:
-        positions = list(self._open.values())
+        with self._lock:
+            positions = list(self._open.values())
         if exchange:
             positions = [p for p in positions
                          if p.exchange.lower() == exchange.lower()]
@@ -165,22 +203,25 @@ class PositionTracker:
         return positions
 
     def count_open(self, exchange: str = None) -> int:
-        if exchange:
-            return sum(1 for p in self._open.values()
-                       if p.exchange.lower() == exchange.lower())
-        return len(self._open)
+        with self._lock:
+            if exchange:
+                return sum(1 for p in self._open.values()
+                           if p.exchange.lower() == exchange.lower())
+            return len(self._open)
 
     def summary(self) -> dict:
-        total      = len(self._closed)
-        wins       = [p for p in self._closed if (p.pnl or 0) > 0]
-        losses     = [p for p in self._closed if (p.pnl or 0) <= 0]
-        total_pnl  = sum(p.pnl        or 0 for p in self._closed)
-        gross_pnl  = sum(p.gross_pnl  or 0 for p in self._closed)
-        total_fees = sum(p.total_fees  or 0 for p in self._closed)
+        with self._lock:
+            closed = list(self._closed)
+        total      = len(closed)
+        wins       = [p for p in closed if (p.pnl or 0) > 0]
+        losses     = [p for p in closed if (p.pnl or 0) <= 0]
+        total_pnl  = sum(p.pnl        or 0 for p in closed)
+        gross_pnl  = sum(p.gross_pnl  or 0 for p in closed)
+        total_fees = sum(p.total_fees  or 0 for p in closed)
         win_rate   = (len(wins) / total * 100) if total > 0 else 0
         avg_win    = (sum(p.pnl for p in wins)   / len(wins))   if wins   else 0
         avg_loss   = (sum(p.pnl for p in losses) / len(losses)) if losses else 0
-        paper_n    = sum(1 for p in self._closed if p.paper_trade)
+        paper_n    = sum(1 for p in closed if p.paper_trade)
         live_n     = total - paper_n
         return {
             "total_trades":   total,
@@ -197,19 +238,36 @@ class PositionTracker:
             "open_positions": self.count_open(),
         }
 
-    def sync_with_exchanges(self, active_exchanges: dict):
-        """Verify open LIVE positions still exist on the exchange.
-        Auto-closes ghost positions that were closed/liquidated on the exchange
-        but the tracker never got updated (network failure, crash, etc.)."""
-        if not self._open:
-            return
+    def sync_with_exchanges(self, active_exchanges: dict) -> list:
+        """Bidirectional sync with exchanges.
+          - Close ghost positions that disappeared from the exchange.
+          - Import manual positions opened outside the bot (2026-04-16).
+          - Clean up paper_trade leftovers when running LIVE.
 
-        live_open = [p for p in self._open.values() if not p.paper_trade]
-        if not live_open:
-            return
+        Returns list of newly-imported Position objects (empty on ghost-only sync)
+        so the caller can place protective SL/TP orders.
+        """
+        from config import DRY_RUN
 
-        # Collect all active positions from exchanges
-        exchange_positions = {}  # (exchange_lower, symbol, side) -> True
+        # Clean up paper_trade positions that shouldn't exist in LIVE mode.
+        # These are leftovers from a previous DRY_RUN session — they were never
+        # placed on the exchange, so close_position() would fail with
+        # "position is zero" on every 10-second cycle.
+        if not DRY_RUN and self._open:
+            paper_ghosts = [p for p in self._open.values() if p.paper_trade]
+            for pos in paper_ghosts:
+                logger.warning(
+                    f"[Positions] PAPER GHOST in LIVE mode: {pos.symbol} "
+                    f"{pos.side.upper()} on {pos.exchange} — auto-closing")
+                self.close(pos.id, pos.entry_price, "paper_ghost_cleanup")
+            if paper_ghosts:
+                logger.info(
+                    f"[Positions] Cleaned {len(paper_ghosts)} paper position(s) "
+                    f"from previous DRY_RUN session")
+
+        # Collect all active positions from exchanges (raw snapshot with entry/size).
+        # exchange_positions: (exchange_lower, symbol, side) -> raw ep dict
+        exchange_positions: dict = {}
         for ex_name, exchange in active_exchanges.items():
             try:
                 positions = exchange.fetch_positions()
@@ -218,15 +276,74 @@ class PositionTracker:
                     if size == 0:
                         continue
                     side_raw = (ep.get("side") or "").lower()
+                    if side_raw not in ("long", "short"):
+                        continue
                     side = "buy" if side_raw == "long" else "sell"
                     sym = ep.get("symbol", "")
-                    exchange_positions[(ex_name.lower(), sym, side)] = True
+                    exchange_positions[(ex_name.lower(), sym, side)] = ep
             except Exception as e:
-                logger.debug(f"[Positions] Sync fetch {ex_name}: {e}")
+                logger.warning(f"[Positions] Sync fetch {ex_name} failed: {str(e)[:150]}")
 
-        # Close any tracked LIVE positions not found on exchange
+        # ── Import manual positions (2026-04-16) ──
+        # Any position the exchange reports that isn't tracked locally is a
+        # manual position the user opened outside the bot. Import it so the
+        # position monitor, SL/TP manager, and dashboard see it.
+        tracked_keys = set()
+        for p in self._open.values():
+            tracked_keys.add((p.exchange.lower(), p.symbol, p.side))
+
+        imported_list: list = []
+        for key, ep in exchange_positions.items():
+            if key in tracked_keys:
+                continue
+            ex_name, sym, side = key
+            size = float(ep.get("contracts") or ep.get("contractSize") or 0)
+            entry = float(ep.get("entryPrice") or ep.get("info", {}).get("avgPrice") or 0)
+            if size <= 0 or entry <= 0:
+                continue
+            try:
+                lev = int(float(ep.get("leverage") or 1))
+            except (TypeError, ValueError):
+                lev = 1
+            liq = float(ep.get("liquidationPrice") or 0)
+            pid = f"MANUAL-{ex_name}-{sym}-{side}-{int(time.time())}"
+            pos = Position(
+                id=pid,
+                exchange=ex_name,
+                symbol=sym,
+                side=side,
+                market_type="futures",
+                strategy="manual",
+                entry_price=entry,
+                size=size,
+                stop_loss=liq,      # best available — liquidation as fallback SL
+                take_profit=0.0,
+                leverage=lev,
+                paper_trade=False,  # manual positions are always real
+            )
+            with self._lock:
+                self._open[pid] = pos
+            logger.warning(
+                f"[Positions] IMPORTED manual position: {sym} {side.upper()} "
+                f"on {ex_name} @ {entry:.4f} size={size:.6f} lev={lev}x | id={pid}")
+            imported_list.append(pos)
+
+        if imported_list:
+            with self._lock:
+                self._save()
+            logger.info(f"[Positions] Synced: imported {len(imported_list)} manual position(s)")
+
+        live_open = [p for p in self._open.values() if not p.paper_trade]
+        if not live_open:
+            return imported_list
+
+        # Close any tracked LIVE FUTURES positions not found on exchange.
+        # SPOT positions are NOT checked — fetch_positions() only returns
+        # futures, so every spot position would falsely appear as a ghost.
         ghosts = []
         for pos in live_open:
+            if pos.market_type != "futures":
+                continue  # skip spot — can't verify via fetch_positions()
             key = (pos.exchange.lower(), pos.symbol, pos.side)
             if key not in exchange_positions:
                 ghosts.append(pos)
@@ -235,46 +352,252 @@ class PositionTracker:
             logger.warning(
                 f"[Positions] GHOST detected: {pos.symbol} {pos.side.upper()} "
                 f"on {pos.exchange} — not found on exchange. Auto-closing.")
-            # Try to get current price for accurate PnL
             ex = active_exchanges.get(pos.exchange.lower())
-            close_price = pos.entry_price  # fallback
-            if ex:
+            close_price = pos.entry_price  # last-resort fallback
+            close_reason = "ghost_sync"
+            resolved_src = "entry_fallback"
+
+            # 2026-04-24: Reconcile ghost against exchange history BEFORE
+            # falling back to ticker. Prior behavior booked PnL at current
+            # mid-price, which was usually optimistic vs. the actual SL fill
+            # that the exchange already executed. Pull the real realized-PnL
+            # ledger record and use its exit_price — same record the
+            # reconcile_closed_pnl path uses, just sourced here synchronously.
+            reconciled = False
+            if ex and hasattr(ex, "fetch_closed_pnl"):
+                try:
+                    # Look back 2h — ghosts are detected within one sync
+                    # cycle (≤60s) of exchange-side fill, so 2h is ample
+                    # while keeping the result set small.
+                    since_ms = int((time.time() - 2 * 3600) * 1000)
+                    records = ex.fetch_closed_pnl(
+                        since_ms=since_ms, symbol=pos.symbol) or []
+                    # Most recent first, filter by side (futures closes come
+                    # with the entry side, not the closing side — different
+                    # exchanges vary, so match either).
+                    candidates = []
+                    for r in records:
+                        rsym = r.get("symbol", "")
+                        if rsym != pos.symbol:
+                            continue
+                        rside = str(r.get("side", "")).lower()
+                        if rside and rside != pos.side.lower():
+                            # Some exchanges report the closing order's side
+                            # (opposite of entry). Accept both.
+                            opp = "buy" if pos.side.lower() == "sell" else "sell"
+                            if rside != opp:
+                                continue
+                        ct = float(r.get("close_time", 0) or 0)
+                        if ct <= 0 or ct < pos.open_time:
+                            continue
+                        candidates.append(r)
+                    if candidates:
+                        candidates.sort(
+                            key=lambda x: float(x.get("close_time", 0) or 0),
+                            reverse=True)
+                        best = candidates[0]
+                        exit_px = float(best.get("exit_price", 0) or 0)
+                        if exit_px > 0:
+                            close_price = exit_px
+                            reconciled = True
+                            resolved_src = "exchange_ledger"
+                            # Tag the closed reason so warehouse queries can
+                            # distinguish exchange-side SL fills from true
+                            # desync ghosts.
+                            close_reason = "ghost_reconciled"
+                            logger.info(
+                                f"[Positions] GHOST reconciled via ledger: "
+                                f"{pos.symbol} {pos.side.upper()} "
+                                f"exit={exit_px:.6g} "
+                                f"realized_pnl={best.get('realized_pnl')}"
+                            )
+                except Exception as e:
+                    logger.debug(
+                        f"[Positions] ghost reconcile lookup failed "
+                        f"{pos.symbol}: {str(e)[:120]}")
+
+            # Fallback 2: ticker mid if ledger didn't resolve.
+            if not reconciled and ex:
                 try:
                     ticker = ex.fetch_ticker(pos.symbol, pos.market_type)
-                    close_price = float(ticker.get("last") or ticker.get("close") or pos.entry_price)
+                    tp = float(ticker.get("last") or ticker.get("close") or 0)
+                    if tp > 0:
+                        close_price = tp
+                        resolved_src = "ticker_fallback"
                 except Exception:
                     pass
-            self.close(pos.id, close_price, "ghost_sync")
+
+            logger.info(
+                f"[Positions] GHOST close price source={resolved_src} "
+                f"price={close_price:.6g}")
+            self.close(pos.id, close_price, close_reason)
 
         if ghosts:
             logger.info(f"[Positions] Synced: closed {len(ghosts)} ghost position(s)")
         else:
             logger.debug("[Positions] Sync: all LIVE positions verified on exchange")
 
-    def _save(self):
-        """Atomic save: write to temp file, then rename over original."""
-        self.SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "open":   [asdict(p) for p in self._open.values()],
-            "closed": [asdict(p) for p in self._closed[-500:]],
-        }
-        tmp_path = self.SAVE_PATH.with_suffix(".tmp")
+        # 2026-04-17: Reconcile realized-PnL from exchange history for trades
+        # that were manually closed (or closed while the bot was offline) so
+        # today's Wins and all-time totals reflect every actual close.
         try:
-            tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            # Backup current file before replacing
-            if self.SAVE_PATH.exists():
+            self.reconcile_closed_pnl(active_exchanges)
+        except Exception as e:
+            logger.debug(f"[Positions] reconcile_closed_pnl failed: {str(e)[:150]}")
+
+        return imported_list
+
+    def reconcile_closed_pnl(self, active_exchanges: dict,
+                              since_ts: float = None) -> int:
+        """Pull realized-PnL ledger from each exchange and import any closed
+        trades not already in `_closed` (deduped by exchange+symbol+minute).
+
+        Returns count of newly-imported records. Runs defensively: any one
+        exchange failing only prints a debug line and skips that source.
+
+        Default window: last 48h (catches today's closes + yesterday's without
+        bloating memory). Caller can widen via `since_ts` (unix seconds).
+        """
+        from datetime import datetime
+
+        if since_ts is None:
+            since_ts = time.time() - 48 * 3600
+        since_ms = int(since_ts * 1000)
+
+        with self._lock:
+            existing_keys = set()
+            for p in self._closed:
+                if p.close_time:
+                    existing_keys.add(
+                        (p.exchange.lower(), p.symbol, int(p.close_time // 60)))
+
+        imported = 0
+        for ex_name, exchange in active_exchanges.items():
+            if not hasattr(exchange, "fetch_closed_pnl"):
+                continue
+            try:
+                records = exchange.fetch_closed_pnl(since_ms=since_ms) or []
+            except Exception as e:
+                logger.debug(f"[Reconcile] {ex_name} fetch failed: {str(e)[:100]}")
+                continue
+
+            for r in records:
+                ct = float(r.get("close_time", 0) or 0)
+                if ct < since_ts:
+                    continue
+                sym = r.get("symbol", "")
+                ex_lower = str(r.get("exchange", ex_name)).lower()
+                k = (ex_lower, sym, int(ct // 60))
+                if k in existing_keys:
+                    continue
+
+                pnl = float(r.get("realized_pnl", 0) or 0)
+                size = float(r.get("size", 0) or 0)
+                entry = float(r.get("entry_price", 0) or 0)
+                exit_p = float(r.get("exit_price", 0) or 0)
+                side = (r.get("side") or "buy") or "buy"
+                leverage = int(r.get("leverage", 1) or 1)
+
+                # Binance's income ledger doesn't always carry entry/size. If
+                # we have to synthesize them, `pnl_pct` can only be a
+                # fabrication (entry=1, size=1 gives pnl_pct = pnl/margin*100,
+                # which looks like a real -5% to -30% loss but isn't). Keep
+                # the dollar `pnl` as ground truth; mark pnl_pct as None so
+                # downstream consumers see "unknown" rather than a bad number.
+                synthesized = (entry <= 0) or (size <= 0)
+                if entry <= 0:
+                    entry = 1.0
+                if size <= 0:
+                    size = 1.0
+                if exit_p <= 0:
+                    exit_p = entry + (pnl / size if side == "buy" else -pnl / size)
+
+                sym_id = sym.replace("/", "_").replace(":", "_")
+                pid = f"RECONCILED-{ex_lower}-{sym_id}-{int(ct)}"
+                pos = Position(
+                    id=pid,
+                    exchange=ex_lower,
+                    symbol=sym,
+                    side=side,
+                    market_type="futures",
+                    strategy="reconciled_exchange",
+                    entry_price=entry,
+                    size=size,
+                    stop_loss=0.0,
+                    take_profit=0.0,
+                    leverage=leverage,
+                    open_time=max(ct - 60, 0.0),
+                    paper_trade=False,
+                )
+                # Overwrite Position's computed fields with exchange ground truth.
+                # Exchange realized_pnl is already net of fees, so zero out fees.
+                pos.exit_price   = exit_p
+                pos.close_time   = ct
+                pos.close_reason = (
+                    "reconciled_no_context" if synthesized
+                    else "reconciled_from_exchange"
+                )
+                pos.entry_fee    = 0.0
+                pos.exit_fee     = 0.0
+                pos.total_fees   = 0.0
+                pos.gross_pnl    = pnl
+                pos.pnl          = pnl
+                if synthesized:
+                    pos.pnl_pct = None
+                else:
+                    notional   = entry * size
+                    margin     = notional / max(leverage, 1) if notional else 1
+                    pos.pnl_pct = (pnl / margin * 100) if margin > 0 else 0.0
+
+                with self._lock:
+                    self._closed.append(pos)
+                    existing_keys.add(k)
+                imported += 1
+                logger.warning(
+                    f"[Reconcile] IMPORTED closed trade: {sym} {side.upper()} "
+                    f"on {ex_lower} pnl={pnl:+.4f} USDT "
+                    f"at {datetime.fromtimestamp(ct).isoformat(timespec='seconds')} "
+                    f"id={pid}")
+
+        if imported:
+            with self._lock:
+                if len(self._closed) > 500:
+                    self._closed = self._closed[-500:]
+                self._save()
+            logger.info(
+                f"[Reconcile] Imported {imported} closed trade(s) from exchange history")
+        return imported
+
+    def _save(self):
+        """Atomic save: write to temp file, then rename over original.
+
+        Serialized via self._lock (RLock) so concurrent callers from the
+        schedule main thread and the _sltp_monitor_loop daemon don't
+        overlap and overwrite each other's committed state.
+        """
+        with self._lock:
+            self.SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "open":   [asdict(p) for p in self._open.values()],
+                "closed": [asdict(p) for p in self._closed[-500:]],
+            }
+            tmp_path = self.SAVE_PATH.with_suffix(".tmp")
+            try:
+                tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                # Backup current file before replacing
+                if self.SAVE_PATH.exists():
+                    try:
+                        self.BACKUP_PATH.write_bytes(self.SAVE_PATH.read_bytes())
+                    except Exception:
+                        pass
+                tmp_path.replace(self.SAVE_PATH)
+            except Exception as e:
+                logger.error(f"[Positions] Save failed: {e}")
+                # Clean up temp file on failure
                 try:
-                    self.BACKUP_PATH.write_bytes(self.SAVE_PATH.read_bytes())
+                    tmp_path.unlink(missing_ok=True)
                 except Exception:
                     pass
-            tmp_path.replace(self.SAVE_PATH)
-        except Exception as e:
-            logger.error(f"[Positions] Save failed: {e}")
-            # Clean up temp file on failure
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
 
     def _load(self):
         if not self.SAVE_PATH.exists():
@@ -295,15 +618,21 @@ class PositionTracker:
                 d.setdefault("total_fees",  0.0)
                 d.setdefault("gross_pnl",   None)
                 d.setdefault("paper_trade", True)   # old records = paper
-                p = Position(**d)
-                self._open[p.id] = p
+                try:
+                    p = Position(**d)
+                    self._open[p.id] = p
+                except Exception as e:
+                    logger.warning(f"[Tracker] Skipping malformed open position: {e}")
             for d in data.get("closed", []):
                 d.setdefault("entry_fee",   0.0)
                 d.setdefault("exit_fee",    0.0)
                 d.setdefault("total_fees",  0.0)
                 d.setdefault("gross_pnl",   None)
                 d.setdefault("paper_trade", True)
-                self._closed.append(Position(**d))
+                try:
+                    self._closed.append(Position(**d))
+                except Exception as e:
+                    logger.warning(f"[Tracker] Skipping malformed closed position: {e}")
             paper_n = sum(1 for p in self._closed if p.paper_trade)
             live_n  = len(self._closed) - paper_n
             logger.info(
@@ -325,15 +654,21 @@ class PositionTracker:
                         d.setdefault("total_fees", 0.0)
                         d.setdefault("gross_pnl", None)
                         d.setdefault("paper_trade", True)
-                        p = Position(**d)
-                        self._open[p.id] = p
+                        try:
+                            p = Position(**d)
+                            self._open[p.id] = p
+                        except Exception as e:
+                            logger.warning(f"[Tracker] Skipping malformed open position: {e}")
                     for d in data.get("closed", []):
                         d.setdefault("entry_fee", 0.0)
                         d.setdefault("exit_fee", 0.0)
                         d.setdefault("total_fees", 0.0)
                         d.setdefault("gross_pnl", None)
                         d.setdefault("paper_trade", True)
-                        self._closed.append(Position(**d))
+                        try:
+                            self._closed.append(Position(**d))
+                        except Exception as e:
+                            logger.warning(f"[Tracker] Skipping malformed closed position: {e}")
                     logger.info(f"[Positions] Recovered from backup: {len(self._open)} open, {len(self._closed)} closed")
                 except Exception as e2:
                     logger.error(f"[Positions] Backup also failed: {e2}")

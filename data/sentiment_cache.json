@@ -1,0 +1,101 @@
+{
+  "combined": {
+    "BASED": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "AVAX": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "XRP": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "TAO": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "DOGE": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "BTC": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "VVV": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "PENGU": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "PAXG": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "ETH": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "BNB": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "ADA": {
+      "score": -0.12,
+      "social": -0.3,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "SOL": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "SIREN": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "BARD": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    },
+    "HYPE": {
+      "score": -0.04,
+      "social": -0.09999999999999998,
+      "news": 0,
+      "signal": "neutral"
+    }
+  },
+  "timestamp": "2026-03-31T03:23:07.383770"
+}

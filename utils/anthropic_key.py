@@ -15,12 +15,13 @@ def get_anthropic_key() -> str:
     if key:
         return key
     # Try reading .env directly
-    env_file = Path(".env")
+    env_file = Path(__file__).parent.parent / ".env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith("ANTHROPIC_API_KEY="):
                 val = line.split("=", 1)[1].strip()
+                val = val.strip('"').strip("'")
                 if val:
                     return val
     return ""

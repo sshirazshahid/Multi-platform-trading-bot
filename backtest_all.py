@@ -38,8 +38,8 @@ def sma(s: pd.Series, p: int) -> pd.Series:
 
 def rsi(s: pd.Series, p: int = 14) -> pd.Series:
     d = s.diff()
-    g = d.clip(lower=0).ewm(span=p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(span=p, adjust=False).mean()
+    g = d.clip(lower=0).ewm(com=p-1, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(com=p-1, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def atr(high, low, close, p: int = 14) -> pd.Series:
@@ -48,7 +48,7 @@ def atr(high, low, close, p: int = 14) -> pd.Series:
         (high - close.shift(1)).abs(),
         (low - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 def adx(high, low, close, p: int = 14) -> pd.Series:
     tr_val = atr(high, low, close, p)
@@ -56,10 +56,10 @@ def adx(high, low, close, p: int = 14) -> pd.Series:
     down = -low.diff()
     pdm = up.where((up > down) & (up > 0), 0.0)
     mdm = down.where((down > up) & (down > 0), 0.0)
-    pdi = 100 * pdm.ewm(span=p, adjust=False).mean() / tr_val.replace(0, np.nan)
-    mdi = 100 * mdm.ewm(span=p, adjust=False).mean() / tr_val.replace(0, np.nan)
+    pdi = 100 * pdm.ewm(com=p-1, adjust=False).mean() / tr_val.replace(0, np.nan)
+    mdi = 100 * mdm.ewm(com=p-1, adjust=False).mean() / tr_val.replace(0, np.nan)
     dx = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
-    return dx.ewm(span=p, adjust=False).mean()
+    return dx.ewm(com=p-1, adjust=False).mean()
 
 def bbands(s: pd.Series, p: int = 20, std: float = 2.0):
     mid = s.rolling(p).mean()
@@ -72,7 +72,7 @@ def supertrend(high, low, close, period=10, multiplier=3.0):
         (high - close.shift(1)).abs(),
         (low - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    atr_val = tr.ewm(span=period, adjust=False).mean()
+    atr_val = tr.ewm(com=period-1, adjust=False).mean()
     hl2 = (high + low) / 2
     upper_raw = hl2 + multiplier * atr_val
     lower_raw = hl2 - multiplier * atr_val
@@ -355,7 +355,7 @@ def simulate_trades(df: pd.DataFrame, signals: list, strategy_name: str,
                     pnl_pct = (entry_price - exit_price) / entry_price * leverage
 
                 # Deduct fees (entry + exit)
-                pnl_pct -= 2 * fee_pct * leverage
+                pnl_pct -= 2 * fee_pct  # fees are on notional, not scaled by leverage
                 pnl_usd = balance * position_pct * pnl_pct
                 balance += pnl_usd
 

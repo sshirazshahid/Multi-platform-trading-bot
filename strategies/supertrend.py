@@ -35,8 +35,8 @@ def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
         (low  - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
 
-    # ATR via EMA smoothing
-    atr = tr.ewm(span=period, adjust=False).mean()
+    # ATR via Wilder's smoothing
+    atr = tr.ewm(com=period-1, adjust=False).mean()
 
     hl2       = (high + low) / 2
     upper_raw = hl2 + multiplier * atr
@@ -82,8 +82,8 @@ class SupertrendStrategy(BaseStrategy):
 
     def _calc_rsi(self, series: pd.Series, period: int = 14) -> pd.Series:
         delta = series.diff()
-        gain  = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
-        loss  = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
+        gain  = delta.clip(lower=0).ewm(com=period-1, adjust=False).mean()
+        loss  = (-delta.clip(upper=0)).ewm(com=period-1, adjust=False).mean()
         rs    = gain / loss.replace(0, np.nan)
         return 100 - (100 / (1 + rs))
 
@@ -93,7 +93,7 @@ class SupertrendStrategy(BaseStrategy):
             (high - close.shift(1)).abs(),
             (low  - close.shift(1)).abs(),
         ], axis=1).max(axis=1)
-        return tr.ewm(span=period, adjust=False).mean()
+        return tr.ewm(com=period-1, adjust=False).mean()
 
     # ── Higher timeframe trend filter ────────────────────────────────
 
@@ -123,11 +123,15 @@ class SupertrendStrategy(BaseStrategy):
         df["vol_ma"]  = df["volume"].rolling(self.cfg["volume_ma"]).mean()
         df.dropna(inplace=True)
 
-        if len(df) < 5:
+        if len(df) < 6:
             return None, None
 
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
+        # CLOSED-BAR ONLY: ccxt returns the in-progress candle as last row on
+        # live feeds. Using iloc[-1] caused ghost flips that vanished before
+        # the bar closed and left us holding whipsawed entries. Always read
+        # from the fully-closed bar back.
+        curr = df.iloc[-2]
+        prev = df.iloc[-3]
 
         # ATR volatility filter
         atr_pct = curr["atr"] / curr["close"]
@@ -149,9 +153,9 @@ class SupertrendStrategy(BaseStrategy):
         bull_trend = curr["st_dir"] == 1 and prev["st_dir"] == 1
         bear_trend = curr["st_dir"] == -1 and prev["st_dir"] == -1
 
-        if bull_trend and 35 < curr["rsi"] < 55 and volume_ok:
+        if bull_trend and 40 < curr["rsi"] < 55 and volume_ok:
             return "buy", atr
-        if bear_trend and 45 < curr["rsi"] < 65 and volume_ok:
+        if bear_trend and 55 < curr["rsi"] < 65 and volume_ok:
             return "sell", atr
 
         return None, None
@@ -176,7 +180,10 @@ class SupertrendStrategy(BaseStrategy):
         if not signal:
             return
 
-        # HTF alignment: flip signal to match 4h trend direction
+        # HTF alignment: block entries when HTF trend is unclear or opposing
+        if htf_trend == 0:
+            logger.debug(f"[Supertrend] {symbol} HTF trend unclear — skipping")
+            return
         if htf_trend == 1 and signal == "sell":
             if self.market_type == "futures":
                 logger.debug(f"[Supertrend] {symbol}: SELL in 4h uptrend — weak, skipping")
@@ -188,9 +195,20 @@ class SupertrendStrategy(BaseStrategy):
             logger.debug(f"[Supertrend] {symbol}: BUY blocked — 4h is bearish")
             return
 
+        # Momentum exhaustion filter
+        from utils.indicators import momentum_exhaustion
+        exhaustion = momentum_exhaustion(df["close"], df["high"], df["low"])
+        if signal == "buy" and exhaustion["bull_exhaustion"]:
+            logger.debug(f"[Supertrend] {symbol}: Bull exhaustion — skipping BUY")
+            return
+        if signal == "sell" and exhaustion["bear_exhaustion"]:
+            logger.debug(f"[Supertrend] {symbol}: Bear exhaustion — skipping SELL")
+            return
+
         current_price = float(df["close"].iloc[-1])
+        htf_label = "bull" if htf_trend == 1 else "bear"
         self.log_signal(symbol, signal, current_price,
-                        f"| ATR={atr:.4f} HTF={'bull' if htf_trend >= 0 else 'bear'}")
+                        f"| ATR={atr:.4f} HTF={htf_label}")
 
         balance = self.get_usdt_balance(exchange)
         if balance < 10:

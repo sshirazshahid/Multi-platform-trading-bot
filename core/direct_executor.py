@@ -155,25 +155,25 @@ class DirectExecutor:
                 fired, _, new_sl = self.trailing.update(pos, price)
                 if fired:
                     self._close_fn(exchange, pos, "trailing_stop", price)
-                    self.blacklist.record_win(pos.symbol)
+                    self.blacklist.record_win(pos.symbol, pos.side)
                     continue
 
                 if pos.side == "buy":
                     eff_sl = max(new_sl, pos.stop_loss)
                     if price <= eff_sl:
                         self._close_fn(exchange, pos, "stop_loss", price)
-                        self.blacklist.record_stop_loss(pos.symbol)
+                        self.blacklist.record_stop_loss(pos.symbol, pos.side)
                     elif price >= pos.take_profit:
                         self._close_fn(exchange, pos, "take_profit", price)
-                        self.blacklist.record_win(pos.symbol)
+                        self.blacklist.record_win(pos.symbol, pos.side)
                 else:  # short
                     eff_sl = min(new_sl, pos.stop_loss)
                     if price >= eff_sl:
                         self._close_fn(exchange, pos, "stop_loss", price)
-                        self.blacklist.record_stop_loss(pos.symbol)
+                        self.blacklist.record_stop_loss(pos.symbol, pos.side)
                     elif price <= pos.take_profit:
                         self._close_fn(exchange, pos, "take_profit", price)
-                        self.blacklist.record_win(pos.symbol)
+                        self.blacklist.record_win(pos.symbol, pos.side)
 
             except Exception as e:
                 logger.debug("[{}] exit check {}: {}".format(
@@ -196,7 +196,7 @@ class DirectExecutor:
                 (df["h"] - df["c"].shift(1)).abs(),
                 (df["l"] - df["c"].shift(1)).abs(),
             ], axis=1).max(axis=1)
-            atr = float(tr.ewm(span=period, adjust=False).mean().iloc[-1])
+            atr = float(tr.ewm(com=period-1, adjust=False).mean().iloc[-1])
             return atr if atr > 0 else None
         except Exception:
             return None

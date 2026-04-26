@@ -77,22 +77,25 @@ class BlacklistManager:
             self._save()
             logger.info("[Blacklist] {} removed.".format(symbol))
 
-    def record_stop_loss(self, symbol: str):
-        self._sl_counts[symbol] = self._sl_counts.get(symbol, 0) + 1
-        count = self._sl_counts[symbol]
+    def record_stop_loss(self, symbol: str, direction: str = ""):
+        """Record a stop-loss hit. Direction-aware: 3 LONG SLs only blacklists LONGs."""
+        key = f"{symbol}:{direction}" if direction else symbol
+        self._sl_counts[key] = self._sl_counts.get(key, 0) + 1
+        count = self._sl_counts[key]
         limit = self.cfg["consecutive_sl_limit"]
-        logger.debug("[Blacklist] {} SL count: {}/{}".format(symbol, count, limit))
+        logger.debug("[Blacklist] {} SL count: {}/{}".format(key, count, limit))
         if count >= limit:
-            self.add(symbol, "{} consecutive stop losses".format(count))
-            self._sl_counts[symbol] = 0   # reset counter after blacklisting
+            self.add(key, "{} consecutive stop losses ({})".format(count, direction or "all"))
+            self._sl_counts[key] = 0   # reset counter after blacklisting
 
-    def record_win(self, symbol: str):
-        """A win resets the consecutive SL counter for this symbol."""
-        if self._sl_counts.get(symbol, 0) > 0:
+    def record_win(self, symbol: str, direction: str = ""):
+        """A win resets the consecutive SL counter for this symbol/direction."""
+        key = f"{symbol}:{direction}" if direction else symbol
+        if self._sl_counts.get(key, 0) > 0:
             logger.debug(
                 "[Blacklist] {} WIN — resetting SL counter (was {})".format(
-                    symbol, self._sl_counts[symbol]))
-        self._sl_counts[symbol] = 0
+                    key, self._sl_counts[key]))
+        self._sl_counts[key] = 0
 
     def check_volatility(self, symbol: str, candle: list):
         if not candle:

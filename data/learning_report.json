@@ -1,0 +1,1433 @@
+{
+  "generated_at": "2026-04-26T18:33:51.959353",
+  "total_trades": 488,
+  "dry_run_trades": 66,
+  "live_trades": 422,
+  "total_net_pnl": 73.1353,
+  "total_fees_paid": 10.7195,
+  "overall_win_rate": 43.4,
+  "recent_20_pnl": -6.9911,
+  "recent_20_wr": 25.0,
+  "recent_20_fees": 0.8733,
+  "by_strategy_all": {
+    "MultiTF": {
+      "trades": 58,
+      "wins": 28,
+      "net_pnl": -11.325311205873742,
+      "total_fees": 0.4561953704795317,
+      "win_rate": 48.3,
+      "avg_pnl": -0.1953,
+      "avg_fee": 0.0079,
+      "best_trade": 3.5155,
+      "worst_trade": -12.7142
+    },
+    "Supertrend": {
+      "trades": 39,
+      "wins": 16,
+      "net_pnl": -45.17610230963274,
+      "total_fees": 0.48839195895420395,
+      "win_rate": 41.0,
+      "avg_pnl": -1.1584,
+      "avg_fee": 0.0125,
+      "best_trade": 3.6885,
+      "worst_trade": -7.7146
+    },
+    "MeanReversion": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.12246500000000002,
+      "total_fees": 0.009337999999999999,
+      "win_rate": 100.0,
+      "avg_pnl": 0.1225,
+      "avg_fee": 0.0093,
+      "best_trade": 0.1225,
+      "worst_trade": 0.1225
+    },
+    "TrendFollowing": {
+      "trades": 8,
+      "wins": 0,
+      "net_pnl": -0.15580204359999758,
+      "total_fees": 0.0675644784,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0195,
+      "avg_fee": 0.0084,
+      "best_trade": -0.0064,
+      "worst_trade": -0.0569
+    },
+    "claude_portfolio": {
+      "trades": 185,
+      "wins": 81,
+      "net_pnl": -4.9679251752899685,
+      "total_fees": 5.221346295289999,
+      "win_rate": 43.8,
+      "avg_pnl": -0.0269,
+      "avg_fee": 0.0282,
+      "best_trade": 1.3803,
+      "worst_trade": -1.9801
+    },
+    "reconciled_exchange": {
+      "trades": 72,
+      "wins": 34,
+      "net_pnl": -3.5804549999999997,
+      "total_fees": 0.12114135367000001,
+      "win_rate": 47.2,
+      "avg_pnl": -0.0497,
+      "avg_fee": 0.0017,
+      "best_trade": 0.4699,
+      "worst_trade": -1.9997
+    },
+    "manual": {
+      "trades": 61,
+      "wins": 21,
+      "net_pnl": -4.968575308335194,
+      "total_fees": 1.2045395511214052,
+      "win_rate": 34.4,
+      "avg_pnl": -0.0815,
+      "avg_fee": 0.0197,
+      "best_trade": 0.2633,
+      "worst_trade": -0.5728
+    },
+    "multitf_futures": {
+      "trades": 55,
+      "wins": 30,
+      "net_pnl": 143.2690313337507,
+      "total_fees": 2.89309711483159,
+      "win_rate": 54.5,
+      "avg_pnl": 2.6049,
+      "avg_fee": 0.0526,
+      "best_trade": 54.6173,
+      "worst_trade": -42.8836
+    },
+    "supertrend_spot": {
+      "trades": 8,
+      "wins": 0,
+      "net_pnl": -4.4376802289373,
+      "total_fees": 0.23860960364798348,
+      "win_rate": 0.0,
+      "avg_pnl": -0.5547,
+      "avg_fee": 0.0298,
+      "best_trade": -0.1859,
+      "worst_trade": -1.0332
+    },
+    "supertrend_futures": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 4.355630251195405,
+      "total_fees": 0.0192679875,
+      "win_rate": 100.0,
+      "avg_pnl": 4.3556,
+      "avg_fee": 0.0193,
+      "best_trade": 4.3556,
+      "worst_trade": 4.3556
+    }
+  },
+  "by_strategy_dry": {
+    "claude_portfolio": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -0.008347209374998707,
+      "total_fees": 0.014538159375,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0042,
+      "avg_fee": 0.0073,
+      "best_trade": -0.0,
+      "worst_trade": -0.0083
+    },
+    "multitf_futures": {
+      "trades": 55,
+      "wins": 30,
+      "net_pnl": 143.2690313337507,
+      "total_fees": 2.89309711483159,
+      "win_rate": 54.5,
+      "avg_pnl": 2.6049,
+      "avg_fee": 0.0526,
+      "best_trade": 54.6173,
+      "worst_trade": -42.8836
+    },
+    "supertrend_spot": {
+      "trades": 8,
+      "wins": 0,
+      "net_pnl": -4.4376802289373,
+      "total_fees": 0.23860960364798348,
+      "win_rate": 0.0,
+      "avg_pnl": -0.5547,
+      "avg_fee": 0.0298,
+      "best_trade": -0.1859,
+      "worst_trade": -1.0332
+    },
+    "supertrend_futures": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 4.355630251195405,
+      "total_fees": 0.0192679875,
+      "win_rate": 100.0,
+      "avg_pnl": 4.3556,
+      "avg_fee": 0.0193,
+      "best_trade": 4.3556,
+      "worst_trade": 4.3556
+    }
+  },
+  "by_strategy_live": {
+    "MultiTF": {
+      "trades": 58,
+      "wins": 28,
+      "net_pnl": -11.325311205873742,
+      "total_fees": 0.4561953704795317,
+      "win_rate": 48.3,
+      "avg_pnl": -0.1953,
+      "avg_fee": 0.0079,
+      "best_trade": 3.5155,
+      "worst_trade": -12.7142
+    },
+    "Supertrend": {
+      "trades": 39,
+      "wins": 16,
+      "net_pnl": -45.17610230963274,
+      "total_fees": 0.48839195895420395,
+      "win_rate": 41.0,
+      "avg_pnl": -1.1584,
+      "avg_fee": 0.0125,
+      "best_trade": 3.6885,
+      "worst_trade": -7.7146
+    },
+    "MeanReversion": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.12246500000000002,
+      "total_fees": 0.009337999999999999,
+      "win_rate": 100.0,
+      "avg_pnl": 0.1225,
+      "avg_fee": 0.0093,
+      "best_trade": 0.1225,
+      "worst_trade": 0.1225
+    },
+    "TrendFollowing": {
+      "trades": 8,
+      "wins": 0,
+      "net_pnl": -0.15580204359999758,
+      "total_fees": 0.0675644784,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0195,
+      "avg_fee": 0.0084,
+      "best_trade": -0.0064,
+      "worst_trade": -0.0569
+    },
+    "claude_portfolio": {
+      "trades": 183,
+      "wins": 81,
+      "net_pnl": -4.959577965914969,
+      "total_fees": 5.206808135914999,
+      "win_rate": 44.3,
+      "avg_pnl": -0.0271,
+      "avg_fee": 0.0285,
+      "best_trade": 1.3803,
+      "worst_trade": -1.9801
+    },
+    "reconciled_exchange": {
+      "trades": 72,
+      "wins": 34,
+      "net_pnl": -3.5804549999999997,
+      "total_fees": 0.12114135367000001,
+      "win_rate": 47.2,
+      "avg_pnl": -0.0497,
+      "avg_fee": 0.0017,
+      "best_trade": 0.4699,
+      "worst_trade": -1.9997
+    },
+    "manual": {
+      "trades": 61,
+      "wins": 21,
+      "net_pnl": -4.968575308335194,
+      "total_fees": 1.2045395511214052,
+      "win_rate": 34.4,
+      "avg_pnl": -0.0815,
+      "avg_fee": 0.0197,
+      "best_trade": 0.2633,
+      "worst_trade": -0.5728
+    }
+  },
+  "by_symbol_all": {
+    "BNB/USDT:USDT": {
+      "trades": 35,
+      "wins": 15,
+      "net_pnl": 24.327349453585448,
+      "total_fees": 0.7853326896628317,
+      "win_rate": 42.9,
+      "avg_pnl": 0.6951
+    },
+    "AVAX/USDT:USDT": {
+      "trades": 29,
+      "wins": 11,
+      "net_pnl": -22.909024968238963,
+      "total_fees": 0.6158293906770932,
+      "win_rate": 37.9,
+      "avg_pnl": -0.79
+    },
+    "ADA/USDT:USDT": {
+      "trades": 13,
+      "wins": 4,
+      "net_pnl": -37.882466822335346,
+      "total_fees": 0.47854161233210085,
+      "win_rate": 30.8,
+      "avg_pnl": -2.914
+    },
+    "XRP/USDT:USDT": {
+      "trades": 25,
+      "wins": 9,
+      "net_pnl": 7.00457398348529,
+      "total_fees": 0.6854490495084011,
+      "win_rate": 36.0,
+      "avg_pnl": 0.2802
+    },
+    "SOL/USDT:USDT": {
+      "trades": 21,
+      "wins": 8,
+      "net_pnl": 57.94864518146614,
+      "total_fees": 0.5352865689998307,
+      "win_rate": 38.1,
+      "avg_pnl": 2.7595
+    },
+    "ETH/USDT:USDT": {
+      "trades": 20,
+      "wins": 12,
+      "net_pnl": 53.29523863332829,
+      "total_fees": 0.9406104513198658,
+      "win_rate": 60.0,
+      "avg_pnl": 2.6648
+    },
+    "XAG/USDT:USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -4.705372705421503,
+      "total_fees": 0.01889684108622963,
+      "win_rate": 0.0,
+      "avg_pnl": -2.3527
+    },
+    "BCH/USDT:USDT": {
+      "trades": 8,
+      "wins": 6,
+      "net_pnl": 0.07937935500001003,
+      "total_fees": 0.108104795,
+      "win_rate": 75.0,
+      "avg_pnl": 0.0099
+    },
+    "GRASS/USDT:USDT": {
+      "trades": 3,
+      "wins": 2,
+      "net_pnl": 2.5142706999999898,
+      "total_fees": 0.0234927,
+      "win_rate": 66.7,
+      "avg_pnl": 0.8381
+    },
+    "QTUM/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 3.6885084999999886,
+      "total_fees": 0.010931249999999998,
+      "win_rate": 100.0,
+      "avg_pnl": 3.6885
+    },
+    "LINK/USDT:USDT": {
+      "trades": 29,
+      "wins": 12,
+      "net_pnl": -2.6658552498499977,
+      "total_fees": 0.4964895798500001,
+      "win_rate": 41.4,
+      "avg_pnl": -0.0919
+    },
+    "DOT/USDT:USDT": {
+      "trades": 18,
+      "wins": 7,
+      "net_pnl": -1.3399454600150131,
+      "total_fees": 0.357105970015,
+      "win_rate": 38.9,
+      "avg_pnl": -0.0744
+    },
+    "BTC/USDT:USDT": {
+      "trades": 17,
+      "wins": 7,
+      "net_pnl": 40.69072396723283,
+      "total_fees": 0.38562415264459465,
+      "win_rate": 41.2,
+      "avg_pnl": 2.3936
+    },
+    "LUMIA/USDT:USDT": {
+      "trades": 6,
+      "wins": 6,
+      "net_pnl": 1.9830783850000062,
+      "total_fees": 0.034576985000000005,
+      "win_rate": 100.0,
+      "avg_pnl": 0.3305
+    },
+    "IOTA/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.601304949999989,
+      "total_fees": 0.011528739999999999,
+      "win_rate": 100.0,
+      "avg_pnl": 0.6013
+    },
+    "ACT/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 1.592015095000008,
+      "total_fees": 0.01014806,
+      "win_rate": 100.0,
+      "avg_pnl": 1.592
+    },
+    "MANA/USDT:USDT": {
+      "trades": 4,
+      "wins": 1,
+      "net_pnl": 0.3440536680000099,
+      "total_fees": 0.164053216,
+      "win_rate": 25.0,
+      "avg_pnl": 0.086
+    },
+    "ARB/USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -0.014500941599999706,
+      "total_fees": 0.0109991184,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0073
+    },
+    "ALGO/USDT:USDT": {
+      "trades": 48,
+      "wins": 28,
+      "net_pnl": -0.2708777459999948,
+      "total_fees": 0.707048196,
+      "win_rate": 58.3,
+      "avg_pnl": -0.0056
+    },
+    "VET/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.03304026000000598,
+      "total_fees": 0.006032576,
+      "win_rate": 100.0,
+      "avg_pnl": 0.033
+    },
+    "SUI/USDT:USDT": {
+      "trades": 3,
+      "wins": 1,
+      "net_pnl": -0.6050739399999998,
+      "total_fees": 0.02067364,
+      "win_rate": 33.3,
+      "avg_pnl": -0.2017
+    },
+    "SEI/USDT:USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -0.8652778400000047,
+      "total_fees": 0.010922495,
+      "win_rate": 0.0,
+      "avg_pnl": -0.4326
+    },
+    "ORDI/USDT:USDT": {
+      "trades": 8,
+      "wins": 4,
+      "net_pnl": 0.5907523900000037,
+      "total_fees": 0.048152875000000005,
+      "win_rate": 50.0,
+      "avg_pnl": 0.0738
+    },
+    "MANA/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.0423368,
+      "total_fees": 0.0211684,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0423
+    },
+    "NEAR/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.0066176999999995175,
+      "total_fees": 0.0054567,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0066
+    },
+    "LTC/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.012985619999999594,
+      "total_fees": 0.005473319999999999,
+      "win_rate": 0.0,
+      "avg_pnl": -0.013
+    },
+    "ADA/USDT": {
+      "trades": 3,
+      "wins": 0,
+      "net_pnl": -1.9832621974044304,
+      "total_fees": 0.06838605264450973,
+      "win_rate": 0.0,
+      "avg_pnl": -0.6611
+    },
+    "TRX/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.009229519999999235,
+      "total_fees": 0.005473039999999999,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0092
+    },
+    "OP/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -3.092236000000003,
+      "total_fees": 0.005964,
+      "win_rate": 0.0,
+      "avg_pnl": -3.0922
+    },
+    "ALGO/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.05690976299999917,
+      "total_fees": 0.013495437,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0569
+    },
+    "LTC/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.1014600799999903,
+      "total_fees": 0.026332480000000002,
+      "win_rate": 0.0,
+      "avg_pnl": -0.1015
+    },
+    "APT/USDT:USDT": {
+      "trades": 5,
+      "wins": 2,
+      "net_pnl": -12.626956167849992,
+      "total_fees": 0.14465381885,
+      "win_rate": 40.0,
+      "avg_pnl": -2.5254
+    },
+    "MANTA/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.9350934319999987,
+      "total_fees": 0.005872888000000001,
+      "win_rate": 0.0,
+      "avg_pnl": -0.9351
+    },
+    "AAVE/USDT:USDT": {
+      "trades": 11,
+      "wins": 4,
+      "net_pnl": -0.2821725000000055,
+      "total_fees": 0.1663675,
+      "win_rate": 36.4,
+      "avg_pnl": -0.0257
+    },
+    "PEPE/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.2904877017000024,
+      "total_fees": 0.0058664145,
+      "win_rate": 0.0,
+      "avg_pnl": -0.2905
+    },
+    "FLOKI/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.1769797523199984,
+      "total_fees": 0.005563784380000001,
+      "win_rate": 0.0,
+      "avg_pnl": -0.177
+    },
+    "ETC/USDT:USDT": {
+      "trades": 2,
+      "wins": 1,
+      "net_pnl": -10.970759229999997,
+      "total_fees": 0.043933860000000005,
+      "win_rate": 50.0,
+      "avg_pnl": -5.4854
+    },
+    "UNI/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -7.022870000000026,
+      "total_fees": 0.026095,
+      "win_rate": 0.0,
+      "avg_pnl": -7.0229
+    },
+    "ATOM/USDT:USDT": {
+      "trades": 30,
+      "wins": 17,
+      "net_pnl": 1.6844776299999882,
+      "total_fees": 0.9159600299999999,
+      "win_rate": 56.7,
+      "avg_pnl": 0.0561
+    },
+    "ARB/USDT:USDT": {
+      "trades": 56,
+      "wins": 20,
+      "net_pnl": -2.1149991013351794,
+      "total_fees": 1.1443879741214045,
+      "win_rate": 35.7,
+      "avg_pnl": -0.0378
+    },
+    "FET/USDT:USDT": {
+      "trades": 25,
+      "wins": 13,
+      "net_pnl": -0.3537964300000051,
+      "total_fees": 0.4191404999999999,
+      "win_rate": 52.0,
+      "avg_pnl": -0.0142
+    },
+    "DOGE/USDT:USDT": {
+      "trades": 24,
+      "wins": 13,
+      "net_pnl": -4.882028436217535,
+      "total_fees": 0.5691295448993787,
+      "win_rate": 54.2,
+      "avg_pnl": -0.2034
+    },
+    "TRX/USDT:USDT": {
+      "trades": 9,
+      "wins": 1,
+      "net_pnl": -0.6408378824999943,
+      "total_fees": 0.18780788250000002,
+      "win_rate": 11.1,
+      "avg_pnl": -0.0712
+    },
+    "FIL/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.035958059999999535,
+      "total_fees": 0.01453194,
+      "win_rate": 100.0,
+      "avg_pnl": 0.036
+    },
+    "GRT/USDT:USDT": {
+      "trades": 6,
+      "wins": 2,
+      "net_pnl": -3.948655380499993,
+      "total_fees": 0.25529238049999997,
+      "win_rate": 33.3,
+      "avg_pnl": -0.6581
+    },
+    "INJ/USDT:USDT": {
+      "trades": 2,
+      "wins": 1,
+      "net_pnl": -0.0013858000000011583,
+      "total_fees": 0.0215858,
+      "win_rate": 50.0,
+      "avg_pnl": -0.0007
+    },
+    "XRP/USDT": {
+      "trades": 3,
+      "wins": 0,
+      "net_pnl": -0.6508474108453727,
+      "total_fees": 0.10133178137140798,
+      "win_rate": 0.0,
+      "avg_pnl": -0.2169
+    },
+    "AVAX/USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -1.4457558339886951,
+      "total_fees": 0.06083747263206577,
+      "win_rate": 0.0,
+      "avg_pnl": -0.7229
+    },
+    "BNB/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.3710364856988023,
+      "total_fees": 0.01355276,
+      "win_rate": 0.0,
+      "avg_pnl": -0.371
+    }
+  },
+  "by_symbol_dry": {
+    "BNB/USDT:USDT": {
+      "trades": 5,
+      "wins": 3,
+      "net_pnl": 23.05783199168981,
+      "total_fees": 0.3013484209147651,
+      "win_rate": 60.0,
+      "avg_pnl": 4.6116
+    },
+    "LINK/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.00831385485,
+      "total_fees": 0.00831385485,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0083
+    },
+    "XRP/USDT:USDT": {
+      "trades": 6,
+      "wins": 3,
+      "net_pnl": 14.363476835526503,
+      "total_fees": 0.4640463738756968,
+      "win_rate": 50.0,
+      "avg_pnl": 2.3939
+    },
+    "XRP/USDT": {
+      "trades": 3,
+      "wins": 0,
+      "net_pnl": -0.6508474108453727,
+      "total_fees": 0.10133178137140798,
+      "win_rate": 0.0,
+      "avg_pnl": -0.2169
+    },
+    "ADA/USDT:USDT": {
+      "trades": 7,
+      "wins": 3,
+      "net_pnl": -35.75972271982836,
+      "total_fees": 0.3987100792074126,
+      "win_rate": 42.9,
+      "avg_pnl": -5.1085
+    },
+    "AVAX/USDT:USDT": {
+      "trades": 7,
+      "wins": 3,
+      "net_pnl": -20.678891964383997,
+      "total_fees": 0.2984626772724428,
+      "win_rate": 42.9,
+      "avg_pnl": -2.9541
+    },
+    "BTC/USDT:USDT": {
+      "trades": 10,
+      "wins": 5,
+      "net_pnl": 41.99675441223282,
+      "total_fees": 0.34115650764459465,
+      "win_rate": 50.0,
+      "avg_pnl": 4.1997
+    },
+    "ETH/USDT:USDT": {
+      "trades": 11,
+      "wins": 6,
+      "net_pnl": 56.747831363950404,
+      "total_fees": 0.650502421191778,
+      "win_rate": 54.5,
+      "avg_pnl": 5.1589
+    },
+    "DOGE/USDT:USDT": {
+      "trades": 3,
+      "wins": 2,
+      "net_pnl": -4.232877473217542,
+      "total_fees": 0.15266450922937863,
+      "win_rate": 66.7,
+      "avg_pnl": -1.411
+    },
+    "SOL/USDT:USDT": {
+      "trades": 8,
+      "wins": 6,
+      "net_pnl": 72.13022578445147,
+      "total_fees": 0.3116984175205221,
+      "win_rate": 75.0,
+      "avg_pnl": 9.0163
+    },
+    "ADA/USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -1.97004049840443,
+      "total_fees": 0.06288758964450973,
+      "win_rate": 0.0,
+      "avg_pnl": -0.985
+    },
+    "AVAX/USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -1.4457558339886951,
+      "total_fees": 0.06083747263206577,
+      "win_rate": 0.0,
+      "avg_pnl": -0.7229
+    },
+    "BNB/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.3710364856988023,
+      "total_fees": 0.01355276,
+      "win_rate": 0.0,
+      "avg_pnl": -0.371
+    }
+  },
+  "by_symbol_live": {
+    "BNB/USDT:USDT": {
+      "trades": 30,
+      "wins": 12,
+      "net_pnl": 1.2695174618956435,
+      "total_fees": 0.48398426874806666,
+      "win_rate": 40.0,
+      "avg_pnl": 0.0423
+    },
+    "AVAX/USDT:USDT": {
+      "trades": 22,
+      "wins": 8,
+      "net_pnl": -2.230133003854968,
+      "total_fees": 0.3173667134046503,
+      "win_rate": 36.4,
+      "avg_pnl": -0.1014
+    },
+    "ADA/USDT:USDT": {
+      "trades": 6,
+      "wins": 1,
+      "net_pnl": -2.122744102506984,
+      "total_fees": 0.07983153312468828,
+      "win_rate": 16.7,
+      "avg_pnl": -0.3538
+    },
+    "XRP/USDT:USDT": {
+      "trades": 19,
+      "wins": 6,
+      "net_pnl": -7.358902852041213,
+      "total_fees": 0.22140267563270438,
+      "win_rate": 31.6,
+      "avg_pnl": -0.3873
+    },
+    "SOL/USDT:USDT": {
+      "trades": 13,
+      "wins": 2,
+      "net_pnl": -14.181580602985319,
+      "total_fees": 0.22358815147930872,
+      "win_rate": 15.4,
+      "avg_pnl": -1.0909
+    },
+    "ETH/USDT:USDT": {
+      "trades": 9,
+      "wins": 6,
+      "net_pnl": -3.4525927306221114,
+      "total_fees": 0.2901080301280877,
+      "win_rate": 66.7,
+      "avg_pnl": -0.3836
+    },
+    "XAG/USDT:USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -4.705372705421503,
+      "total_fees": 0.01889684108622963,
+      "win_rate": 0.0,
+      "avg_pnl": -2.3527
+    },
+    "BCH/USDT:USDT": {
+      "trades": 8,
+      "wins": 6,
+      "net_pnl": 0.07937935500001003,
+      "total_fees": 0.108104795,
+      "win_rate": 75.0,
+      "avg_pnl": 0.0099
+    },
+    "GRASS/USDT:USDT": {
+      "trades": 3,
+      "wins": 2,
+      "net_pnl": 2.5142706999999898,
+      "total_fees": 0.0234927,
+      "win_rate": 66.7,
+      "avg_pnl": 0.8381
+    },
+    "QTUM/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 3.6885084999999886,
+      "total_fees": 0.010931249999999998,
+      "win_rate": 100.0,
+      "avg_pnl": 3.6885
+    },
+    "LINK/USDT:USDT": {
+      "trades": 28,
+      "wins": 12,
+      "net_pnl": -2.6575413949999978,
+      "total_fees": 0.48817572500000006,
+      "win_rate": 42.9,
+      "avg_pnl": -0.0949
+    },
+    "DOT/USDT:USDT": {
+      "trades": 18,
+      "wins": 7,
+      "net_pnl": -1.3399454600150131,
+      "total_fees": 0.357105970015,
+      "win_rate": 38.9,
+      "avg_pnl": -0.0744
+    },
+    "BTC/USDT:USDT": {
+      "trades": 7,
+      "wins": 2,
+      "net_pnl": -1.30603044499999,
+      "total_fees": 0.044467645,
+      "win_rate": 28.6,
+      "avg_pnl": -0.1866
+    },
+    "LUMIA/USDT:USDT": {
+      "trades": 6,
+      "wins": 6,
+      "net_pnl": 1.9830783850000062,
+      "total_fees": 0.034576985000000005,
+      "win_rate": 100.0,
+      "avg_pnl": 0.3305
+    },
+    "IOTA/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.601304949999989,
+      "total_fees": 0.011528739999999999,
+      "win_rate": 100.0,
+      "avg_pnl": 0.6013
+    },
+    "ACT/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 1.592015095000008,
+      "total_fees": 0.01014806,
+      "win_rate": 100.0,
+      "avg_pnl": 1.592
+    },
+    "MANA/USDT:USDT": {
+      "trades": 4,
+      "wins": 1,
+      "net_pnl": 0.3440536680000099,
+      "total_fees": 0.164053216,
+      "win_rate": 25.0,
+      "avg_pnl": 0.086
+    },
+    "ARB/USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -0.014500941599999706,
+      "total_fees": 0.0109991184,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0073
+    },
+    "ALGO/USDT:USDT": {
+      "trades": 48,
+      "wins": 28,
+      "net_pnl": -0.2708777459999948,
+      "total_fees": 0.707048196,
+      "win_rate": 58.3,
+      "avg_pnl": -0.0056
+    },
+    "VET/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.03304026000000598,
+      "total_fees": 0.006032576,
+      "win_rate": 100.0,
+      "avg_pnl": 0.033
+    },
+    "SUI/USDT:USDT": {
+      "trades": 3,
+      "wins": 1,
+      "net_pnl": -0.6050739399999998,
+      "total_fees": 0.02067364,
+      "win_rate": 33.3,
+      "avg_pnl": -0.2017
+    },
+    "SEI/USDT:USDT": {
+      "trades": 2,
+      "wins": 0,
+      "net_pnl": -0.8652778400000047,
+      "total_fees": 0.010922495,
+      "win_rate": 0.0,
+      "avg_pnl": -0.4326
+    },
+    "ORDI/USDT:USDT": {
+      "trades": 8,
+      "wins": 4,
+      "net_pnl": 0.5907523900000037,
+      "total_fees": 0.048152875000000005,
+      "win_rate": 50.0,
+      "avg_pnl": 0.0738
+    },
+    "MANA/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.0423368,
+      "total_fees": 0.0211684,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0423
+    },
+    "NEAR/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.0066176999999995175,
+      "total_fees": 0.0054567,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0066
+    },
+    "LTC/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.012985619999999594,
+      "total_fees": 0.005473319999999999,
+      "win_rate": 0.0,
+      "avg_pnl": -0.013
+    },
+    "ADA/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.013221699000000373,
+      "total_fees": 0.005498463,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0132
+    },
+    "TRX/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.009229519999999235,
+      "total_fees": 0.005473039999999999,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0092
+    },
+    "OP/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -3.092236000000003,
+      "total_fees": 0.005964,
+      "win_rate": 0.0,
+      "avg_pnl": -3.0922
+    },
+    "ALGO/USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.05690976299999917,
+      "total_fees": 0.013495437,
+      "win_rate": 0.0,
+      "avg_pnl": -0.0569
+    },
+    "LTC/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.1014600799999903,
+      "total_fees": 0.026332480000000002,
+      "win_rate": 0.0,
+      "avg_pnl": -0.1015
+    },
+    "APT/USDT:USDT": {
+      "trades": 5,
+      "wins": 2,
+      "net_pnl": -12.626956167849992,
+      "total_fees": 0.14465381885,
+      "win_rate": 40.0,
+      "avg_pnl": -2.5254
+    },
+    "MANTA/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.9350934319999987,
+      "total_fees": 0.005872888000000001,
+      "win_rate": 0.0,
+      "avg_pnl": -0.9351
+    },
+    "AAVE/USDT:USDT": {
+      "trades": 11,
+      "wins": 4,
+      "net_pnl": -0.2821725000000055,
+      "total_fees": 0.1663675,
+      "win_rate": 36.4,
+      "avg_pnl": -0.0257
+    },
+    "PEPE/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.2904877017000024,
+      "total_fees": 0.0058664145,
+      "win_rate": 0.0,
+      "avg_pnl": -0.2905
+    },
+    "FLOKI/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -0.1769797523199984,
+      "total_fees": 0.005563784380000001,
+      "win_rate": 0.0,
+      "avg_pnl": -0.177
+    },
+    "ETC/USDT:USDT": {
+      "trades": 2,
+      "wins": 1,
+      "net_pnl": -10.970759229999997,
+      "total_fees": 0.043933860000000005,
+      "win_rate": 50.0,
+      "avg_pnl": -5.4854
+    },
+    "UNI/USDT:USDT": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl": -7.022870000000026,
+      "total_fees": 0.026095,
+      "win_rate": 0.0,
+      "avg_pnl": -7.0229
+    },
+    "ATOM/USDT:USDT": {
+      "trades": 30,
+      "wins": 17,
+      "net_pnl": 1.6844776299999882,
+      "total_fees": 0.9159600299999999,
+      "win_rate": 56.7,
+      "avg_pnl": 0.0561
+    },
+    "ARB/USDT:USDT": {
+      "trades": 56,
+      "wins": 20,
+      "net_pnl": -2.1149991013351794,
+      "total_fees": 1.1443879741214045,
+      "win_rate": 35.7,
+      "avg_pnl": -0.0378
+    },
+    "FET/USDT:USDT": {
+      "trades": 25,
+      "wins": 13,
+      "net_pnl": -0.3537964300000051,
+      "total_fees": 0.4191404999999999,
+      "win_rate": 52.0,
+      "avg_pnl": -0.0142
+    },
+    "DOGE/USDT:USDT": {
+      "trades": 21,
+      "wins": 11,
+      "net_pnl": -0.6491509629999925,
+      "total_fees": 0.41646503567000004,
+      "win_rate": 52.4,
+      "avg_pnl": -0.0309
+    },
+    "TRX/USDT:USDT": {
+      "trades": 9,
+      "wins": 1,
+      "net_pnl": -0.6408378824999943,
+      "total_fees": 0.18780788250000002,
+      "win_rate": 11.1,
+      "avg_pnl": -0.0712
+    },
+    "FIL/USDT:USDT": {
+      "trades": 1,
+      "wins": 1,
+      "net_pnl": 0.035958059999999535,
+      "total_fees": 0.01453194,
+      "win_rate": 100.0,
+      "avg_pnl": 0.036
+    },
+    "GRT/USDT:USDT": {
+      "trades": 6,
+      "wins": 2,
+      "net_pnl": -3.948655380499993,
+      "total_fees": 0.25529238049999997,
+      "win_rate": 33.3,
+      "avg_pnl": -0.6581
+    },
+    "INJ/USDT:USDT": {
+      "trades": 2,
+      "wins": 1,
+      "net_pnl": -0.0013858000000011583,
+      "total_fees": 0.0215858,
+      "win_rate": 50.0,
+      "avg_pnl": -0.0007
+    }
+  },
+  "by_hour": {
+    "16": {
+      "trades": 15,
+      "wins": 8,
+      "net_pnl": 5.497270260430173,
+      "win_rate": 53.3
+    },
+    "18": {
+      "trades": 31,
+      "wins": 18,
+      "net_pnl": 1.4132743254069209,
+      "win_rate": 58.1
+    },
+    "14": {
+      "trades": 14,
+      "wins": 5,
+      "net_pnl": 5.253655768103517,
+      "win_rate": 35.7
+    },
+    "22": {
+      "trades": 17,
+      "wins": 7,
+      "net_pnl": -2.020511925648926,
+      "win_rate": 41.2
+    },
+    "0": {
+      "trades": 32,
+      "wins": 11,
+      "net_pnl": -19.78326394119691,
+      "win_rate": 34.4
+    },
+    "1": {
+      "trades": 14,
+      "wins": 3,
+      "net_pnl": -14.710838702034994,
+      "win_rate": 21.4
+    },
+    "15": {
+      "trades": 18,
+      "wins": 11,
+      "net_pnl": 6.138028556500012,
+      "win_rate": 61.1
+    },
+    "17": {
+      "trades": 33,
+      "wins": 12,
+      "net_pnl": -26.84825802537499,
+      "win_rate": 36.4
+    },
+    "19": {
+      "trades": 32,
+      "wins": 16,
+      "net_pnl": 64.87370362722055,
+      "win_rate": 50.0
+    },
+    "20": {
+      "trades": 13,
+      "wins": 4,
+      "net_pnl": -1.5048077879999886,
+      "win_rate": 30.8
+    },
+    "21": {
+      "trades": 27,
+      "wins": 12,
+      "net_pnl": 2.9153946279999783,
+      "win_rate": 44.4
+    },
+    "7": {
+      "trades": 31,
+      "wins": 14,
+      "net_pnl": -1.521251790011991,
+      "win_rate": 45.2
+    },
+    "11": {
+      "trades": 37,
+      "wins": 6,
+      "net_pnl": -127.18478175506544,
+      "win_rate": 16.2
+    },
+    "12": {
+      "trades": 16,
+      "wins": 7,
+      "net_pnl": -1.2755537334999878,
+      "win_rate": 43.8
+    },
+    "13": {
+      "trades": 23,
+      "wins": 15,
+      "net_pnl": 65.72777742322049,
+      "win_rate": 65.2
+    },
+    "4": {
+      "trades": 17,
+      "wins": 6,
+      "net_pnl": 1.368658759045644,
+      "win_rate": 35.3
+    },
+    "23": {
+      "trades": 16,
+      "wins": 5,
+      "net_pnl": -0.8809663399999901,
+      "win_rate": 31.2
+    },
+    "5": {
+      "trades": 9,
+      "wins": 2,
+      "net_pnl": -1.2551548249999962,
+      "win_rate": 22.2
+    },
+    "3": {
+      "trades": 17,
+      "wins": 12,
+      "net_pnl": 1.2440255025098004,
+      "win_rate": 70.6
+    },
+    "8": {
+      "trades": 21,
+      "wins": 11,
+      "net_pnl": 22.790358413309022,
+      "win_rate": 52.4
+    },
+    "2": {
+      "trades": 20,
+      "wins": 10,
+      "net_pnl": -2.048713909380032,
+      "win_rate": 50.0
+    },
+    "6": {
+      "trades": 6,
+      "wins": 2,
+      "net_pnl": -0.20170109499999936,
+      "win_rate": 33.3
+    },
+    "9": {
+      "trades": 24,
+      "wins": 14,
+      "net_pnl": 95.07793385456749,
+      "win_rate": 58.3
+    },
+    "10": {
+      "trades": 5,
+      "wins": 1,
+      "net_pnl": 0.07099802517680087,
+      "win_rate": 20.0
+    }
+  },
+  "by_reason": {
+    "stop_loss": {
+      "count": 96,
+      "net_pnl": -243.01085672526688
+    },
+    "take_profit": {
+      "count": 34,
+      "net_pnl": 314.23167944972886
+    },
+    "trailing_stop": {
+      "count": 57,
+      "net_pnl": 33.918248473510346
+    },
+    "ghost_sync": {
+      "count": 96,
+      "net_pnl": -8.419846181455188
+    },
+    "mcp_brain_close": {
+      "count": 44,
+      "net_pnl": -20.090345986999967
+    },
+    "STALE": {
+      "count": 22,
+      "net_pnl": 0.19335954547499523
+    },
+    "mcp_take_profit": {
+      "count": 15,
+      "net_pnl": 8.104518786000014
+    },
+    "Trend flipped down, -1.2% cut loss": {
+      "count": 1,
+      "net_pnl": -0.3501777300000006
+    },
+    "systematic_close": {
+      "count": 17,
+      "net_pnl": -3.5826503808500028
+    },
+    "paper_ghost_cleanup": {
+      "count": 1,
+      "net_pnl": -0.00831385485
+    },
+    "reconciled_from_exchange": {
+      "count": 54,
+      "net_pnl": -1.7929750000000004
+    },
+    "AGE_LIMIT": {
+      "count": 2,
+      "net_pnl": -0.12835176499999654
+    },
+    "ALGO stale 194m pnl=+0.2%": {
+      "count": 1,
+      "net_pnl": -0.0037230000000011646
+    },
+    "ALGO stale 181m pnl=+0.0%": {
+      "count": 1,
+      "net_pnl": -0.026949010000000342
+    },
+    "ALGO stale 191m pnl=+0.0%": {
+      "count": 1,
+      "net_pnl": -0.09229219000000174
+    },
+    "ALGO -0.0% + reversal + stale 97m": {
+      "count": 1,
+      "net_pnl": -0.03746605499999946
+    },
+    "sl_placement_failed": {
+      "count": 13,
+      "net_pnl": -1.3284267325000019
+    },
+    "1h/15m EMA=up conflicts with short": {
+      "count": 1,
+      "net_pnl": -0.08974162499999931
+    },
+    "reconciled_no_context": {
+      "count": 18,
+      "net_pnl": -1.78748
+    },
+    "506m open, -3.2% past SL, MACD neg, 15m EMA down": {
+      "count": 1,
+      "net_pnl": -0.4040482500000023
+    },
+    "-3.7% past SL; 15m mixed+RSI42 no recovery": {
+      "count": 1,
+      "net_pnl": -0.08736939300000007
+    },
+    "4h ADX=15.4 below 20, 15m EMA down, MACD negative": {
+      "count": 1,
+      "net_pnl": -0.06231757000000128
+    },
+    "Past SL at -3.5%; breach confirmed": {
+      "count": 1,
+      "net_pnl": -0.19519769999999892
+    },
+    "Past 2.5% SL, 1h EMA mixed": {
+      "count": 1,
+      "net_pnl": -0.16767747999999824
+    },
+    "Trend=down, lock +0.5% profit": {
+      "count": 1,
+      "net_pnl": 0.0002712200000002038
+    },
+    "Manual long -5.3% no confirmed SL; double ARB exposure": {
+      "count": 1,
+      "net_pnl": -0.2601775164999986
+    },
+    "15m EMA reversed up, OB +0.393 bullish vs short": {
+      "count": 1,
+      "net_pnl": -0.41341349999999766
+    },
+    "Lock +2%; OB imb -0.712 heavy sell pressure": {
+      "count": 1,
+      "net_pnl": 0.0673
+    },
+    "Past SL at -3.5%; SL limit was 2.5%": {
+      "count": 1,
+      "net_pnl": -0.3632601449999969
+    },
+    "Duplicate ATOM exposure; -2.2% near SL": {
+      "count": 1,
+      "net_pnl": -0.10064284999999969
+    },
+    "ghost_reconciled": {
+      "count": 2,
+      "net_pnl": -0.5764015200150026
+    }
+  },
+  "knowledge_status": {
+    "dry_run_trades": 66,
+    "live_trades": 392,
+    "graduated": true,
+    "star_strategies": [],
+    "caution_strategies": [
+      "MultiTF",
+      "Supertrend",
+      "TrendFollowing",
+      "reconciled_exchange",
+      "manual"
+    ],
+    "star_symbols": [
+      "ETH/USDT:USDT",
+      "BCH/USDT:USDT",
+      "LUMIA/USDT:USDT"
+    ],
+    "caution_symbols": [
+      "ADA/USDT:USDT",
+      "SOL/USDT:USDT",
+      "BTC/USDT:USDT",
+      "TRX/USDT:USDT"
+    ],
+    "best_hours": [
+      8,
+      20,
+      7,
+      23,
+      18
+    ],
+    "last_updated": "2026-04-26T18:33:51.945317",
+    "strategy_count": 14,
+    "blend_pct": 100
+  },
+  "suggestions": [
+    "UNDERPERFORMING: 'MultiTF' WR=48% (58 trades) \u2014 auto-disabled (below 50% threshold).",
+    "UNDERPERFORMING: 'Supertrend' WR=41% (39 trades) \u2014 auto-disabled (below 50% threshold).",
+    "UNDERPERFORMING: 'claude_portfolio' WR=44% (185 trades) \u2014 auto-disabled (below 50% threshold).",
+    "UNDERPERFORMING: 'reconciled_exchange' WR=47% (72 trades) \u2014 auto-disabled (below 50% threshold).",
+    "UNDERPERFORMING: 'manual' WR=34% (61 trades) \u2014 auto-disabled (below 50% threshold).",
+    "BEST HOURS: Most profitable trades at 03:00 UTC, 13:00 UTC, 15:00 UTC."
+  ]
+}

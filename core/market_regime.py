@@ -73,7 +73,7 @@ def _atr(high, low, close, p=14) -> pd.Series:
         (high - close.shift(1)).abs(),
         (low - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 
 def _adx(high, low, close, p=14) -> pd.Series:
@@ -82,10 +82,10 @@ def _adx(high, low, close, p=14) -> pd.Series:
     down = -low.diff()
     pdm = up.where((up > down) & (up > 0), 0.0)
     mdm = down.where((down > up) & (down > 0), 0.0)
-    pdi = 100 * pdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
-    mdi = 100 * mdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
+    pdi = 100 * pdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
+    mdi = 100 * mdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
     dx = (100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan))
-    return dx.ewm(span=p, adjust=False).mean()
+    return dx.ewm(com=p-1, adjust=False).mean()
 
 
 def _hurst_exponent(series: pd.Series, max_lag: int = 20) -> float:
@@ -253,11 +253,17 @@ class MarketRegimeDetector:
                         timeframe: str = "1h", lookback: int = 200) -> dict:
         """
         Return full regime analysis dict (for dashboard/logging).
+        Calls detect() first (populates cache), then computes extra indicators
+        from a single OHLCV fetch — avoids double API call.
         """
         try:
+            # detect() fetches OHLCV and caches the regime
+            regime = self.detect(exchange, symbol, timeframe, lookback)
+
+            # Fetch OHLCV once for the detailed indicators
             raw = exchange.fetch_ohlcv(symbol, timeframe, limit=lookback)
             if not raw or len(raw) < 60:
-                return {"regime": REGIME_UNKNOWN}
+                return {"regime": regime}
 
             df = pd.DataFrame(
                 raw, columns=["ts", "open", "high", "low", "close", "volume"]
@@ -270,8 +276,6 @@ class MarketRegimeDetector:
 
             adx_val = float(adx_series.dropna().iloc[-1]) if not adx_series.dropna().empty else 0
             atr_pct = float(atr_series.iloc[-1] / df["close"].iloc[-1]) if len(df) > 0 else 0
-
-            regime = self.detect(exchange, symbol, timeframe, lookback)
 
             return {
                 "regime": regime,

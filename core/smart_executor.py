@@ -114,8 +114,15 @@ class SmartExecutor:
 
         Returns the fill result dict, or None on failure.
         """
-        if params is None:
-            params = {}
+        # Copy caller's params and strip any clientOrderId/newClientOrderId.
+        # This path may fire up to 2 physical HTTP create_order calls
+        # (limit, then market fallback). Bybit reserves orderLinkId even
+        # after cancellation, so reusing the same ID yields retCode 110072
+        # "OrderLinkedID is duplicate". base.create_order's setdefault()
+        # will assign a fresh UUID per call when no ID is present.
+        params = dict(params) if params else {}
+        params.pop("clientOrderId", None)
+        params.pop("newClientOrderId", None)
 
         entry_price = self.get_entry_price(exchange, symbol, side, market_type)
         if entry_price <= 0:
@@ -137,6 +144,7 @@ class SmartExecutor:
                 amount=amount,
                 price=entry_price,
                 params=params,
+                market_type=market_type,
             )
             order_id = order.get("id")
 
@@ -183,8 +191,12 @@ class SmartExecutor:
         TWAP execution: split large order into smaller slices
         executed over time to reduce market impact.
         """
-        if params is None:
-            params = {}
+        # Strip clientOrderId/newClientOrderId — each slice (and each
+        # limit+market fallback inside a slice) must get its own fresh
+        # UUID or Bybit rejects with 110072 "OrderLinkedID is duplicate".
+        params = dict(params) if params else {}
+        params.pop("clientOrderId", None)
+        params.pop("newClientOrderId", None)
 
         slice_amount = total_amount / self.twap_slices
         results = []

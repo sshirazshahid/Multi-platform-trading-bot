@@ -1,0 +1,360 @@
+{
+  "binance": {
+    "BTC": {
+      "coin": "BTC",
+      "exchange": "binance",
+      "balance": 0.00055992,
+      "avg_cost": 67669.85571428572,
+      "current_price": 77925.6,
+      "unrealized_pnl": 5.7423963404571445,
+      "unrealized_pnl_pct": 0.1515555808041897,
+      "peak_price": 79386.32,
+      "last_updated": 1777209356.4425495
+    },
+    "LTC": {
+      "coin": "LTC",
+      "exchange": "binance",
+      "balance": 0.102,
+      "avg_cost": 53.66,
+      "current_price": 56.12,
+      "unrealized_pnl": 0.2509200000000001,
+      "unrealized_pnl_pct": 0.04584420424897505,
+      "peak_price": 56.7,
+      "last_updated": 1777209356.8570619
+    },
+    "ETH": {
+      "coin": "ETH",
+      "exchange": "binance",
+      "balance": 0.0171971,
+      "avg_cost": 2067.2525,
+      "current_price": 2331.54,
+      "unrealized_pnl": 4.544978566249998,
+      "unrealized_pnl_pct": 0.12784480850791083,
+      "peak_price": 2419.79,
+      "last_updated": 1777209357.2554476
+    },
+    "BNB": {
+      "coin": "BNB",
+      "exchange": "binance",
+      "balance": 0.04814231,
+      "avg_cost": 591.6138775510204,
+      "current_price": 631.56,
+      "unrealized_pnl": 1.9230986102367307,
+      "unrealized_pnl_pct": 0.06752059741116295,
+      "peak_price": 651.74,
+      "last_updated": 1777209357.6521883
+    },
+    "TRX": {
+      "coin": "TRX",
+      "exchange": "binance",
+      "balance": 168.2,
+      "avg_cost": 0.31767170035671816,
+      "current_price": 0.3237,
+      "unrealized_pnl": 1.013960000000004,
+      "unrealized_pnl_pct": 0.018976508252112372,
+      "peak_price": 0.3354,
+      "last_updated": 1777209358.0505805
+    },
+    "LINK": {
+      "coin": "LINK",
+      "exchange": "binance",
+      "balance": 11.38255386,
+      "avg_cost": 9.45,
+      "current_price": 9.45,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 9.54,
+      "last_updated": 1777209358.4488184
+    },
+    "ADA": {
+      "coin": "ADA",
+      "exchange": "binance",
+      "balance": 24.20302689,
+      "avg_cost": 0.2474,
+      "current_price": 0.2529,
+      "unrealized_pnl": 0.1331166478950001,
+      "unrealized_pnl_pct": 0.022231204527081667,
+      "peak_price": 0.2565,
+      "last_updated": 1777209359.2762973
+    },
+    "VET": {
+      "coin": "VET",
+      "exchange": "binance",
+      "balance": 2433.80493112,
+      "avg_cost": 0.007247761798340984,
+      "current_price": 0.007387,
+      "unrealized_pnl": 0.3388786217979956,
+      "unrealized_pnl_pct": 0.019211200027419266,
+      "peak_price": 0.007452,
+      "last_updated": 1777209359.6743853
+    },
+    "ATOM": {
+      "coin": "ATOM",
+      "exchange": "binance",
+      "balance": 17.47045795,
+      "avg_cost": 1.7137927876359473,
+      "current_price": 2.025,
+      "unrealized_pnl": 5.436932517342901,
+      "unrealized_pnl_pct": 0.18158975496293242,
+      "peak_price": 2.054,
+      "last_updated": 1777209360.4862583
+    },
+    "ALGO": {
+      "coin": "ALGO",
+      "exchange": "binance",
+      "balance": 248.84045155,
+      "avg_cost": 0.11432222222222223,
+      "current_price": 0.1186,
+      "unrealized_pnl": 1.0644841538527756,
+      "unrealized_pnl_pct": 0.037418602390902826,
+      "peak_price": 0.1206,
+      "last_updated": 1777209360.8977768
+    },
+    "DOGE": {
+      "coin": "DOGE",
+      "exchange": "binance",
+      "balance": 404.39012143,
+      "avg_cost": 0.09158,
+      "current_price": 0.09856,
+      "unrealized_pnl": 2.8226430475814004,
+      "unrealized_pnl_pct": 0.07621751474120987,
+      "peak_price": 0.09898,
+      "last_updated": 1777209361.6446939
+    },
+    "SOL": {
+      "coin": "SOL",
+      "exchange": "binance",
+      "balance": 0.444925,
+      "avg_cost": 80.24098876404493,
+      "current_price": 86.11,
+      "unrealized_pnl": 2.61126982415731,
+      "unrealized_pnl_pct": 0.07314230951482129,
+      "peak_price": 89.16,
+      "last_updated": 1777209362.0572047
+    },
+    "NEAR": {
+      "coin": "NEAR",
+      "exchange": "binance",
+      "balance": 4.3,
+      "avg_cost": 1.269,
+      "current_price": 1.397,
+      "unrealized_pnl": 0.5504000000000004,
+      "unrealized_pnl_pct": 0.1008668242710797,
+      "peak_price": 1.429,
+      "last_updated": 1777209362.4695818
+    },
+    "FIL": {
+      "coin": "FIL",
+      "exchange": "binance",
+      "balance": 7.12,
+      "avg_cost": 0.8424996486296555,
+      "current_price": 0.947,
+      "unrealized_pnl": 0.7440425017568523,
+      "unrealized_pnl_pct": 0.12403607709548195,
+      "peak_price": 0.962,
+      "last_updated": 1777209362.8678188
+    },
+    "GRT": {
+      "coin": "GRT",
+      "exchange": "binance",
+      "balance": 960.88255506,
+      "avg_cost": 0.02497,
+      "current_price": 0.02497,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.0255,
+      "last_updated": 1777209363.2807112
+    },
+    "SUI": {
+      "coin": "SUI",
+      "exchange": "binance",
+      "balance": 318.79435577,
+      "avg_cost": 0.9442,
+      "current_price": 0.9442,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.9731,
+      "last_updated": 1777209363.6777413
+    }
+  },
+  "bybit": {
+    "ARB": {
+      "coin": "ARB",
+      "exchange": "bybit",
+      "balance": 305.57412,
+      "avg_cost": 0.13014,
+      "current_price": 0.13014,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.13272,
+      "last_updated": 1777209364.0594378
+    },
+    "SAND": {
+      "coin": "SAND",
+      "exchange": "bybit",
+      "balance": 77.64228,
+      "avg_cost": 0.08014,
+      "current_price": 0.08014,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.08602,
+      "last_updated": 1777209364.313806
+    },
+    "BTC": {
+      "coin": "BTC",
+      "exchange": "bybit",
+      "balance": 0.00043457,
+      "avg_cost": 77932.6,
+      "current_price": 77932.6,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 79334.2,
+      "last_updated": 1777209364.7429054
+    },
+    "ETH": {
+      "coin": "ETH",
+      "exchange": "bybit",
+      "balance": 0.02833164,
+      "avg_cost": 2331.57,
+      "current_price": 2331.57,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 2419.2,
+      "last_updated": 1777209364.9975603
+    },
+    "AVAX": {
+      "coin": "AVAX",
+      "exchange": "bybit",
+      "balance": 1.963035,
+      "avg_cost": 9.444,
+      "current_price": 9.444,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 9.646,
+      "last_updated": 1777209365.4592884
+    },
+    "DOGE": {
+      "coin": "DOGE",
+      "exchange": "bybit",
+      "balance": 192.6072,
+      "avg_cost": 0.09851,
+      "current_price": 0.09851,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.09897,
+      "last_updated": 1777209365.8878636
+    },
+    "NEAR": {
+      "coin": "NEAR",
+      "exchange": "bybit",
+      "balance": 4.93506,
+      "avg_cost": 1.397,
+      "current_price": 1.397,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 1.43,
+      "last_updated": 1777209366.5081048
+    },
+    "MANA": {
+      "coin": "MANA",
+      "exchange": "bybit",
+      "balance": 240.0689,
+      "avg_cost": 0.09442,
+      "current_price": 0.09442,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.10081,
+      "last_updated": 1777209367.1279624
+    },
+    "SUI": {
+      "coin": "SUI",
+      "exchange": "bybit",
+      "balance": 6.68331,
+      "avg_cost": 0.9439,
+      "current_price": 0.9439,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.9731,
+      "last_updated": 1777209367.5732753
+    },
+    "ALGO": {
+      "coin": "ALGO",
+      "exchange": "bybit",
+      "balance": 59.0301,
+      "avg_cost": 0.11843,
+      "current_price": 0.11843,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.12056,
+      "last_updated": 1777209368.004458
+    },
+    "FET": {
+      "coin": "FET",
+      "exchange": "bybit",
+      "balance": 100.57932,
+      "avg_cost": 0.2097,
+      "current_price": 0.2097,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.217,
+      "last_updated": 1777209368.6404335
+    },
+    "SOL": {
+      "coin": "SOL",
+      "exchange": "bybit",
+      "balance": 0.1474524,
+      "avg_cost": 86.12,
+      "current_price": 86.12,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 89.17,
+      "last_updated": 1777209368.87865
+    },
+    "OP": {
+      "coin": "OP",
+      "exchange": "bybit",
+      "balance": 108.1917,
+      "avg_cost": 0.1256,
+      "current_price": 0.1256,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.1323,
+      "last_updated": 1777209369.1332831
+    },
+    "BNB": {
+      "coin": "BNB",
+      "exchange": "bybit",
+      "balance": 0.0195804,
+      "avg_cost": 631.4,
+      "current_price": 631.4,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 651.9,
+      "last_updated": 1777209369.5810058
+    },
+    "FIL": {
+      "coin": "FIL",
+      "exchange": "bybit",
+      "balance": 7.13286,
+      "avg_cost": 0.9468,
+      "current_price": 0.9468,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "peak_price": 0.9617,
+      "last_updated": 1777209370.014122
+    }
+  },
+  "bitget": {
+    "BNB": {
+      "coin": "BNB",
+      "exchange": "bitget",
+      "balance": 0.0097902,
+      "avg_cost": 606.9,
+      "current_price": 631.5,
+      "unrealized_pnl": 0.24083892000000023,
+      "unrealized_pnl_pct": 0.0405338606030648,
+      "peak_price": 651.8,
+      "last_updated": 1777209371.7053351
+    }
+  }
+}

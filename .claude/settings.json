@@ -1,5 +1,4 @@
 {
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": true
-  }
+  "model": "opus",
+  "enabledPlugins": {}
 }

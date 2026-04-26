@@ -145,11 +145,13 @@ class ProbabilityCalibrator:
         }
 
     def _bucket_key(self, conf: float) -> str:
-        """Map confidence to bucket key string."""
-        for i, b in enumerate(self.BUCKETS):
-            if conf < b + self.BUCKET_SIZE:
-                return f"{b:.2f}"
-        return f"{self.BUCKETS[-1]:.2f}"
+        """Map confidence to bucket key string using bisect for correct boundaries."""
+        # Find the rightmost bucket whose lower bound <= conf
+        import bisect
+        idx = bisect.bisect_right(self.BUCKETS, conf) - 1
+        if idx < 0:
+            idx = 0
+        return f"{self.BUCKETS[idx]:.2f}"
 
     def _save(self):
         try:

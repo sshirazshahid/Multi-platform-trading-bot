@@ -125,14 +125,16 @@ def calculate_metrics(trades: list, label: str) -> dict:
             max_consec_losses = max(max_consec_losses, current_losses)
 
     # Sharpe ratio (annualised, assuming ~3 trades/day)
+    # Use pnl_pct returns for dimensionally correct Sharpe
     sharpe = 0.0
-    if len(pnls) >= 2:
-        avg = sum(pnls) / len(pnls)
-        std = math.sqrt(sum((x - avg) ** 2 for x in pnls) / len(pnls))
+    pnl_pcts = [t.get("pnl_pct", 0) or 0 for t in trades]
+    if len(pnl_pcts) >= 2:
+        avg = sum(pnl_pcts) / len(pnl_pcts)
+        std = math.sqrt(sum((x - avg) ** 2 for x in pnl_pcts) / (len(pnl_pcts) - 1))
         if std > 0:
             sharpe = (avg / std) * math.sqrt(252 * 3)  # annualised
 
-    # Max drawdown
+    # Max drawdown (as percentage of starting balance)
     running = 0.0
     peak    = 0.0
     max_dd  = 0.0

@@ -9,7 +9,7 @@ function Show-Header {
     Clear-Host
     Write-Host ""
     Write-Host "  ============================================================" -ForegroundColor Cyan
-    Write-Host "    Trading Bot  |  Binance + MEXC" -ForegroundColor Cyan
+    Write-Host "    Trading Bot  |  Binance + Bybit + Bitget" -ForegroundColor Cyan
     Write-Host "    Trend Following  /  Grid Trading  /  Scalping" -ForegroundColor DarkCyan
     Write-Host "  ============================================================" -ForegroundColor Cyan
     Write-Host ""
@@ -118,7 +118,7 @@ function Run-Backtest {
     $days = Read-Host "  Days of history [90]"
     if (-not $days) { $days = "90" }
 
-    $ex = Read-Host "  Exchange: binance or mexc [binance]"
+    $ex = Read-Host "  Exchange: binance, bybit, or bitget [binance]"
     if (-not $ex) { $ex = "binance" }
 
     Write-Host ""

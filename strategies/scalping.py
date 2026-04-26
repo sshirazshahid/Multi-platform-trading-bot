@@ -18,8 +18,8 @@ def _ema(s, p): return s.ewm(span=p, adjust=False).mean()
 
 def _rsi(s, p=14):
     d = s.diff()
-    g = d.clip(lower=0).ewm(span=p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(span=p, adjust=False).mean()
+    g = d.clip(lower=0).ewm(com=p-1, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(com=p-1, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def _bbands(s, p=20, std=2.0):
@@ -55,6 +55,7 @@ class ScalpingStrategy(BaseStrategy):
         }
 
     def generate_signal(self, df: pd.DataFrame):
+        df = df.copy()  # Don't mutate shared/cached DataFrame
         df["ema_fast"]  = _ema(df["close"], self.cfg["fast_ema"])
         df["ema_slow"]  = _ema(df["close"], self.cfg["slow_ema"])
         df["rsi"]       = _rsi(df["close"], self.cfg["rsi_period"])
@@ -127,6 +128,12 @@ class ScalpingStrategy(BaseStrategy):
         else:
             sl = current_price * (1 + self.cfg["stop_loss"])
             tp = current_price * (1 - self.cfg["take_profit"])
+
+        rr = ((tp - current_price) / max(current_price - sl, 1e-8)) if signal == "buy" \
+             else ((current_price - tp) / max(sl - current_price, 1e-8))
+        if rr < RISK.get("min_rr_ratio", 1.5):
+            logger.debug(f"[Scalping] {symbol}: R:R {rr:.2f} too low — skipped")
+            return
 
         pos = self.order_manager.open_position(
             exchange=exchange, symbol=symbol, side=signal,

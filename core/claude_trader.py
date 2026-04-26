@@ -18,8 +18,8 @@ Claude's analysis covers:
   - Overall portfolio allocation suggestion
   - Risk warnings
 
-The Claude model used: claude-sonnet-4-20250514 (Sonnet 4 — best balance of
-speed and analytical depth for financial decisions)
+The Claude model used: claude-opus-4-7 (Opus 4.7 — deepest reasoning
+for financial decisions; Max subscription via CLI when available)
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ TRADES_FILE  = Path("data/claude_trades.json")
 REPORT_FILE  = Path("data/claude_analysis/latest_report.html")
 
 # Claude model for API fallback
-CLAUDE_MODEL   = "claude-sonnet-4-20250514"
+CLAUDE_MODEL   = "claude-opus-4-7"
 
 # Minimum confidence for Claude to place a trade
 MIN_CONFIDENCE = 0.60
@@ -57,8 +57,8 @@ def _ema(s, p):
 
 def _rsi(s, p=14):
     d = s.diff()
-    g = d.clip(lower=0).ewm(span=p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(span=p, adjust=False).mean()
+    g = d.clip(lower=0).ewm(com=p-1, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(com=p-1, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def _atr(high, low, close, p=14):
@@ -67,7 +67,7 @@ def _atr(high, low, close, p=14):
         (high - close.shift(1)).abs(),
         (low  - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 def _adx(high, low, close, p=14):
     tr   = _atr(high, low, close, p)
@@ -75,10 +75,10 @@ def _adx(high, low, close, p=14):
     down = -low.diff()
     pdm  = up.where((up > down) & (up > 0), 0.0)
     mdm  = down.where((down > up) & (down > 0), 0.0)
-    pdi  = 100 * pdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
-    mdi  = 100 * mdm.ewm(span=p, adjust=False).mean() / tr.replace(0, np.nan)
+    pdi  = 100 * pdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
+    mdi  = 100 * mdm.ewm(com=p-1, adjust=False).mean() / tr.replace(0, np.nan)
     dx   = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
-    return dx.ewm(span=p, adjust=False).mean(), pdi, mdi
+    return dx.ewm(com=p-1, adjust=False).mean(), pdi, mdi
 
 def _bbands(s, p=20, std=2.0):
     mid   = s.rolling(p).mean()
@@ -239,10 +239,11 @@ class ClaudeTrader:
         started_at = datetime.now()
 
         # ── 1. Connect exchanges ──────────────────────────────────────
-        from exchanges import BinanceClient, MEXCClient
+        from exchanges import BinanceClient, BybitClient, BitgetClient
         exchanges = {
             "binance": BinanceClient(),
-            "mexc":    MEXCClient(),
+            "bybit":   BybitClient(),
+            "bitget":  BitgetClient(),
         }
         active = {n: ex for n, ex in exchanges.items()
                   if getattr(ex, "_connected", False)}
@@ -557,7 +558,14 @@ ONLY return the JSON object. No other text."""
             )
             return None
 
-        # Validate R:R
+        # Validate SL is set and R:R is acceptable
+        if sl <= 0:
+            logger.warning("[ClaudeTrader] {} SL=0 — invalid, skipped".format(symbol))
+            return None
+        if action == "BUY" and entry <= sl:
+            logger.warning("[ClaudeTrader] {} BUY SL={:.4f} >= entry={:.4f} — invalid".format(
+                symbol, sl, entry))
+            return None
         if action == "BUY" and (entry - sl) > 0:
             rr = (tp - entry) / (entry - sl)
             if rr < 1.5:
@@ -567,6 +575,10 @@ ONLY return the JSON object. No other text."""
                     )
                 )
                 return None
+        elif action == "SELL" and sl <= entry:
+            logger.warning("[ClaudeTrader] {} SELL SL={:.4f} <= entry={:.4f} — invalid".format(
+                symbol, sl, entry))
+            return None
         elif action == "SELL" and (sl - entry) > 0:
             rr = (entry - tp) / (sl - entry)
             if rr < 1.5:
@@ -581,8 +593,9 @@ ONLY return the JSON object. No other text."""
 
         # Paper trade execution
         trade_id    = "CLAUDE-{}".format(uuid.uuid4().hex[:8].upper())
-        start_bal   = 1000.0   # paper wallet
-        pos_size_pct= 0.05     # 5% of balance per Claude trade
+        from config import DRY_RUN_BALANCE
+        start_bal   = DRY_RUN_BALANCE   # use configured paper balance
+        pos_size_pct= 0.05              # 5% of balance per Claude trade
         leverage    = 2 if market_type == "futures" else 1
         notional    = start_bal * pos_size_pct * leverage
         qty         = notional / entry if entry > 0 else 0

@@ -54,7 +54,7 @@ def _atr(high, low, close, p=14):
         (high - close.shift(1)).abs(),
         (low - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 
 class FundingRateArbStrategy(BaseStrategy):
@@ -73,7 +73,7 @@ class FundingRateArbStrategy(BaseStrategy):
         """
         # Check cache (funding rates change every 8h, no need to spam)
         cached = self._funding_cache.get(symbol)
-        if cached and (time.time() - cached[1]) < 300:  # 5 min cache
+        if cached and (time.time() - cached[1]) < 1800:  # 30 min cache (matches check interval)
             return cached[0]
 
         try:
@@ -212,26 +212,3 @@ class FundingRateArbStrategy(BaseStrategy):
         )
         return pos
 
-    def run_cross_exchange(self, exchanges: dict, symbol: str):
-        """
-        Cross-exchange funding arb: find the exchange with the most extreme
-        funding rate and trade there.
-        """
-        rates = self._get_multi_exchange_funding(exchanges, symbol)
-        if len(rates) < 2:
-            return
-
-        # Find the exchange with the most extreme funding
-        best_ex = None
-        best_rate = 0
-        for ex_name, rate in rates.items():
-            if abs(rate) > abs(best_rate):
-                best_rate = rate
-                best_ex = ex_name
-
-        if best_ex and abs(best_rate) >= self.cfg["min_funding_edge"]:
-            logger.info(
-                f"[FundingArb] {symbol}: Best funding on {best_ex} "
-                f"({best_rate*100:.4f}%) | Rates: "
-                + ", ".join(f"{k}={v*100:.4f}%" for k, v in rates.items()))
-            self.run(exchanges[best_ex], symbol)

@@ -16,7 +16,7 @@ import json
 import time
 from collections import defaultdict
 from pathlib     import Path
-from datetime    import datetime
+from datetime    import datetime, timezone
 from loguru      import logger
 
 from core.knowledge_model import KnowledgeModel
@@ -190,7 +190,7 @@ class LearningEngine:
                 by_symbol[sym]["total_fees"] += fee
                 if won: by_symbol[sym]["wins"] += 1
                 if ot:
-                    h = datetime.fromtimestamp(ot).hour
+                    h = datetime.fromtimestamp(ot, tz=timezone.utc).hour
                     by_hour[h]["trades"]  += 1
                     by_hour[h]["net_pnl"] += pnl
                     if won: by_hour[h]["wins"] += 1
@@ -230,11 +230,22 @@ class LearningEngine:
         for s, d in all_strat.items():
             if d["trades"] >= MIN_SAMPLE_SIZE:
                 wr = d["win_rate"]
-                if wr < 40:
+                if wr < 50:
                     suggestions.append(
                         "UNDERPERFORMING: '{}' WR={:.0f}% ({} trades) — "
-                        "consider disabling or tightening entry conditions.".format(
+                        "auto-disabled (below 50% threshold).".format(
                             s, wr, d["trades"]))
+                # Fee-to-profit ratio check
+                gross_pnl = d.get("gross_pnl", 0)
+                total_fees = d.get("total_fees", d["avg_fee"] * d["trades"])
+                if gross_pnl > 0 and total_fees / gross_pnl > 0.20:
+                    fee_ratio = total_fees / gross_pnl
+                    suggestions.append(
+                        "FEE_ALERT: '{}' fees consume {:.0%} of gross profit "
+                        "(${:.2f} / ${:.2f}). Auto-flagging.".format(
+                            s, fee_ratio, total_fees, gross_pnl))
+                    if hasattr(self, 'knowledge'):
+                        self.knowledge.flag_fee_heavy(s, fee_ratio)
                 if d["avg_fee"] > 0.50:
                     suggestions.append(
                         "HIGH FEES: '{}' avg {:.2f} USDT/trade — "

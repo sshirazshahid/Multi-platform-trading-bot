@@ -73,28 +73,20 @@ set /p "BIN_SEC=  Binance Secret Key : "
 if "!BIN_KEY!"=="" set "BIN_KEY=your_binance_api_key_here" & set "BIN_SEC=your_binance_secret_key_here"
 set "BIN_TESTNET=false"
 cls
-echo  Step 4 - MEXC API Keys (Enter to skip)
-echo.
-set "MX_KEY=" & set "MX_SEC="
-set /p "MX_KEY=  MEXC API Key    : "
-set /p "MX_SEC=  MEXC Secret Key : "
-if "!MX_KEY!"=="" set "MX_KEY=your_mexc_api_key_here" & set "MX_SEC=your_mexc_secret_key_here"
-set "MX_TESTNET=false"
-cls
-echo  Step 5 - Bybit API Keys (Enter to skip)
+echo  Step 4 - Bybit API Keys (Enter to skip)
 echo.
 set "BY_KEY=" & set "BY_SEC="
 set /p "BY_KEY=  Bybit API Key    : "
 set /p "BY_SEC=  Bybit Secret Key : "
 cls
-echo  Step 6 - Bitget API Keys (Enter to skip)
+echo  Step 5 - Bitget API Keys (Enter to skip)
 echo.
 set "BG_KEY=" & set "BG_SEC=" & set "BG_PASS="
 set /p "BG_KEY=  Bitget API Key    : "
 set /p "BG_SEC=  Bitget Secret Key : "
 set /p "BG_PASS= Bitget Passphrase : "
 cls
-echo  Step 7 - Email + Risk Profile
+echo  Step 6 - Email + Risk Profile
 echo.
 set "GM_SEND=" & set "GM_PASS2=" & set "GM_RECV="
 set /p "GM_SEND=  Gmail address (Enter to skip): "
@@ -108,16 +100,23 @@ echo.
 set /p "RISK_C=  Choose [1/2/3]: "
 set "R_PCT=0.02" & set "R_SL=0.010" & set "R_TP=0.030" & set "R_DL=0.02" & set "R_POS=4" & set "R_LEV=2"
 if "!RISK_C!"=="2" set "R_PCT=0.03" & set "R_SL=0.015" & set "R_TP=0.045" & set "R_DL=0.03" & set "R_POS=6" & set "R_LEV=3"
-if "!RISK_C!"=="3" set "R_PCT=0.05" & set "R_SL=0.020" & set "R_TP=0.060" & set "R_DL=0.05" & set "R_POS=8" & set "R_LEV=5"
+if "!RISK_C!"=="3" set "R_PCT=0.05" & set "R_SL=0.020" & set "R_TP=0.060" & set "R_DL=0.05" & set "R_POS=8" & set "R_LEV=3"
 echo.
-set /p "DRY=  DRY RUN mode? [YES/NO]: "
-set "DRY_RUN=true"
-if /i "!DRY!"=="NO" set "DRY_RUN=false"
+echo  Operating Mode:
+echo    [1] PAPER       - Simulated trades, no real orders (recommended)
+echo    [2] OBSERVATION - Data collection only, no trades at all
+echo    [3] LIVE        - Real orders with real money
+echo.
+set /p "MODE_C=  Choose [1/2/3]: "
+set "OP_MODE=PAPER"
+if "!MODE_C!"=="2" set "OP_MODE=OBSERVATION"
+if "!MODE_C!"=="3" set "OP_MODE=CONTROLLED_LIVE"
 cd /d "%BOT_DIR%"
-"%VENV_PYTHON%" %HELPER% write_env "!BIN_KEY!" "!BIN_SEC!" "!BIN_TESTNET!" "!MX_KEY!" "!MX_SEC!" "!MX_TESTNET!" "!GM_SEND!" "!GM_PASS2!" "!GM_RECV!" "!DRY_RUN!"
+"%VENV_PYTHON%" %HELPER% write_env "!BIN_KEY!" "!BIN_SEC!" "!BIN_TESTNET!" "" "" "" "!GM_SEND!" "!GM_PASS2!" "!GM_RECV!" "false"
 "%VENV_PYTHON%" %HELPER% apply_risk "!R_PCT!" "!R_POS!" "!R_DL!" "!R_SL!" "!R_TP!" "!R_LEV!"
 if not "!BY_KEY!"=="" "%VENV_PYTHON%" %HELPER% update_keys bybit "!BY_KEY!" "!BY_SEC!"
 if not "!BG_KEY!"=="" "%VENV_PYTHON%" %HELPER% update_keys bitget "!BG_KEY!" "!BG_SEC!" "!BG_PASS!"
+"%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', '!OP_MODE!'); set_env_var('CONTROLLED_LIVE_ENABLED', 'true' if '!OP_MODE!'=='CONTROLLED_LIVE' else 'false')" 2>nul
 echo done > "%SETUP_FLAG%"
 echo  Setup complete.
 timeout /t 3 >nul
@@ -126,34 +125,45 @@ goto :menu
 cls
 echo.
 echo  =====================================================================
-echo   TRADING BOT - Binance + MEXC + Bybit + Bitget
-echo   Crypto + Gold + Silver + Oil - Spot + Futures + Arbitrage
+echo   TRADING BOT - Binance + Bybit + Bitget
+echo   Crypto Spot + Futures - 30 Coins - MCP Brain Scoring Engine
 echo  =====================================================================
 echo.
 cd /d "%BOT_DIR%"
+set "OP_MODE=PAPER"
 set "IS_LIVE=0"
-findstr /i "DRY_RUN=false" .env >nul 2>&1
-if not errorlevel 1 set "IS_LIVE=1"
+findstr /i "OPERATING_MODE=CONTROLLED_LIVE" .env >nul 2>&1
+if not errorlevel 1 (
+    set "OP_MODE=CONTROLLED_LIVE"
+    set "IS_LIVE=1"
+)
+findstr /i "OPERATING_MODE=OBSERVATION" .env >nul 2>&1
+if not errorlevel 1 set "OP_MODE=OBSERVATION"
 set "TM=usdt_only"
 findstr /i "TRADING_MODE=portfolio" .env >nul 2>&1
 if not errorlevel 1 set "TM=portfolio"
 findstr /i "TRADING_MODE=all" .env >nul 2>&1
 if not errorlevel 1 set "TM=all"
-if "!IS_LIVE!"=="1" goto :lbl_live
-echo   Run Mode : DRY RUN - paper trading
+if "!OP_MODE!"=="CONTROLLED_LIVE" goto :lbl_live
+if "!OP_MODE!"=="OBSERVATION" goto :lbl_obs
+echo   Operating Mode : PAPER (simulated trades)
 goto :lbl_tm
 :lbl_live
-echo   Run Mode : LIVE TRADING
+echo   Operating Mode : CONTROLLED_LIVE (real orders)
+echo   Safety Nets    : 3x max leverage, 1%% sizing, $2 max loss/trade
+goto :lbl_tm
+:lbl_obs
+echo   Operating Mode : OBSERVATION (data collection only)
 :lbl_tm
 if "!TM!"=="portfolio" goto :lbl_port
 if "!TM!"=="all" goto :lbl_all
-echo   Trade Mode : USDT ONLY
+echo   Trade Mode     : USDT ONLY
 goto :lbl_snap
 :lbl_port
-echo   Trade Mode : PORTFOLIO
+echo   Trade Mode     : PORTFOLIO
 goto :lbl_snap
 :lbl_all
-echo   Trade Mode : ALL (Crypto + Commodities + Everything Available)
+echo   Trade Mode     : ALL (30 coins, Spot + Futures)
 :lbl_snap
 echo.
 set "HAS_DATA=0"
@@ -167,7 +177,7 @@ echo  -----------------------------------------------------------------------
 echo   [1] Start bot          [2] Dashboard (60s)    [3] Switch trade mode
 echo   [4] Scan portfolio     [5] Backtest            [6] Open positions
 echo   [7] View logs          [8] Edit API keys       [9] Risk profile
-echo   [A] Toggle DRY/LIVE    [B] Re-run wizard       [C] Clear cache
+echo   [A] Switch mode        [B] Re-run wizard       [C] Clear cache
 echo   [D] Build exe          [M] Multi-Profile       [R] Multi report
 echo  -----------------------------------------------------------------------
 echo   WALLET
@@ -178,7 +188,6 @@ echo   MAINTENANCE
 echo   [J]  Fix ghost/phantom positions
 echo  -----------------------------------------------------------------------
 echo   [Z] Arbitrage opps     [Y] Arbitrage backtest
-echo   [I] Research report    [V] View research
 echo   [X] Send email report  [W] Test email
 echo   [E] Claude AI now      [F] Set Claude key      [G] View Claude report
 echo  -----------------------------------------------------------------------
@@ -196,7 +205,7 @@ if /i "!CHOICE!"=="6" goto :status
 if /i "!CHOICE!"=="7" goto :logs
 if /i "!CHOICE!"=="8" goto :keys
 if /i "!CHOICE!"=="9" goto :risk
-if /i "!CHOICE!"=="A" goto :tog_live
+if /i "!CHOICE!"=="A" goto :tog_mode
 if /i "!CHOICE!"=="B" del "%SETUP_FLAG%" >nul 2>&1 & goto :wizard
 if /i "!CHOICE!"=="C" goto :clr
 if /i "!CHOICE!"=="D" goto :build
@@ -207,8 +216,6 @@ if /i "!CHOICE!"=="K" goto :wallet_show
 if /i "!CHOICE!"=="J" goto :fix_ghosts
 if /i "!CHOICE!"=="Z" goto :arb_view
 if /i "!CHOICE!"=="Y" goto :arb_bt
-if /i "!CHOICE!"=="I" goto :rsch_run
-if /i "!CHOICE!"=="V" goto :rsch_view
 if /i "!CHOICE!"=="X" goto :email_send
 if /i "!CHOICE!"=="W" goto :email_test
 if /i "!CHOICE!"=="E" goto :ai_run
@@ -225,10 +232,13 @@ if not exist "%VENV_PYTHON%" goto :err_setup
 if not exist ".env" goto :err_env
 "%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
 set "IS_LIVE=0"
-findstr /i "DRY_RUN=false" .env >nul 2>&1
+findstr /i "OPERATING_MODE=CONTROLLED_LIVE" .env >nul 2>&1
 if not errorlevel 1 set "IS_LIVE=1"
 if "!IS_LIVE!"=="0" goto :bot_start
-echo   WARNING: LIVE TRADING - REAL MONEY
+echo   ************************************************************
+echo   *  WARNING: CONTROLLED_LIVE MODE - REAL MONEY AT RISK      *
+echo   *  Safety: 3x max leverage, 1%% sizing, $2 max loss/trade  *
+echo   ************************************************************
 echo.
 set /p "CONFIRM=  Type YES to confirm: "
 if /i not "!CONFIRM!"=="YES" goto :bot_cancel
@@ -263,10 +273,9 @@ echo   REPLICATE LIVE WALLET TO DRY RUN
 echo  ===================================================
 echo.
 echo  Scans live balances from all exchanges and mirrors
-echo  them into your 3 DRY RUN paper wallets.
+echo  them into your DRY RUN paper wallets.
 echo.
 echo  - Coins converted to USDT at current price
-echo  - Gold/Silver/Oil futures margin included
 echo  - Real money is NOT affected
 echo.
 set /p "CONF=  Replicate now? [Y/N]: "
@@ -294,7 +303,7 @@ cls
 echo.
 echo  Fix Ghost / Phantom Positions
 echo.
-echo  Scans all 3 profile position files and removes
+echo  Scans position files and removes
 echo  any open positions with invalid symbols.
 echo.
 cd /d "%BOT_DIR%"
@@ -343,7 +352,7 @@ set "EMAIL_OK=0"
 findstr /i "GMAIL_SENDER=" .env >nul 2>&1
 if not errorlevel 1 set "EMAIL_OK=1"
 if "!EMAIL_OK!"=="0" goto :email_nokey
-"%VENV_PYTHON%" -m core.report_emailer
+"%VENV_PYTHON%" -m core.report_emailer --send
 echo.
 pause
 goto :menu
@@ -359,31 +368,6 @@ echo.
 cd /d "%BOT_DIR%"
 if not exist "%VENV_PYTHON%" goto :err_setup
 "%VENV_PYTHON%" -m core.report_emailer --test
-echo.
-pause
-goto :menu
-:rsch_run
-cls
-echo.
-echo  RESEARCH ENGINE - 8 Frameworks
-echo.
-set /p "CONF=  Run now? [Y/N]: "
-if /i not "!CONF!"=="Y" goto :menu
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-echo.
-"%VENV_PYTHON%" -m research.engine
-echo.
-set "RPT=%BOT_DIR%data\research\report.html"
-if exist "!RPT!" start "" "!RPT!"
-pause
-goto :menu
-:rsch_view
-cls
-echo.
-cd /d "%BOT_DIR%"
-set "RPT=%BOT_DIR%data\research\report.html"
-if exist "!RPT!" (start "" "!RPT!") else echo  No report yet. Run [I] first.
 echo.
 pause
 goto :menu
@@ -443,7 +427,6 @@ echo.
 echo  Multi-Profile Learning
 echo.
 echo  3 profiles on all exchanges simultaneously
-echo  Crypto + Gold + Silver + Oil
 echo  Arb every 2min, Claude every 15min, Email daily
 echo.
 echo  TIP: Run [L] first to mirror your real balance.
@@ -452,7 +435,7 @@ cd /d "%BOT_DIR%"
 if not exist "%VENV_PYTHON%" goto :err_setup
 if not exist ".env" goto :err_env
 set "IS_LIVE=0"
-findstr /i "DRY_RUN=false" .env >nul 2>&1
+findstr /i "OPERATING_MODE=CONTROLLED_LIVE" .env >nul 2>&1
 if not errorlevel 1 set "IS_LIVE=1"
 if "!IS_LIVE!"=="1" goto :mp_err
 "%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
@@ -464,7 +447,7 @@ echo  Session ended.
 pause
 goto :menu
 :mp_err
-echo  ERROR: Needs DRY RUN mode. Use Option [A] first.
+echo  ERROR: Multi-profile needs PAPER mode. Switch to PAPER first via [A].
 pause
 goto :menu
 :mreport
@@ -483,9 +466,7 @@ echo  [1] USDT ONLY   [2] PORTFOLIO   [3] ALL
 echo.
 echo  USDT ONLY  - Trade configured USDT pairs only
 echo  PORTFOLIO  - Scan your wallet + trade what you hold
-echo  ALL        - Scan ALL available markets on every exchange
-echo               Crypto, Gold, Silver, Oil, Stocks, Scalping
-echo               Maximum opportunity discovery
+echo  ALL        - All 30 coins, Spot + Futures on all exchanges
 echo.
 cd /d "%BOT_DIR%"
 set /p "TMC=  Choose [1/2/3]: "
@@ -503,31 +484,45 @@ if not exist "%VENV_PYTHON%" goto :err_setup
 echo.
 pause
 goto :menu
-:tog_live
+:tog_mode
 cls
 echo.
+echo  Switch Operating Mode
+echo.
+echo  Current: !OP_MODE!
+echo.
+echo  [1] PAPER             - Simulated trades (safe, no real orders)
+echo  [2] OBSERVATION       - Data collection only (no trades)
+echo  [3] CONTROLLED_LIVE   - Real orders (requires signed checklist)
+echo.
 cd /d "%BOT_DIR%"
-set "IS_LIVE=0"
-findstr /i "DRY_RUN=false" .env >nul 2>&1
-if not errorlevel 1 set "IS_LIVE=1"
-if "!IS_LIVE!"=="1" goto :to_dry
-echo  Current: DRY RUN
-echo.
-echo  WARNING: LIVE = REAL money at risk.
-echo.
-set /p "CONF=  Type YES to confirm LIVE: "
-if /i not "!CONF!"=="YES" goto :tog_cancel
-"%VENV_PYTHON%" %HELPER% set_dry false
-echo  Switched to LIVE. Restart bot.
-pause
+set /p "MC=  Choose [1/2/3]: "
+if "!MC!"=="1" (
+    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'PAPER'); set_env_var('CONTROLLED_LIVE_ENABLED', 'false')"
+    echo  Switched to PAPER mode.
+    pause
+    goto :menu
+)
+if "!MC!"=="2" (
+    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'OBSERVATION'); set_env_var('CONTROLLED_LIVE_ENABLED', 'false')"
+    echo  Switched to OBSERVATION mode.
+    pause
+    goto :menu
+)
+if "!MC!"=="3" (
+    echo.
+    echo  WARNING: CONTROLLED_LIVE = REAL MONEY AT RISK
+    echo  Safety nets: 3x max leverage, 1%% sizing, $2 max loss/trade
+    echo.
+    set /p "CONF=  Type YES to confirm: "
+    if /i not "!CONF!"=="YES" goto :tog_cancel2
+    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'CONTROLLED_LIVE'); set_env_var('CONTROLLED_LIVE_ENABLED', 'true')"
+    echo  Switched to CONTROLLED_LIVE mode.
+    pause
+    goto :menu
+)
 goto :menu
-:to_dry
-echo  Current: LIVE
-"%VENV_PYTHON%" %HELPER% set_dry true
-echo  Switched to DRY RUN.
-pause
-goto :menu
-:tog_cancel
+:tog_cancel2
 echo  Cancelled.
 pause
 goto :menu
@@ -562,16 +557,15 @@ set "DAYS=60"
 set /p "DAYS=  Days [60]: "
 if "!DAYS!"=="" set "DAYS=60"
 echo.
-echo  [1] Binance  [2] MEXC  [3] Bybit  [4] Bitget  [5] ALL
+echo  [1] Binance  [2] Bybit  [3] Bitget  [4] ALL
 echo.
 set "EX=1"
-set /p "EX=  Exchange [1-5, default 1]: "
+set /p "EX=  Exchange [1-4, default 1]: "
 if "!EX!"=="" set "EX=1"
-if "!EX!"=="5" goto :bt_all
+if "!EX!"=="4" goto :bt_all
 set "EXNAME=binance"
-if "!EX!"=="2" set "EXNAME=mexc"
-if "!EX!"=="3" set "EXNAME=bybit"
-if "!EX!"=="4" set "EXNAME=bitget"
+if "!EX!"=="2" set "EXNAME=bybit"
+if "!EX!"=="3" set "EXNAME=bitget"
 echo.
 "%VENV_PYTHON%" backtest.py --strategy "!STRAT!" --symbol "!SYM!" --exchange "!EXNAME!" --days "!DAYS!"
 echo.
@@ -632,30 +626,22 @@ cls
 echo.
 echo  Edit API Keys
 echo.
-echo  [1] Binance  [2] MEXC  [3] Bybit  [4] Bitget
-echo  [5] Email    [6] Open .env in Notepad  [7] Back
+echo  [1] Binance  [2] Bybit  [3] Bitget
+echo  [4] Email    [5] Open .env in Notepad  [6] Back
 echo.
 set /p "EKC=  Choice: "
 cd /d "%BOT_DIR%"
 if "!EKC!"=="1" goto :k_bin
-if "!EKC!"=="2" goto :k_mx
-if "!EKC!"=="3" goto :k_bybit
-if "!EKC!"=="4" goto :k_bitget
-if "!EKC!"=="5" goto :k_em
-if "!EKC!"=="6" notepad "%BOT_DIR%.env" & goto :menu
+if "!EKC!"=="2" goto :k_bybit
+if "!EKC!"=="3" goto :k_bitget
+if "!EKC!"=="4" goto :k_em
+if "!EKC!"=="5" notepad "%BOT_DIR%.env" & goto :menu
 goto :menu
 :k_bin
 echo.
 set /p "BK=  Binance API Key    : "
 set /p "BS=  Binance Secret Key : "
 "%VENV_PYTHON%" %HELPER% update_keys binance "!BK!" "!BS!"
-pause
-goto :menu
-:k_mx
-echo.
-set /p "MK=  MEXC API Key    : "
-set /p "MS=  MEXC Secret Key : "
-"%VENV_PYTHON%" %HELPER% update_keys mexc "!MK!" "!MS!"
 pause
 goto :menu
 :k_bybit
@@ -686,10 +672,12 @@ cls
 echo.
 echo  [1] CONSERVATIVE  [2] MODERATE  [3] AGGRESSIVE
 echo.
+echo  Note: Max leverage is capped at 3x across all profiles.
+echo.
 set /p "RC=  Choose [1/2/3]: "
 set "R_PCT=0.02" & set "R_SL=0.010" & set "R_TP=0.030" & set "R_DL=0.02" & set "R_POS=4" & set "R_LEV=2"
 if "!RC!"=="2" set "R_PCT=0.03" & set "R_SL=0.015" & set "R_TP=0.045" & set "R_DL=0.03" & set "R_POS=6" & set "R_LEV=3"
-if "!RC!"=="3" set "R_PCT=0.05" & set "R_SL=0.020" & set "R_TP=0.060" & set "R_DL=0.05" & set "R_POS=8" & set "R_LEV=5"
+if "!RC!"=="3" set "R_PCT=0.05" & set "R_SL=0.020" & set "R_TP=0.060" & set "R_DL=0.05" & set "R_POS=8" & set "R_LEV=3"
 cd /d "%BOT_DIR%"
 "%VENV_PYTHON%" %HELPER% apply_risk "!R_PCT!" "!R_POS!" "!R_DL!" "!R_SL!" "!R_TP!" "!R_LEV!"
 echo  Profile applied.

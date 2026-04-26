@@ -7,9 +7,12 @@ core/order_manager.py — Order lifecycle with:
   - Blacklist / trailing stop / compliance / risk integrations
 """
 
+import json
+import time
 import uuid
+from pathlib import Path
 from loguru import logger
-from config import DRY_RUN
+from config import DRY_RUN, RISK
 from exchanges.base             import BaseExchange
 from core.position_tracker      import Position, PositionTracker
 from core.risk_manager          import RiskManager
@@ -21,6 +24,7 @@ from utils.notifier             import TelegramNotifier
 from core.post_mortem           import PostMortem
 from core.kelly_sizer           import KellySizer
 from core.smart_executor        import SmartExecutor
+from core.sim_execution         import SimExecutionModel
 
 # Permission-denied error patterns
 _PERM_ERRORS = (
@@ -62,6 +66,58 @@ def _is_skip_pair_error(e: Exception) -> bool:
     return any(s in msg for s in _SKIP_PAIR_ERRORS)
 
 
+def build_sl_tp_order_params(
+    ex_name: str, side: str, oneway: bool,
+    trigger_price: float, is_sl: bool,
+) -> tuple[str, dict]:
+    """Return (order_type, params) for an SL or TP conditional order.
+
+    Separated out so it is trivially unit-testable. Per-exchange shape rules:
+      Binance USD-M → STOP_MARKET / TAKE_PROFIT_MARKET + stopPrice + reduceOnly
+      Bitget        → ONLY stopLossPrice (SL) or takeProfitPrice (TP); ccxt
+                      rejects the combo with triggerPrice
+                      ("createOrder() params can only contain one of
+                      triggerPrice, stopLossPrice, takeProfitPrice,
+                      trailingPercent")
+      Bybit v5      → triggerPrice + stopLossPrice/takeProfitPrice +
+                      explicit triggerDirection (ccxt only auto-infers
+                      triggerDirection in the stopLossPrice-only branch)
+    """
+    ex_lower = ex_name.lower()
+
+    if ex_lower == "binance":
+        order_type = "STOP_MARKET" if is_sl else "TAKE_PROFIT_MARKET"
+        params = {"stopPrice": trigger_price, "reduceOnly": True}
+        if not oneway:
+            params["positionSide"] = "LONG" if side == "buy" else "SHORT"
+        return order_type, params
+
+    if ex_lower == "bitget":
+        params = {"stopLossPrice": trigger_price} if is_sl \
+            else {"takeProfitPrice": trigger_price}
+        if oneway:
+            params["reduceOnly"] = True
+        else:
+            params["positionSide"] = "LONG" if side == "buy" else "SHORT"
+            params["reduceOnly"] = True
+        return "market", params
+
+    # Bybit v5 (default for everything else)
+    params = {"triggerPrice": trigger_price}
+    if is_sl:
+        params["stopLossPrice"] = trigger_price
+        params["triggerDirection"] = "below" if side == "buy" else "above"
+    else:
+        params["takeProfitPrice"] = trigger_price
+        params["triggerDirection"] = "above" if side == "buy" else "below"
+    if oneway:
+        params["reduceOnly"] = True
+    else:
+        params["positionSide"] = "LONG" if side == "buy" else "SHORT"
+        params["reduceOnly"] = True
+    return "market", params
+
+
 class OrderManager:
 
     def __init__(self, tracker: PositionTracker, risk: RiskManager,
@@ -77,14 +133,32 @@ class OrderManager:
         self.post_mortem = PostMortem()
         self.kelly       = KellySizer()
         self.executor    = SmartExecutor()
+        self.sim         = SimExecutionModel()  # DRY_RUN realism
         self.mcp_brain   = None  # Set by bot_engine after construction
         # Track exchanges where futures is disabled (don't retry)
-        self._futures_disabled = set()
         # Track exchanges using One-Way Mode (no positionSide param)
         # Bitget is ALWAYS one-way — pre-populate to avoid first-order 40774 error
-        self._oneway_mode = {"bitget"}
+        self._order_mode_path = Path("data/order_mode_state.json")
+        saved = self._load_order_mode_state()
+        self._futures_disabled = saved.get("futures_disabled", set())
+        self._oneway_mode = saved.get("oneway_mode", {"bitget"})
         # Track positions where SL was already widened once (prevent infinite widening)
-        self._sl_widened = set()
+        self._sl_widened_path = Path("data/sl_widened.json")
+        self._sl_widened = self._load_sl_widened()
+
+        # Idempotency: track recently placed client order IDs to avoid duplicates
+        self._recent_client_ids: set = set()
+        self._recent_client_ids_max = 500
+
+        # DRY_RUN funding accrual: last UTC hour we charged funding on.
+        # Real exchanges settle funding at 00/08/16 UTC; we settle when the
+        # current UTC hour first matches one of those after the last tick.
+        self._last_funding_hour = -1
+
+        # Close failure counter: {position_id: fail_count}
+        # After 3 failures, force-close in tracker to break infinite loops
+        self._close_fail_path = Path("data/close_fail_count.json")
+        self._close_fail_count: dict = self._load_close_fail_count()
 
         if DRY_RUN:
             logger.warning(
@@ -96,6 +170,151 @@ class OrderManager:
             logger.info(self.wallet.statement())
         else:
             logger.warning("[Orders] LIVE MODE — real orders will be placed.")
+
+    # ── SL widened persistence ─────────────────────────────────────────
+
+    def _load_order_mode_state(self) -> dict:
+        """Load persisted _futures_disabled and _oneway_mode sets."""
+        try:
+            if self._order_mode_path.exists():
+                data = json.loads(self._order_mode_path.read_text(encoding="utf-8"))
+                return {
+                    "futures_disabled": set(data.get("futures_disabled", [])),
+                    "oneway_mode": set(data.get("oneway_mode", ["bitget"])),
+                }
+        except Exception:
+            pass
+        return {"futures_disabled": set(), "oneway_mode": {"bitget"}}
+
+    def _save_order_mode_state(self):
+        """Persist _futures_disabled and _oneway_mode so they survive restarts."""
+        try:
+            self._order_mode_path.parent.mkdir(parents=True, exist_ok=True)
+            self._order_mode_path.write_text(json.dumps({
+                "futures_disabled": list(self._futures_disabled),
+                "oneway_mode": list(self._oneway_mode),
+            }), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Orders] Failed to save order mode state: {e}")
+
+    def _load_sl_widened(self) -> set:
+        try:
+            if self._sl_widened_path.exists():
+                data = json.loads(self._sl_widened_path.read_text(encoding="utf-8"))
+                return set(data)
+        except Exception:
+            pass
+        return set()
+
+    def _save_sl_widened(self):
+        try:
+            self._sl_widened_path.parent.mkdir(parents=True, exist_ok=True)
+            self._sl_widened_path.write_text(
+                json.dumps(list(self._sl_widened)), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Orders] Failed to save sl_widened: {e}")
+
+    def cleanup_sl_widened(self):
+        """Remove entries for positions that are no longer open."""
+        open_ids = {p.id for p in self.tracker.get_open()}
+        stale = self._sl_widened - open_ids
+        if stale:
+            self._sl_widened -= stale
+            self._save_sl_widened()
+            logger.debug(f"[Orders] Cleaned {len(stale)} stale sl_widened entries")
+
+    # ── Close-fail counter persistence (2026-04-16) ──────────────────
+
+    def _load_close_fail_count(self) -> dict:
+        try:
+            if self._close_fail_path.exists():
+                data = json.loads(
+                    self._close_fail_path.read_text(encoding="utf-8"))
+                # Only keep entries for positions that still exist
+                open_ids = {p.id for p in self.tracker.get_open()}
+                restored = {k: v for k, v in data.items() if k in open_ids}
+                if restored:
+                    logger.info(
+                        f"[Orders] Restored close_fail_count for "
+                        f"{len(restored)} position(s)")
+                return restored
+        except Exception:
+            pass
+        return {}
+
+    def _save_close_fail_count(self):
+        try:
+            self._close_fail_path.parent.mkdir(parents=True, exist_ok=True)
+            self._close_fail_path.write_text(
+                json.dumps(self._close_fail_count), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Orders] Failed to save close_fail_count: {e}")
+
+    # ── Execution Safety: idempotency, price bands, post-order verify ──
+
+    def _generate_client_order_id(self, exchange_name: str, symbol: str,
+                                   side: str) -> str:
+        """Generate a unique client order ID for idempotency.
+        Sent to exchange as clientOrderId/clOrdID to prevent duplicates."""
+        import hashlib
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")[:20]
+        raw = f"{exchange_name}:{symbol}:{side}:{ts}:{uuid.uuid4().hex[:6]}"
+        # Most exchanges accept 32-36 char alphanumeric IDs
+        cid = "TB" + hashlib.md5(raw.encode()).hexdigest()[:30]
+        # Track to prevent same-second duplicates
+        if len(self._recent_client_ids) >= self._recent_client_ids_max:
+            # Evict oldest half
+            to_remove = list(self._recent_client_ids)[:self._recent_client_ids_max // 2]
+            for r in to_remove:
+                self._recent_client_ids.discard(r)
+        self._recent_client_ids.add(cid)
+        return cid
+
+    def _check_price_band(self, symbol: str, side: str,
+                          fill_price: float, exchange,
+                          market_type: str) -> bool:
+        """Validate that fill price is within ±5% of current market price.
+        Returns True if price is within band, False if suspicious."""
+        try:
+            ticker = exchange.fetch_ticker(symbol, market_type)
+            market_price = float(ticker.get("last") or ticker.get("close") or 0)
+            if market_price <= 0:
+                return True  # can't validate, allow
+            deviation = abs(fill_price - market_price) / market_price
+            if deviation > 0.05:  # >5% deviation
+                logger.error(
+                    f"[Orders] PRICE BAND REJECT: {symbol} {side.upper()} "
+                    f"fill={fill_price:.6f} vs market={market_price:.6f} "
+                    f"({deviation*100:.1f}% deviation > 5% limit)")
+                return False
+            return True
+        except Exception:
+            return True  # can't validate, allow
+
+    def _verify_order_on_exchange(self, exchange, order_id: str,
+                                  symbol: str) -> dict | None:
+        """Immediately verify an order exists on exchange after placement.
+        Returns order status dict or None if verification fails."""
+        if not order_id:
+            return None
+        import time as _t
+        for attempt in range(2):
+            try:
+                status = exchange.exchange.fetch_order(order_id, symbol)
+                if status and status.get("id"):
+                    logger.debug(
+                        f"[Orders] Order {order_id} verified: "
+                        f"status={status.get('status')}, "
+                        f"filled={status.get('filled')}")
+                    return status
+            except Exception as e:
+                if attempt == 0:
+                    _t.sleep(0.5)  # brief wait for order to propagate
+                else:
+                    logger.warning(
+                        f"[Orders] Order verification failed for {order_id}: {e}")
+        return None
 
     # ── Balance helpers ───────────────────────────────────────────────
 
@@ -109,32 +328,80 @@ class OrderManager:
             return self.wallet.balance(exchange.name)
         try:
             bal = exchange.fetch_balance(market_type)
-            return self._extract_usdt(bal)
+            return self._extract_usdt(bal, exchange.name)
         except Exception as e:
             logger.debug(f"[Orders] balance fetch {market_type}: {e}")
         return 0.0
 
-    def _extract_usdt(self, bal: dict) -> float:
+    def _extract_usdt(self, bal: dict, exchange_name: str = "") -> float:
         if not bal:
             return 0.0
-        # Prefer total over free for unified accounts (Bybit UTA returns free=0
-        # or dust when funds are allocated to unified margin, but total is correct)
+        ex = exchange_name.lower() if exchange_name else ""
+
+        # ── Bybit unified account: totalEquity in raw API response ──
+        if ex == "bybit":
+            try:
+                lst = bal.get("info", {}).get("result", {}).get("list", [])
+                if lst and isinstance(lst, list):
+                    acct = lst[0] if lst else {}
+                    for field in ("totalAvailableBalance", "totalWalletBalance", "totalEquity"):
+                        val = acct.get(field)
+                        if val is not None:
+                            try:
+                                v = float(val)
+                                if v > 0:
+                                    return v
+                            except (TypeError, ValueError):
+                                pass
+                    # Check per-coin entries for USDT
+                    coins = acct.get("coin", [])
+                    if isinstance(coins, list):
+                        for c in coins:
+                            if c.get("coin") == "USDT":
+                                for f2 in ("equity", "walletBalance"):
+                                    val2 = c.get(f2)
+                                    if val2 is not None:
+                                        try:
+                                            v2 = float(val2)
+                                            if v2 > 0:
+                                                return v2
+                                        except (TypeError, ValueError):
+                                            pass
+            except Exception:
+                pass
+
+        # ── Standard: USDT.free → USDT.total → free.USDT → total.USDT ──
         usdt = bal.get("USDT")
         if isinstance(usdt, dict):
-            # Try total first (covers Bybit unified), then free
-            v = usdt.get("total") or usdt.get("free") or 0.0
-            if v:
-                return float(v)
+            for key in ("free", "total"):
+                val = usdt.get(key)
+                if val is not None:
+                    try:
+                        v = float(val)
+                        if v > 0:
+                            return v
+                    except (TypeError, ValueError):
+                        pass
         total = bal.get("total", {})
         if isinstance(total, dict):
-            v = total.get("USDT", 0.0)
-            if v:
-                return float(v)
+            val = total.get("USDT")
+            if val is not None:
+                try:
+                    v = float(val)
+                    if v > 0:
+                        return v
+                except (TypeError, ValueError):
+                    pass
         free = bal.get("free", {})
         if isinstance(free, dict):
-            v = free.get("USDT", 0.0)
-            if v:
-                return float(v)
+            val = free.get("USDT")
+            if val is not None:
+                try:
+                    v = float(val)
+                    if v > 0:
+                        return v
+                except (TypeError, ValueError):
+                    pass
         return 0.0
 
     def auto_transfer_for_trade(self, exchange: BaseExchange,
@@ -143,6 +410,9 @@ class OrderManager:
         Auto-transfer USDT between spot and futures when needed.
         If trading futures but balance is in spot → transfer spot→futures.
         If trading spot but balance is in futures → transfer futures→spot.
+
+        Spec §14: No auto-transfers to futures unless futures has positive
+        expectancy in paper testing. In PAPER/OBSERVATION mode this is a no-op.
         """
         if self.dry_run:
             return True
@@ -153,7 +423,44 @@ class OrderManager:
         if current >= needed:
             return True
 
+        # Spec §14 / §2: Block spot→futures transfers until futures proves
+        # positive expectancy. Futures→spot is always allowed (de-risking).
         other_type = "futures" if market_type == "spot" else "spot"
+        if market_type == "futures" and other_type == "spot":
+            try:
+                import json as _j
+                from pathlib import Path as _P
+                _kp = _P("data/kelly_stats.json")
+                if _kp.exists():
+                    ks = _j.loads(_kp.read_text())
+                else:
+                    ks = {}
+                # Check if any strategy has positive expectancy
+                # E = WR * avg_win - (1-WR) * avg_loss
+                has_positive = False
+                for v in ks.values():
+                    w, l = v.get("wins", 0), v.get("losses", 0)
+                    tw, tl = v.get("total_win", 0), v.get("total_loss", 0)
+                    if w + l > 10:  # meaningful sample
+                        wr = w / (w + l)
+                        avg_w = tw / w if w > 0 else 0
+                        avg_l = tl / l if l > 0 else 0
+                        exp = wr * avg_w - (1 - wr) * avg_l
+                        if exp > 0:
+                            has_positive = True
+                            break
+                if not has_positive:
+                    logger.warning(
+                        "[Orders] Auto-transfer spot→futures BLOCKED: "
+                        "futures expectancy is negative (spec §14)")
+                    return False
+            except Exception:
+                # If we can't verify expectancy, block the transfer (safe default)
+                logger.warning(
+                    "[Orders] Auto-transfer spot→futures BLOCKED: "
+                    "cannot verify expectancy — defaulting to safe")
+                return False
+
         other_bal  = self.available_balance(exchange, other_type)
 
         if other_bal < 5:
@@ -174,7 +481,8 @@ class OrderManager:
     def open_position(self, exchange: BaseExchange, symbol: str, side: str,
                       market_type: str, strategy: str, size: float,
                       sl: float, tp: float, leverage: int = 1,
-                      order_type: str = "market", price: float = None):
+                      order_type: str = "market", price: float = None,
+                      candidate_id: int = None, mcp_score: float = None):
 
         if self.blacklist.is_blacklisted(symbol):
             logger.warning(f"[Orders] {symbol} blacklisted — skipped.")
@@ -271,51 +579,12 @@ class OrderManager:
             margin_needed = notional / max(leverage, 1) + 2  # +2 USDT buffer
             self.auto_transfer_for_trade(exchange, "futures", margin_needed)
 
-        # ── MCP Brain SL/TP override — use AI-recommended levels when available ──
-        if self.mcp_brain:
-            try:
-                base = symbol.split("/")[0].split(":")[0]
-                mcp_dec = self.mcp_brain.last_decisions().get(base, {})
-                mcp_sl = mcp_dec.get("sl_pct", 0)
-                mcp_tp = mcp_dec.get("tp_pct", 0)
-                if mcp_sl > 0 and mcp_tp > 0:
-                    est_px = price
-                    if not est_px:
-                        try:
-                            t = exchange.fetch_ticker(symbol, market_type)
-                            est_px = float(t.get("last") or t.get("close") or 0)
-                        except Exception:
-                            est_px = 0
-                    if est_px > 0:
-                        if side == "buy":
-                            mcp_sl_px = est_px * (1 - mcp_sl / 100)
-                            mcp_tp_px = est_px * (1 + mcp_tp / 100)
-                        else:
-                            mcp_sl_px = est_px * (1 + mcp_sl / 100)
-                            mcp_tp_px = est_px * (1 - mcp_tp / 100)
-                        # Only override if MCP gives wider SL (more conservative)
-                        # or significantly better TP
-                        if side == "buy":
-                            if mcp_sl_px < sl:  # wider SL for buy = lower price
-                                logger.info(
-                                    f"[MCP-SL] {symbol}: SL {sl:.6g} → {mcp_sl_px:.6g} "
-                                    f"(MCP {mcp_sl:.1f}%)")
-                                sl = mcp_sl_px
-                            if mcp_tp_px > tp:  # higher TP target
-                                tp = mcp_tp_px
-                        else:
-                            if mcp_sl_px > sl:  # wider SL for sell = higher price
-                                logger.info(
-                                    f"[MCP-SL] {symbol}: SL {sl:.6g} → {mcp_sl_px:.6g} "
-                                    f"(MCP {mcp_sl:.1f}%)")
-                                sl = mcp_sl_px
-                            if mcp_tp_px < tp:  # lower TP target for shorts
-                                tp = mcp_tp_px
-            except Exception:
-                pass
+        # MCP Brain SL/TP override REMOVED — spec §2 forbids AI from
+        # widening stop losses. Deterministic ATR-based SL/TP is authoritative.
 
         # ── MCP Brain confidence → position size scaling ──
         # High-conviction signals get more capital, marginal ones get less
+        _pre_boost_size = size
         if self.mcp_brain:
             try:
                 base = symbol.split("/")[0].split(":")[0]
@@ -334,6 +603,33 @@ class OrderManager:
             except Exception:
                 pass
 
+        # ── Post-boost loss clamp — prevent MCP boost from exceeding $MAX_LOSS ──
+        # bot_engine._within_loss_clamp() ran BEFORE this function was called,
+        # so the +20% boost above can push expected loss from $2.00 to $2.40.
+        # Re-check and clamp size back down if needed.
+        if size > _pre_boost_size and sl > 0:
+            try:
+                from config import MAX_LOSS_PER_TRADE_USD
+                _est_px = price
+                if not _est_px:
+                    try:
+                        _t = exchange.fetch_ticker(symbol, market_type)
+                        _est_px = float(_t.get("last") or _t.get("close") or 0)
+                    except Exception:
+                        _est_px = 0
+                if _est_px > 0:
+                    _sl_frac = abs(_est_px - sl) / _est_px
+                    _exp_loss = size * _est_px * _sl_frac
+                    if _exp_loss > MAX_LOSS_PER_TRADE_USD:
+                        _max_sz = MAX_LOSS_PER_TRADE_USD / (_est_px * _sl_frac) if _sl_frac > 0 else size
+                        logger.warning(
+                            f"[MCP-SIZE] Re-clamped after boost: "
+                            f"size {size:.8f} → {_max_sz:.8f} "
+                            f"(loss ${_exp_loss:.2f} > ${MAX_LOSS_PER_TRADE_USD})")
+                        size = _max_sz
+            except (ImportError, Exception):
+                pass
+
         # Get fill price
         fill_price = price
         if not fill_price or order_type == "market":
@@ -344,7 +640,26 @@ class OrderManager:
             return None
         fill_price = float(fill_price)
 
-        # Round quantity to exchange precision (MEXC: whole contracts, Bitget: 0.1)
+        # ── DRY_RUN realism: apply slippage + spread (2026-04-11) ──
+        # In LIVE, SmartExecutor crosses the book and pays real slippage.
+        # In DRY_RUN, paper used midpoint-ish ticker.last → systematically
+        # better than any real fill. Apply directional spread + slippage so
+        # paper pays what LIVE pays. See core/sim_execution.py for rationale.
+        if self.dry_run:
+            sim_fill = self.sim.paper_fill_price(
+                exchange, symbol, side, market_type,
+                base_price=fill_price, phase="open", size=size)
+            if sim_fill > 0 and sim_fill != fill_price:
+                logger.debug(
+                    f"[SimExec] {symbol} {side} OPEN slip: "
+                    f"{fill_price:.6g} → {sim_fill:.6g}")
+                fill_price = sim_fill
+
+        # ── Price Band Sanity Check ──
+        if not self._check_price_band(symbol, side, fill_price, exchange, market_type):
+            return None
+
+        # Round quantity to exchange precision (Bitget: 0.1)
         try:
             rounded_size = exchange.round_quantity(symbol, size)
             if rounded_size != size:
@@ -394,6 +709,12 @@ class OrderManager:
                     if ex_name_lower not in self._oneway_mode:
                         params["positionSide"] = "LONG" if side == "buy" else "SHORT"
 
+                # ── Idempotency: attach client order ID ──
+                client_oid = self._generate_client_order_id(
+                    exchange.name, symbol, side)
+                params["clientOrderId"] = client_oid
+                params["newClientOrderId"] = client_oid  # Binance alias
+
                 # ── Smart Execution: spread check + limit order + fallback ──
                 spread_info = self.executor.check_spread(
                     exchange, symbol, market_type)
@@ -423,11 +744,25 @@ class OrderManager:
                 pos.id         = pos.order_id or pos.id
                 fill_price     = order.get("average") or order.get("price") or fill_price
                 pos.entry_price = float(fill_price)
+                # Recalculate entry_fee based on actual fill price
+                from core.position_tracker import _fee_rate
+                pos.entry_fee = pos.size * pos.entry_price * _fee_rate(pos.market_type)
+                pos.total_fees = pos.entry_fee + pos.exit_fee
+
+                # ── Post-order verification ──
+                verified = self._verify_order_on_exchange(
+                    exchange, pos.order_id, symbol)
+                if verified:
+                    actual_fill = verified.get("average") or verified.get("price")
+                    if actual_fill:
+                        pos.entry_price = float(actual_fill)
+                        fill_price = pos.entry_price
+
                 logger.info(
                     f"[Orders] LIVE ORDER: {side.upper()} {size:.6f} {symbol} "
                     f"@ {fill_price:.4f} | "
                     f"entry_fee={pos.entry_fee:.4f} USDT | "
-                    f"id={pos.id} | {strategy}"
+                    f"id={pos.id} | cid={client_oid[:12]}.. | {strategy}"
                 )
             except Exception as e:
                 # Skip pair errors (e.g., Binance TradFi agreement for XAU/XAG)
@@ -441,14 +776,14 @@ class OrderManager:
                 # Handle position mode mismatch — retry without positionSide
                 if _is_position_mode_error(e) and market_type == "futures":
                     self._oneway_mode.add(ex_name_lower)
+                    self._save_order_mode_state()
                     logger.info(
                         f"[Orders] {exchange.name} is in ONE-WAY mode. "
                         f"Retrying without positionSide...")
                     try:
-                        order = exchange.create_order(
-                            symbol, order_type, side, size,
-                            fill_price if order_type == "limit" else None,
-                            params={}, market_type=market_type,
+                        order = self.executor.execute_limit_with_fallback(
+                            exchange, symbol, side, size,
+                            market_type, {},
                         )
                         if not order or not order.get("id"):
                             logger.warning(f"[Orders] {symbol}: one-way retry returned empty order")
@@ -457,6 +792,10 @@ class OrderManager:
                         pos.id          = pos.order_id or pos.id
                         fill_price      = order.get("average") or order.get("price") or fill_price
                         pos.entry_price = float(fill_price)
+                        # Recalculate entry_fee based on actual fill price
+                        from core.position_tracker import _fee_rate as _fr
+                        pos.entry_fee = pos.size * pos.entry_price * _fr(pos.market_type)
+                        pos.total_fees = pos.entry_fee + pos.exit_fee
                         logger.info(
                             f"[Orders] LIVE ORDER (one-way): {side.upper()} {size:.6f} {symbol} "
                             f"@ {fill_price:.4f} | id={pos.id} | {strategy}")
@@ -465,6 +804,7 @@ class OrderManager:
                         return None
                 elif _is_permission_error(e) and market_type == "futures":
                     self._futures_disabled.add(ex_name_lower)
+                    self._save_order_mode_state()
                     logger.warning(
                         f"[Orders] Futures PERMISSION DENIED on {exchange.name} "
                         f"— falling back to SPOT for buy signals.")
@@ -482,23 +822,95 @@ class OrderManager:
 
         self.tracker.add(pos)
 
-        # Place SL/TP orders on the exchange for real protection
+        # Warehouse trade-open row (spec §4, §6) — MUST run BEFORE
+        # _place_exchange_sl_tp so the fail-closed path has a row to patch
+        # via record_trade_close → trade_id_by_key. Previously this write
+        # lived in bot_engine._execute_open AFTER open_position returned,
+        # so every SL-placement failure silently lost its trade row.
+        try:
+            from core.warehouse import get_warehouse
+            from config import OPERATING_MODE as _mode
+            get_warehouse().record_trade_open(
+                exchange=exchange.name.lower(),
+                symbol=symbol,
+                side=side,
+                ts_entry=float(getattr(pos, "open_time", time.time())),
+                entry_px=float(getattr(pos, "entry_price", fill_price)),
+                size=float(getattr(pos, "size", size)),
+                leverage=int(leverage),
+                candidate_id=candidate_id if (candidate_id or 0) > 0 else None,
+                market_type=market_type,
+                strategy_family=str(strategy) if strategy else "unknown",
+                fee=float(getattr(pos, "entry_fee", 0.0)),
+                mode=_mode,
+                mcp_score=float(mcp_score) if mcp_score is not None else None,
+            )
+        except Exception as _we:
+            logger.debug(f"[Warehouse] record_trade_open skipped: {_we}")
+
+        # Place SL/TP orders on the exchange for real protection.
+        # 2026-04-16 (post-audit): use pos.size (the tracker's canonical size,
+        # which reflects any rounding applied at entry), not the pre-round
+        # `size` variable. Otherwise SL/TP are placed for the wrong quantity
+        # and the exchange rejects them on partial fills.
         if not self.dry_run and market_type == "futures":
-            self._place_exchange_sl_tp(exchange, pos, sl, tp, side, symbol, size, market_type)
+            self._place_exchange_sl_tp(exchange, pos, sl, tp, side, symbol, pos.size, market_type)
 
         self.compliance.log_trade(
             exchange.name, symbol, side, size, fill_price,
             strategy, order_id=pos.id, reason="entry"
         )
+        # Gather rich context for email notification
+        _bal = 0.0
+        _open_n = None
+        _exposure = None
+        try:
+            if self.dry_run:
+                _bal = float(self.wallet.total_balance() or 0.0)
+            _open_n = self.tracker.count_open()
+            _exposure = sum(
+                float(p.size) * float(p.entry_price)
+                for p in self.tracker.get_open()
+            )
+        except Exception:
+            pass
+        _risk_usd = None
+        _rr = None
+        try:
+            if side == "buy":
+                sl_pct = (float(fill_price) - float(sl)) / float(fill_price)
+                tp_pct = (float(tp) - float(fill_price)) / float(fill_price)
+            else:
+                sl_pct = (float(sl) - float(fill_price)) / float(fill_price)
+                tp_pct = (float(fill_price) - float(tp)) / float(fill_price)
+            _risk_usd = float(size) * float(fill_price) * sl_pct
+            _rr = (tp_pct / sl_pct) if sl_pct > 0 else None
+        except Exception:
+            pass
         self.notifier.trade_opened(
             exchange.name, symbol, side, fill_price,
-            size, sl, tp, strategy, market_type
+            size, sl, tp, strategy, market_type,
+            leverage=leverage,
+            rr_ratio=_rr,
+            risk_usd=_risk_usd,
+            balance=_bal if _bal > 0 else None,
+            open_positions=_open_n,
+            total_exposure=_exposure,
         )
         return pos
 
     def _place_exchange_sl_tp(self, exchange, pos, sl, tp, side, symbol, size, market_type):
         """Attempt to place SL/TP conditional orders on the exchange.
-        Falls back silently to local monitoring if exchange rejects."""
+
+        2026-04-20 FIX (-4120 root cause): Binance USD-M rejects
+        type="market" + stopLossPrice/takeProfitPrice params on /fapi/v1/order
+        (error -4120 "use Algo Order API"). Route Binance through its native
+        STOP_MARKET / TAKE_PROFIT_MARKET types with `stopPrice`. Bybit/Bitget
+        keep the ccxt unified path (triggerPrice + stopLossPrice).
+
+        Fail-closed policy: if SL placement fails, the position is closed
+        immediately at market. No naked live positions, ever.
+        """
         ex_lower = exchange.name.lower()
         close_side = "sell" if side == "buy" else "buy"
         oneway = ex_lower in self._oneway_mode
@@ -508,43 +920,232 @@ class OrderManager:
         tp_rounded = exchange.round_price(symbol, tp)
         size_rounded = exchange.round_quantity(symbol, size)
 
-        # Stop-Loss
+        # Stop-Loss — spec §14: failed SL must trigger emergency handling.
+        # 2026-04-20: fail-closed. If SL cannot be attached, close the
+        # position at market instead of leaving it naked.
         try:
-            sl_params = {
-                "triggerPrice": sl_rounded,
-                "stopLossPrice": sl_rounded,  # ccxt unified param
-            }
-            if oneway:
-                sl_params["tradeSide"] = "close"  # Bitget one-way
-            else:
-                sl_params["positionSide"] = "LONG" if side == "buy" else "SHORT"
-                sl_params["reduceOnly"] = True
-            exchange.exchange.create_order(
-                symbol, "market", close_side, size_rounded, None, sl_params)
-            pos._exchange_sl = True  # Track that exchange SL is set
-            logger.info(f"[Orders] SL order on {exchange.name}: {symbol} @ {sl_rounded}")
+            sl_type, sl_params = build_sl_tp_order_params(
+                ex_lower, side, oneway, sl_rounded, is_sl=True)
+            exchange.create_order(
+                symbol, sl_type, close_side, size_rounded, None, sl_params,
+                market_type=market_type)
+            pos._exchange_sl = True
+            logger.info(
+                f"[Orders] SL order on {exchange.name}: {symbol} "
+                f"@ {sl_rounded} (type={sl_type})")
         except Exception as e:
-            logger.debug(f"[Orders] SL order skipped on {exchange.name} {symbol}: {e} — local monitoring active")
+            logger.error(
+                f"[Orders] EMERGENCY: SL order FAILED on {exchange.name} {symbol}: {e} "
+                f"— closing position {pos.id[:8]} at market (fail-closed policy).")
+            # Capture ccxt's last HTTP round-trip so the next occurrence of
+            # -4120 (or any repeat rejection) leaves enough evidence on disk
+            # to diagnose without a second live failure. Raw body bypasses
+            # ccxt's error-string truncation.
+            try:
+                raw = getattr(exchange, "exchange", None)
+                req_url    = getattr(raw, "last_request_url", None)
+                req_body   = getattr(raw, "last_request_body", None)
+                req_hdrs   = getattr(raw, "last_request_headers", None)
+                resp_body  = getattr(raw, "last_http_response", None)
+                resp_hdrs  = getattr(raw, "last_response_headers", None)
+                opts_type  = None
+                try:
+                    opts_type = raw.options.get("defaultType") if raw else None
+                except Exception:
+                    pass
+                logger.error(
+                    f"[Orders] SL-FAIL DEBUG | exchange={exchange.name} symbol={symbol} "
+                    f"order_type={sl_type} close_side={close_side} size={size_rounded} "
+                    f"sl_params={sl_params} defaultType={opts_type}")
+                logger.error(
+                    f"[Orders] SL-FAIL DEBUG | request_url={req_url} "
+                    f"request_body={req_body}")
+                logger.error(
+                    f"[Orders] SL-FAIL DEBUG | response_body={resp_body}")
+                # Full headers only at debug level — they contain auth/signature echoes.
+                logger.debug(
+                    f"[Orders] SL-FAIL DEBUG hdrs | req={req_hdrs} resp={resp_hdrs}")
+            except Exception as dbg_err:
+                logger.warning(f"[Orders] SL-FAIL debug capture itself failed: {dbg_err}")
+            try:
+                self.notifier.send(
+                    f"EMERGENCY: SL placement FAILED for {symbol} on {exchange.name}. "
+                    f"Closing position {pos.id[:8]} at market. Reason: {e}")
+            except Exception:
+                pass
+            pos._sl_failed = True
+            # Fail-closed: close position immediately at market.
+            try:
+                self.close_position(exchange, pos, reason="sl_placement_failed")
+            except Exception as close_err:
+                logger.critical(
+                    f"[Orders] CRITICAL: fail-closed close_position also failed "
+                    f"for {symbol} — position is naked and tracker may be stale: "
+                    f"{close_err}")
+                try:
+                    self.notifier.send(
+                        f"CRITICAL: {symbol} on {exchange.name} is NAKED and "
+                        f"auto-close failed. MANUAL INTERVENTION REQUIRED. "
+                        f"Reason: {close_err}")
+                except Exception:
+                    pass
+            # Do not attempt TP placement; position is (or should be) closed.
+            return
 
         # Take-Profit
         try:
-            tp_params = {
-                "triggerPrice": tp_rounded,
-                "takeProfitPrice": tp_rounded,  # ccxt unified param
-            }
-            if oneway:
-                tp_params["tradeSide"] = "close"
-            else:
-                tp_params["positionSide"] = "LONG" if side == "buy" else "SHORT"
-                tp_params["reduceOnly"] = True
-            exchange.exchange.create_order(
-                symbol, "market", close_side, size_rounded, None, tp_params)
+            tp_type, tp_params = build_sl_tp_order_params(
+                ex_lower, side, oneway, tp_rounded, is_sl=False)
+            exchange.create_order(
+                symbol, tp_type, close_side, size_rounded, None, tp_params,
+                market_type=market_type)
             pos._exchange_tp = True
-            logger.info(f"[Orders] TP order on {exchange.name}: {symbol} @ {tp_rounded}")
+            logger.info(
+                f"[Orders] TP order on {exchange.name}: {symbol} "
+                f"@ {tp_rounded} (type={tp_type})")
         except Exception as e:
-            logger.debug(f"[Orders] TP order skipped on {exchange.name} {symbol}: {e} — local monitoring active")
+            logger.warning(
+                f"[Orders] TP order FAILED on {exchange.name} {symbol}: {e} "
+                f"— local monitoring active (SL is protected)")
+
+    def _replace_exchange_sl(self, exchange: BaseExchange, pos: Position) -> None:
+        """Cancel the existing SL/TP conditional orders on the exchange and
+        re-place them at the current ``pos.stop_loss`` / ``pos.take_profit``
+        for the current ``pos.size``.
+
+        2026-04-25 (post-audit): pre-flight check added — if the target SL
+        sits on the wrong side of current price (would be exchange-rejected,
+        e.g. Bitget code 40917) the cancel-then-place cycle would strip the
+        working SL and fail-closed would market-close an otherwise-healthy
+        position. Skip the move when invalid; the existing SL keeps running.
+
+        2026-04-19 (Fix A2/A3): the trailing-advance and partial-TP-breakeven
+        paths only mutate ``pos.stop_loss`` in the tracker. In CONTROLLED_LIVE
+        the exchange keeps running the original (wider) SL because
+        ``_exchange_sl=True`` silences local SL monitoring — so the tighter
+        SL was a ghost. This helper mirrors ``bot_engine._replace_exchange_sl``
+        so the order-manager's internal loops can sync too.
+        """
+        if self.dry_run:
+            return  # paper mode: no exchange order to cancel/re-place
+        if not pos or pos.market_type != "futures":
+            return  # spot has no exchange-side SL/TP
+        if not pos.stop_loss or pos.stop_loss <= 0:
+            return
+
+        # Pre-flight: refuse SL placements the exchange would reject for
+        # being on the wrong side of current price. See the 2026-04-25 note
+        # above — this prevents fail-closed from killing healthy positions
+        # during a normal pullback through a tightened/breakeven SL level.
+        try:
+            tkr = exchange.fetch_ticker(pos.symbol, pos.market_type)
+            last = float((tkr or {}).get("last") or (tkr or {}).get("close") or 0)
+        except Exception as e:
+            logger.debug(f"[Orders] Replace-SL mark check unavailable for {pos.symbol}: {e}")
+            last = 0.0
+        if last > 0:
+            side = (pos.side or "").lower()
+            if side == "buy" and pos.stop_loss >= last:
+                logger.info(
+                    f"[Orders] Replace-SL SKIP {pos.symbol} BUY: target SL "
+                    f"{pos.stop_loss:.6g} >= last {last:.6g} (would be "
+                    f"exchange-rejected); keeping current exchange SL")
+                return
+            if side == "sell" and pos.stop_loss <= last:
+                logger.info(
+                    f"[Orders] Replace-SL SKIP {pos.symbol} SELL: target SL "
+                    f"{pos.stop_loss:.6g} <= last {last:.6g} (would be "
+                    f"exchange-rejected); keeping current exchange SL")
+                return
+
+        # Cancel ALL conditional orders on the symbol. We do not track the
+        # specific SL/TP order IDs at placement time; the symbol scope is
+        # narrow enough for one position.
+        try:
+            if hasattr(exchange, "cancel_all_orders"):
+                exchange.cancel_all_orders(pos.symbol, pos.market_type)
+            else:
+                exchange.exchange.cancel_all_orders(pos.symbol)
+        except Exception as e:
+            logger.warning(
+                f"[Orders] Replace-SL cancel_all_orders failed for "
+                f"{pos.symbol}: {str(e)[:120]} — proceeding with re-place")
+
+        # Clear flags so a placement failure falls through to local monitoring
+        pos._exchange_sl = False
+        pos._exchange_tp = False
+
+        try:
+            self._place_exchange_sl_tp(
+                exchange, pos, pos.stop_loss, pos.take_profit,
+                pos.side, pos.symbol, pos.size, pos.market_type)
+            logger.info(
+                f"[Orders] Exchange SL synced: {pos.symbol} "
+                f"SL={pos.stop_loss:.6g} size={pos.size:.8g}")
+        except Exception as e:
+            logger.error(
+                f"[Orders] Replace-SL re-place failed for {pos.symbol}: "
+                f"{str(e)[:150]}")
 
     # ── Close position ────────────────────────────────────────────────
+
+    def partial_close_position(self, exchange: BaseExchange, position: Position,
+                              close_pct: float, reason: str, price: float):
+        """Close a fraction of a position and move SL to breakeven on remainder."""
+        partial_size = position.size * close_pct
+        if partial_size * price < 5.0:
+            return False
+
+        close_side = "sell" if position.side == "buy" else "buy"
+
+        if self.dry_run:
+            sim_px = self.sim.paper_fill_price(
+                exchange, position.symbol, close_side,
+                position.market_type, base_price=price, phase="close",
+                size=partial_size)
+            if sim_px > 0:
+                price = sim_px
+            logger.info(
+                f"[Orders] [DRY] PARTIAL CLOSE {position.symbol} "
+                f"{close_pct:.0%} ({partial_size:.8f}) @ {price:.4f} | {reason}")
+        else:
+            try:
+                exchange.create_order(
+                    position.symbol, "market", close_side, partial_size,
+                    market_type=position.market_type)
+            except Exception as e:
+                logger.error(f"[Orders] Partial close failed: {e}")
+                return False
+
+        position.size -= partial_size
+        position.partial_taken = True
+
+        try:
+            from config import PARTIAL_TP
+            if PARTIAL_TP.get("move_sl_to_breakeven", True):
+                position.stop_loss = position.entry_price
+                logger.info(f"[Orders] SL moved to breakeven {position.entry_price:.4f}")
+        except ImportError:
+            position.stop_loss = position.entry_price
+
+        with self.tracker._lock:
+            self.tracker._save()
+
+        # 2026-04-19 (Fix A3): if the exchange is holding the SL, the local
+        # breakeven move is a ghost until we cancel the old (wider, full-size)
+        # SL/TP and re-place at entry for the remaining size. Without this,
+        # the exchange keeps running the original SL while the tracker thinks
+        # breakeven is locked in.
+        if (not self.dry_run
+                and getattr(position, "_exchange_sl", False)
+                and position.market_type == "futures"):
+            try:
+                self._replace_exchange_sl(exchange, position)
+            except Exception as e:
+                logger.warning(
+                    f"[Orders] Partial-TP breakeven SL re-place failed "
+                    f"for {position.symbol}: {str(e)[:120]}")
+        return True
 
     def close_position(self, exchange: BaseExchange, position: Position,
                        reason: str, price: float = None,
@@ -560,7 +1161,29 @@ class OrderManager:
             return None
         price = float(price)
 
-        if self.dry_run:
+        # ── DRY_RUN realism: apply slippage on close (2026-04-11) ──
+        # The caller's `price` is either a ticker.last (monitor poll) or an
+        # SL/TP trigger level. Either way, in LIVE a market close eats the
+        # spread in the opposite direction plus slippage. Stop-losses get
+        # the wider `pct_stop_loss` because market orders fill worse during
+        # the fast moves that trigger SLs.
+        _is_paper = position.paper_trade if hasattr(position, 'paper_trade') else self.dry_run
+        if _is_paper:
+            phase = "stop" if reason in ("stop_loss", "trailing_stop") else "close"
+            sim_px = self.sim.paper_fill_price(
+                exchange, position.symbol, close_side,
+                position.market_type, base_price=price, phase=phase,
+                size=position.size)
+            if sim_px > 0 and sim_px != price:
+                logger.debug(
+                    f"[SimExec] {position.symbol} CLOSE ({reason}) slip: "
+                    f"{price:.6g} → {sim_px:.6g}")
+                price = sim_px
+
+        # Route based on the POSITION's origin, not current mode.
+        # A paper_trade position was never placed on the exchange — sending
+        # a reduce-only close would fail with "position is zero".
+        if _is_paper:
             logger.info(
                 f"[Orders] [DRY] CLOSE {position.symbol} "
                 f"@ {price:.4f} | reason={reason}"
@@ -583,20 +1206,25 @@ class OrderManager:
                     params["reduceOnly"] = True
 
             try:
-                exchange.create_order(
+                close_order = exchange.create_order(
                     position.symbol, order_type, close_side,
                     position.size,
                     price if order_type == "limit" else None,
                     params=params, market_type=position.market_type)
                 order_placed = True
+                # Use actual fill price if available
+                fill = close_order.get("average") or close_order.get("price")
+                if fill:
+                    price = float(fill)
             except Exception as e:
                 err = str(e)
                 # Already closed/liquidated on exchange — mark as closed in tracker
                 _already_closed = (
                     "No position" in err or "22002" in err
+                    or "110017" in err
+                    or "position is zero" in err.lower()
                     or "position does not exist" in err.lower()
                     or "order not found" in err.lower()
-                    or "insufficient" in err.lower()
                 )
                 if _already_closed:
                     logger.info(
@@ -606,23 +1234,51 @@ class OrderManager:
                 # "reduceonly not required" — Binance One-Way mode
                 elif "reduceonly" in err.lower() or "-1106" in err:
                     self._oneway_mode.add(ex_lower)
-                    logger.info(f"[Orders] {exchange.name} One-Way mode — retrying close without reduceOnly")
+                    self._save_order_mode_state()
+                    # 2026-04-20: Before retrying without reduceOnly, verify the
+                    # position still exists on the exchange. Without this guard
+                    # the retry opens a NAKED REVERSE position when the target
+                    # is already closed (e.g. TP/SL fired, stale list caller).
+                    # Root cause of the ALGO naked-short cascade on 2026-04-20.
+                    _still_open = False
                     try:
-                        exchange.create_order(
-                            position.symbol, order_type, close_side,
-                            position.size, None,
-                            params={}, market_type=position.market_type)
+                        _live = exchange.fetch_positions([position.symbol]) or []
+                        for _p in _live:
+                            _sz = abs(float(_p.get("contracts") or _p.get("contractSize") or 0))
+                            if _sz > 0:
+                                _still_open = True
+                                break
+                    except Exception as _fe:
+                        logger.warning(
+                            f"[Orders] fetch_positions failed during close-retry "
+                            f"guard for {position.symbol}: {_fe} — "
+                            f"treating as closed to avoid naked reverse")
+                    if not _still_open:
+                        logger.info(
+                            f"[Orders] {position.symbol} already flat on exchange "
+                            f"— skipping naked-reverse retry (fail-closed guard)")
                         order_placed = True
-                    except Exception as e2:
-                        err2 = str(e2).lower()
-                        if "no position" in err2 or "22002" in err2 or "does not exist" in err2:
+                    else:
+                        logger.info(f"[Orders] {exchange.name} One-Way mode — retrying close without reduceOnly")
+                        try:
+                            exchange.create_order(
+                                position.symbol, order_type, close_side,
+                                position.size,
+                                price if order_type == "limit" else None,
+                                params={}, market_type=position.market_type)
                             order_placed = True
-                        else:
-                            logger.error(f"[Orders] Close failed (retry): {e2}")
+                        except Exception as e2:
+                            err2 = str(e2).lower()
+                            if "no position" in err2 or "22002" in err2 or "does not exist" in err2 \
+                                    or "110017" in err2 or "position is zero" in err2:
+                                order_placed = True
+                            else:
+                                logger.error(f"[Orders] Close failed (retry): {e2}")
                 # Position mode mismatch (Bitget 40773/40774 / Binance positionSide)
                 elif (_is_position_mode_error(e) or "unilateral" in err.lower()) \
                         and position.market_type == "futures":
                     self._oneway_mode.add(ex_lower)
+                    self._save_order_mode_state()
                     # One-way mode: reduceOnly=True tells the exchange this is a close
                     _ow_close = {"reduceOnly": True}
                     try:
@@ -633,7 +1289,8 @@ class OrderManager:
                         order_placed = True
                     except Exception as e2:
                         err2 = str(e2).lower()
-                        if "no position" in err2 or "22002" in err2 or "does not exist" in err2:
+                        if "no position" in err2 or "22002" in err2 or "does not exist" in err2 \
+                                or "110017" in err2 or "position is zero" in err2:
                             order_placed = True
                         else:
                             logger.error(f"[Orders] Close failed (one-way): {e2}")
@@ -641,62 +1298,208 @@ class OrderManager:
                     logger.error(f"[Orders] Close failed for {position.id}: {e}")
 
             if not order_placed:
+                # Track close failures — force-close ghost after 3 attempts
+                fc = self._close_fail_count.get(position.id, 0) + 1
+                self._close_fail_count[position.id] = fc
+                self._save_close_fail_count()
+                if fc >= 3:
+                    logger.warning(
+                        f"[Orders] GHOST: {position.symbol} close failed {fc}x "
+                        f"— force-closing in tracker (not on exchange)")
+                    self.tracker.close(position.id, price, "ghost_force_close")
+                    self._close_fail_count.pop(position.id, None)
+                    self._save_close_fail_count()
                 return None
 
+        # Success — clear any failure counter
+        if position.id in self._close_fail_count:
+            self._close_fail_count.pop(position.id, None)
+            self._save_close_fail_count()
+        # tracker.close() now invokes self._finalize_close via its on_close
+        # hook (wired in BotEngine.__init__). All post-close work — wallet,
+        # risk, Spec §12 streaks, compliance, blacklist, trailing cleanup,
+        # warehouse update, post-mortem, notifier — happens there so ghost-
+        # closed positions get the same treatment as normal exits.
         closed = self.tracker.close(position.id, price, reason)
         if not closed:
             return None
+        return closed
 
-        if self.dry_run:
-            self.wallet.on_close(
-                position.exchange, position.symbol, position.side,
-                position.size, price, position.entry_price,
-                closed.exit_fee, closed.gross_pnl,
-                position.market_type
+    def _finalize_close(self, pos: Position, price: float, reason: str) -> None:
+        """Post-close hooks fired by PositionTracker.on_close after EVERY
+        close (normal exit, ghost-sync, ghost-reconciled, ghost_force_close,
+        STALE, AGE_LIMIT, fail-closed). Centralising here is the fix for the
+        2026-04-26 finding that ghost-closed positions were silently bypassing
+        warehouse, daily_pnl, Spec §12 streak counters, blacklist, trailing
+        cleanup, post-mortem and notifier — meaning a -$0.64 ghost loss
+        never reached any safety rail.
+
+        ``pos`` is the closed Position (entry fields preserved, exit fields
+        populated). ``price`` is the actual exit price the tracker recorded.
+        """
+        is_win  = (pos.pnl or 0) > 0
+        pnl_pct = pos.pnl_pct or 0.0
+        close_side = "sell" if pos.side == "buy" else "buy"
+        _is_paper = pos.paper_trade if hasattr(pos, "paper_trade") else self.dry_run
+
+        if _is_paper:
+            try:
+                self.wallet.on_close(
+                    pos.exchange, pos.symbol, pos.side,
+                    pos.size, price, pos.entry_price,
+                    pos.exit_fee, pos.gross_pnl,
+                    pos.market_type, leverage=pos.leverage,
+                )
+            except Exception as we:
+                logger.debug(f"[Wallet] on_close skipped: {we}")
+
+        try:
+            self.risk.record_trade_pnl(
+                pos.pnl, self.risk._start_balance or 0,
+                is_win=is_win, pnl_pct=pnl_pct,
             )
-
-        is_win  = (closed.pnl or 0) > 0
-        pnl_pct = closed.pnl_pct or 0.0
-
-        self.risk.record_trade_pnl(
-            closed.pnl, price * position.size,
-            is_win=is_win, pnl_pct=pnl_pct
-        )
-        self.compliance.log_trade(
-            position.exchange, position.symbol, close_side,
-            position.size, price, position.strategy,
-            pnl=closed.pnl, reason=reason, order_id=position.id
-        )
+        except Exception as re:
+            logger.debug(f"[Risk] record_trade_pnl skipped: {re}")
+        # Spec §12 pause policy — needs per-symbol + per-family streaks.
+        try:
+            self.risk.record_trade_result(
+                symbol=pos.symbol,
+                family=pos.strategy or "unknown",
+                is_win=is_win,
+                pnl_usd=float(pos.pnl or 0.0),
+            )
+        except Exception as _rte:
+            logger.debug(f"[Risk/Spec12] record_trade_result skipped: {_rte}")
+        try:
+            self.compliance.log_trade(
+                pos.exchange, pos.symbol, close_side,
+                pos.size, price, pos.strategy,
+                pnl=pos.pnl, reason=reason, order_id=pos.id,
+            )
+        except Exception as ce:
+            logger.debug(f"[Compliance] log_trade skipped: {ce}")
 
         if is_win:
-            self.blacklist.record_win(position.symbol)
+            self.blacklist.record_win(pos.symbol, pos.side)
         elif reason == "stop_loss":
-            self.blacklist.record_stop_loss(position.symbol)
+            self.blacklist.record_stop_loss(pos.symbol, pos.side)
 
-        self.trailing.remove(position.id)
-        self._sl_widened.discard(position.id)
+        self.trailing.remove(pos.id)
+        self._sl_widened.discard(pos.id)
+        self._save_sl_widened()
+
+        # Warehouse trade-close update (spec §4, §6) — locate the row by
+        # idempotency key and patch in exit fields + r_multiple.
+        try:
+            from core.warehouse import get_warehouse
+            wh = get_warehouse()
+            tid = wh.trade_id_by_key(
+                exchange=pos.exchange.lower(),
+                symbol=pos.symbol,
+                ts_entry=float(getattr(pos, "open_time", 0)),
+                side=pos.side,
+            )
+            if tid:
+                # r_multiple = price move / stop distance (side-aware).
+                r_mult = None
+                sl = float(getattr(pos, "stop_loss", 0) or 0)
+                ep = float(pos.entry_price or 0)
+                xp = float(price or 0)
+                if sl > 0 and ep > 0 and xp > 0 and sl != ep:
+                    if pos.side == "buy":
+                        denom = ep - sl
+                        if denom > 0:
+                            r_mult = (xp - ep) / denom
+                    else:
+                        denom = sl - ep
+                        if denom > 0:
+                            r_mult = (ep - xp) / denom
+                ts_exit = float(getattr(pos, "close_time", 0) or time.time())
+                wh.record_trade_close(
+                    trade_id=tid,
+                    ts_exit=ts_exit,
+                    exit_px=xp,
+                    realized_pnl=float(pos.pnl or 0.0),
+                    r_multiple=round(r_mult, 3) if r_mult is not None else None,
+                    hold_sec=ts_exit - float(getattr(pos, "open_time", ts_exit)),
+                    exit_reason=reason,
+                    fee=float(getattr(pos, "total_fees", 0.0)),
+                )
+        except Exception as _we:
+            logger.debug(f"[Warehouse] record_trade_close skipped: {_we}")
 
         # Post-mortem analysis
         try:
             self.post_mortem.analyze_trade({
-                "symbol": position.symbol, "exchange": position.exchange,
-                "side": position.side, "market_type": position.market_type,
-                "strategy": position.strategy,
-                "entry_price": position.entry_price, "close_price": price,
-                "pnl": closed.pnl, "pnl_pct": pnl_pct,
-                "close_reason": reason, "leverage": position.leverage,
-                "open_time": getattr(position, 'open_time', 0),
-                "close_time": getattr(closed, 'close_time', 0),
+                "symbol": pos.symbol, "exchange": pos.exchange,
+                "side": pos.side, "market_type": pos.market_type,
+                "strategy": pos.strategy,
+                "entry_price": pos.entry_price, "close_price": price,
+                "pnl": pos.pnl, "pnl_pct": pnl_pct,
+                "close_reason": reason, "leverage": pos.leverage,
+                "open_time": getattr(pos, "open_time", 0),
+                "close_time": getattr(pos, "close_time", 0),
             })
         except Exception as pm_err:
             logger.debug(f"[PostMortem] {pm_err}")
 
-        self.notifier.trade_closed(
-            position.exchange, position.symbol, position.side,
-            position.entry_price, price,
-            closed.pnl, pnl_pct, reason
-        )
-        return closed
+        # Gather rich context for email notification
+        _duration = None
+        try:
+            _duration = float(getattr(pos, "close_time", 0) or 0) \
+                      - float(getattr(pos, "open_time", 0) or 0)
+        except Exception:
+            pass
+        _bal_after = None
+        _daily_pnl = None
+        _daily_trades = None
+        _daily_wr = None
+        _open_n = None
+        try:
+            _open_n = self.tracker.count_open()
+            if self.dry_run:
+                _bal_after = float(self.wallet.total_balance() or 0.0)
+            # Today's trade stats
+            import time as _t
+            day_start = int(_t.time()) - 24 * 3600
+            todays = [
+                p for p in self.tracker._closed
+                if float(getattr(p, "close_time", 0) or 0) >= day_start
+            ]
+            _daily_trades = len(todays)
+            _daily_pnl = sum(float(p.pnl or 0) for p in todays)
+            if _daily_trades:
+                _daily_wr = 100.0 * sum(
+                    1 for p in todays if (p.pnl or 0) > 0
+                ) / _daily_trades
+        except Exception:
+            pass
+        try:
+            self.notifier.trade_closed(
+                pos.exchange, pos.symbol, pos.side,
+                pos.entry_price, price,
+                pos.pnl, pnl_pct, reason,
+                strategy=getattr(pos, "strategy", None),
+                size=getattr(pos, "size", None),
+                leverage=getattr(pos, "leverage", None),
+                gross_pnl=getattr(pos, "gross_pnl", None),
+                entry_fee=getattr(pos, "entry_fee", None),
+                exit_fee=getattr(pos, "exit_fee", None),
+                total_fees=getattr(pos, "total_fees", None),
+                stop_loss=getattr(pos, "stop_loss", None),
+                take_profit=getattr(pos, "take_profit", None),
+                partial_taken=getattr(pos, "partial_taken", False),
+                open_time=getattr(pos, "open_time", None),
+                close_time=getattr(pos, "close_time", None),
+                duration_sec=_duration,
+                balance_after=_bal_after,
+                daily_pnl=_daily_pnl,
+                daily_trades=_daily_trades,
+                daily_wr=_daily_wr,
+                open_positions=_open_n,
+            )
+        except Exception as ne:
+            logger.debug(f"[Notifier] trade_closed skipped: {ne}")
 
     # ── SL / TP / Trailing check ──────────────────────────────────────
 
@@ -708,11 +1511,12 @@ class OrderManager:
         entry_fee = pos.size * pos.entry_price * rate
         exit_fee = pos.size * price * rate
         if pos.side == "buy":
-            gross = (price - pos.entry_price) * pos.size * pos.leverage
+            # size is already the leveraged quantity — do NOT multiply by leverage again
+            gross = (price - pos.entry_price) * pos.size
             # Breakeven = entry where gross covers both fees + buffer
             be = pos.entry_price * (1 + rate * 2 + 0.0005)
         else:
-            gross = (pos.entry_price - price) * pos.size * pos.leverage
+            gross = (pos.entry_price - price) * pos.size
             be = pos.entry_price * (1 - rate * 2 - 0.0005)
         net = gross - entry_fee - exit_fee
         notional = pos.entry_price * pos.size
@@ -720,10 +1524,26 @@ class OrderManager:
         return net, net_pct, be
 
     def _early_breakeven_move(self, pos: Position, price: float, effective_sl: float) -> float:
-        """Once profit covers fees, move SL to breakeven proactively.
-        This prevents winners from turning into losers."""
+        """Once the trade is at least half way to TP, move SL to breakeven.
+        2026-04-16 (post-audit): threshold raised 1.0% → half of (TP distance)
+        because ratcheting to BE at 1.0% (25% of a 4% TP) combined with the
+        already-removed MCP proactive TP meant any 1% pullback cashed the trade
+        at BE. Winners never reached TP — that's the 33 trailing_stop exits
+        averaging +$0.82 instead of full TP wins averaging +$2.83.
+        """
         _, net_pct, be = self._net_pnl_at_price(pos, price)
-        if net_pct >= 1.0:  # At least 1.0% net profit — let winners breathe before locking in
+        # Threshold = halfway to TP (side-aware). Floored at 1.5% to cover
+        # taker-fee round-trip (~0.1%) with breathing room. With a 4% TP this
+        # fires at +2%, with an 8% TP at +4% — much less likely to stop out
+        # on a normal 1h retrace.
+        tp_dist_pct = 0.0
+        if pos.take_profit and pos.entry_price > 0:
+            if pos.side == "buy":
+                tp_dist_pct = (pos.take_profit - pos.entry_price) / pos.entry_price * 100.0
+            else:
+                tp_dist_pct = (pos.entry_price - pos.take_profit) / pos.entry_price * 100.0
+        threshold = max(1.5, 0.5 * tp_dist_pct) if tp_dist_pct > 0 else 2.0
+        if net_pct >= threshold:
             if pos.side == "buy" and effective_sl < be:
                 logger.info(
                     f"[Orders] BREAKEVEN MOVE: {pos.symbol} BUY — "
@@ -736,16 +1556,138 @@ class OrderManager:
                 return be
         return effective_sl
 
+    def accrue_paper_funding(self, exchange: BaseExchange):
+        """
+        DRY_RUN-only: at each 8h UTC funding boundary, charge funding on
+        every held futures position for this exchange. LIVE futures accrue
+        funding on the exchange side and settle automatically — paper
+        previously ignored it entirely, making carry-heavy longs look free.
+
+        We check once per call; the first call landing in a funding hour
+        (00/08/16 UTC) after the last settlement triggers the charge.
+        Idempotent: only one settlement per 8h window.
+        """
+        if not self.dry_run or not self.sim.funding_on:
+            return
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        hour = now.hour
+        if hour not in (0, 8, 16):
+            return
+        # Settled this window already?
+        window_key = hour + now.day * 100 + now.month * 10000
+        if self._last_funding_hour == window_key:
+            return
+        self._last_funding_hour = window_key
+
+        positions = [p for p in self.tracker.get_open(exchange=exchange.name)
+                     if p.market_type == "futures"]
+        if not positions:
+            return
+        for pos in positions:
+            try:
+                # Current mark + funding rate in one shot
+                rate = 0.0
+                try:
+                    fr = exchange.exchange.fetch_funding_rate(pos.symbol)
+                    rate = float(fr.get("fundingRate") or 0.0)
+                except Exception:
+                    # Fallback median: 0.01% per 8h for BTC/ETH-class perps
+                    rate = 0.0001
+                try:
+                    tk = exchange.fetch_ticker(pos.symbol, "futures")
+                    mark = float(tk.get("last") or tk.get("close") or pos.entry_price)
+                except Exception:
+                    mark = pos.entry_price
+                cost = self.sim.funding_payment(pos, mark, rate)
+                if abs(cost) < 0.0001:
+                    continue
+                # Apply to wallet: +cost = debit (wallet shrinks), -cost = credit
+                name = exchange.name.lower()
+                prev = self.wallet._balances.get(name, self.wallet._start)
+                self.wallet._balances[name] = prev - cost
+                self.wallet._save()
+                logger.info(
+                    f"[SimFund] {exchange.name} {pos.symbol} {pos.side.upper()}: "
+                    f"rate={rate*100:.4f}% cost={cost:+.4f} USDT "
+                    f"→ bal {prev:.2f} → {self.wallet._balances[name]:.2f}"
+                )
+            except Exception as e:
+                logger.debug(f"[SimFund] {pos.symbol}: {e}")
+
     def check_sl_tp(self, exchange: BaseExchange, market_type: str = "spot"):
+        # Funding settlement piggybacks on the monitor loop
+        if self.dry_run and market_type == "futures":
+            self.accrue_paper_funding(exchange)
         positions = self.tracker.get_open(exchange=exchange.name)
         for pos in positions:
             if pos.market_type != market_type:
+                continue
+            # Skip if exchange is already handling both SL and TP
+            if getattr(pos, '_exchange_sl', False) and getattr(pos, '_exchange_tp', False):
                 continue
             ticker = exchange.fetch_ticker(pos.symbol, market_type)
             price  = ticker.get("last")
             if not price:
                 continue
             price = float(price)
+
+            # ── DRY_RUN realism: intrabar wick SL/TP (2026-04-11) ──
+            # LIVE exchange-side SL/TP orders trigger on wick price (high/low
+            # within the candle). Paper polling `ticker.last` every ~N seconds
+            # misses wicks that dipped below SL and recovered — survivorship
+            # bias that turned profitable paper into losing live. Consult the
+            # last 1m candle: if it touched SL/TP, fire the close at the
+            # trigger level (not at `last`) so paper matches what LIVE would
+            # have caught.
+            if self.dry_run:
+                wick_reason, wick_px = self.sim.check_wick_trigger(
+                    exchange, pos.symbol, market_type, pos.side,
+                    pos.stop_loss, pos.take_profit)
+                if wick_reason == "stop_loss":
+                    logger.warning(
+                        f"[Orders] WICK STOP: {pos.symbol} {pos.side.upper()} "
+                        f"1m wick touched SL={pos.stop_loss:.6g} "
+                        f"(ticker last={price:.6g})")
+                    self.close_position(
+                        exchange, pos, "stop_loss", wick_px)
+                    continue
+                if wick_reason == "take_profit":
+                    logger.info(
+                        f"[Orders] WICK TP: {pos.symbol} {pos.side.upper()} "
+                        f"1m wick touched TP={pos.take_profit:.6g} "
+                        f"(ticker last={price:.6g})")
+                    self.close_position(
+                        exchange, pos, "take_profit", wick_px)
+                    continue
+
+            # ── PARTIAL TAKE PROFIT ──
+            try:
+                from config import PARTIAL_TP
+                if (PARTIAL_TP.get("enabled") and not pos.partial_taken
+                        and pos.take_profit and pos.entry_price):
+                    take_at = PARTIAL_TP.get("first_take_at_pct", 0.5)
+                    take_sz = PARTIAL_TP.get("first_take_size", 0.5)
+                    if pos.side == "buy":
+                        tp_dist = pos.take_profit - pos.entry_price
+                        partial_level = pos.entry_price + tp_dist * take_at
+                        if price >= partial_level:
+                            logger.info(
+                                f"[Orders] PARTIAL TP: {pos.symbol} BUY "
+                                f"@ {price:.4f} ({take_at:.0%} of TP)")
+                            self.partial_close_position(
+                                exchange, pos, take_sz, "partial_tp", price)
+                    else:
+                        tp_dist = pos.entry_price - pos.take_profit
+                        partial_level = pos.entry_price - tp_dist * take_at
+                        if price <= partial_level:
+                            logger.info(
+                                f"[Orders] PARTIAL TP: {pos.symbol} SELL "
+                                f"@ {price:.4f} ({take_at:.0%} of TP)")
+                            self.partial_close_position(
+                                exchange, pos, take_sz, "partial_tp", price)
+            except ImportError:
+                pass
 
             should_trail, trail_reason, updated_sl = self.trailing.update(
                 pos, price
@@ -767,28 +1709,65 @@ class OrderManager:
             # ── Early breakeven move: lock SL to breakeven once in profit ──
             effective_sl = self._early_breakeven_move(pos, price, effective_sl)
 
-            if pos.side == "buy":
+            # Persist trailing advance so it survives restarts
+            # 2026-04-19 (Fix A2): when the exchange holds SL, also re-place
+            # it. Previously the tracker advanced but the exchange kept
+            # running the original (wider) SL → trailing was a ghost in live.
+            sl_advanced = False
+            if pos.side == "buy" and effective_sl > pos.stop_loss:
+                pos.stop_loss = effective_sl
+                sl_advanced = True
+                with self.tracker._lock:
+                    self.tracker._save()
+            elif pos.side == "sell" and effective_sl < pos.stop_loss:
+                pos.stop_loss = effective_sl
+                sl_advanced = True
+                with self.tracker._lock:
+                    self.tracker._save()
+
+            if (sl_advanced
+                    and not self.dry_run
+                    and getattr(pos, "_exchange_sl", False)
+                    and pos.market_type == "futures"):
+                try:
+                    self._replace_exchange_sl(exchange, pos)
+                except Exception as e:
+                    logger.warning(
+                        f"[Orders] Trailing SL re-place failed for "
+                        f"{pos.symbol}: {str(e)[:120]}")
+
+            # ── HARD MAX LOSS GATE — absolute circuit breaker ──
+            # 2026-04-12: replaces ANTI-LOSS gate which WIDENED SL on MCP
+            # advice, turning -3% losses into -16% catastrophes. No override,
+            # no MCP consultation, no exceptions. This is the last line of
+            # defense — if price moves 3% against you, you're OUT.
+            net_pnl, net_pct, be = self._net_pnl_at_price(pos, price)
+            if abs(net_pct) >= 3.0 and net_pnl < 0:
+                logger.error(
+                    f"[Orders] HARD MAX LOSS: {pos.symbol} {pos.side.upper()} "
+                    f"@ {price:.4f} net={net_pct:+.2f}% — forced close, no override")
+                self.close_position(exchange, pos, "hard_max_loss", price)
+                continue
+
+            # 2026-04-20: Guard against garbage SL/TP values (0.0, None, NaN).
+            # Root cause of ALGO naked-short cascade — a position with
+            # take_profit=0.0 fires TAKE_PROFIT on the first tick because
+            # any positive price >= 0. Skip the SL/TP trigger *only* when
+            # invalid, but let age-limit + hard-max-loss enforcement continue
+            # below so an unprotected position isn't immortal.
+            _tp_ok = pos.take_profit is not None and float(pos.take_profit) > 0
+            _sl_ok = effective_sl is not None and float(effective_sl) > 0
+            _sltp_valid = _tp_ok and _sl_ok
+            if not _sltp_valid:
+                logger.warning(
+                    f"[Orders] Invalid SL/TP for {pos.symbol} "
+                    f"(SL={effective_sl}, TP={pos.take_profit}) — "
+                    f"skipping SL/TP trigger this cycle (age/hard-loss still active)")
+
+            if _sltp_valid and pos.side == "buy":
                 if price <= effective_sl:
-                    # ── ANTI-LOSS GATE ──
-                    # Before closing at SL, check if net PnL is negative
-                    net_pnl, net_pct, be = self._net_pnl_at_price(pos, price)
-                    if net_pnl < 0 and pos.id not in self._sl_widened:
-                        # Check MCP Brain: does it predict recovery?
-                        coin = pos.symbol.split("/")[0]
-                        mcp_hold = False
-                        if self.mcp_brain and abs(net_pct) < 1.5:
-                            mcp_hold = self.mcp_brain.should_hold_position(
-                                coin, pos.side, abs(net_pct))
-                        if mcp_hold:
-                            # Widen SL by 0.5% — give position room to recover
-                            new_sl = effective_sl * (1 - 0.005)
-                            self._sl_widened.add(pos.id)
-                            pos.stop_loss = new_sl
-                            logger.warning(
-                                f"[Orders] ANTI-LOSS: {pos.symbol} BUY — "
-                                f"net={net_pct:+.2f}%, MCP says HOLD. "
-                                f"SL widened {effective_sl:.6g} → {new_sl:.6g}")
-                            continue
+                    # 2026-04-12: ANTI-LOSS gate REMOVED. SL hit = close.
+                    # No widening, no MCP hold consultation. Discipline > hope.
                     logger.warning(
                         f"[Orders] STOP LOSS: {pos.symbol} "
                         f"@ {price:.4f} (SL={effective_sl:.4f}) net={net_pct:+.2f}%"
@@ -796,59 +1775,29 @@ class OrderManager:
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
                 elif price >= pos.take_profit:
-                    trail_status = self.trailing._tracking.get(pos.id, {})
-                    # ── MCP BRAIN PROFIT GATE: consult MCP before taking profit ──
-                    coin = pos.symbol.split("/")[0]
+                    # 2026-04-16: MCP TP override REMOVED — always close at TP.
+                    # The old "MCP says RIDE" gate collapsed R:R from 2.5:1 to 1.12:1
+                    # by letting winning positions ride past TP, only to retrace and
+                    # exit at trailing SL for a fraction of the planned profit.
                     _, net_pct, _ = self._net_pnl_at_price(pos, price)
-                    mcp_take = True  # Default: take profit
-                    if self.mcp_brain and trail_status.get("active"):
-                        mcp_take = self.mcp_brain.should_take_profit(
-                            coin, pos.side, net_pct)
-                    if trail_status.get("active") and not mcp_take:
-                        logger.info(
-                            f"[Orders] {pos.symbol} passed TP {pos.take_profit:.4f} "
-                            f"— MCP says RIDE, trailing active (peak={trail_status.get('peak',0):.4f})")
-                    else:
-                        logger.info(
-                            f"[Orders] TAKE PROFIT: {pos.symbol} "
-                            f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
-                        )
-                        self.close_position(exchange, pos, "take_profit", price)
-                        continue
+                    logger.info(
+                        f"[Orders] TAKE PROFIT: {pos.symbol} "
+                        f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
+                    )
+                    self.close_position(exchange, pos, "take_profit", price)
+                    continue
 
-                # ── MCP BRAIN PROACTIVE PROFIT-TAKE: check even BEFORE TP is hit ──
-                _, net_pct_check, _ = self._net_pnl_at_price(pos, price)
-                if net_pct_check >= 2.0 and self.mcp_brain:
-                    coin = pos.symbol.split("/")[0]
-                    adv = self.mcp_brain.get_position_advice(pos.id)
-                    if adv.get("action") == "TAKE_PROFIT" and adv.get("confidence", 0) >= 0.65:
-                        logger.info(
-                            f"[Orders] MCP PROFIT-TAKE: {pos.symbol} BUY "
-                            f"@ {price:.4f} net={net_pct_check:+.2f}% — "
-                            f"MCP says TAKE_PROFIT conf={adv['confidence']:.0%}: "
-                            f"{adv.get('reason','')[:50]}")
-                        self.close_position(exchange, pos, "mcp_take_profit", price)
-                        continue
+                # 2026-04-16 (post-audit): Proactive MCP TP-at-+2% REMOVED.
+                # Together with the earlier TP override, this gate was exiting
+                # winners at +2% (halfway to planned TP), collapsing realized
+                # R:R to 0.74:1. Deterministic TP at pos.take_profit is the
+                # sole authority for profit-taking; trailing stop handles the
+                # retrace case, and MCP advice now only applies to exits below
+                # the planned TP line (loss-cut / breakeven).
 
-            else:
+            elif _sltp_valid and pos.side == "sell":
                 if price >= effective_sl:
-                    # ── ANTI-LOSS GATE (shorts) ──
-                    net_pnl, net_pct, be = self._net_pnl_at_price(pos, price)
-                    if net_pnl < 0 and pos.id not in self._sl_widened:
-                        coin = pos.symbol.split("/")[0]
-                        mcp_hold = False
-                        if self.mcp_brain and abs(net_pct) < 1.5:
-                            mcp_hold = self.mcp_brain.should_hold_position(
-                                coin, pos.side, abs(net_pct))
-                        if mcp_hold:
-                            new_sl = effective_sl * (1 + 0.005)
-                            self._sl_widened.add(pos.id)
-                            pos.stop_loss = new_sl
-                            logger.warning(
-                                f"[Orders] ANTI-LOSS: {pos.symbol} SELL — "
-                                f"net={net_pct:+.2f}%, MCP says HOLD. "
-                                f"SL widened {effective_sl:.6g} → {new_sl:.6g}")
-                            continue
+                    # 2026-04-12: ANTI-LOSS gate REMOVED for shorts too.
                     logger.warning(
                         f"[Orders] STOP LOSS (short): {pos.symbol} "
                         f"@ {price:.4f} (SL={effective_sl:.4f}) net={net_pct:+.2f}%"
@@ -856,53 +1805,38 @@ class OrderManager:
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
                 elif price <= pos.take_profit:
-                    trail_status = self.trailing._tracking.get(pos.id, {})
-                    # ── MCP BRAIN PROFIT GATE (shorts): consult MCP ──
-                    coin = pos.symbol.split("/")[0]
+                    # 2026-04-16: MCP TP override REMOVED for shorts too.
                     _, net_pct, _ = self._net_pnl_at_price(pos, price)
-                    mcp_take = True
-                    if self.mcp_brain and trail_status.get("active"):
-                        mcp_take = self.mcp_brain.should_take_profit(
-                            coin, pos.side, net_pct)
-                    if trail_status.get("active") and not mcp_take:
-                        logger.info(
-                            f"[Orders] {pos.symbol} passed TP {pos.take_profit:.4f} "
-                            f"— MCP says RIDE, trailing active (trough={trail_status.get('trough',0):.4f})")
-                    else:
-                        logger.info(
-                            f"[Orders] TAKE PROFIT (short): {pos.symbol} "
-                            f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
-                        )
-                        self.close_position(exchange, pos, "take_profit", price)
-                        continue
-
-                # ── MCP BRAIN PROACTIVE PROFIT-TAKE (shorts) ──
-                _, net_pct_check, _ = self._net_pnl_at_price(pos, price)
-                if net_pct_check >= 2.0 and self.mcp_brain:
-                    coin = pos.symbol.split("/")[0]
-                    adv = self.mcp_brain.get_position_advice(pos.id)
-                    if adv.get("action") == "TAKE_PROFIT" and adv.get("confidence", 0) >= 0.65:
-                        logger.info(
-                            f"[Orders] MCP PROFIT-TAKE: {pos.symbol} SELL "
-                            f"@ {price:.4f} net={net_pct_check:+.2f}% — "
-                            f"MCP says TAKE_PROFIT conf={adv['confidence']:.0%}: "
-                            f"{adv.get('reason','')[:50]}")
-                        self.close_position(exchange, pos, "mcp_take_profit", price)
-                        continue
-
-            # ── STALE POSITION TIMEOUT: close losing/stagnant positions open > 24 hours ──
-            # Crypto trends take 6-24h to develop — don't kill trades prematurely
-            age_min = getattr(pos, "duration_minutes", 0) or 0
-            if age_min >= 1440:  # 24 hours
-                net_pnl, net_pct, _ = self._net_pnl_at_price(pos, price)
-                if net_pnl < 0:
-                    logger.warning(
-                        f"[Orders] TIMEOUT CLOSE: {pos.symbol} {pos.side} "
-                        f"open {age_min:.0f}min, net={net_pct:+.2f}% — cutting loss")
-                    self.close_position(exchange, pos, "stale_timeout", price)
-                elif net_pct < 0.3:
-                    # Flat after 24 hours — free up capital
                     logger.info(
-                        f"[Orders] TIMEOUT CLOSE: {pos.symbol} {pos.side} "
-                        f"open {age_min:.0f}min, net={net_pct:+.2f}% — freeing capital")
-                    self.close_position(exchange, pos, "stale_timeout", price)
+                        f"[Orders] TAKE PROFIT (short): {pos.symbol} "
+                        f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
+                    )
+                    self.close_position(exchange, pos, "take_profit", price)
+                    continue
+
+                # 2026-04-16 (post-audit): Proactive MCP TP-at-+2% REMOVED
+                # for shorts too. Deterministic TP is sole authority.
+
+            # ── POSITION AGE LIMIT ENFORCEMENT ──────────────────────────
+            # Two rules:
+            #   1. AGE_LIMIT: open > max_position_age_hours AND losing → force-close
+            #   2. STALE:     open > max_stale_hours AND PnL between -0.5% and +0.5% → force-close
+            age_hours = (pos.duration_minutes or 0) / 60.0
+            max_age_h = RISK.get("max_position_age_hours", 24)
+            max_stale_h = RISK.get("max_stale_hours", 4)
+            net_pnl, net_pct, _ = self._net_pnl_at_price(pos, price)
+
+            if age_hours >= max_age_h and net_pnl < 0:
+                logger.warning(
+                    f"[Orders] AGE_LIMIT: {pos.symbol} {pos.side} "
+                    f"open {age_hours:.1f}h (limit {max_age_h}h), "
+                    f"net={net_pct:+.2f}% — force-closing losing position")
+                self.close_position(exchange, pos, "AGE_LIMIT", price)
+                continue
+            elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.3:
+                logger.warning(
+                    f"[Orders] STALE: {pos.symbol} {pos.side} "
+                    f"open {age_hours:.1f}h (stale limit {max_stale_h}h), "
+                    f"net={net_pct:+.2f}% — near breakeven, freeing capital")
+                self.close_position(exchange, pos, "STALE", price)
+                continue

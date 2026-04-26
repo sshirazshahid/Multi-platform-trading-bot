@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="60">
+<title>Trading Bot — Knowledge Report</title>
+<style>
+  body{background:#0f172a;color:#e2e8f0;font-family:monospace;padding:24px;}
+  h1{color:#38bdf8;margin-bottom:4px;}
+  h2{color:#7dd3fc;border-bottom:1px solid #334155;padding-bottom:6px;margin-top:28px;}
+  .meta{color:#64748b;font-size:.85em;margin-bottom:16px;}
+  .status{background:#1e293b;border-radius:8px;padding:14px 20px;margin-bottom:20px;border-left:4px solid #4ade80;}
+  .cards{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 24px;}
+  .card{background:#1e293b;border-radius:8px;padding:16px 22px;min-width:150px;}
+  .card .label{color:#94a3b8;font-size:.8em;text-transform:uppercase;}
+  .card .value{font-size:1.5em;font-weight:bold;margin-top:4px;}
+  table{border-collapse:collapse;width:100%;margin-top:12px;}
+  th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #1e293b;}
+  th{color:#94a3b8;font-size:.8em;text-transform:uppercase;}
+  tr:hover{background:#1e293b;}
+  .tab-btn{background:#1e293b;border:none;color:#94a3b8;padding:8px 18px;cursor:pointer;margin-right:4px;border-radius:4px;font-family:monospace;}
+  .tab-btn.active{color:#38bdf8;border-bottom:2px solid #38bdf8;}
+  .tab-content{display:none;}
+  .tab-content.active{display:block;}
+  ul{padding-left:20px;}
+  li{padding:6px 0;color:#fbbf24;}
+</style>
+</head>
+<body>
+<h1>Trading Bot — Knowledge Report</h1>
+<div class="meta">Generated: 2026-04-26T18:33:51.959353 &nbsp;|&nbsp; 488 total trades (all profiles merged)</div>
+<div class="status">
+  <strong style="color:#4ade80">Learning Status: GRADUATED — Live data drives all decisions</strong><br>
+  <span style="color:#94a3b8">Paper: 66 &nbsp;|&nbsp; Live: 422 &nbsp;|&nbsp; Stars: [] &nbsp;|&nbsp; Caution: ['MultiTF', 'Supertrend', 'TrendFollowing', 'reconciled_exchange', 'manual']</span>
+</div>
+<div class="cards">
+  <div class="card"><div class="label">Net PnL</div><div class="value" style="color:#4ade80">+73.1353</div></div>
+  <div class="card"><div class="label">Win Rate</div><div class="value" style="color:#f87171">43.4%</div></div>
+  <div class="card"><div class="label">Fees Paid</div><div class="value" style="color:#f97316">10.7195</div></div>
+  <div class="card"><div class="label">Paper Trades</div><div class="value" style="color:#a78bfa">66</div></div>
+  <div class="card"><div class="label">Live Trades</div><div class="value" style="color:#34d399">422</div></div>
+  <div class="card"><div class="label">Recent 20 PnL</div><div class="value" style="color:#f87171">-6.9911</div></div>
+</div>
+<h2>Strategy Performance</h2>
+<div>
+  <button class="tab-btn active" onclick="showTab('all')">All Trades</button>
+  <button class="tab-btn" onclick="showTab('dry')">Paper Only</button>
+  <button class="tab-btn" onclick="showTab('live')">Live Only</button>
+</div>
+<div id="tab-all" class="tab-content active">
+  <table><tr><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>Fees</th><th>Avg/Trade</th></tr><tr><td>multitf_futures</td><td>55</td><td>54.5%</td><td style='color:#4ade80'>+143.2690</td><td>2.8931</td><td>+2.6049</td></tr><tr><td>supertrend_futures</td><td>1</td><td>100.0%</td><td style='color:#4ade80'>+4.3556</td><td>0.0193</td><td>+4.3556</td></tr><tr><td>MeanReversion</td><td>1</td><td>100.0%</td><td style='color:#4ade80'>+0.1225</td><td>0.0093</td><td>+0.1225</td></tr><tr><td>TrendFollowing</td><td>8</td><td>0.0%</td><td style='color:#f87171'>-0.1558</td><td>0.0676</td><td>-0.0195</td></tr><tr><td>reconciled_exchange</td><td>72</td><td>47.2%</td><td style='color:#f87171'>-3.5805</td><td>0.1211</td><td>-0.0497</td></tr><tr><td>supertrend_spot</td><td>8</td><td>0.0%</td><td style='color:#f87171'>-4.4377</td><td>0.2386</td><td>-0.5547</td></tr><tr><td>claude_portfolio</td><td>185</td><td>43.8%</td><td style='color:#f87171'>-4.9679</td><td>5.2213</td><td>-0.0269</td></tr><tr><td>manual</td><td>61</td><td>34.4%</td><td style='color:#f87171'>-4.9686</td><td>1.2045</td><td>-0.0815</td></tr><tr><td>MultiTF</td><td>58</td><td>48.3%</td><td style='color:#f87171'>-11.3253</td><td>0.4562</td><td>-0.1953</td></tr><tr><td>Supertrend</td><td>39</td><td>41.0%</td><td style='color:#f87171'>-45.1761</td><td>0.4884</td><td>-1.1584</td></tr></table></div>
+<div id="tab-dry" class="tab-content">
+  <table><tr><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>Fees</th><th>Avg/Trade</th></tr><tr><td>multitf_futures</td><td>55</td><td>54.5%</td><td style='color:#4ade80'>+143.2690</td><td>2.8931</td><td>+2.6049</td></tr><tr><td>supertrend_futures</td><td>1</td><td>100.0%</td><td style='color:#4ade80'>+4.3556</td><td>0.0193</td><td>+4.3556</td></tr><tr><td>claude_portfolio</td><td>2</td><td>0.0%</td><td style='color:#f87171'>-0.0083</td><td>0.0145</td><td>-0.0042</td></tr><tr><td>supertrend_spot</td><td>8</td><td>0.0%</td><td style='color:#f87171'>-4.4377</td><td>0.2386</td><td>-0.5547</td></tr></table></div>
+<div id="tab-live" class="tab-content">
+  <table><tr><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>Fees</th><th>Avg/Trade</th></tr><tr><td>MeanReversion</td><td>1</td><td>100.0%</td><td style='color:#4ade80'>+0.1225</td><td>0.0093</td><td>+0.1225</td></tr><tr><td>TrendFollowing</td><td>8</td><td>0.0%</td><td style='color:#f87171'>-0.1558</td><td>0.0676</td><td>-0.0195</td></tr><tr><td>reconciled_exchange</td><td>72</td><td>47.2%</td><td style='color:#f87171'>-3.5805</td><td>0.1211</td><td>-0.0497</td></tr><tr><td>claude_portfolio</td><td>183</td><td>44.3%</td><td style='color:#f87171'>-4.9596</td><td>5.2068</td><td>-0.0271</td></tr><tr><td>manual</td><td>61</td><td>34.4%</td><td style='color:#f87171'>-4.9686</td><td>1.2045</td><td>-0.0815</td></tr><tr><td>MultiTF</td><td>58</td><td>48.3%</td><td style='color:#f87171'>-11.3253</td><td>0.4562</td><td>-0.1953</td></tr><tr><td>Supertrend</td><td>39</td><td>41.0%</td><td style='color:#f87171'>-45.1761</td><td>0.4884</td><td>-1.1584</td></tr></table></div>
+<h2>Suggestions &amp; Insights</h2>
+<ul><li>UNDERPERFORMING: 'MultiTF' WR=48% (58 trades) — auto-disabled (below 50% threshold).</li><li>UNDERPERFORMING: 'Supertrend' WR=41% (39 trades) — auto-disabled (below 50% threshold).</li><li>UNDERPERFORMING: 'claude_portfolio' WR=44% (185 trades) — auto-disabled (below 50% threshold).</li><li>UNDERPERFORMING: 'reconciled_exchange' WR=47% (72 trades) — auto-disabled (below 50% threshold).</li><li>UNDERPERFORMING: 'manual' WR=34% (61 trades) — auto-disabled (below 50% threshold).</li><li>BEST HOURS: Most profitable trades at 03:00 UTC, 13:00 UTC, 15:00 UTC.</li></ul>
+<script>
+function showTab(name){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+<p style="color:#334155;margin-top:40px;font-size:.8em;">
+  Auto-refreshes 60s &nbsp;|&nbsp; data/knowledge_model.json &nbsp;|&nbsp; All 3 profiles merged
+</p>
+</body></html>

@@ -1,0 +1,866 @@
+[
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "supertrend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "supertrend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "supertrend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "multitf",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "multitf",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "multitf",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "trend",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "trend",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "trend",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "meanreversion",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "meanreversion",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "scalping",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "scalping",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "scalping",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BTC/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ETH/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "SOL/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "XRP/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "BNB/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "ADA/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "DOGE/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "grid",
+    "exchange": "Binance",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "grid",
+    "exchange": "MEXC",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  },
+  {
+    "symbol": "AVAX/USDT",
+    "strategy": "grid",
+    "exchange": "Bitget",
+    "error": "Backtester.__init__() got an unexpected keyword argument 'timeframe'"
+  }
+]

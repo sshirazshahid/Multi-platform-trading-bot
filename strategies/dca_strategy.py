@@ -51,20 +51,22 @@ class DCAStrategy(BaseStrategy):
         ex_name = exchange.name
         logger.debug(f"[DCA] Checking {symbol} on {ex_name}")
 
-        # HARD CHECK: Verify actual balance for this market type
-        # Do NOT rely on get_usdt_balance() which used to fake-fallback
-        try:
-            _bal = exchange.fetch_balance(self.market_type)
-            _usdt = 0.0
-            _u = _bal.get("USDT")
-            if isinstance(_u, dict):
-                _usdt = float(_u.get("free", 0) or _u.get("total", 0) or 0)
-            elif isinstance(_bal.get("free"), dict):
-                _usdt = float(_bal["free"].get("USDT", 0) or 0)
-            if _usdt < 6:
-                return  # Not enough balance — skip silently
-        except Exception:
-            return  # Can't check — skip safely
+        # Balance check — use paper wallet in DRY RUN, real balance in LIVE
+        if self.order_manager.dry_run:
+            _usdt = self.get_usdt_balance(exchange)
+        else:
+            try:
+                _bal = exchange.fetch_balance(self.market_type)
+                _usdt = 0.0
+                _u = _bal.get("USDT")
+                if isinstance(_u, dict):
+                    _usdt = float(_u.get("free", 0) or _u.get("total", 0) or 0)
+                elif isinstance(_bal.get("free"), dict):
+                    _usdt = float(_bal["free"].get("USDT", 0) or 0)
+            except Exception:
+                return  # Can't check — skip safely
+        if _usdt < 6:
+            return  # Not enough balance — skip silently
 
         # Reset daily counters on new day
         today = date.today()
@@ -120,6 +122,15 @@ class DCAStrategy(BaseStrategy):
                 f"[DCA] [DRY] BUY {qty:.6f} {symbol} @ {price:.4f} "
                 f"({amount_usdt:.2f} USDT) on {ex_name} — {reason}"
             )
+            # Debit paper wallet so balance reflects the spend
+            wallet = getattr(self.order_manager, "wallet", None)
+            if wallet is not None:
+                try:
+                    fee = amount_usdt * 0.001  # spot taker fee
+                    wallet.on_open(ex_name, symbol, "buy", qty, price, fee,
+                                   market_type=self.market_type)
+                except Exception:
+                    pass
         else:
             try:
                 # Pass price for exchanges that require it (e.g. Bitget spot market buys)
@@ -173,8 +184,9 @@ class DCAStrategy(BaseStrategy):
         now  = time.time()
         avg  = self._avg_cost.get(symbol, price)
 
-        # Dip buy check (takes priority)
-        if dip_pct > 0 and avg > 0:
+        # Dip buy check (takes priority, but still requires interval cooldown
+        # to prevent runaway buys every cycle while price stays below threshold)
+        if dip_pct > 0 and avg > 0 and (now - last) >= interval_secs:
             drop_pct = (avg - price) / avg
             if drop_pct >= dip_pct:
                 return True, f"dip buy -{drop_pct*100:.1f}%", amount * dip_mult

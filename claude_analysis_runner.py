@@ -48,7 +48,7 @@ def test_key():
     import urllib.request, urllib.error
     try:
         payload = json.dumps({
-            "model":      "claude-sonnet-4-20250514",
+            "model":      "claude-opus-4-7",
             "max_tokens": 50,
             "messages":   [{"role": "user", "content": "Reply with: OK"}],
         }).encode()

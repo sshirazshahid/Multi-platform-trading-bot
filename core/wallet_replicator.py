@@ -36,7 +36,7 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
     Bitget futures:
         bal["USDT"]["total"]   (free may be lower than actual equity)
 
-    Binance / MEXC (standard spot):
+    Binance (standard spot):
         bal["USDT"]["free"]    or   bal["free"]["USDT"]
     """
     if not bal:
@@ -125,7 +125,7 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
                     pass
         return 0.0
 
-    # ── Standard ccxt (Binance, MEXC) ─────────────────────────────────
+    # ── Standard ccxt (Binance) ──────────────────────────────────────
     usdt = bal.get("USDT")
     if isinstance(usdt, dict):
         for key in ("free", "total"):
@@ -164,11 +164,10 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
 # ══════════════════════════════════════════════════════════════════════
 
 def replicate_live_to_dry(verbose: bool = True) -> dict:
-    from exchanges import BinanceClient, MEXCClient, BybitClient, BitgetClient
+    from exchanges import BinanceClient, BybitClient, BitgetClient
 
     clients = {
         "binance": BinanceClient(),
-        "mexc":    MEXCClient(),
         "bybit":   BybitClient(),
         "bitget":  BitgetClient(),
     }
@@ -329,7 +328,6 @@ def _get_price(exchange, coin: str, verbose: bool) -> float:
 
 _COMMODITY_FUTURES = {
     "binance": {"XAU/USDT:USDT": "Gold", "XAG/USDT:USDT": "Silver"},
-    "mexc":    {"XAU/USDT:USDT": "Gold", "XAG/USDT:USDT": "Silver"},
     "bybit":   {"XAU/USDT:USDT": "Gold", "XAG/USDT:USDT": "Silver"},
     "bitget":  {"XAUUSDT:USDT": "Gold",  "XAGUSDT:USDT": "Silver", "WTIUSDT:USDT": "Oil"},
 }

@@ -51,7 +51,7 @@ def _call_live(news: dict, snapshots: dict) -> dict | None:
     text = call_claude(
         prompt,
         model="sonnet",
-        api_model="claude-sonnet-4-20250514",
+        api_model="claude-opus-4-7",
         max_tokens=800,
         timeout=60,
     )

@@ -8,7 +8,7 @@ Simulates a real exchange account starting with a configurable USDT balance
   - Returns notional + PnL - exit fee when a position is closed
   - Maintains a running balance that the risk manager uses for position sizing
   - Persists balance to data/virtual_wallet.json so it survives restarts
-  - Separate balances per exchange (binance / mexc) if multi-exchange is used
+  - Separate balances per exchange (binance / bybit / bitget) if multi-exchange is used
   - Prints a clear balance statement on every open and close
 
 Fee rates mirror the real exchanges:
@@ -111,22 +111,35 @@ class VirtualWallet:
     def on_close(self, exchange: str, symbol: str, side: str,
                  size: float, exit_price: float, entry_price: float,
                  exit_fee: float, gross_pnl: float,
-                 market_type: str = "spot"):
+                 market_type: str = "spot", leverage: int = 1):
         """
         Return USDT to wallet when position closes.
-        balance += notional_at_exit - exit_fee + (profit already in gross_pnl
-        is net of entry; we just add back the exit proceeds).
+
+        Spot:    proceeds = size * exit_price - exit_fee
+        Futures: proceeds = margin_returned + PnL - exit_fee
+                 (on_open deducted margin = notional/leverage + entry_fee,
+                  so we return margin + gross_pnl - exit_fee)
         """
         if not self._enabled:
             return
 
         ex       = exchange.lower()
         bal      = self._balances.get(ex, self._start)
-        proceeds = size * exit_price - exit_fee   # what we receive back
 
-        # Estimate entry fee for accurate net PnL display
-        fee_rate = 0.0005 if market_type == "futures" else 0.001
-        entry_fee_est = size * entry_price * fee_rate
+        if market_type == "futures" and leverage > 1:
+            # Return margin (what was originally deducted) + realized PnL
+            margin = size * entry_price / leverage
+            proceeds = margin + gross_pnl - exit_fee
+        else:
+            proceeds = size * exit_price - exit_fee   # spot: sell proceeds
+
+        # Use config fee rates for accurate net PnL display
+        try:
+            from core.position_tracker import _fee_rate
+            entry_fee_est = size * entry_price * _fee_rate(market_type)
+        except Exception:
+            fee_rate = 0.0005 if market_type == "futures" else 0.001
+            entry_fee_est = size * entry_price * fee_rate
         net_pnl  = gross_pnl - entry_fee_est - exit_fee
 
         self._balances[ex] = bal + proceeds

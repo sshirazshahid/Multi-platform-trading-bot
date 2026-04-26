@@ -1,0 +1,345 @@
+{
+  "fetched_at": "2026-04-26T18:15:31.439916",
+  "fear_greed": {
+    "value": 33,
+    "label": "Fear",
+    "timestamp": "1777161600"
+  },
+  "trending": [
+    {
+      "name": "Mask Network",
+      "symbol": "MASK",
+      "rank": 404,
+      "price_btc": 8.571407548374761e-06
+    },
+    {
+      "name": "Ultima",
+      "symbol": "ULTIMA",
+      "rank": 260,
+      "price_btc": 0.03963795635418834
+    },
+    {
+      "name": "Official Trump",
+      "symbol": "TRUMP",
+      "rank": 89,
+      "price_btc": 3.428955392791047e-05
+    },
+    {
+      "name": "peaq",
+      "symbol": "PEAQ",
+      "rank": 630,
+      "price_btc": 2.1010881478518515e-07
+    },
+    {
+      "name": "Pudgy Penguins",
+      "symbol": "PENGU",
+      "rank": 98,
+      "price_btc": 1.1385134015196922e-07
+    },
+    {
+      "name": "Orca",
+      "symbol": "ORCA",
+      "rank": 280,
+      "price_btc": 2.1899271808253973e-05
+    },
+    {
+      "name": "Solana",
+      "symbol": "SOL",
+      "rank": 7,
+      "price_btc": 0.0011055446191319308
+    },
+    {
+      "name": "OpenGradient",
+      "symbol": "OPG",
+      "rank": 400,
+      "price_btc": 4.601670623505316e-06
+    },
+    {
+      "name": "Monad",
+      "symbol": "MON",
+      "rank": 123,
+      "price_btc": 3.907447319854963e-07
+    },
+    {
+      "name": "Aerodrome Finance",
+      "symbol": "AERO",
+      "rank": 111,
+      "price_btc": 6.022501367931237e-06
+    }
+  ],
+  "global": {
+    "total_market_cap_usd": 2682363164736.3896,
+    "total_volume_24h_usd": 51096463252.42534,
+    "btc_dominance": 58.1,
+    "eth_dominance": 10.5,
+    "market_cap_change_24h": 0.24,
+    "active_cryptocurrencies": 17526
+  },
+  "news": [
+    {
+      "title": "MiCA's not enough: Bybit CEO says firms need other licenses to turn a profit in Europe",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/policy/2026/04/26/mica-s-not-enough-bybit-ceo-says-firms-need-other-licenses-to-turn-a-profit-in-europe",
+      "published": "2026-04-26 13:00",
+      "categories": "Policy,Regulation,Exclusive,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Policy",
+        "Regulation",
+        "Exclusive",
+        "News"
+      ]
+    },
+    {
+      "title": "Coinbase's John D\u2019Agostino says crypto platform stands alone as industry's full-service prime broker",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/business/2026/04/21/coinbase-s-john-d-agostino-says-exchange-stands-alone-as-crypto-s-full-service-prime-broker",
+      "published": "2026-04-26 12:00",
+      "categories": "Finance,Coinbase,Exclusive,Prime Broker,Crypto Trading,Derivatives,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Finance",
+        "Coinbase",
+        "Exclusive",
+        "Prime Broker",
+        "Crypto Trading",
+        "Derivatives",
+        "News"
+      ]
+    },
+    {
+      "title": "Litecoin hit by denial-of-service attack, rewrites 13 blocks to reverse effect",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/markets/2026/04/26/litecoin-says-its-13-block-reorg-was-not-a-zero-day-but-github-commit-history-shows-otherwise",
+      "published": "2026-04-26 08:34",
+      "categories": "Markets,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Markets",
+        "News"
+      ]
+    },
+    {
+      "title": "Crypto is built for AI agents, not humans, says Alchemy's CEO",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/tech/2026/04/25/crypto-is-built-for-ai-agents-not-humans-says-alchemy-s-ceo",
+      "published": "2026-04-25 19:00",
+      "categories": "Tech,Artificial Intelligence,Alchemy,Exclusive,Consensus Miami 2026,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Tech",
+        "Artificial Intelligence",
+        "Alchemy",
+        "Exclusive",
+        "Consensus Miami 2026",
+        "News"
+      ]
+    },
+    {
+      "title": "Trump defends crypto legislation at private event featuring boxer Mike Tyson, Tether CEO",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/policy/2026/04/25/trump-defends-crypto-legislation-at-private-event-featuring-boxer-mike-tyson-tether-ceo",
+      "published": "2026-04-25 18:53",
+      "categories": "Policy,Donald Trump,Stablecoins,Top Stories,Breaking News,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Policy",
+        "Donald Trump",
+        "Stablecoins",
+        "Top Stories",
+        "Breaking News",
+        "News"
+      ]
+    },
+    {
+      "title": "BlackRock\u2019s bitcoin ETF just hit a massive milestone that proves crypto is now a mainstream bet",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/markets/2026/04/25/blackrock-s-bitcoin-etf-just-hit-a-massive-milestone-that-proves-crypto-is-now-a-mainstream-bet",
+      "published": "2026-04-25 18:29",
+      "categories": "Markets,Bitcoin News,BlackRock,ETFs,Options,News",
+      "sentiment": 1,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Markets",
+        "Bitcoin News",
+        "BlackRock",
+        "ETFs",
+        "Options",
+        "News"
+      ]
+    },
+    {
+      "title": "How Anthropic\u2019s Mythos model is forcing the crypto industry to rethink everything about security",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/tech/2026/04/25/how-anthropic-s-mythos-model-is-forcing-the-crypto-industry-to-rethink-everything-about-security",
+      "published": "2026-04-25 17:00",
+      "categories": "Tech,Artificial Intelligence,DeFi,News",
+      "sentiment": -1,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Tech",
+        "Artificial Intelligence",
+        "DeFi",
+        "News"
+      ]
+    },
+    {
+      "title": "Bitcoin falls after Trump reportedly canceled Steve Witkoff and Jared Kushner's Iran-talks trip",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/markets/2026/04/25/bitcoin-falls-after-trump-reportedly-canceled-steve-witkoff-and-jared-kushner-s-iran-talks-trip",
+      "published": "2026-04-25 16:20",
+      "categories": "Markets,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Markets",
+        "News"
+      ]
+    },
+    {
+      "title": "Mike Tyson, Tether CEO, Cathie Wood among speakers at Trump's 'most exclusive' crypto conference",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/policy/2026/04/25/mike-tyson-tether-ceo-cathie-wood-among-speakers-at-trump-s-most-exclusive-crypto-conference",
+      "published": "2026-04-25 15:24",
+      "categories": "Policy,Donald Trump,Top Stories,Exclusive,News",
+      "sentiment": 1,
+      "impact": "HIGH",
+      "breaking": false,
+      "tags": [
+        "Policy",
+        "Donald Trump",
+        "Top Stories",
+        "Exclusive",
+        "News"
+      ]
+    },
+    {
+      "title": "Bitcoin at $40,000 would be 'near-unprecedented' statistical outcome, analyst says",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/markets/2026/04/25/bitcoin-at-usd40-000-would-be-near-unprecedented-statistical-outcome-analyst-says",
+      "published": "2026-04-25 15:00",
+      "categories": "Markets,Bitcoin News,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Markets",
+        "Bitcoin News",
+        "News"
+      ]
+    },
+    {
+      "title": "Europe\u2019s banks are going all in on crypto",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/opinion/2026/04/25/europe-s-banks-are-going-all-in-on-crypto",
+      "published": "2026-04-25 13:30",
+      "categories": "Opinion,MiCA,Opinion",
+      "sentiment": -1,
+      "impact": "HIGH",
+      "breaking": false,
+      "tags": [
+        "Opinion",
+        "MiCA",
+        "Opinion"
+      ]
+    },
+    {
+      "title": "Coinbase\u2019s Jesse Pollak says AI agents are the next big wave for crypto payments",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/tech/2026/04/25/coinbase-s-jesse-pollak-says-ai-agents-are-the-next-big-wave-for-crypto-payments",
+      "published": "2026-04-25 13:00",
+      "categories": "Tech,Coinbase,Consensus Miami 2026,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Tech",
+        "Coinbase",
+        "Consensus Miami 2026",
+        "News"
+      ]
+    },
+    {
+      "title": "Clock is ticking for bitcoin to prevent quantum threat as it could drain 6.9 million BTC including Satoshi\u2019s",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/tech/2026/04/25/clock-is-ticking-for-bitcoin-to-prevent-quantum-threat-as-it-could-drain-6-9-million-btc-including-satoshi-s",
+      "published": "2026-04-25 10:00",
+      "categories": "Tech,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Tech",
+        "News"
+      ]
+    },
+    {
+      "title": "Ripple-linked XRP stalls near $1.44 as 'triangle squeeze' nears breakout",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/markets/2026/04/25/ripple-linked-xrp-stalls-near-usd1-44-as-triangle-squeeze-nears-breakout",
+      "published": "2026-04-25 05:33",
+      "categories": "Markets,News",
+      "sentiment": 1,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Markets",
+        "News"
+      ]
+    },
+    {
+      "title": "U.S. CFTC adds New York to string of states its suing to stop prediction market pushback",
+      "source": "CoinDesk",
+      "url": "https://www.coindesk.com/policy/2026/04/24/u-s-cftc-adds-new-york-to-string-of-states-its-suing-to-stop-prediction-market-pushback",
+      "published": "2026-04-24 22:09",
+      "categories": "Policy,Prediction Markets,Kalshi,Coinbase,Gemini,News",
+      "sentiment": 0,
+      "impact": "LOW",
+      "breaking": false,
+      "tags": [
+        "Policy",
+        "Prediction Markets",
+        "Kalshi",
+        "Coinbase",
+        "Gemini",
+        "News"
+      ]
+    }
+  ],
+  "sentiment": {
+    "NEWS": 0.5,
+    "BITCOIN": 1.0,
+    "MARKETS": 1.0,
+    "OPTIONS": 1.0,
+    "BLACKROCK": 1.0,
+    "ETFS": 1.0,
+    "BTC": 1.0,
+    "INTELLIGENCE": -1.0,
+    "ARTIFICIAL": -1.0,
+    "TECH": -1.0,
+    "DEFI": -1.0,
+    "TRUMP": 1.0,
+    "EXCLUSIVE": 1.0,
+    "STORIES": 1.0,
+    "POLICY": 1.0,
+    "TOP": 1.0,
+    "DONALD": 1.0,
+    "OPINION": -1.0,
+    "MICA": -1.0,
+    "XRP": 1.0,
+    "NEAR": 1.0
+  }
+}

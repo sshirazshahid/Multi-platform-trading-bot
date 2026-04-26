@@ -7,6 +7,7 @@ Usage:
 """
 
 import sys
+import time
 import argparse
 from loguru import logger
 from utils.logger import setup_logger
@@ -14,7 +15,7 @@ from config import DRY_RUN
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Binance + MEXC Trading Bot")
+    parser = argparse.ArgumentParser(description="Crypto Trading Bot")
     parser.add_argument(
         "--status", action="store_true",
         help="Print current bot status and open positions, then exit"
@@ -59,14 +60,63 @@ def print_status():
             pos_tbl.add_row(
                 p.exchange, p.symbol, p.side.upper(), p.market_type,
                 p.strategy,
-                f"{p.entry_price:.4f}",
-                f"{p.stop_loss:.4f}",
-                f"{p.take_profit:.4f}",
+                f"{p.entry_price:.4f}" if p.entry_price else "N/A",
+                f"{p.stop_loss:.4f}" if p.stop_loss else "N/A",
+                f"{p.take_profit:.4f}" if p.take_profit else "N/A",
                 f"{p.duration_minutes:.0f}",
             )
         console.print(pos_tbl)
     else:
         console.print("[yellow]No open positions.[/yellow]")
+
+
+def run_with_watchdog():
+    """Watchdog wrapper — restarts the bot on crashes for 24/7 operation."""
+    from core.bot_engine import BotEngine
+
+    max_restarts = 10
+    restart_window = 3600  # 1 hour
+    restart_times = []
+
+    while True:
+        try:
+            logger.info("[Watchdog] Initialising trading bot...")
+            engine = BotEngine()
+            engine.run()
+            # If run() returns normally, exit cleanly
+            break
+        except SystemExit:
+            logger.info("[Watchdog] Clean exit requested")
+            break  # Intentional exit
+        except Exception as e:
+            # loguru ignores the stdlib `exc_info` kwarg — use .opt(exception=True)
+            # so the full traceback lands in the log. 2026-04-20: previously
+            # `'list' object has no attribute 'get'` crashes were invisible.
+            logger.opt(exception=True).critical(f"[Watchdog] Bot crashed: {e}")
+
+            # Check restart rate — append BEFORE guard so current crash is counted
+            now = time.time()
+            restart_times.append(now)
+            restart_times = [t for t in restart_times if now - t < restart_window]
+            if len(restart_times) > max_restarts:
+                logger.critical(
+                    f"[Watchdog] Too many restarts ({max_restarts} in "
+                    f"{restart_window}s) — giving up")
+                # Send critical alert
+                try:
+                    from utils import TelegramNotifier
+                    TelegramNotifier().error(
+                        f"BOT PERMANENTLY STOPPED: {max_restarts} crashes in "
+                        f"{restart_window // 60} minutes.\n"
+                        f"Last error: {e}")
+                except Exception:
+                    pass
+                break
+            cooldown = min(300, 30 * len(restart_times))  # 30s, 60s, 90s, ..., max 300s
+            logger.info(
+                f"[Watchdog] Restarting in {cooldown}s "
+                f"(restart #{len(restart_times)})")
+            time.sleep(cooldown)
 
 
 def main():
@@ -77,11 +127,7 @@ def main():
         print_status()
         sys.exit(0)
 
-    from core.bot_engine import BotEngine
-
-    logger.info("Initialising trading bot...")
-    bot = BotEngine()
-    bot.run()
+    run_with_watchdog()
 
 
 if __name__ == "__main__":

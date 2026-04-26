@@ -18,9 +18,13 @@ class BinanceClient(BaseExchange):
     # Geo-block circuit breaker — once 451 is detected, stop all API calls
     _geo_blocked = False
 
+    # Default to ONE-WAY mode — per-instance to avoid multi-profile contamination
+    _is_oneway = True  # class default; overridden per-instance in __init__
+
     def __init__(self, api_key: str = None, secret: str = None,
                  testnet: bool = None):
         self._connected = False
+        self._is_oneway = True  # Instance variable — safe for multi-profile
         super().__init__(
             api_key = (api_key or BINANCE_API_KEY  or "").strip(),
             secret  = (secret  or BINANCE_SECRET_KEY or "").strip(),
@@ -146,6 +150,8 @@ class BinanceClient(BaseExchange):
             return {}
         if market_type == "futures":
             self.switch_to_futures()
+        else:
+            self.switch_to_spot()
         try:
             result = super().fetch_ticker(symbol, market_type)
         except Exception as e:
@@ -185,17 +191,23 @@ class BinanceClient(BaseExchange):
                          market_type: str = "spot") -> dict:
         if not self._ok():
             return {"bids": [], "asks": []}
-        return super().fetch_order_book(symbol, limit, market_type)
+        if market_type == "futures":
+            self.switch_to_futures()
+        try:
+            return super().fetch_order_book(symbol, limit, market_type)
+        finally:
+            self.switch_to_spot()
 
     def fetch_open_orders(self, symbol: str,
                           market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        return super().fetch_open_orders(symbol, market_type)
-
-    # Default to ONE-WAY mode — most retail Binance accounts use one-way.
-    # Prevents first futures order of every session from failing with -4061 before retry.
-    _is_oneway = True
+        if market_type == "futures":
+            self.switch_to_futures()
+        try:
+            return super().fetch_open_orders(symbol, market_type)
+        finally:
+            self.switch_to_spot()
 
     def create_order(self, symbol: str, order_type: str, side: str,
                      amount: float, price: float = None,
@@ -208,7 +220,7 @@ class BinanceClient(BaseExchange):
 
         # Strip positionSide if Binance is in One-Way mode
         _params = dict(params or {})
-        if BinanceClient._is_oneway and "positionSide" in _params:
+        if self._is_oneway and "positionSide" in _params:
             del _params["positionSide"]
 
         try:
@@ -217,8 +229,8 @@ class BinanceClient(BaseExchange):
             return order
         except Exception as e:
             err = str(e)
-            if ("-4061" in err or "position side does not match" in err) and not BinanceClient._is_oneway:
-                BinanceClient._is_oneway = True
+            if ("-4061" in err or "position side does not match" in err) and not self._is_oneway:
+                self._is_oneway = True
                 logger.info("[Binance] ONE-WAY mode detected. Retrying...")
                 clean = {k: v for k, v in _params.items() if k != "positionSide"}
                 try:
@@ -226,7 +238,7 @@ class BinanceClient(BaseExchange):
                                                  price, clean, market_type)
                     return order
                 except Exception as e2:
-                    raise e2
+                    raise
             raise
         finally:
             self.switch_to_spot()
@@ -289,6 +301,53 @@ class BinanceClient(BaseExchange):
         if not self._ok():
             return 0.0001
         return super().get_min_order_size(symbol)
+
+    def fetch_closed_pnl(self, since_ms: int = None,
+                          symbol: str = None) -> list:
+        """Binance Futures realized-PnL from the income ledger.
+        Endpoint: /fapi/v1/income?incomeType=REALIZED_PNL.
+        """
+        if not self._ok():
+            return []
+        try:
+            params = {"incomeType": "REALIZED_PNL", "limit": 1000}
+            if since_ms:
+                params["startTime"] = int(since_ms)
+            if symbol:
+                try:
+                    params["symbol"] = self.exchange.market_id(symbol)
+                except Exception:
+                    params["symbol"] = symbol.replace("/", "").split(":")[0]
+            records = self.exchange.fapiPrivateGetIncome(params) or []
+            out = []
+            for r in records:
+                try:
+                    pnl = float(r.get("income", 0) or 0)
+                    if pnl == 0:
+                        continue
+                    raw_sym = str(r.get("symbol", "") or "")
+                    if raw_sym.endswith("USDT"):
+                        unified = f"{raw_sym[:-4]}/USDT:USDT"
+                    else:
+                        unified = raw_sym
+                    out.append({
+                        "exchange":     "binance",
+                        "symbol":       unified,
+                        "side":         None,  # income ledger doesn't carry side
+                        "realized_pnl": pnl,
+                        "close_time":   int(r.get("time", 0) or 0) / 1000.0,
+                        "trade_id":     str(r.get("tradeId", "") or r.get("tranId", "")),
+                        "entry_price":  0.0,
+                        "exit_price":   0.0,
+                        "size":         0.0,
+                        "leverage":     1,
+                    })
+                except Exception:
+                    continue
+            return out
+        except Exception as e:
+            logger.warning(f"[Binance] fetch_closed_pnl: {str(e)[:150]}")
+            return []
 
     @property
     def name(self) -> str:

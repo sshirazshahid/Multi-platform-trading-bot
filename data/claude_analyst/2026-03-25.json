@@ -1,0 +1,60 @@
+{
+  "date": "2026-03-25",
+  "generated_at": "2026-03-25T16:14:53.425866",
+  "commentary": "Analysis unavailable: HTTP 400",
+  "risk_guidance": "Use default position sizes.",
+  "decisions": [
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "XRP/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "ADA/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "action": "skip",
+      "reasoning": "Analyst unavailable"
+    }
+  ],
+  "executed_trades": [],
+  "market_snapshot": {
+    "fear_greed": 14,
+    "btc_dominance": 56.6,
+    "trending": [
+      "TAO",
+      "SIREN",
+      "PENGU",
+      "XTZ",
+      "MON"
+    ]
+  }
+}

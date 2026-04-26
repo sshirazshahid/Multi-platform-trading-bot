@@ -31,6 +31,8 @@ def _fee_rate(market_type: str) -> float:
 class TrailingStopManager:
     def __init__(self):
         self._tracking = self._load_peaks()
+        # self.activation retained for backwards compat, but _adaptive_activation
+        # reads RISK live on every call so config edits take immediate effect.
         self.activation = RISK.get("trailing_activation", 0.008)
         self.enabled = RISK.get("trailing_stop", True)
         if self._tracking:
@@ -49,6 +51,25 @@ class TrailingStopManager:
         else:
             return ep * (1 - fee_pct - buffer)
 
+    def _adaptive_activation(self, position) -> float:
+        """
+        Volatility-adaptive trailing activation threshold.
+        High-vol assets need more room before trailing activates;
+        low-vol assets can activate sooner.
+
+        Reads RISK["trailing_activation"] live on every call so config
+        reloads (or runtime edits to RISK) take effect without bot restart.
+        """
+        base = RISK.get("trailing_activation", 0.008)  # default 0.8%
+        # Use ATR if available on the position
+        atr_pct = getattr(position, 'atr_pct', 0)
+        if atr_pct and atr_pct > 0:
+            # Scale: if ATR is 2%, activate at ~2.2% (1.1x ATR)
+            # If ATR is 0.5%, activate at ~1.0% (2x ATR but floored at base * 0.5)
+            adaptive = atr_pct * 1.1
+            return max(base * 0.5, min(adaptive, base * 2.0))
+        return base
+
     def update(self, position, current_price: float) -> tuple:
         if not self.enabled:
             return False, "", position.stop_loss
@@ -57,6 +78,7 @@ class TrailingStopManager:
         sl = position.stop_loss
         ep = position.entry_price
         be = self._breakeven_price(position, side)
+        activation_threshold = self._adaptive_activation(position)
         if pid not in self._tracking:
             self._tracking[pid] = {
                 "peak": current_price, "trough": current_price,
@@ -73,15 +95,17 @@ class TrailingStopManager:
                 t["peak_pnl"] = (current_price - ep) / ep
                 dirty = True
             peak_pnl = t["peak_pnl"]
-            if peak_pnl >= self.activation and not t["active"]:
+            if peak_pnl >= activation_threshold and not t["active"]:
                 t["active"] = True; dirty = True
                 logger.info(
                     f"[Trail] {position.symbol} BUY activated: "
-                    f"profit={peak_pnl*100:.1f}% — SL locked to breakeven {be:.6g}")
+                    f"profit={peak_pnl*100:.1f}% (thresh={activation_threshold*100:.1f}%) "
+                    f"— SL locked to breakeven {be:.6g}")
             if t["active"]:
                 trail_pct = self._trail_distance(peak_pnl)
                 trail_sl = round(t["peak"] * (1 - trail_pct), 8)
-                lock_sl = ep * (1 + peak_pnl * 0.70)
+                lock_frac = self._lock_fraction(peak_pnl)
+                lock_sl = ep * (1 + peak_pnl * lock_frac)
                 # Breakeven floor: NEVER let trailing SL go below breakeven
                 new_sl = max(trail_sl, lock_sl, be)
                 if new_sl > sl:
@@ -100,15 +124,17 @@ class TrailingStopManager:
                 t["peak_pnl"] = (ep - current_price) / ep
                 dirty = True
             peak_pnl = t["peak_pnl"]
-            if peak_pnl >= self.activation and not t["active"]:
+            if peak_pnl >= activation_threshold and not t["active"]:
                 t["active"] = True; dirty = True
                 logger.info(
                     f"[Trail] {position.symbol} SELL activated: "
-                    f"profit={peak_pnl*100:.1f}% — SL locked to breakeven {be:.6g}")
+                    f"profit={peak_pnl*100:.1f}% (thresh={activation_threshold*100:.1f}%) "
+                    f"— SL locked to breakeven {be:.6g}")
             if t["active"]:
                 trail_pct = self._trail_distance(peak_pnl)
                 trail_sl = round(t["trough"] * (1 + trail_pct), 8)
-                lock_sl = ep * (1 - peak_pnl * 0.70)
+                lock_frac = self._lock_fraction(peak_pnl)
+                lock_sl = ep * (1 - peak_pnl * lock_frac)
                 # Breakeven floor: NEVER let trailing SL go above breakeven (for shorts)
                 new_sl = min(trail_sl, lock_sl, be)
                 if new_sl < sl:
@@ -124,6 +150,26 @@ class TrailingStopManager:
         if dirty: self._save_peaks()
         return False, "", sl
 
+    @staticmethod
+    def _lock_fraction(peak_pnl: float) -> float:
+        """Graduated profit lock — protect bigger winners more aggressively.
+        2026-04-24 retune: lowered low-peak locks so winners have room to reach
+        target TP instead of exiting at ~0.6% clipped profit. Prior config
+        (0.60/0.70/0.75/0.80) produced 55W trailing @ $0.09 avg vs 4 full TPs
+        @ $2.84 — trailing was intercepting wins before they matured.
+        Low profit  (< 3%):  lock 40% — let winners breathe
+        Medium      (3-5%):  lock 55% — moderate protection
+        Good        (5-8%):  lock 70% — tighter lock
+        Exceptional (> 8%):  lock 80% — protect the big win"""
+        if peak_pnl < 0.03:
+            return 0.40
+        elif peak_pnl < 0.05:
+            return 0.55
+        elif peak_pnl < 0.08:
+            return 0.70
+        else:
+            return 0.80
+
     def _trail_distance(self, peak_pnl: float) -> float:
         """Adaptive trail distance — wider to survive normal retracements.
         Old values (0.4-0.8%) were within normal candle noise and exited winners prematurely.
@@ -132,9 +178,9 @@ class TrailingStopManager:
         if peak_pnl < 0.03:   return base          # 1.2% — just activated, standard trail
         elif peak_pnl < 0.05: return base * 0.85    # 1.0% — moderate profit, slightly tighter
         elif peak_pnl < 0.08: return base * 0.75    # 0.9% — good profit, lock more
-        elif peak_pnl < 0.12: return base           # 1.2% — let winners breathe
-        elif peak_pnl < 0.20: return base * 1.25    # 1.5% — big winner, give room
-        else:                 return base * 1.5     # 1.8% — exceptional winner, let it ride
+        elif peak_pnl < 0.12: return base * 0.70    # 0.84% — great profit, continue tightening
+        elif peak_pnl < 0.20: return base * 0.65    # 0.78% — big winner, protect gains
+        else:                 return base * 0.60    # 0.72% — exceptional winner, tight protection
 
     def remove(self, position_id: str):
         self._tracking.pop(position_id, None); self._save_peaks()

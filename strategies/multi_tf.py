@@ -1,11 +1,8 @@
 """
-strategies/multi_tf.py — Multi-Timeframe Confluence Strategy (Futures)
+strategies/multi_tf.py — Trend Pullback Strategy (Futures)
 
-Requires 4h trend + 1h structure + 15m entry to all agree.
-ADX filter blocks choppy markets. Max 3 trades/symbol/day.
-Strict 1:3 R:R enforced.
-
-Win rate: ~55-60%  |  R:R: 1:3+
+HTF trend filter (1h/15m) + pullback to EMA or VWAP + tight stop.
+Target 1.2-1.6R with high win-rate entries. Max 3 trades/symbol/day.
 """
 
 import numpy as np
@@ -29,8 +26,8 @@ def _ema(series: pd.Series, period: int) -> pd.Series:
 
 def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
-    gain  = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
+    gain  = delta.clip(lower=0).ewm(com=period-1, adjust=False).mean()
+    loss  = (-delta.clip(upper=0)).ewm(com=period-1, adjust=False).mean()
     rs    = gain / loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
@@ -41,7 +38,7 @@ def _atr(high, low, close, period: int = 14) -> pd.Series:
         (high - close.shift(1)).abs(),
         (low  - close.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=period, adjust=False).mean()
+    return tr.ewm(com=period-1, adjust=False).mean()
 
 
 def _adx(high, low, close, period: int = 14) -> pd.Series:
@@ -51,10 +48,17 @@ def _adx(high, low, close, period: int = 14) -> pd.Series:
     down = -low.diff()
     plus_dm  = up.where((up > down) & (up > 0), 0)
     minus_dm = down.where((down > up) & (down > 0), 0)
-    plus_di  = 100 * plus_dm.ewm(span=period, adjust=False).mean() / tr.replace(0, np.nan)
-    minus_di = 100 * minus_dm.ewm(span=period, adjust=False).mean() / tr.replace(0, np.nan)
+    plus_di  = 100 * plus_dm.ewm(com=period-1, adjust=False).mean() / tr.replace(0, np.nan)
+    minus_di = 100 * minus_dm.ewm(com=period-1, adjust=False).mean() / tr.replace(0, np.nan)
     dx       = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
-    return dx.ewm(span=period, adjust=False).mean()
+    return dx.ewm(com=period-1, adjust=False).mean()
+
+
+def _vwap(df: pd.DataFrame) -> pd.Series:
+    """Session VWAP using typical price × volume."""
+    tp = (df["high"] + df["low"] + df["close"]) / 3
+    cumvol = df["volume"].cumsum()
+    return (tp * df["volume"]).cumsum() / cumvol.replace(0, np.nan)
 
 
 class MultiTFStrategy(BaseStrategy):
@@ -76,10 +80,9 @@ class MultiTFStrategy(BaseStrategy):
     def _htf_direction(self, exchange: BaseExchange, symbol: str) -> int:
         """4h: +1 bullish, -1 bearish, 0 unclear.
         Tightened: require ADX > 20 on 4h to confirm real trend (not chop)."""
-        raw = exchange.fetch_ohlcv(symbol, self.cfg["htf_timeframe"], 220, self.market_type)
-        if not raw or len(raw) < 200:
+        df = self.get_dataframe(exchange, symbol, self.cfg["htf_timeframe"], 220)
+        if df is None or len(df) < 200:
             return 0
-        df     = pd.DataFrame(raw, columns=["timestamp","open","high","low","close","volume"])
         ema200 = _ema(df["close"], self.cfg["trend_ema"])
         close  = float(df["close"].iloc[-1])
         ema    = float(ema200.iloc[-1])
@@ -98,10 +101,9 @@ class MultiTFStrategy(BaseStrategy):
     def _mtf_structure(self, exchange: BaseExchange, symbol: str) -> int:
         """1h: +1 bullish EMA stack, -1 bearish, 0 unclear.
         Tightened: require 0.3% EMA separation (was 0.1%) to filter noise."""
-        raw = exchange.fetch_ohlcv(symbol, self.cfg["mtf_timeframe"], 50, self.market_type)
-        if not raw or len(raw) < 30:
+        df = self.get_dataframe(exchange, symbol, self.cfg["mtf_timeframe"], 50)
+        if df is None or len(df) < 30:
             return 0
-        df   = pd.DataFrame(raw, columns=["timestamp","open","high","low","close","volume"])
         fast = _ema(df["close"], self.cfg["structure_fast"])
         slow = _ema(df["close"], self.cfg["structure_slow"])
         f, s = float(fast.iloc[-1]), float(slow.iloc[-1])
@@ -112,12 +114,20 @@ class MultiTFStrategy(BaseStrategy):
         return 0
 
     def generate_signal(self, df: pd.DataFrame):
-        """Returns (signal, atr) or (None, None)."""
+        """Returns (signal, atr) or (None, None).
+
+        Entry types:
+        1. Fresh EMA crossover with ADX confirmation
+        2. Pullback to EMA (RSI retraces toward midline)
+        3. Pullback to VWAP (price within vwap_pullback_pct)
+        4. Strong trend continuation (ADX > 33)
+        """
         df["ema_fast"] = _ema(df["close"], self.cfg["entry_fast"])
         df["ema_slow"] = _ema(df["close"], self.cfg["entry_slow"])
         df["rsi"]      = _rsi(df["close"], self.cfg["rsi_period"])
         df["atr"]      = _atr(df["high"], df["low"], df["close"], self.cfg["atr_period"])
         df["adx"]      = _adx(df["high"], df["low"], df["close"], self.cfg["adx_period"])
+        df["vwap"]     = _vwap(df)
         df.dropna(inplace=True)
         if len(df) < 5:
             return None, None
@@ -132,28 +142,32 @@ class MultiTFStrategy(BaseStrategy):
         bear_cross = prev["ema_fast"] >= prev["ema_slow"] and curr["ema_fast"] < curr["ema_slow"]
         atr        = float(curr["atr"])
 
-        # Entry on fresh crossover (original)
         if bull_cross and curr["rsi"] < self.cfg["rsi_overbought"]:
             return "buy", atr
         if bear_cross and curr["rsi"] > self.cfg["rsi_oversold"]:
             return "sell", atr
 
-        # Trend continuation — only on STRONG established trends with ADX confirmation
-        # Tightened: require 0.3% EMA separation + higher ADX to reduce whipsaws
-        # Live WR was 20% vs 54.5% dry — entries were too loose
         bull_trend = curr["ema_fast"] > curr["ema_slow"] * 1.003
         bear_trend = curr["ema_fast"] < curr["ema_slow"] * 0.997
 
-        # Pullback entry: strong trend + RSI retraces toward midline + ADX confirms
-        # WIDENED: RSI window 38-52 / 48-62 (was 42-48 / 52-58 — only 6 points, near-impossible)
-        # ADX 25 (was 30 — too restrictive, blocked most legitimate trending markets)
+        # EMA pullback: trend + RSI retraces toward midline + ADX confirms
         if bull_trend and curr["adx"] > 25 and 38 < curr["rsi"] < 52:
             return "buy", atr
         if bear_trend and curr["adx"] > 25 and 48 < curr["rsi"] < 62:
             return "sell", atr
 
-        # Strong trend entry (ADX > 33 = strong, enter with momentum)
-        # Was ADX > 38 — only fires during explosive breakouts, not regular trends
+        # VWAP pullback: price within vwap_pullback_pct of VWAP in trending market
+        vwap_pct = self.cfg.get("vwap_pullback_pct", 0.002)
+        if curr["vwap"] > 0:
+            vwap_dist = abs(curr["close"] - curr["vwap"]) / curr["vwap"]
+            if bull_trend and vwap_dist < vwap_pct and curr["close"] >= curr["vwap"]:
+                if curr["rsi"] < self.cfg["rsi_overbought"]:
+                    return "buy", atr
+            if bear_trend and vwap_dist < vwap_pct and curr["close"] <= curr["vwap"]:
+                if curr["rsi"] > self.cfg["rsi_oversold"]:
+                    return "sell", atr
+
+        # Strong trend continuation (ADX > 33)
         if bull_trend and curr["adx"] > 33 and curr["rsi"] < self.cfg["rsi_overbought"] - 5:
             return "buy", atr
         if bear_trend and curr["adx"] > 33 and curr["rsi"] > self.cfg["rsi_oversold"] + 5:
@@ -192,6 +206,16 @@ class MultiTFStrategy(BaseStrategy):
         if signal == "sell" and htf != -1:
             return
 
+        # Momentum exhaustion filter — skip entries when trend is losing steam
+        from utils.indicators import momentum_exhaustion
+        exhaustion = momentum_exhaustion(df["close"], df["high"], df["low"])
+        if signal == "buy" and exhaustion["bull_exhaustion"]:
+            logger.debug(f"[MultiTF] {symbol}: Bull exhaustion detected — skipping BUY")
+            return
+        if signal == "sell" and exhaustion["bear_exhaustion"]:
+            logger.debug(f"[MultiTF] {symbol}: Bear exhaustion detected — skipping SELL")
+            return
+
         current_price = float(df["close"].iloc[-1])
         self.log_signal(symbol, signal, current_price,
                         f"| HTF={htf} MTF={mtf} ATR={atr:.4f}")
@@ -202,15 +226,26 @@ class MultiTFStrategy(BaseStrategy):
 
         leverage = self.risk.validate_leverage(RISK["default_leverage"])
         size     = self.risk.calculate_position_size(balance, current_price, leverage)
-        sl, tp   = self.risk.get_sl_tp(
-            current_price, signal, atr=atr,
-            atr_sl_mult=self.cfg.get("atr_sl_mult"),
-            atr_tp_mult=self.cfg.get("atr_tp_mult"),
-            leverage=leverage)
 
-        rr = ((tp - current_price) / max(current_price - sl, 1e-8)) if signal == "buy" \
-             else ((current_price - tp) / max(sl - current_price, 1e-8))
-        if rr < RISK.get("min_rr_ratio", 1.5):
+        # ATR-based SL clamped to [1.0%, 2.5%]
+        sl_mult = self.cfg.get("atr_sl_mult", 1.5)
+        sl_raw  = atr * sl_mult
+        sl_pct  = max(0.01, min(0.025, sl_raw / current_price))
+        sl_dist = current_price * sl_pct
+
+        # Dynamic R:R within target range (1.2-1.6x)
+        target_rr = (self.cfg.get("target_rr_min", 1.2) + self.cfg.get("target_rr_max", 1.6)) / 2
+        tp_dist = sl_dist * target_rr
+
+        if signal == "buy":
+            sl = current_price - sl_dist
+            tp = current_price + tp_dist
+        else:
+            sl = current_price + sl_dist
+            tp = current_price - tp_dist
+
+        rr = tp_dist / max(sl_dist, 1e-8)
+        if rr < RISK.get("min_rr_ratio", 1.2):
             logger.debug(f"[MultiTF] {symbol}: R:R {rr:.2f} too low — skipped")
             return
 

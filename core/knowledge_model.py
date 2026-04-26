@@ -105,6 +105,29 @@ class KnowledgeModel:
         if not trades:
             return
 
+        # Exclude bug-driven exits from score computation. These closes are
+        # not market-driven losses — they are the bot closing itself out:
+        #   sl_placement_failed: Binance -4120 / Bybit 110072 rejected the
+        #     SL order, fail-closed policy market-closed the position.
+        #   systematic_close:    legacy stale-age rule (removed 2026-04-20)
+        #     that closed positions after N hours regardless of market state.
+        # Including these inflated WR<35% against otherwise-healthy symbols
+        # and caused auto-symptom-blacklists. See feedback_no_symptom_blacklists.
+        _BUG_EXITS = {"sl_placement_failed", "systematic_close"}
+        _total_in = len(trades)
+        trades = [
+            t for t in trades
+            if (t.get("close_reason") or t.get("exit_reason") or "") not in _BUG_EXITS
+        ]
+        _dropped = _total_in - len(trades)
+        if _dropped:
+            logger.info(
+                f"[Knowledge] Excluded {_dropped}/{_total_in} bug-driven exits "
+                f"({', '.join(sorted(_BUG_EXITS))}) from {mode} score rebuild")
+
+        if not trades:
+            return
+
         mode_key = "dry" if mode == "dry" else "live"
         count    = len(trades)
 
@@ -207,20 +230,28 @@ class KnowledgeModel:
                 self._model["regime_map"][regime][mode_key] = best
 
         # ── Hour scores ───────────────────────────────────────────────
-        hour_buckets = defaultdict(lambda: {"trades": 0, "wins": 0})
+        hour_buckets = defaultdict(lambda: {
+            "trades": 0, "wins": 0, "net_pnl": 0.0, "total_fees": 0.0,
+        })
         for t in trades:
             ot = t.get("open_time", 0)
             if ot:
                 h = datetime.fromtimestamp(ot).hour
-                hour_buckets[h]["trades"] += 1
+                hour_buckets[h]["trades"]     += 1
+                hour_buckets[h]["net_pnl"]    += t.get("pnl") or 0.0
+                hour_buckets[h]["total_fees"] += t.get("total_fees") or 0.0
                 if (t.get("pnl") or 0) > 0:
                     hour_buckets[h]["wins"] += 1
         for h, d in hour_buckets.items():
             n  = d["trades"]
             wr = (d["wins"] / n * 100) if n > 0 else 0
             self._model["hour_scores"][str(h)] = {
-                "win_rate": round(wr, 1),
-                "trades":   n,
+                "trades":     n,
+                "wins":       d["wins"],
+                "win_rate":   round(wr, 1),
+                "net_pnl":    round(d["net_pnl"], 4),
+                "avg_pnl":    round(d["net_pnl"] / max(n, 1), 4),
+                "total_fees": round(d["total_fees"], 4),
             }
 
         # ── Flags ─────────────────────────────────────────────────────
@@ -233,7 +264,7 @@ class KnowledgeModel:
             data = scores.get(mode_key, {})
             if data.get("trades", 0) >= MIN_STRATEGY_SAMPLE:
                 wr = data.get("win_rate", 50)
-                if wr < 40:   caution_strats.append(strat)
+                if wr < 50:   caution_strats.append(strat)
                 if wr >= 65:  star_strats.append(strat)
 
         for sym, scores in self._model["symbol_scores"].items():
@@ -397,11 +428,11 @@ class KnowledgeModel:
     # ── Internal helpers ──────────────────────────────────────────────
 
     def _wr_to_multiplier(self, win_rate: float, n: int) -> float:
-        """Convert win rate to a confidence multiplier (0.5–1.5)."""
+        """Convert win rate to a confidence multiplier (0.5–1.5).
+        50% WR → 1.0 (neutral), 30% → 0.6, 70% → 1.4, 80% → 1.5 (capped)."""
         if n < MIN_STRATEGY_SAMPLE:
             return 1.0
-        # 40% WR → 0.76, 50% → 1.0, 60% → 1.10, 70% → 1.28, 80% → 1.5
-        mult = 0.5 + (win_rate / 100) * 1.5
+        mult = (win_rate / 100) * 2.0
         return round(max(0.5, min(1.5, mult)), 3)
 
     # ── Persistence ───────────────────────────────────────────────────
@@ -440,6 +471,22 @@ class KnowledgeModel:
         except Exception as e:
             logger.warning(f"[Knowledge] Load error ({e}) — using fresh model")
             self._model = self._default_model()
+
+    def is_caution_strategy(self, strategy: str) -> bool:
+        """Returns True if strategy is flagged as underperforming (WR < 50%)."""
+        return strategy in self._model.get("caution_strategies", [])
+
+    def flag_fee_heavy(self, strategy: str, ratio: float):
+        """Flag a strategy as fee-heavy (fees > 20% of gross profit)."""
+        fee_heavy = self._model.setdefault("fee_heavy_strategies", {})
+        fee_heavy[strategy] = {"ratio": round(ratio, 3),
+                               "flagged_at": __import__("datetime").datetime.now().isoformat()}
+        self._save()
+        logger.warning(f"[Knowledge] Fee-heavy: '{strategy}' fees={ratio:.0%} of gross profit")
+
+    def get_fee_heavy_strategies(self) -> set:
+        """Return set of strategy names flagged as fee-heavy."""
+        return set(self._model.get("fee_heavy_strategies", {}).keys())
 
     def _log_status(self):
         dry_n  = self._model.get("dry_run_trades", 0)

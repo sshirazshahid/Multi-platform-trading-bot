@@ -141,6 +141,14 @@ class StrategySelector:
         opps = [o for o in opps
                 if not (o.market_type == "spot" and o.direction == "sell")]
 
+        # Deduplicate: keep highest confidence per (strategy, market_type, direction)
+        seen = {}
+        for opp in opps:
+            dedup_key = (opp.strategy, opp.market_type, opp.direction)
+            if dedup_key not in seen or opp.confidence > seen[dedup_key].confidence:
+                seen[dedup_key] = opp
+        opps = list(seen.values())
+
         with self._lock:
             self._cache[key] = (opps, time.time())
 
@@ -360,19 +368,21 @@ class StrategySelector:
                     reason = "Very strong uptrend ADX={:.1f} {:.0%} TFs".format(
                         adx_avg, trend_pct)
                     # supertrend_spot KILLED — 0% WR across 8+ trades historically.
-                    # Use trend_spot instead (has ADX filter + R:R check).
+                    # supertrend_futures KILLED 2026-04-20 — 39 trades at 41% WR,
+                    # -$45.18 cumulative PnL per warehouse.sqlite. Fallback path
+                    # (full_bull=False) lowered entry conviction too far; only
+                    # emit futures opportunities when multi-TF is actually full.
                     if full_bull:
                         o = _opp("trend_spot", "spot", "buy", conf * 0.9, reason)
                         if o: opps.append(o)
-                    strat = "multitf_futures" if full_bull else "supertrend_futures"
-                    o = _opp(strat, "futures", "buy", conf, reason)
-                    if o: opps.append(o)
+                        o = _opp("multitf_futures", "futures", "buy", conf, reason)
+                        if o: opps.append(o)
                 else:
                     conf   = min(0.95, trend_pct * adx_avg / 40)
                     reason = "Very strong downtrend ADX={:.1f} — SHORT".format(adx_avg)
-                    strat  = "multitf_futures" if full_bear else "supertrend_futures"
-                    o = _opp(strat, "futures", "sell", conf, reason)
-                    if o: opps.append(o)
+                    if full_bear:
+                        o = _opp("multitf_futures", "futures", "sell", conf, reason)
+                        if o: opps.append(o)
 
             elif adx_avg >= 22:
                 if bull_pct > bear_pct and bull_pct >= 0.5:
@@ -382,17 +392,15 @@ class StrategySelector:
                     if full_bull and adx_avg >= SPOT_ADX_MIN:
                         o = _opp("trend_spot", "spot", "buy", conf, reason)
                         if o: opps.append(o)
-                    if adx_avg >= FUTURES_ADX_MIN:
-                        strat = "multitf_futures" if full_bull else "supertrend_futures"
-                        o = _opp(strat, "futures", "buy", min(0.85, conf*1.05), reason)
+                    if adx_avg >= FUTURES_ADX_MIN and full_bull:
+                        o = _opp("multitf_futures", "futures", "buy", min(0.85, conf*1.05), reason)
                         if o: opps.append(o)
 
                 elif bear_pct > bull_pct and bear_pct >= 0.5:
                     conf   = min(0.80, trend_pct * 0.85)
                     reason = "Downtrend ADX={:.1f} — Futures SHORT".format(adx_avg)
-                    if adx_avg >= FUTURES_ADX_MIN:
-                        strat = "multitf_futures" if full_bear else "supertrend_futures"
-                        o = _opp(strat, "futures", "sell", conf, reason)
+                    if adx_avg >= FUTURES_ADX_MIN and full_bear:
+                        o = _opp("multitf_futures", "futures", "sell", conf, reason)
                         if o: opps.append(o)
 
             if full_bull and adx_avg >= 25:
@@ -472,8 +480,11 @@ class StrategySelector:
                              regime="breakout")
                     if o: opps.append(o)
             else:
-                if adx_avg >= FUTURES_ADX_MIN:
-                    o = _opp("supertrend_futures", "futures", "sell",
+                # Volume-spike short requires full_bear alignment, mirroring the
+                # full_bull guard on the long side. supertrend_futures label
+                # retired 2026-04-20 (see data/warehouse.sqlite stats).
+                if adx_avg >= FUTURES_ADX_MIN and full_bear:
+                    o = _opp("multitf_futures", "futures", "sell",
                              min(0.65, vol_avg*0.25),
                              "Volume spike {:.1f}x — Breakout SHORT".format(vol_avg),
                              regime="breakout")

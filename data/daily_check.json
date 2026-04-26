@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-04-25T19:00:04.614250+00:00",
+  "exchanges": {
+    "binance": {
+      "connected": true,
+      "halted": false,
+      "latency_ms": 206.0,
+      "consecutive_fails": 0
+    },
+    "bybit": {
+      "connected": true,
+      "halted": false,
+      "latency_ms": 317.0,
+      "consecutive_fails": 0
+    },
+    "bitget": {
+      "connected": true,
+      "halted": false,
+      "latency_ms": 332.0,
+      "consecutive_fails": 0
+    }
+  },
+  "risk": {
+    "is_halted": false,
+    "halt_reason": null,
+    "daily_pnl": 1.5748088750000055
+  },
+  "positions": {
+    "open_count": 2,
+    "per_exchange": {
+      "binance": 1,
+      "bybit": 1,
+      "bitget": 0
+    }
+  },
+  "strategies": {}
+}

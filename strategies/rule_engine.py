@@ -50,8 +50,8 @@ def _sma(s, p):  return s.rolling(p).mean()
 
 def _rsi(s, p=14):
     d = s.diff()
-    g = d.clip(lower=0).ewm(span=p, adjust=False).mean()
-    l = (-d.clip(upper=0)).ewm(span=p, adjust=False).mean()
+    g = d.clip(lower=0).ewm(com=p-1, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(com=p-1, adjust=False).mean()
     return 100 - 100 / (1 + g / l.replace(0, np.nan))
 
 def _macd(s, fast=12, slow=26, sig=9):
@@ -67,7 +67,7 @@ def _bbands(s, p=20, std=2.0):
 def _atr(h, l, c, p=14):
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()],
                    axis=1).max(axis=1)
-    return tr.ewm(span=p, adjust=False).mean()
+    return tr.ewm(com=p-1, adjust=False).mean()
 
 
 def build_indicators(df: pd.DataFrame, indicator_defs: dict) -> dict:
@@ -220,7 +220,9 @@ class RuleBasedStrategy(BaseStrategy):
                 exit_long  = self.cfg.get("exit_long",  [])
                 exit_short = self.cfg.get("exit_short", [])
                 for pos in positions:
-                    if pos.side == "buy" and evaluate_rules(exit_long, computed):
+                    # Guard: empty rule list → evaluate_rules returns True (vacuous truth)
+                    # which would close ALL positions immediately. Only evaluate if rules exist.
+                    if pos.side == "buy" and exit_long and evaluate_rules(exit_long, computed):
                         logger.info(f"[{self.name}] EXIT LONG rule triggered for {symbol}")
                         ticker = exchange.fetch_ticker(symbol, self.market_type)
                         price  = ticker.get("last") or ticker.get("close")
@@ -228,7 +230,7 @@ class RuleBasedStrategy(BaseStrategy):
                             self.order_manager.close_position(
                                 exchange, pos, "rule_exit", price
                             )
-                    elif pos.side == "sell" and evaluate_rules(exit_short, computed):
+                    elif pos.side == "sell" and exit_short and evaluate_rules(exit_short, computed):
                         logger.info(f"[{self.name}] EXIT SHORT rule triggered for {symbol}")
                         ticker = exchange.fetch_ticker(symbol, self.market_type)
                         price  = ticker.get("last") or ticker.get("close")

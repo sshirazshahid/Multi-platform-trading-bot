@@ -40,9 +40,12 @@ class SplitResult:
     total_pnl:     float
     max_drawdown:  float
     sharpe_ratio:  float
+    sortino_ratio: float
     avg_trade_pct: float
     best_trade:    float
     worst_trade:   float
+    turnover:      float          # number of round-trip trades / initial capital
+    equity_curve:  list = field(default_factory=list)  # [(trade_idx, balance)]
 
 
 @dataclass
@@ -59,9 +62,12 @@ class BacktestResult:
     total_pnl:     float
     max_drawdown:  float
     sharpe_ratio:  float
+    sortino_ratio: float
     avg_trade_pct: float
     best_trade:    float
     worst_trade:   float
+    turnover:      float
+    equity_curve:  list = field(default_factory=list)
     # Split details
     train: SplitResult = field(default=None)
     test:  SplitResult = field(default=None)
@@ -73,14 +79,19 @@ class BacktestResult:
     profit_factor: float = 0.0
 
 
+SLIPPAGE_PCT = 0.0005  # 0.05% slippage per side
+
+
 class Backtester:
 
     def __init__(self, sl_pct: float = 0.040, tp_pct: float = 0.100,
-                 fee_pct: float = 0.0007, initial_balance: float = 1000.0):
+                 fee_pct: float = 0.0007, initial_balance: float = 1000.0,
+                 leverage: int = 1):
         self.sl_pct          = sl_pct   # 4% SL matches futures config
         self.tp_pct          = tp_pct   # 10% TP matches futures config
         self.fee_pct         = fee_pct
         self.initial_balance = initial_balance
+        self.leverage        = leverage
 
     # ------------------------------------------------------------------ #
     # Public entry point                                                   #
@@ -155,9 +166,12 @@ class Backtester:
             total_pnl=overall.total_pnl,
             max_drawdown=overall.max_drawdown,
             sharpe_ratio=overall.sharpe_ratio,
+            sortino_ratio=overall.sortino_ratio,
             avg_trade_pct=overall.avg_trade_pct,
             best_trade=overall.best_trade,
             worst_trade=overall.worst_trade,
+            turnover=overall.turnover,
+            equity_curve=overall.equity_curve,
             train=train_result,
             test=test_result,
             overfit_warning=overfit,
@@ -194,16 +208,21 @@ class Backtester:
             if in_trade:
                 pnl_pct = 0.0
                 reason  = None
+                lev = self.leverage
                 if entry_side == "buy":
                     if low <= sl:
-                        pnl_pct, reason = -(self.sl_pct + 2 * self.fee_pct), "stop_loss"
+                        pnl_pct, reason = -(self.sl_pct * lev + 2 * self.fee_pct), "stop_loss"
+                        exit_price = sl * (1 + SLIPPAGE_PCT)  # slippage on SL price
                     elif high >= tp:
-                        pnl_pct, reason = self.tp_pct - 2 * self.fee_pct, "take_profit"
+                        pnl_pct, reason = self.tp_pct * lev - 2 * self.fee_pct, "take_profit"
+                        exit_price = tp * (1 - SLIPPAGE_PCT)  # slippage on TP price
                 else:
                     if high >= sl:
-                        pnl_pct, reason = -(self.sl_pct + 2 * self.fee_pct), "stop_loss"
+                        pnl_pct, reason = -(self.sl_pct * lev + 2 * self.fee_pct), "stop_loss"
+                        exit_price = sl * (1 - SLIPPAGE_PCT)
                     elif low <= tp:
-                        pnl_pct, reason = self.tp_pct - 2 * self.fee_pct, "take_profit"
+                        pnl_pct, reason = self.tp_pct * lev - 2 * self.fee_pct, "take_profit"
+                        exit_price = tp * (1 + SLIPPAGE_PCT)
 
                 if reason:
                     trade_pnl = balance * 0.05 * pnl_pct
@@ -212,7 +231,7 @@ class Backtester:
                         "window":   window_name,
                         "side":     entry_side,
                         "entry":    entry_price,
-                        "exit":     close,
+                        "exit":     exit_price,
                         "pnl_pct":  pnl_pct,
                         "pnl":      trade_pnl,
                         "reason":   reason,
@@ -227,15 +246,17 @@ class Backtester:
                     signal = None
 
                 if signal in ("buy", "sell"):
-                    in_trade    = True
-                    entry_price = close
-                    entry_side  = signal
+                    in_trade   = True
+                    entry_side = signal
+                    # Apply slippage to entry fill price
                     if signal == "buy":
-                        sl = close * (1 - self.sl_pct)
-                        tp = close * (1 + self.tp_pct)
+                        entry_price = close * (1 + SLIPPAGE_PCT)
+                        sl = entry_price * (1 - self.sl_pct)
+                        tp = entry_price * (1 + self.tp_pct)
                     else:
-                        sl = close * (1 + self.sl_pct)
-                        tp = close * (1 - self.tp_pct)
+                        entry_price = close * (1 - SLIPPAGE_PCT)
+                        sl = entry_price * (1 + self.sl_pct)
+                        tp = entry_price * (1 - self.tp_pct)
 
         return trades
 
@@ -251,7 +272,9 @@ class Backtester:
                 window=window, candles=len(df),
                 total_trades=0, wins=0, losses=0, win_rate=0.0,
                 total_pnl=0.0, max_drawdown=0.0, sharpe_ratio=0.0,
-                avg_trade_pct=0.0, best_trade=0.0, worst_trade=0.0,
+                sortino_ratio=0.0, avg_trade_pct=0.0,
+                best_trade=0.0, worst_trade=0.0,
+                turnover=0.0, equity_curve=[],
             )
 
         wins   = [t for t in trades if t["pnl"] > 0]
@@ -261,8 +284,10 @@ class Backtester:
         balance     = self.initial_balance
         peak        = balance
         max_dd      = 0.0
-        for t in trades:
+        equity_curve = [(0, self.initial_balance)]
+        for idx, t in enumerate(trades):
             balance += t["pnl"]
+            equity_curve.append((idx + 1, round(balance, 4)))
             peak     = max(peak, balance)
             dd       = (peak - balance) / max(peak, 1e-8) * 100
             max_dd   = max(max_dd, dd)
@@ -277,6 +302,15 @@ class Backtester:
         std_r  = np.std(pnls)
         sharpe = (mean_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
 
+        # Sortino ratio: uses downside deviation only (negative returns)
+        downside = [r for r in pnls if r < 0]
+        downside_std = np.std(downside) if len(downside) > 1 else 0.0
+        sortino = (mean_r / downside_std * (252 ** 0.5)) if downside_std > 0 else 0.0
+
+        # Turnover: total notional traded / initial balance
+        total_notional = sum(abs(t.get("pnl", 0)) for t in trades)
+        turnover = total_notional / self.initial_balance if self.initial_balance > 0 else 0.0
+
         return SplitResult(
             window=window,
             candles=len(df),
@@ -287,9 +321,12 @@ class Backtester:
             total_pnl=round(total_pnl, 4),
             max_drawdown=round(max_dd, 2),
             sharpe_ratio=round(sharpe, 3),
+            sortino_ratio=round(sortino, 3),
             avg_trade_pct=round(avg_pct, 3),
             best_trade=round(best, 3),
             worst_trade=round(worst, 3),
+            turnover=round(turnover, 4),
+            equity_curve=equity_curve,
         )
 
     # ------------------------------------------------------------------ #
@@ -336,6 +373,14 @@ class Backtester:
              "{:.3f}".format(tr.sharpe_ratio),
              "{:.3f}".format(te.sharpe_ratio),
              "{:.3f}".format(r.sharpe_ratio))
+        _row("Sortino Ratio",
+             "{:.3f}".format(tr.sortino_ratio),
+             "{:.3f}".format(te.sortino_ratio),
+             "{:.3f}".format(r.sortino_ratio))
+        _row("Turnover",
+             "{:.4f}".format(tr.turnover),
+             "{:.4f}".format(te.turnover),
+             "{:.4f}".format(r.turnover))
         _row("Avg Trade",
              "{:+.3f}%".format(tr.avg_trade_pct),
              "{:+.3f}%".format(te.avg_trade_pct),
@@ -413,7 +458,8 @@ class Backtester:
                     symbol=symbol, strategy=getattr(strategy, "name", "?"),
                     timeframe=timeframe, total_trades=0, wins=0, losses=0,
                     win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
-                    avg_trade_pct=0, best_trade=0, worst_trade=0,
+                    sortino_ratio=0, avg_trade_pct=0, best_trade=0,
+                    worst_trade=0, turnover=0,
                     reject_reason="insufficient data ({} candles)".format(
                         len(raw) if raw else 0))
                 return r
@@ -428,6 +474,7 @@ class Backtester:
                 symbol=symbol, strategy=getattr(strategy, "name", "?"),
                 timeframe=timeframe, total_trades=0, wins=0, losses=0,
                 win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
-                avg_trade_pct=0, best_trade=0, worst_trade=0,
+                sortino_ratio=0, avg_trade_pct=0, best_trade=0,
+                worst_trade=0, turnover=0,
                 reject_reason="error: {}".format(str(e)[:100]))
             return r

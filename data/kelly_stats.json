@@ -1,0 +1,44 @@
+{
+  "MultiTF": {
+    "wins": 28,
+    "losses": 30,
+    "total_win": 14.041607730504607,
+    "total_loss": 25.366918936378347
+  },
+  "Supertrend": {
+    "wins": 16,
+    "losses": 23,
+    "total_win": 21.617539925000017,
+    "total_loss": 66.79364223463276
+  },
+  "MeanReversion": {
+    "wins": 1,
+    "losses": 0,
+    "total_win": 0.12246500000000002,
+    "total_loss": 0.0
+  },
+  "TrendFollowing": {
+    "wins": 0,
+    "losses": 8,
+    "total_win": 0.0,
+    "total_loss": 0.15580204359999758
+  },
+  "claude_portfolio": {
+    "wins": 81,
+    "losses": 102,
+    "total_win": 16.893270058999995,
+    "total_loss": 21.852848024914962
+  },
+  "reconciled_exchange": {
+    "wins": 34,
+    "losses": 38,
+    "total_win": 3.73815594,
+    "total_loss": 7.318610939999999
+  },
+  "manual": {
+    "wins": 21,
+    "losses": 40,
+    "total_win": 1.8968078190000044,
+    "total_loss": 6.865383127335199
+  }
+}

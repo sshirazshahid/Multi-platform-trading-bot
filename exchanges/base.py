@@ -9,8 +9,24 @@ Key behaviours:
 
 from abc import ABC, abstractmethod
 from typing import Optional
+import random
+import time as _time
 import ccxt
 from loguru import logger
+
+
+# ── Retry configuration ────────────────────────────────────────────────
+MAX_RETRIES       = 3       # total attempts (1 original + 2 retries)
+BACKOFF_BASE_SEC  = 1.0     # base delay: 1s, 2s, 4s ...
+BACKOFF_MAX_SEC   = 8.0     # cap delay
+JITTER_FACTOR     = 0.3     # ±30% randomness on delay
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with jitter: base * 2^attempt ± jitter."""
+    delay = min(BACKOFF_BASE_SEC * (2 ** attempt), BACKOFF_MAX_SEC)
+    jitter = delay * JITTER_FACTOR * (2 * random.random() - 1)
+    return max(0.1, delay + jitter)
 
 
 # Error substrings that mean "symbol doesn't exist on this exchange"
@@ -32,10 +48,13 @@ _SYMBOL_ERRORS = (
 
 # Error substrings that mean "clock drift — retry after sync"
 _TIMESTAMP_ERRORS = (
-    "-1021",
-    "Timestamp for this request",
-    "outside of the recvWindow",
-    "recvWindow",
+    "-1021",                          # Binance
+    "Timestamp for this request",     # Binance
+    "outside of the recvWindow",      # Binance
+    "recvWindow",                     # Binance camelCase
+    "recv_window",                    # Bybit underscore format
+    "10002",                          # Bybit retCode for timestamp errors
+    "timestamp",                      # Generic catch-all (case-sensitive avoids false positives)
 )
 
 # Transient errors — retry once, log as WARNING not ERROR
@@ -108,66 +127,61 @@ class BaseExchange(ABC):
                     limit: int = 100, market_type: str = "spot") -> list:
         if not self._ready():
             return []
-        try:
-            params = self._futures_params() if market_type == "futures" else {}
-            return self.exchange.fetch_ohlcv(
-                symbol, timeframe, limit=limit, params=params)
-        except Exception as e:
-            if _is_symbol_error(e):
-                logger.debug(f"[{self.name}] {symbol} not available — skipped")
-                return []
-            if _is_timestamp_error(e):
-                logger.debug(f"[{self.name}] Timestamp drift — syncing clock and retrying")
-                self._sync_time()
-                try:
-                    params = self._futures_params() if market_type == "futures" else {}
-                    return self.exchange.fetch_ohlcv(
-                        symbol, timeframe, limit=limit, params=params)
-                except Exception as e2:
-                    logger.error(f"[{self.name}] fetch_ohlcv {symbol} (retry): {e2}")
+        for attempt in range(MAX_RETRIES):
+            try:
+                params = self._futures_params() if market_type == "futures" else {}
+                return self.exchange.fetch_ohlcv(
+                    symbol, timeframe, limit=limit, params=params)
+            except Exception as e:
+                if _is_symbol_error(e):
+                    logger.debug(f"[{self.name}] {symbol} not available — skipped")
                     return []
-            if _is_transient_error(e):
-                logger.warning(f"[{self.name}] fetch_ohlcv {symbol}: transient error, retrying...")
-                import time as _t; _t.sleep(1)
-                try:
-                    params = self._futures_params() if market_type == "futures" else {}
-                    return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit, params=params)
-                except Exception:
-                    pass
+                if _is_timestamp_error(e):
+                    self._sync_time()
+                    continue  # retry after clock sync
+                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
+                    delay = _backoff_delay(attempt)
+                    logger.warning(
+                        f"[{self.name}] fetch_ohlcv {symbol}: transient error, "
+                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
+                    _time.sleep(delay)
+                    continue
+                if attempt == MAX_RETRIES - 1:
+                    logger.warning(f"[{self.name}] fetch_ohlcv {symbol}: "
+                                   f"failed after {MAX_RETRIES} attempts: {e}")
+                else:
+                    logger.warning(f"[{self.name}] fetch_ohlcv {symbol}: {e}")
                 return []
-            logger.warning(f"[{self.name}] fetch_ohlcv {symbol}: {e}")
-            return []
+        return []
 
     def fetch_ticker(self, symbol: str, market_type: str = "spot") -> dict:
         if not self._ready():
             return {}
-        try:
-            params = self._futures_params() if market_type == "futures" else {}
-            return self.exchange.fetch_ticker(symbol, params=params)
-        except Exception as e:
-            if _is_symbol_error(e):
-                logger.debug(f"[{self.name}] {symbol} not available — skipped")
-                return {}
-            if _is_timestamp_error(e):
-                logger.debug(f"[{self.name}] Timestamp drift — syncing and retrying")
-                self._sync_time()
-                try:
-                    params = self._futures_params() if market_type == "futures" else {}
-                    return self.exchange.fetch_ticker(symbol, params=params)
-                except Exception as e2:
-                    logger.error(f"[{self.name}] fetch_ticker {symbol} (retry): {e2}")
+        for attempt in range(MAX_RETRIES):
+            try:
+                params = self._futures_params() if market_type == "futures" else {}
+                return self.exchange.fetch_ticker(symbol, params=params)
+            except Exception as e:
+                if _is_symbol_error(e):
+                    logger.debug(f"[{self.name}] {symbol} not available — skipped")
                     return {}
-            if _is_transient_error(e):
-                logger.warning(f"[{self.name}] fetch_ticker {symbol}: transient, retrying...")
-                import time as _t; _t.sleep(1)
-                try:
-                    params = self._futures_params() if market_type == "futures" else {}
-                    return self.exchange.fetch_ticker(symbol, params=params)
-                except Exception:
-                    pass
+                if _is_timestamp_error(e):
+                    self._sync_time()
+                    continue
+                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
+                    delay = _backoff_delay(attempt)
+                    logger.warning(
+                        f"[{self.name}] fetch_ticker {symbol}: transient, "
+                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
+                    _time.sleep(delay)
+                    continue
+                if attempt == MAX_RETRIES - 1:
+                    logger.warning(f"[{self.name}] fetch_ticker {symbol}: "
+                                   f"failed after {MAX_RETRIES} attempts: {e}")
+                else:
+                    logger.warning(f"[{self.name}] fetch_ticker {symbol}: {e}")
                 return {}
-            logger.warning(f"[{self.name}] fetch_ticker {symbol}: {e}")
-            return {}
+        return {}
 
     def fetch_order_book(self, symbol: str, limit: int = 20,
                          market_type: str = "spot") -> dict:
@@ -187,34 +201,34 @@ class BaseExchange(ABC):
     def fetch_balance(self, market_type: str = "spot") -> dict:
         if not self._ready():
             return {}
-        try:
-            params = self._futures_params() if market_type == "futures" else {}
-            return self.exchange.fetch_balance(params=params)
-        except Exception as e:
-            if _is_timestamp_error(e):
-                logger.debug(f"[{self.name}] Timestamp drift on balance — syncing and retrying")
-                self._sync_time()
-                try:
-                    params = self._futures_params() if market_type == "futures" else {}
-                    return self.exchange.fetch_balance(params=params)
-                except Exception as e2:
-                    logger.error(f"[{self.name}] fetch_balance (retry): {e2}")
-                    return {}
-            logger.error(f"[{self.name}] fetch_balance: {e}")
-            return {}
+        for attempt in range(MAX_RETRIES):
+            try:
+                params = self._futures_params() if market_type == "futures" else {}
+                return self.exchange.fetch_balance(params=params)
+            except Exception as e:
+                if _is_timestamp_error(e):
+                    self._sync_time()
+                    continue
+                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
+                    delay = _backoff_delay(attempt)
+                    logger.warning(
+                        f"[{self.name}] fetch_balance: transient, "
+                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
+                    _time.sleep(delay)
+                    continue
+                logger.error(f"[{self.name}] fetch_balance: {e}")
+                return {}
+        return {}
 
     def fetch_positions(self, symbols: list = None) -> list:
         if not self._ready():
             return []
-        # Try with category=linear first (Bybit requires it), then without
-        for params in ({"category": "linear"}, {}):
-            try:
-                result = self.exchange.fetch_positions(symbols, params=params)
-                if result is not None:
-                    return result
-            except Exception:
-                continue
-        return []
+        try:
+            result = self.exchange.fetch_positions(symbols) or []
+            return result
+        except Exception as e:
+            logger.debug(f"[{self.name}] fetch_positions: {e}")
+            return []
 
     # ── Symbol verification ──────────────────────────────────────────
 
@@ -239,25 +253,47 @@ class BaseExchange(ABC):
         _params = self._futures_params() if market_type == "futures" else {}
         if params:
             _params.update(params)
-        try:
-            order = self.exchange.create_order(
-                symbol, order_type, side, amount, price, _params)
-            logger.info(
-                f"[{self.name}] ORDER {side.upper()} {amount} {symbol} "
-                f"@ {price or 'MARKET'} | id={order.get('id')}")
-            return order
-        except Exception as e:
-            if _is_timestamp_error(e):
-                self._sync_time()
-                try:
-                    order = self.exchange.create_order(
-                        symbol, order_type, side, amount, price, _params)
-                    return order
-                except Exception as e2:
-                    logger.error(f"[{self.name}] create_order {symbol} (retry): {e2}")
-                    raise e2
-            logger.error(f"[{self.name}] create_order {symbol}: {e}")
-            raise
+        import uuid as _uuid
+        _params.setdefault("clientOrderId", _uuid.uuid4().hex[:24])
+        last_err = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                order = self.exchange.create_order(
+                    symbol, order_type, side, amount, price, _params)
+                logger.info(
+                    f"[{self.name}] ORDER {side.upper()} {amount} {symbol} "
+                    f"@ {price or 'MARKET'} | id={order.get('id')}")
+                return order
+            except Exception as e:
+                last_err = e
+                if _is_timestamp_error(e):
+                    self._sync_time()
+                    continue
+                # Network timeouts on market orders are UNSAFE to retry —
+                # the order may have been filled; retrying doubles position size.
+                if order_type == "market" and _is_transient_error(e):
+                    logger.warning(
+                        f"[{self.name}] create_order {symbol}: network error on MARKET order "
+                        f"— NOT retrying to avoid duplicate fill: {str(e)[:80]}")
+                    raise
+                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
+                    delay = _backoff_delay(attempt)
+                    # Regenerate clientOrderId for the retry: if the prior
+                    # attempt actually reached the venue before the error,
+                    # the ID is reserved (Bybit 110072 OrderLinkedID is
+                    # duplicate) and reusing it guarantees the retry fails.
+                    _params["clientOrderId"] = _uuid.uuid4().hex[:24]
+                    if "newClientOrderId" in _params:
+                        _params["newClientOrderId"] = _params["clientOrderId"]
+                    logger.warning(
+                        f"[{self.name}] create_order {symbol}: transient, "
+                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
+                    _time.sleep(delay)
+                    continue
+                logger.error(f"[{self.name}] create_order {symbol}: {e}")
+                raise
+        logger.error(f"[{self.name}] create_order {symbol}: failed after {MAX_RETRIES} attempts")
+        raise last_err
 
     def cancel_order(self, order_id: str, symbol: str,
                      market_type: str = "spot") -> dict:
@@ -277,6 +313,26 @@ class BaseExchange(ABC):
             # Use self.fetch_open_orders (not exchange directly) to pass futures params
             for o in self.fetch_open_orders(symbol, market_type):
                 self.cancel_order(o["id"], symbol, market_type)
+            # 2026-04-20: Binance USD-M separates regular and algo (conditional)
+            # order books. A plain fetch_open_orders returns only regular
+            # orders, so STOP_MARKET / TAKE_PROFIT_MARKET SL/TP orders survive
+            # cancel_all_orders and can fire after a close → naked reverse.
+            # Second pass with stop=True reaches the algo endpoint. Safe on
+            # other venues (Bybit/Bitget either support the flag or return
+            # empty).
+            if market_type == "futures":
+                try:
+                    algo = self.exchange.fetch_open_orders(
+                        symbol, params={"stop": True}) or []
+                    for o in algo:
+                        try:
+                            self.exchange.cancel_order(
+                                o["id"], symbol, params={"stop": True})
+                        except Exception as _ce:
+                            logger.debug(
+                                f"[{self.name}] algo cancel {o.get('id')}: {_ce}")
+                except Exception as _ae:
+                    logger.debug(f"[{self.name}] algo fetch skipped: {_ae}")
             logger.info(f"[{self.name}] Cancelled all orders for {symbol}")
         except Exception as e:
             logger.error(f"[{self.name}] cancel_all_orders {symbol}: {e}")
@@ -313,7 +369,7 @@ class BaseExchange(ABC):
 
     def get_amount_precision(self, symbol: str) -> float:
         """Return the step size for quantity rounding.
-        E.g., MEXC futures SOL = 1.0 (whole contracts), Bitget SOL = 0.1."""
+        E.g., Bitget SOL = 0.1 (fractional contracts)."""
         if not self._ready():
             return 0.0001
         try:
@@ -334,15 +390,12 @@ class BaseExchange(ABC):
             return 0.0001
 
     def round_quantity(self, symbol: str, quantity: float) -> float:
-        """Round quantity to exchange precision. Rounds UP for whole contracts."""
+        """Round quantity to exchange precision. Rounds DOWN to avoid over-exposure."""
         import math
         step = self.get_amount_precision(symbol)
         if step <= 0:
             step = 0.0001
-        if step >= 1.0:
-            rounded = max(step, math.ceil(quantity / step) * step)
-        else:
-            rounded = math.floor(quantity / step) * step
+        rounded = math.floor(quantity / step) * step
         return round(rounded, 8)
 
     def round_price(self, symbol: str, price: float) -> float:
@@ -375,6 +428,35 @@ class BaseExchange(ABC):
         """Transfer funds between accounts. Override in subclasses."""
         logger.debug(f"[{self.name}] transfer not implemented")
         return False
+
+    # ── Trade history ─────────────────────────────────────────────
+
+    def fetch_my_trades(self, symbol: str, since: int = None,
+                        limit: int = 100, market_type: str = "spot") -> list:
+        """Fetch user's trade history for a symbol via ccxt."""
+        if not self._ready():
+            return []
+        try:
+            params = self._futures_params() if market_type == "futures" else {}
+            return self.exchange.fetch_my_trades(
+                symbol, since=since, limit=limit, params=params)
+        except Exception as e:
+            logger.debug(f"[{self.name}] fetch_my_trades {symbol}: {e}")
+            return []
+
+    def fetch_closed_pnl(self, since_ms: int = None,
+                          symbol: str = None) -> list:
+        """Return normalized realized-PnL records from futures history.
+
+        Each record: {exchange, symbol, side, realized_pnl, close_time,
+                      entry_price, exit_price, size, leverage, trade_id}.
+        close_time is unix seconds.
+
+        Default (base) implementation returns empty; subclasses override
+        with exchange-specific endpoints. Used by PositionTracker to
+        reconcile manually-closed trades so they show in today's stats.
+        """
+        return []
 
     # ── Helpers ─────────────────────────────────────────────────────
 

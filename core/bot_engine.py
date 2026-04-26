@@ -1,6 +1,6 @@
 """
 core/bot_engine.py — Smart Multi-Timeframe Bot Engine with Learning + News
-Exchanges: Binance | MEXC | Bybit | Bitget
+Exchanges: Binance | Bybit | Bitget
 
 FIX: _extract_usdt now handles Bybit Unified Account correctly.
      Bybit returns totalEquity in bal["total"]["USDT"], not bal["free"]["USDT"].
@@ -8,10 +8,12 @@ FIX: _extract_usdt now handles Bybit Unified Account correctly.
 """
 
 import time
+import json
 import signal
 import atexit
 import threading
 import schedule
+from pathlib import Path
 from loguru import logger
 from rich.console import Console
 from rich.table   import Table
@@ -28,7 +30,7 @@ try:
 except ImportError:
     CLAUDE_PORTFOLIO = {"enabled": True, "scan_interval_min": 15, "max_actions_per_cycle": 4}
 from exchanges import (
-    BinanceClient, MEXCClient,
+    BinanceClient,
     BybitClient,   BitgetClient,
 )
 from exchanges.base         import BaseExchange
@@ -45,14 +47,22 @@ try:
     from core.mcp_brain         import MCPBrain
 except ImportError:
     MCPBrain = None
+try:
+    from core.spot_manager      import SpotPortfolioManager
+except ImportError:
+    SpotPortfolioManager = None
+try:
+    from core.capital_allocator import CapitalAllocator
+except ImportError:
+    CapitalAllocator = None
 from utils import TelegramNotifier
 
 console = Console()
 
-MAX_PER_EXCHANGE    = 6       # Max 6 per exchange (4 exchanges × 6 = 24 slots)
+MAX_PER_EXCHANGE    = CLAUDE_PORTFOLIO.get("max_per_exchange", 6)
 MAX_TOTAL_POSITIONS = 8       # Max 8 total across all exchanges
-NEWS_INTERVAL       = 60 * 30
-LEARN_INTERVAL      = 60 * 60
+NEWS_INTERVAL       = CLAUDE_PORTFOLIO.get("news_interval_min", 30) * 60
+LEARN_INTERVAL      = CLAUDE_PORTFOLIO.get("learn_interval_min", 60) * 60
 PORTFOLIO_CYCLE_SEC = CLAUDE_PORTFOLIO.get("scan_interval_min", 15) * 60
 MAX_ACTIONS_PER_CYCLE = CLAUDE_PORTFOLIO.get("max_actions_per_cycle", 4)
 
@@ -74,14 +84,38 @@ class BotEngine:
         self.tracker   = PositionTracker()
         self.risk      = RiskManager()
         self.order_mgr = OrderManager(self.tracker, self.risk, self.notifier)
+        # 2026-04-26: route every PositionTracker.close() — including ghost
+        # syncs detected by sync_with_exchanges — through OrderManager's
+        # post-close pipeline (warehouse, risk, Spec §12, blacklist,
+        # trailing cleanup, post-mortem, notifier). Before this wiring,
+        # ghost-closed losses bypassed all safety rails.
+        self.tracker.on_close = self.order_mgr._finalize_close
         self.learner   = LearningEngine()
         self.news      = NewsScanner()
         self.mcp_brain = MCPBrain() if MCPBrain else None
         self.order_mgr.mcp_brain = self.mcp_brain  # Wire MCP exit intelligence
 
+        # Spot portfolio manager + capital allocator (autonomous)
+        self.spot_manager = None
+        self.capital_allocator = None
+
+        # Closed-loop post-mortem learner (evidence-driven auto-tightening)
+        try:
+            from core.auto_mutator import AutoMutator
+            self.auto_mutator = AutoMutator()
+            logger.info("[Engine] AutoMutator enabled — mutations will self-apply from post-mortems")
+        except Exception as e:
+            logger.debug(f"[Engine] AutoMutator init failed: {e}")
+            self.auto_mutator = None
+        # Universe filter: runtime quality checks before trading
+        try:
+            from core.pair_discovery import UniverseFilter
+            self.universe_filter = UniverseFilter()
+        except ImportError:
+            self.universe_filter = None
+
         self.exchanges = {
             "binance": BinanceClient(),
-            "mexc":    MEXCClient(),
             "bybit":   BybitClient(),
             "bitget":  BitgetClient(),
         }
@@ -92,7 +126,11 @@ class BotEngine:
 
         self._start_time = time.time()
         self._cycle      = 0
-        self._consecutive_api_fails = 0
+        self._consecutive_api_fails: dict[str, int] = {}  # Per-exchange fail counter
+        self._exchange_halted: set[str] = set()         # Exchanges halted due to outage
+        self._api_latency: dict[str, float] = {}        # Last health-check latency (ms)
+        self._last_health_check = 0  # Time-based health check (not cycle-based)
+        self._last_heartbeat    = 0  # Time-based heartbeat writer (60s interval)
         # Per-exchange, per-market-type USDT balances (populated by _log_balances)
         self._balances: dict[str, dict[str, float]] = {}
         # Transfer cooldown: prevent repeated transfer attempts (5 min per route)
@@ -106,13 +144,30 @@ class BotEngine:
         else:
             logger.info(f"[Engine] Connected: {list(self.active_exchanges.keys())}")
             self._log_balances()
-            # Sync tracked positions with exchange — close ghosts on startup
+            # Sync tracked positions with exchange — close ghosts + import manual on startup
             if not DRY_RUN:
-                self.tracker.sync_with_exchanges(self.active_exchanges)
+                imported = self.tracker.sync_with_exchanges(self.active_exchanges)
+                if imported:
+                    self._protect_imported_positions(imported)
 
             # Wire exchange clients to MCP Brain for direct OHLCV fetching
             if self.mcp_brain:
                 self.mcp_brain.set_exchanges(self.active_exchanges)
+
+            # Initialize spot manager + capital allocator after exchanges are connected
+            if SpotPortfolioManager:
+                try:
+                    self.spot_manager = SpotPortfolioManager(
+                        self.active_exchanges, self.risk)
+                except Exception as e:
+                    logger.debug(f"[Engine] SpotManager init: {e}")
+            if CapitalAllocator:
+                try:
+                    self.capital_allocator = CapitalAllocator(
+                        self.active_exchanges, self.spot_manager,
+                        self.risk, self.order_mgr)
+                except Exception as e:
+                    logger.debug(f"[Engine] CapitalAllocator init: {e}")
 
         self.current_pairs = self._resolve_pairs()
 
@@ -306,7 +361,12 @@ class BotEngine:
                             total += balances[name][mtype]  # Use retained balance
         self._balances = balances
         if total > 0:
-            self.risk.set_start_balance(total)
+            # Only set start balance once at startup — subsequent calls just update current
+            if not getattr(self, '_balance_initialized', False):
+                self.risk.set_start_balance(total)
+                self._balance_initialized = True
+            else:
+                self.risk.update_current_balance(total)
             logger.info(f"[Engine] Total USDT: {total:.4f}")
         else:
             logger.warning(
@@ -317,36 +377,94 @@ class BotEngine:
         """
         Extract USDT balance from a ccxt fetch_balance() response.
 
-        FIX: Bybit Unified Account returns totalEquity in bal["total"]["USDT"]
-             NOT in bal["free"]["USDT"] (which is 0 on Bybit Unified).
+        Bybit Unified Account uses multiple balance fields that are NOT
+        interchangeable for order sizing:
+          - totalEquity            = wallet + unrealized PnL + ALL collateral
+                                     (BTC/ETH posted as margin, locked margin
+                                     on open positions). This is display-only
+                                     and NOT spendable as fresh USDT margin.
+          - totalWalletBalance     = deposited balance excluding unrealized PnL
+          - totalAvailableBalance  = free USDT-equivalent margin for NEW orders
+                                     ← this is what sizing must use
+          - per-coin availableToWithdraw = free USDT (excludes locked margin)
+
+        2026-04-12 FIX (Bybit 110007 "ab not enough"):
+        Previously preferred totalEquity → bot thought it had $700 available
+        when only $400 was actually free, sized trades on $700 and Bybit
+        rejected them. Now we try totalAvailableBalance first, then the
+        per-coin USDT availableToWithdraw, and only fall back to
+        totalEquity as a last-resort display value.
         """
         if not bal:
             return 0.0
 
         ex = exchange_name.lower() if exchange_name else ""
 
-        # ── Bybit: Use totalEquity (matches Bybit app — includes unrealized PnL)
+        # ── Bybit: Use totalAvailableBalance for sizing, NOT totalEquity
         if ex == "bybit":
-            # Priority 1: Raw Bybit v5 API — totalEquity is what the app shows
             try:
-                lst = bal.get("info", {}).get("result", {}).get("list", [{}])
-                if lst:
-                    eq = lst[0].get("totalEquity")
-                    if eq:
-                        v = float(eq)
-                        if v > 0:
-                            return v
-                    wb = lst[0].get("totalWalletBalance")
-                    if wb:
-                        v = float(wb)
-                        if v > 0:
-                            return v
+                lst = bal.get("info", {}).get("result", {}).get("list", [])
+                if lst and isinstance(lst, list):
+                    acct = lst[0] if lst else {}
+                    # Priority 1: free margin available for new orders
+                    for field in ("totalAvailableBalance",
+                                  "totalMarginBalance",
+                                  "totalWalletBalance"):
+                        val = acct.get(field)
+                        if val is not None:
+                            try:
+                                v = float(val)
+                                if v > 0:
+                                    return v
+                            except (TypeError, ValueError):
+                                pass
+                    # Priority 2: per-coin USDT free balance
+                    coins = acct.get("coin", [])
+                    if isinstance(coins, list):
+                        for c in coins:
+                            if c.get("coin") == "USDT":
+                                for f2 in ("availableToWithdraw",
+                                           "availableBalance",
+                                           "walletBalance"):
+                                    val2 = c.get(f2)
+                                    if val2 is not None:
+                                        try:
+                                            v2 = float(val2)
+                                            if v2 > 0:
+                                                return v2
+                                        except (TypeError, ValueError):
+                                            pass
+                    # Priority 3 (last resort): totalEquity — display only,
+                    # NOT reliable for sizing but better than returning 0.
+                    te = acct.get("totalEquity")
+                    if te is not None:
+                        try:
+                            v = float(te)
+                            if v > 0:
+                                logger.warning(
+                                    "[Bybit] _extract_usdt falling back to "
+                                    "totalEquity — available margin fields "
+                                    "missing. Sizing may be over-estimated.")
+                                return v
+                        except (TypeError, ValueError):
+                            pass
             except Exception:
                 pass
-            # Fallback: ccxt parsed fields
+            # Fallback: ccxt parsed fields — prefer free over total
             usdt = bal.get("USDT") or {}
             if isinstance(usdt, dict):
-                val = usdt.get("total")
+                for key in ("free", "total"):
+                    val = usdt.get(key)
+                    if val is not None:
+                        try:
+                            v = float(val)
+                            if v > 0:
+                                return v
+                        except (TypeError, ValueError):
+                            pass
+            free_d = bal.get("free") or {}
+            if isinstance(free_d, dict):
+                val = free_d.get("USDT")
                 if val is not None:
                     try:
                         v = float(val)
@@ -366,7 +484,7 @@ class BotEngine:
                         pass
             return 0.0
 
-        # ── Standard ccxt (Binance, MEXC, Bitget) ─────────────────────
+        # ── Standard ccxt (Binance, Bitget) ────────────────────────────
         usdt = bal.get("USDT")
         if isinstance(usdt, dict):
             for key in ("free", "total"):
@@ -426,11 +544,13 @@ class BotEngine:
                         pass
                     break
             if not current_price:
-                continue
+                # Use entry price as fallback so position is never invisible
+                current_price = p.entry_price
+            lev = max(1, getattr(p, "leverage", 1) or 1)
             if p.side == "buy":
-                pnl_pct = (current_price - p.entry_price) / p.entry_price * 100
+                pnl_pct = (current_price - p.entry_price) / p.entry_price * 100 * lev
             else:
-                pnl_pct = (p.entry_price - current_price) / p.entry_price * 100
+                pnl_pct = (p.entry_price - current_price) / p.entry_price * 100 * lev
             result.append({
                 "id": p.id,
                 "symbol": p.symbol,
@@ -449,9 +569,19 @@ class BotEngine:
         return result
 
     def _build_risk_envelope(self) -> dict:
-        """Build risk constraints for Claude."""
+        """Build risk constraints for Claude, including the active mechanism gates.
+
+        Exposing gates to Claude means it stops proposing trades that will
+        be blocked downstream — tighter loop, fewer wasted cycles.
+        """
+        from config import (
+            BLACKLIST_HARD, WHITELIST_SYMBOLS, ALLOWED_HOURS_UTC,
+            PEAK_HOURS_UTC, BLOCKED_HOURS_UTC, SHORTS_REQUIRE_BTC_BEAR,
+            MAX_LOSS_PER_TRADE_PCT, LEVERAGE_TIERS,
+        )
+
         total_open = self.tracker.count_open()
-        max_new = max(0, MAX_TOTAL_POSITIONS - total_open)
+        max_new = max(0, RISK.get("max_open_positions", 8) - total_open)
 
         total_bal = sum(
             b.get("spot", 0) + b.get("futures", 0)
@@ -469,12 +599,60 @@ class BotEngine:
 
         dd_pct = RISK.get("max_drawdown_pct", 0.25)
 
+        # Live mechanism state — fed to Claude so its proposals respect gates
+        hour = self._current_utc_hour()
+        hour_class = self._classify_hour(hour)
+        btc_trend = self._get_btc_trend()
+
+        # Effective blacklist = static ∪ dynamic (AutoMutator)
+        dyn_bl = (self.auto_mutator.get_effective_blacklist()
+                  if self.auto_mutator else set())
+        effective_bl = sorted(set(BLACKLIST_HARD) | dyn_bl)
+
+        # Throttle state
+        throttle = self._consec_loss_state()
+        throttle_paused = throttle["pause_until"] > time.time()
+        tier_cap = throttle.get("tier_cap") or (
+            "STANDARD" if (self.auto_mutator
+                           and self.auto_mutator.get_leverage_cap() is not None)
+            else None)
+
+        mutator_snap = (self.auto_mutator.snapshot()
+                        if self.auto_mutator else {})
+
         return {
             "max_new_positions": max_new,
             "total_open": total_open,
             "daily_loss_pct": round(daily_loss_pct, 4),
             "drawdown_headroom_pct": round((dd_pct - daily_loss_pct) * 100, 1),
             "total_balance": round(total_bal, 2),
+            # Mechanism state — helps Claude propose better trades
+            "hour_utc": hour,
+            "hour_class": hour_class,           # peak|allowed|warmup|blocked
+            "btc_4h_trend": btc_trend,          # bull|bear|neutral
+            "blacklist": effective_bl,
+            "whitelist": sorted(WHITELIST_SYMBOLS),
+            "allowed_hours_utc": sorted(ALLOWED_HOURS_UTC),
+            "peak_hours_utc": sorted(PEAK_HOURS_UTC),
+            "blocked_hours_utc": sorted(BLOCKED_HOURS_UTC),
+            "shorts_require_btc_bear": SHORTS_REQUIRE_BTC_BEAR,
+            "shorts_allowed_now": btc_trend == "bear",
+            "max_loss_per_trade_pct": MAX_LOSS_PER_TRADE_PCT,
+            "leverage_tiers": {
+                name: {
+                    "leverage": t["leverage"],
+                    "min_confidence": t["min_confidence"],
+                    "sl_pct": t["sl_pct"],
+                    "tp_pct": t["tp_pct"],
+                    "requires_whitelist": t["requires_whitelist"],
+                    "requires_peak_hour": t["requires_peak_hour"],
+                    "requires_btc_aligned": t["requires_btc_aligned"],
+                }
+                for name, t in LEVERAGE_TIERS.items()
+            },
+            "consec_loss_throttled": throttle_paused,
+            "effective_tier_cap": tier_cap,     # None | "STANDARD"
+            "auto_mutations": mutator_snap,
         }
 
     def _get_recent_trades(self, n: int = 20) -> list:
@@ -491,6 +669,285 @@ class BotEngine:
             })
         return result
 
+    # ==============================================================
+    # HIGH-WR MECHANISM GATES (2026-04-11 rewrite)
+    # Hour gate + blacklist + BTC macro trend + leverage tier selector
+    # + $-loss-per-trade clamp + consecutive-loss throttle
+    # ==============================================================
+
+    def _current_utc_hour(self) -> int:
+        return datetime.now(timezone.utc).hour
+
+    def _classify_hour(self, hour: int) -> str:
+        """Return 'peak' | 'allowed' | 'warmup' | 'blocked'."""
+        from config import (
+            ALLOWED_HOURS_UTC, WARMUP_HOURS_UTC,
+            PEAK_HOURS_UTC, BLOCKED_HOURS_UTC,
+        )
+        if hour in BLOCKED_HOURS_UTC:
+            return "blocked"
+        if hour in PEAK_HOURS_UTC:
+            return "peak"
+        if hour in WARMUP_HOURS_UTC:
+            return "warmup"
+        # Default: allowed (any hour not explicitly blocked/warmup/peak)
+        return "allowed"
+
+    def _get_btc_trend(self) -> str:
+        """
+        Return 'bull' | 'bear' | 'neutral' from BTC 4h EMA200 slope.
+        Cached 15 minutes to avoid repeated API calls.
+
+        Rules:
+          - close > EMA200 AND EMA200 5-bar slope > +0.2% → bull
+          - close < EMA200 AND EMA200 5-bar slope < −0.2% → bear
+          - otherwise → neutral
+        """
+        cache_ttl = 900  # 15 minutes
+        now = time.time()
+        if getattr(self, '_btc_trend_cached_at', 0) + cache_ttl > now:
+            return getattr(self, '_btc_trend_cached', "neutral")
+
+        try:
+            import pandas as pd
+            from config import BTC_TREND_TIMEFRAME, BTC_TREND_EMA_PERIOD
+
+            exchange = (self.active_exchanges.get('binance')
+                        or next(iter(self.active_exchanges.values()), None))
+            if not exchange:
+                return "neutral"
+
+            raw = exchange.fetch_ohlcv(
+                "BTC/USDT", BTC_TREND_TIMEFRAME,
+                BTC_TREND_EMA_PERIOD + 20, "spot")
+            if not raw or len(raw) < BTC_TREND_EMA_PERIOD + 5:
+                return "neutral"
+
+            df = pd.DataFrame(raw, columns=["ts", "o", "h", "l", "c", "v"])
+            ema = df["c"].ewm(span=BTC_TREND_EMA_PERIOD, adjust=False).mean()
+            last_ema = float(ema.iloc[-1])
+            past_ema = float(ema.iloc[-6])
+            close = float(df["c"].iloc[-1])
+
+            slope_pct = (last_ema - past_ema) / past_ema if past_ema > 0 else 0.0
+            above_ema = close > last_ema
+
+            if above_ema and slope_pct > 0.002:
+                trend = "bull"
+            elif not above_ema and slope_pct < -0.002:
+                trend = "bear"
+            else:
+                trend = "neutral"
+
+            self._btc_trend_cached = trend
+            self._btc_trend_cached_at = now
+            logger.info(
+                f"[BTC-Trend] {trend} "
+                f"(slope={slope_pct*100:+.2f}%, close_above_ema={above_ema})")
+            return trend
+        except Exception as e:
+            logger.debug(f"[BTC-Trend] error: {e}")
+            return "neutral"
+
+    def _consec_loss_state(self) -> dict:
+        """
+        Inspect recent_results for consecutive-loss throttle state.
+        Returns {'pause_until': ts, 'downgrade_until': ts, 'tier_cap': str|None}.
+        """
+        from config import (
+            CONSEC_LOSS_DOWNGRADE_COUNT, CONSEC_LOSS_DOWNGRADE_HOURS,
+            CONSEC_LOSS_PAUSE_COUNT,     CONSEC_LOSS_PAUSE_HOURS,
+        )
+
+        state = getattr(self, '_consec_loss_state_cached',
+                        {"pause_until": 0, "downgrade_until": 0, "tier_cap": None})
+        now = time.time()
+
+        # Expire any prior throttle windows
+        if state.get("pause_until", 0) < now:
+            state["pause_until"] = 0
+        if state.get("downgrade_until", 0) < now:
+            state["downgrade_until"] = 0
+            state["tier_cap"] = None
+
+        # Count consecutive losses at the tail of recent_results
+        results = getattr(self.risk, '_recent_results', [])
+        tail_losses = 0
+        for r in reversed(results):
+            if not r:
+                tail_losses += 1
+            else:
+                break
+
+        # Escalate throttles — fire ONCE per streak, tracked by _last_pause_streak.
+        # Previous bug: pause expired → tail_losses still high → re-triggered
+        # immediately → infinite deadlock (no trades → no wins → streak never clears).
+        last_streak = getattr(self, '_last_pause_streak', 0)
+        if tail_losses >= CONSEC_LOSS_PAUSE_COUNT and tail_losses != last_streak and state["pause_until"] <= 0:
+            state["pause_until"] = now + CONSEC_LOSS_PAUSE_HOURS * 3600
+            self._last_pause_streak = tail_losses
+            logger.warning(
+                f"[Throttle] PAUSE: {tail_losses} consecutive losses "
+                f"→ paused for {CONSEC_LOSS_PAUSE_HOURS}h (one-shot, won't re-trigger)")
+        elif tail_losses >= CONSEC_LOSS_DOWNGRADE_COUNT and state["downgrade_until"] <= 0:
+            state["downgrade_until"] = now + CONSEC_LOSS_DOWNGRADE_HOURS * 3600
+            state["tier_cap"] = "STANDARD"
+            logger.warning(
+                f"[Throttle] DOWNGRADE: {tail_losses} consecutive losses "
+                f"→ tier cap = STANDARD for {CONSEC_LOSS_DOWNGRADE_HOURS}h")
+
+        self._consec_loss_state_cached = state
+        return state
+
+    def _select_leverage_tier(self, symbol: str, side: str,
+                              confidence: float, btc_trend: str,
+                              atr_pct: float = 0.0) -> tuple:
+        """
+        Select the highest leverage tier this candidate qualifies for.
+        Returns (tier_name, tier_params) or (None, None) if rejected.
+        Gates checked in order:
+          hour class → throttle pause → tier requirements → high-ATR clamp.
+        """
+        from config import LEVERAGE_TIERS, WHITELIST_SYMBOLS, HIGH_ATR_PCT_THRESHOLD
+
+        hour = self._current_utc_hour()
+        hour_class = self._classify_hour(hour)
+
+        if hour_class == "blocked":
+            logger.info(
+                f"[Tier] {symbol} REJECTED: hour {hour:02d} UTC is in BLOCKED_HOURS_UTC")
+            return None, None
+
+        # Throttle pause short-circuits everything
+        throttle = self._consec_loss_state()
+        if throttle["pause_until"] > time.time():
+            rem_min = (throttle["pause_until"] - time.time()) / 60
+            logger.warning(
+                f"[Tier] {symbol} REJECTED: consec-loss pause "
+                f"({rem_min:.0f}m remaining)")
+            return None, None
+        tier_cap = throttle.get("tier_cap")
+
+        in_whitelist = symbol in WHITELIST_SYMBOLS
+
+        # For longs, BTC bull/neutral is aligned.
+        # For shorts, BTC bear is aligned (handled upstream but reflected here).
+        if side == "buy":
+            btc_aligned = btc_trend in ("bull", "neutral")
+        else:
+            btc_aligned = btc_trend == "bear"
+
+        is_peak_hour    = hour_class == "peak"
+        # Include "warmup" — half-size handler at line 860 depends on this not rejecting
+        # the trade upstream. Before: warmup hours were gated out here, making the
+        # half-size path unreachable and silently discarding WARMUP_HOURS_UTC opportunities.
+        is_allowed_hour = hour_class in ("peak", "allowed", "warmup")
+        high_atr        = atr_pct >= HIGH_ATR_PCT_THRESHOLD
+
+        # Try tiers highest → lowest (20x → 15x → 10x → 5x)
+        for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD"):
+            if tier_cap == "STANDARD" and tier_name != "STANDARD":
+                continue
+
+            t = LEVERAGE_TIERS[tier_name]
+            if confidence < t["min_confidence"]:
+                continue
+            if t["requires_whitelist"] and not in_whitelist:
+                continue
+            if t["requires_allowed_hour"] and not is_allowed_hour:
+                continue
+            if t["requires_peak_hour"] and not is_peak_hour:
+                continue
+            if t["requires_btc_aligned"] and not btc_aligned:
+                continue
+            if high_atr and tier_name != "STANDARD":
+                # High vol forces STANDARD regardless of qualification
+                continue
+
+            params = dict(t)
+            # Warmup hours — half size
+            if hour_class == "warmup":
+                params["size_pct"] *= 0.5
+
+            # AutoMutator leverage cap (post-mortem evidence)
+            if self.auto_mutator:
+                cap = self.auto_mutator.get_leverage_cap()
+                if cap is not None and params["leverage"] > cap:
+                    logger.warning(
+                        f"[Tier] {symbol} leverage capped {params['leverage']}x → {cap}x "
+                        f"(AutoMutator: recent leverage-amplified losses)")
+                    params["leverage"] = cap
+
+            logger.info(
+                f"[Tier] {symbol} → {tier_name} "
+                f"(conf={confidence:.0%}, hour={hour:02d}/{hour_class}, "
+                f"wl={in_whitelist}, btc={btc_trend}, atr%={atr_pct*100:.2f}%, "
+                f"lev={params['leverage']}x, size={params['size_pct']*100:.1f}%, "
+                f"sl={params['sl_pct']*100:.1f}%)")
+            return tier_name, params
+
+        logger.info(
+            f"[Tier] {symbol} REJECTED: no tier qualifies "
+            f"(conf={confidence:.0%}, hour={hour:02d}/{hour_class}, "
+            f"wl={in_whitelist}, btc_trend={btc_trend})")
+        return None, None
+
+    def _within_loss_clamp(self, balance: float, notional: float,
+                            leverage: int, sl_pct: float) -> bool:
+        """
+        Dual hard clamp: reject trades where expected loss exceeds either
+          (a) MAX_LOSS_PER_TRADE_PCT × balance, or
+          (b) MAX_LOSS_PER_TRADE_USD (absolute dollar ceiling).
+        The dollar ceiling catches strategies that bypass mcp_brain's $4 sizer
+        (legacy Supertrend etc. that ran outside the scoring engine and
+        produced -$11/-$8 fat-tail losses in the Apr 2026 review).
+        """
+        from config import MAX_LOSS_PER_TRADE_PCT, MAX_LOSS_PER_TRADE_USD
+        if balance <= 0:
+            return False
+        expected_loss = notional * leverage * sl_pct
+        pct_limit = balance * MAX_LOSS_PER_TRADE_PCT
+        usd_limit = MAX_LOSS_PER_TRADE_USD
+        limit = min(pct_limit, usd_limit)
+        ok = expected_loss <= limit
+        if not ok:
+            binding = "USD" if usd_limit < pct_limit else "PCT"
+            logger.warning(
+                f"[Loss-Clamp] REJECTED ({binding}): expected loss ${expected_loss:.2f} "
+                f"> limit ${limit:.2f} "
+                f"(notional=${notional:.2f} × lev={leverage}x × sl={sl_pct*100:.2f}%)")
+        return ok
+
+    def _recent_side_wr(self, side: str, limit: int = 30) -> tuple:
+        """Rolling win-rate of the last `limit` CLOSED trades on a given side.
+
+        Pulls directly from the warehouse so it reflects REAL PnL (not
+        positions.json fallback prices used by ghost_sync). Excludes:
+          - sl_placement_failed: infrastructure failure (ccxt routing bug
+            fixed 2026-04-22); pre-fix noise should not penalize the gate.
+          - systematic_close: MCP-monitor close path disabled 2026-04-24
+            (1W/17L historical). Including these disabled-mode losses in
+            a rolling side-WR gate would keep the gate latched on data
+            that cannot recur under current config.
+
+        Returns (wr, n). wr is None when insufficient sample.
+        """
+        try:
+            from core.warehouse import get_warehouse
+            rows = get_warehouse().query(
+                "SELECT realized_pnl FROM trades WHERE status='CLOSED' "
+                "AND side=? AND exit_reason NOT IN ('sl_placement_failed', 'systematic_close') "
+                "ORDER BY ts_exit DESC LIMIT ?",
+                (side, int(limit)),
+            )
+        except Exception:
+            return (None, 0)
+        n = len(rows or [])
+        if n == 0:
+            return (None, 0)
+        wins = sum(1 for r in rows if (r.get("realized_pnl") or 0) > 0)
+        return (wins / n, n)
+
     def _claude_portfolio_cycle(self):
         """Single unified cycle: gather data -> Claude decides -> execute.
         Replaces the old _scan_and_trade + _run_mcp_brain pipeline."""
@@ -498,12 +955,33 @@ class BotEngine:
             logger.warning("[Claude] MCP Brain not available — skipping portfolio cycle")
             return
 
+        # Refresh closed-loop mutations from latest post-mortems
+        if self.auto_mutator:
+            try:
+                self.auto_mutator.refresh()
+            except Exception as e:
+                logger.debug(f"[Claude] AutoMutator refresh: {e}")
+
         self._log_balances()
 
         all_coins = self._collect_all_coins()
         open_positions = self._build_position_snapshot()
         risk_envelope = self._build_risk_envelope()
         recent_trades = self._get_recent_trades(20)
+
+        # Gather news context for MCP Brain
+        news_context = {}
+        try:
+            news_context = self.news.get_market_context()
+            news_signals = self.news.get_news_signals()
+            if news_signals:
+                logger.info(
+                    f"[Claude] News signals: {len(news_signals)} actionable "
+                    f"({sum(1 for s in news_signals if s.get('signal') == 'bullish')} bull, "
+                    f"{sum(1 for s in news_signals if s.get('signal') == 'bearish')} bear)")
+                news_context["news_signals"] = news_signals
+        except Exception as e:
+            logger.debug(f"[Claude] News context error: {e}")
 
         logger.info(
             f"[Claude] Portfolio cycle: {len(all_coins)} coins, "
@@ -516,6 +994,7 @@ class BotEngine:
             exchange_balances=dict(self._balances),
             risk_envelope=risk_envelope,
             recent_trades=recent_trades,
+            news_context=news_context,
         )
 
         if not actions:
@@ -549,44 +1028,352 @@ class BotEngine:
 
     def _execute_open(self, action: dict) -> bool:
         """Validate and execute an OPEN action from Claude. Returns True if executed."""
+        from config import (
+            BLACKLIST_HARD, SHORTS_REQUIRE_BTC_BEAR,
+            OPERATING_MODE, CONTROLLED_LIVE_ENABLED,
+            UNIVERSE_WHITELIST, TRADING_MODE,
+        )
+
         symbol     = action.get("symbol", "")
         ex_name    = action.get("exchange", "").lower()
         market_type = action.get("market_type", "futures")
         side       = action.get("side", "").lower()
-        leverage   = min(action.get("leverage", 5), RISK.get("futures_max_leverage", 5))
-        size_pct   = min(action.get("size_pct", 3.0), RISK.get("max_position_pct", 0.05) * 100)
-        sl_pct     = action.get("sl_pct", 4.0)
-        tp_pct     = action.get("tp_pct", 10.0)
         confidence = action.get("confidence", 0)
+        # leverage / size / sl / tp are now assigned by the leverage tier selector
+        # below; Claude's suggested values are IGNORED to enforce the mechanism.
 
         if not symbol or not ex_name or side not in ("buy", "sell"):
             logger.warning(f"[Claude] Invalid OPEN action: {action}")
             return False
 
-        # ── Hard limits (non-negotiable) ──
-
-        # MEXC futures blocked (geo-blocked from Pakistan)
-        if market_type == "futures" and ex_name == "mexc":
-            logger.warning(f"[Claude] BLOCKED: MEXC futures not available")
+        # ── LEARNING-FIRST MODE GATES (spec §3, §13) ─────────────────────
+        # (A) OBSERVATION mode: never place any order, even paper. The
+        #     candidate will still be recorded in the warehouse (Phase B),
+        #     but execution short-circuits here.
+        if OPERATING_MODE == "OBSERVATION":
+            logger.info(
+                f"[Mode] OBSERVATION — skipping execution for {ex_name}:{symbol} {side}"
+            )
             return False
 
-        # Spot can only be "buy" (no short on spot)
+        # (B) CONTROLLED_LIVE requires the env latch in addition to config.
+        if OPERATING_MODE == "CONTROLLED_LIVE" and not CONTROLLED_LIVE_ENABLED:
+            logger.error(
+                "[Mode] OPERATING_MODE=CONTROLLED_LIVE but CONTROLLED_LIVE_ENABLED "
+                "env var is not 'true'. Refusing to place live orders. Aborting."
+            )
+            return False
+
+        # (C) Universe gate. In TRADING_MODE=all the discovery pipeline
+        # (pair_discovery.discover_all_mode) feeds the scanner every liquid
+        # USDT perp on each exchange, and the downstream gates (MCP score
+        # >=65, meta-filter, universe_filter spread/vol/depth, risk
+        # manager) enforce quality. The static UNIVERSE_WHITELIST was a
+        # learning-first backstop from the 30-symbol static TRADING_PAIRS
+        # era; it would contradict "ALL pairs" mode. Skip it when
+        # TRADING_MODE='all'. Keep it active in usdt_only/portfolio modes.
+        if TRADING_MODE != "all":
+            symbol_for_whitelist = symbol if symbol in UNIVERSE_WHITELIST else (
+                symbol if ":USDT" in symbol else f"{symbol}:USDT"
+            )
+            if (symbol not in UNIVERSE_WHITELIST
+                    and symbol_for_whitelist not in UNIVERSE_WHITELIST):
+                logger.info(
+                    f"[Mode] BLOCKED: {symbol} outside configured universe "
+                    f"(TRADING_MODE={TRADING_MODE}, universe size="
+                    f"{len(UNIVERSE_WHITELIST)})"
+                )
+                return False
+
+        # (C.2) Short gate — 2026-04-24
+        # SELL trades were running 14.3% WR (1W/6L) over the last 72h and 38.7%
+        # over 30d vs buys at 45.6% / 41.9%. Block new shorts until a rolling
+        # 30-SELL window clears 45% WR. Gate auto-re-enables once recovery WR
+        # breaks 45% — no manual flag flip needed. Buys bypass the gate.
+        if side == "sell":
+            try:
+                sell_wr, sell_n = self._recent_side_wr("sell", limit=30)
+            except Exception as _e:
+                logger.debug(f"[ShortGate] WR probe failed: {_e}")
+                sell_wr, sell_n = None, 0
+            if sell_n >= 10 and sell_wr is not None and sell_wr < 0.45:
+                logger.info(
+                    f"[ShortGate] SELL blocked — rolling WR {sell_wr*100:.1f}% "
+                    f"over last {sell_n} SELL closes < 45% threshold. "
+                    f"Auto-lifts once recovery WR ≥ 45%."
+                )
+                return False
+
+        # (D) Per-symbol pause (spec §12). Family pause is checked at (D.1)
+        # below once strategy_family is known.
+        if self.risk and self.risk.is_symbol_paused(symbol):
+            logger.info(f"[Risk/Spec12] {symbol} is paused — skipping")
+            return False
+
+        # (E) Meta-filter quality gate (spec §8). The feature snapshot was
+        #     already written to the warehouse candidates table during scoring
+        #     (core.mcp_brain._algorithmic_portfolio); we hydrate a
+        #     FeatureVector from that row and run the rule-based evaluator.
+        #     Failure modes are non-fatal — missing candidate_id or warehouse
+        #     errors default to ALLOW so the meta-filter never blocks purely
+        #     due to infrastructure issues.
+        _meta_size_multiplier = 1.0
+        _atr_frac_hint = 0.0   # Fed to _select_leverage_tier for high-ATR clamp
+        try:
+            import json as _j
+            from core.features  import FeatureVector as _FV
+            from core.meta_filter import MetaFilter as _MetaFilter
+            from core.warehouse  import get_warehouse as _get_wh
+            _cid = int(action.get("candidate_id") or -1)
+            _fv = None
+            if _cid > 0:
+                _rows = _get_wh().query(
+                    "SELECT features_json FROM candidates WHERE id=?", (_cid,),
+                )
+                if _rows:
+                    _feat = _j.loads(_rows[0].get("features_json") or "{}")
+                    # Surface 1h ATR to the tier selector (below) as a fraction.
+                    # _feat stores percent (e.g. 2.5 for 2.5%); tier expects fraction.
+                    try:
+                        _v = _feat.get("atr_pct_1h")
+                        if isinstance(_v, (int, float)) and _v > 0:
+                            _atr_frac_hint = float(_v) / 100.0
+                    except Exception:
+                        pass
+                    # Build a FeatureVector from the stored snapshot.
+                    _adx_4h = _feat.get("adx_4h")
+                    _bb_4h  = _feat.get("bb_width_4h") or 0
+                    _regime = None
+                    if _adx_4h is not None:
+                        if _adx_4h < 15:
+                            _regime = "chop"
+                        elif _bb_4h < 1.0:
+                            _regime = "squeeze"
+                        elif _bb_4h > 5.0:
+                            _regime = "expansion"
+                        else:
+                            _regime = "trend"
+                    # Compute percentiles against 30d warehouse window
+                    # so meta-filter SKIP rules actually fire.
+                    from core.features import _pctl
+                    _spread_pctl = None
+                    _vol_pctl = None
+                    try:
+                        _since = time.time() - 30 * 86400
+                        _sample_rows = _get_wh().query(
+                            "SELECT features_json FROM candidates "
+                            "WHERE symbol=? AND ts >= ? AND features_json IS NOT NULL",
+                            (symbol, _since),
+                        )
+                        _sp_samp, _at_samp = [], []
+                        for _sr in _sample_rows:
+                            try:
+                                _sf = _j.loads(_sr.get("features_json") or "{}")
+                            except Exception:
+                                continue
+                            if isinstance(_sf.get("spread_pct"), (int, float)):
+                                _sp_samp.append(float(_sf["spread_pct"]))
+                            if isinstance(_sf.get("atr_pct_1h"), (int, float)):
+                                _at_samp.append(float(_sf["atr_pct_1h"]))
+                        _spread_pctl = _pctl(_feat.get("spread_pct"), _sp_samp)
+                        _vol_pctl = _pctl(_feat.get("atr_pct_1h"), _at_samp)
+                    except Exception:
+                        pass
+
+                    # RiskManager._global_streak is a list[bool] (True=win). The
+                    # meta-filter wants an int trailing-loss count — compute it here.
+                    _streak_list = getattr(self.risk, "_global_streak", None) if self.risk else None
+                    _loss_streak_int = 0
+                    if isinstance(_streak_list, list):
+                        for _is_win in reversed(_streak_list):
+                            if _is_win:
+                                break
+                            _loss_streak_int += 1
+                    _fv = _FV(
+                        spread_pctl=_spread_pctl,
+                        vol_pctl=_vol_pctl,
+                        funding_bias=_feat.get("funding_rate"),
+                        ob_imbalance=_feat.get("ob_imbalance"),
+                        trend_strength=(_adx_4h / 100.0) if _adx_4h is not None else None,
+                        regime_label=_regime,
+                        hour_of_day=time.gmtime().tm_hour,
+                        day_of_week=time.gmtime().tm_wday,
+                        recent_loss_streak=_loss_streak_int,
+                        exchange_id=ex_name,
+                        symbol_id=symbol,
+                        raw=_feat,
+                    )
+            if _fv is not None:
+                _decision = _MetaFilter().evaluate(
+                    _fv, side=side, confidence=confidence,
+                )
+                logger.info(
+                    f"[MetaFilter] {symbol} {side}: {_decision.decision} "
+                    f"-- {_decision.reason}"
+                )
+                if _decision.decision == "SKIP":
+                    # Patch the candidate row's decision so the warehouse
+                    # reflects the meta-filter SKIP, not the scorer's ALLOW.
+                    try:
+                        _get_wh().query(
+                            "UPDATE candidates SET decision='SKIP', skip_reason=? WHERE id=?",
+                            (f"meta:{_decision.reason}", _cid),
+                        )
+                    except Exception:
+                        pass
+                    return False
+                if _decision.decision == "REVIEW":
+                    # Phase D will ask ClaudeCode; for now, conservative SKIP.
+                    try:
+                        _get_wh().query(
+                            "UPDATE candidates SET decision='REVIEW', skip_reason=? WHERE id=?",
+                            (f"meta:{_decision.reason}", _cid),
+                        )
+                    except Exception:
+                        pass
+                    logger.info("[MetaFilter] REVIEW -> SKIP (Phase D pending)")
+                    return False
+                _meta_size_multiplier = float(_decision.size_multiplier or 1.0)
+        except Exception as _mfe:
+            logger.debug(f"[MetaFilter] skipped ({_mfe}) -- defaulting to ALLOW")
+
+        # ── HIGH-WR MECHANISM GATES (applied BEFORE legacy checks) ──────
+
+        # (a) Symbol blacklist — evidence-based hard block (static + dynamic)
+        symbol_key = symbol if ":" in symbol else f"{symbol}:USDT"
+        if symbol in BLACKLIST_HARD or symbol_key in BLACKLIST_HARD:
+            logger.info(f"[Claude] BLOCKED by blacklist: {symbol}")
+            return False
+        if self.auto_mutator:
+            dyn_bl = self.auto_mutator.get_effective_blacklist()
+            if symbol in dyn_bl or symbol_key in dyn_bl:
+                logger.info(f"[Claude] BLOCKED by dynamic (post-mortem) blacklist: {symbol}")
+                return False
+            if side == "sell" and self.auto_mutator.shorts_blocked():
+                logger.info(
+                    f"[Claude] BLOCKED: shorts disabled by AutoMutator "
+                    f"(counter-trend short losses in recent post-mortems)")
+                return False
+
+        # (a2) Caution symbol — soft gate. Knowledge-model WR<35% triggers
+        # caution, but high-conviction signals (conf>=0.90) still pass.
+        # Rationale: the caution list is auto-built from historical losses,
+        # many of which were driven by bot-side bugs (SL-placement failures,
+        # stale-close rules) that have since been fixed. A permanent symbol
+        # block punishes setups we'd now take. Confidence 0.90 is the
+        # natural break in the 30d ALLOW histogram (~top 50%).
+        try:
+            from core.knowledge_model import KnowledgeModel
+            _km = KnowledgeModel()
+            if _km.is_caution_symbol(symbol) or _km.is_caution_symbol(symbol_key):
+                if confidence >= 0.90:
+                    logger.info(
+                        f"[Claude] caution-symbol OVERRIDE {symbol} "
+                        f"(conf={confidence:.2f} >= 0.90) — high-conviction pass")
+                else:
+                    logger.info(
+                        f"[Claude] BLOCKED: {symbol} is caution symbol "
+                        f"(<50% WR, conf={confidence:.2f} < 0.90)")
+                    return False
+        except Exception:
+            pass
+
+        # (b) Spot — buy-only (no short on spot)
         if market_type == "spot" and side == "sell":
             logger.warning(f"[Claude] BLOCKED: Cannot short on spot")
             return False
 
-        # Minimum SL/TP
-        if market_type == "futures":
-            sl_pct = max(sl_pct, 3.0)
-            tp_pct = max(tp_pct, 8.0)
+        # (c) BTC macro trend + side filter
+        btc_trend = self._get_btc_trend()
+        if side == "sell" and SHORTS_REQUIRE_BTC_BEAR and btc_trend != "bear":
+            logger.info(
+                f"[Claude] BLOCKED: SHORT {symbol} requires BTC 4h macro-bear, "
+                f"current trend={btc_trend}")
+            return False
+        # 2026-04-12: Removed bear-macro long-blocking gate. The scoring
+        # engine already requires per-coin 4h+1h EMA20>50 alignment for
+        # longs — if a coin is trending up despite BTC being bearish,
+        # the setup is valid. The old gate was killing legitimate longs
+        # and concentrating all trades on Binance (most whitelist pairs).
+
+        # (e) Leverage tier selector — also enforces hour gate + throttle + whitelist
+        # ATR hint comes from the warehouse candidate features (atr_pct_1h), converted
+        # to a fraction above. Falls back to 0 (no clamp) if the candidate row is missing.
+        # The tier selector also handles: BLOCKED_HOURS_UTC, consec-loss pause/downgrade,
+        # min-confidence threshold, whitelist requirement, BTC alignment, peak hour.
+        tier_name, tier_params = self._select_leverage_tier(
+            symbol_key, side, confidence, btc_trend, atr_pct=_atr_frac_hint)
+        if tier_params is None:
+            return False
+
+        # Tier controls leverage; algorithm's ATR-based SL/TP are preferred
+        # when provided (they adapt to each coin's volatility). Tier SL/TP
+        # only used as fallback when the algorithm doesn't send its own.
+        leverage = tier_params["leverage"]
+        size_pct = tier_params["size_pct"] * 100.0   # selector uses fraction; rest of fn uses %
+        algo_sl  = action.get("sl_pct", 0)
+        algo_tp  = action.get("tp_pct", 0)
+        if algo_sl > 0 and algo_tp > 0:
+            sl_pct = algo_sl
+            tp_pct = algo_tp
         else:
-            sl_pct = max(sl_pct, 2.0)
-            tp_pct = max(tp_pct, 5.0)
+            sl_pct = tier_params["sl_pct"] * 100.0
+            tp_pct = tier_params["tp_pct"] * 100.0
+
+        # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
+        min_rr = RISK.get("min_rr_ratio", 1.8)
+        actual_rr = tp_pct / sl_pct if sl_pct > 0 else 0
+        if actual_rr < min_rr:
+            logger.info(
+                f"[Claude] BLOCKED: {symbol} R:R {actual_rr:.2f}:1 "
+                f"< {min_rr:.1f}:1 minimum (SL={sl_pct}% TP={tp_pct}%)")
+            return False
 
         exchange = self.active_exchanges.get(ex_name)
         if not exchange:
             logger.warning(f"[Claude] Exchange '{ex_name}' not connected")
             return False
+
+        # ── Exchange health gate — block new trades on halted exchanges ──
+        if self.is_exchange_halted(ex_name):
+            logger.warning(
+                f"[Claude] BLOCKED: {ex_name} is HALTED (API unreachable) "
+                f"— no new trades until recovered")
+            return False
+
+        # ── Strategy gate: block caution (<50% WR) and fee-heavy strategies ──
+        strategy_name = action.get("strategy", "")
+
+        # (D.1) Per-family pause (spec §12) — now that strategy_family is known.
+        if strategy_name and self.risk and self.risk.is_family_paused(strategy_name):
+            logger.info(f"[Risk/Spec12] strategy family '{strategy_name}' is paused — skipping")
+            return False
+
+        if strategy_name:
+            try:
+                from core.knowledge_model import KnowledgeModel
+                km = KnowledgeModel()
+                if km.is_caution_strategy(strategy_name):
+                    logger.info(
+                        f"[Claude] BLOCKED: strategy '{strategy_name}' is caution "
+                        f"(<50% WR) — auto-disabled")
+                    return False
+                if strategy_name in km.get_fee_heavy_strategies():
+                    logger.info(
+                        f"[Claude] BLOCKED: strategy '{strategy_name}' is fee-heavy "
+                        f"(fees >20% of gross profit) — auto-disabled")
+                    return False
+            except Exception:
+                pass
+
+        # ── Universe filter: spread, volatility, depth, halt checks ──
+        if self.universe_filter:
+            uf_result = self.universe_filter.check(exchange, symbol, market_type)
+            if not uf_result["ok"]:
+                logger.info(
+                    f"[Claude] BLOCKED by universe filter: {symbol} — "
+                    f"{', '.join(uf_result['reasons'])}")
+                return False
 
         # Risk manager circuit breakers
         if not self.risk.can_trade(self.tracker.count_open()):
@@ -599,10 +1386,11 @@ class BotEngine:
             logger.info(f"[Claude] {ex_name}: {ex_open}/{MAX_PER_EXCHANGE} positions — full")
             return False
 
-        # Total position limit
+        # Total position limit (from config, not module constant)
         total_open = self.tracker.count_open()
-        if total_open >= MAX_TOTAL_POSITIONS:
-            logger.info(f"[Claude] Total {total_open}/{MAX_TOTAL_POSITIONS} — full")
+        _max_positions = RISK.get("max_open_positions", 8)
+        if total_open >= _max_positions:
+            logger.info(f"[Claude] Total {total_open}/{_max_positions} — full")
             return False
 
         # No duplicate base asset on same exchange
@@ -614,6 +1402,28 @@ class BotEngine:
         if already_has:
             logger.info(f"[Claude] {base_asset} already open on {ex_name} — skip")
             return False
+
+        # Correlation check — prevent over-concentration in correlated assets
+        total_bal = sum(
+            b.get("spot", 0) + b.get("futures", 0)
+            for ex, b in self._balances.items()
+            if ex not in _UNIFIED_EXCHANGES
+        ) + sum(
+            b.get("spot", 0)
+            for ex, b in self._balances.items()
+            if ex in _UNIFIED_EXCHANGES
+        )
+        corr_info = {"can_add": True, "size_multiplier": 1.0}
+        if total_bal > 0:
+            corr_info = self.risk.check_correlation(
+                symbol, self.tracker.get_open(), total_bal)
+            if not corr_info.get("can_add", True):
+                logger.info(
+                    f"[Claude] BLOCKED: {symbol} correlation group "
+                    f"'{corr_info.get('group', '?')}' at "
+                    f"{corr_info.get('current_pct', 0)*100:.0f}% exposure "
+                    f"(max {corr_info.get('max_pct', 0)*100:.0f}%)")
+                return False
 
         # Balance check
         ex_bals = self._balances.get(ex_name, {})
@@ -648,11 +1458,45 @@ class BotEngine:
         if market_type == "futures" and ":" not in symbol:
             trade_symbol = symbol + ":USDT"
 
-        # Compute position size from size_pct
+        # Compute position size from size_pct (apply correlation + meta-filter reduction)
         size_fraction = size_pct / 100.0
+        corr_mult = corr_info.get("size_multiplier", 1.0) if total_bal > 0 else 1.0
+        if corr_mult < 1.0:
+            size_fraction *= corr_mult
+            logger.info(
+                f"[Claude] {symbol} size reduced {corr_mult:.0%} "
+                f"(correlation group '{corr_info.get('group', '?')}')")
+        # Apply meta-filter size modifier (spec §8 — quality-based de-risking)
+        if _meta_size_multiplier < 1.0:
+            size_fraction *= _meta_size_multiplier
+            logger.info(
+                f"[Claude] {symbol} size reduced {_meta_size_multiplier:.0%} "
+                f"(meta-filter quality gate)")
         notional = mtype_bal * size_fraction
-        if notional < 5.0:
-            logger.info(f"[Claude] Notional ${notional:.2f} < $5 minimum")
+        # 2026-04-24: min-notional floor raised to keep the bot from placing
+        # trades whose P&L range is smaller than the cost floor (fees + spread
+        # + slippage ~$0.20-0.40 per round-trip at market). Below $15-30
+        # notional at 3x, even a +3% unleveraged move nets <$1 gross, making
+        # any fee drag dominant. Pockets smaller than the floor just skip.
+        if mtype_bal < 100:
+            min_notional = 10.0
+        elif mtype_bal < 500:
+            min_notional = 30.0
+        else:
+            min_notional = 50.0
+        if notional < min_notional:
+            logger.info(
+                f"[Claude] Notional ${notional:.2f} < ${min_notional:.2f} minimum "
+                f"(mtype_bal=${mtype_bal:.2f})")
+            return False
+
+        # ── Hard loss clamp — final safety rail ──
+        # Rejects any trade where worst-case loss at SL exceeds
+        # MAX_LOSS_PER_TRADE_PCT of the market-type balance. This is the
+        # guardrail that makes 20x tiers survivable: a 20x AGGRESSIVE trade
+        # with 0.8% SL on 2% of balance only risks 0.32% — well under the $2 cap.
+        _clamp_lev = leverage if market_type == "futures" else 1
+        if not self._within_loss_clamp(mtype_bal, notional, _clamp_lev, sl_pct / 100.0):
             return False
 
         # Get current price for sizing
@@ -679,6 +1523,20 @@ class BotEngine:
         else:
             size = notional / price
 
+        # Pre-check: will this size survive exchange rounding?
+        # BTC at $83k with step=0.001 needs min $83 notional (or $16.6 at 5x).
+        # Skip early instead of wasting API calls on doomed orders.
+        try:
+            step = exchange.get_amount_precision(trade_symbol)
+            if step > 0 and size < step:
+                min_notional = step * price / max(leverage, 1)
+                logger.info(
+                    f"[Claude] {symbol}: size {size:.8f} < step {step} "
+                    f"(need ${min_notional:.0f} at {leverage}x, have ${notional:.0f}) — skip")
+                return False
+        except Exception:
+            pass
+
         # Set leverage
         if market_type == "futures" and leverage > 1:
             try:
@@ -692,20 +1550,44 @@ class BotEngine:
             f"SL={stop_loss:.6g} TP={take_profit:.6g} conf={confidence:.0%}")
 
         try:
-            self.order_mgr.open_position(
+            _cid = action.get("candidate_id")
+            pos = self.order_mgr.open_position(
                 exchange, trade_symbol, side, market_type,
                 strategy="claude_portfolio",
                 size=size, price=price,
                 sl=stop_loss, tp=take_profit,
                 leverage=leverage,
+                candidate_id=_cid if (_cid or 0) > 0 else None,
+                mcp_score=action.get("mcp_score"),
             )
+            if pos is None:
+                logger.info(f"[Claude] open_position returned None — rejected by order manager")
+                return False
+            # Warehouse record_trade_open now happens inside open_position
+            # (before SL placement) so fail-closed paths don't lose the row.
             return True
         except Exception as e:
             logger.error(f"[Claude] open_position failed: {e}")
+            # Spec §12 hardening: 3 rejections in 10 minutes on one symbol
+            # pauses that symbol for 2 hours. Harmless if risk_manager lacks
+            # the method (old versions).
+            try:
+                if self.risk and hasattr(
+                    self.risk, "note_order_rejection"
+                ):
+                    self.risk.note_order_rejection(symbol, str(e))
+            except Exception:
+                pass
             return False
 
     def _execute_close(self, action: dict) -> bool:
         """Find and close a position by ID. Returns True if closed."""
+        # Spec §4: OBSERVATION mode must not send any live orders
+        from config import OPERATING_MODE as _close_mode
+        if _close_mode == "OBSERVATION":
+            logger.info("[Mode] OBSERVATION — close blocked (no live orders)")
+            return False
+
         position_id = action.get("position_id", "")
         reason = action.get("reason", "claude_portfolio_close")
 
@@ -776,45 +1658,354 @@ class BotEngine:
                 logger.debug(f"[Engine] SL/TP monitor: {e}")
             stop_event.wait(10)  # Check every 10 seconds
 
+    def _write_heartbeat(self):
+        """Write heartbeat file for external monitoring."""
+        try:
+            import psutil, os
+            process = psutil.Process(os.getpid())
+            mem_mb = process.memory_info().rss / 1024 / 1024
+        except Exception:
+            mem_mb = 0
+
+        # Find last trade time from tracker
+        last_trade_time = None
+        try:
+            closed = self.tracker.get_closed_positions()
+            if closed:
+                last_trade_time = max(
+                    p.close_time for p in closed if getattr(p, "close_time", None)
+                ) if any(getattr(p, "close_time", None) for p in closed) else None
+        except Exception:
+            pass
+
+        heartbeat = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "uptime_seconds": int(time.time() - self._start_time),
+            "cycle_count": self._cycle,
+            "open_positions": self.tracker.count_open(),
+            "per_exchange_positions": {
+                ex_name: self.tracker.count_open(exchange=ex.name)
+                for ex_name, ex in self.active_exchanges.items()
+            },
+            "last_trade_time": last_trade_time,
+            "active_exchanges": list(self.active_exchanges.keys()),
+            "halted_exchanges": list(self._exchange_halted),
+            "api_latency_ms": {k: round(v, 0) for k, v in self._api_latency.items()},
+            "is_halted": self.risk.is_halted,
+            "halt_reason": self.risk.halt_reason if self.risk.is_halted else None,
+            "daily_pnl": getattr(self.risk, "_daily_pnl", 0),
+            "spot_manager_active": self.spot_manager is not None,
+            "capital_allocator_active": self.capital_allocator is not None,
+            "memory_mb": round(mem_mb, 1),
+        }
+        try:
+            Path("data/heartbeat.json").write_text(
+                json.dumps(heartbeat, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     def _check_exchange_health(self):
-        """Verify exchanges are still reachable. Alert + reconnect if not."""
+        """Verify exchanges are reachable + measure latency.
+        Auto-halt trading on exchange after 3 consecutive failures.
+        Auto-resume when exchange recovers."""
+        self._last_health_check = time.time()
         for ex_name, exchange in list(self.active_exchanges.items()):
             try:
+                t0 = time.time()
                 ticker = exchange.fetch_ticker("BTC/USDT", "spot")
-                if ticker and ticker.get("last"):
-                    self._consecutive_api_fails = 0
+                latency_ms = (time.time() - t0) * 1000
+                self._api_latency[ex_name] = latency_ms
+                # Accept any price field — some exchanges populate `close`
+                # or bid/ask but not `last` on every ticker
+                price = None
+                if ticker:
+                    price = (ticker.get("last") or ticker.get("close")
+                             or ticker.get("bid") or ticker.get("ask"))
+                if price:
+                    prev_fails = self._consecutive_api_fails.get(ex_name, 0)
+                    self._consecutive_api_fails[ex_name] = 0
+                    # Auto-resume if previously halted
+                    if ex_name in self._exchange_halted:
+                        self._exchange_halted.discard(ex_name)
+                        logger.info(
+                            f"[Health] {ex_name} RECOVERED — resuming trading "
+                            f"(latency={latency_ms:.0f}ms)")
+                        self.notifier.alert(
+                            f"{ex_name.upper()} recovered after outage — "
+                            f"trading resumed (latency={latency_ms:.0f}ms)")
+                    elif latency_ms > 5000:
+                        logger.warning(
+                            f"[Health] {ex_name}: HIGH LATENCY {latency_ms:.0f}ms")
+                        high_lat_key = f"{ex_name}_high_latency"
+                        cnt = self._consecutive_api_fails.get(high_lat_key, 0) + 1
+                        self._consecutive_api_fails[high_lat_key] = cnt
+                        if cnt >= 3:
+                            logger.warning(
+                                f"[Health] {ex_name} DEGRADED — latency >5s "
+                                f"for {cnt} consecutive checks")
+                            self.notifier.alert(
+                                f"{ex_name.upper()} degraded: latency >5s "
+                                f"for {cnt} checks — consider pausing")
+                    else:
+                        self._consecutive_api_fails.pop(
+                            f"{ex_name}_high_latency", None)
                 else:
-                    raise Exception("Empty ticker")
+                    keys = list(ticker.keys()) if ticker else []
+                    raise Exception(f"Empty ticker (keys={keys[:5]})")
             except Exception as e:
-                self._consecutive_api_fails += 1
+                fails = self._consecutive_api_fails.get(ex_name, 0) + 1
+                self._consecutive_api_fails[ex_name] = fails
+                self._api_latency[ex_name] = -1
                 logger.warning(
-                    f"[Engine] {ex_name} health check FAILED "
-                    f"(attempt {self._consecutive_api_fails}): {e}")
-                if self._consecutive_api_fails >= 3:
+                    f"[Health] {ex_name} health check FAILED "
+                    f"(attempt {fails}): {e}")
+                if fails >= 3 and ex_name not in self._exchange_halted:
+                    self._exchange_halted.add(ex_name)
                     open_on_ex = self.tracker.count_open(exchange=exchange.name)
+                    logger.error(
+                        f"[Health] {ex_name} HALTED — {fails} consecutive failures. "
+                        f"No new trades will be placed on {ex_name} until recovered.")
                     self.notifier.error(
-                        f"EXCHANGE DOWN: {ex_name.upper()} unreachable for "
-                        f"{self._consecutive_api_fails} consecutive checks.\n"
+                        f"EXCHANGE HALTED: {ex_name.upper()} unreachable for "
+                        f"{fails} consecutive checks.\n"
                         f"Open positions on {ex_name}: {open_on_ex}\n"
-                        f"SL/TP monitoring PAUSED for this exchange.\n"
+                        f"Trading HALTED on this exchange. "
+                        f"Will auto-resume when API recovers.\n"
                         f"Attempting auto-reconnect...")
-                    # Try to reconnect
+                    # Non-blocking reconnect attempt
                     try:
                         exchange._init_exchange()
                         if getattr(exchange, '_connected', False):
-                            logger.info(f"[Engine] {ex_name} reconnected")
-                            self._consecutive_api_fails = 0
+                            logger.info(f"[Health] {ex_name} reconnected")
+                            self._consecutive_api_fails[ex_name] = 0
+                            self._exchange_halted.discard(ex_name)
+                            # 2026-04-16 (post-audit): If the exchange was
+                            # down at startup and excluded from active_exchanges,
+                            # the reconnect fixed _connected but left the
+                            # routing dict stale — no trades would ever route
+                            # here. Re-register now.
+                            if ex_name not in self.active_exchanges:
+                                self.active_exchanges[ex_name] = exchange
+                                logger.info(
+                                    f"[Health] {ex_name} re-added to active_exchanges")
                             self.notifier.alert(
                                 f"{ex_name.upper()} reconnected successfully after outage.")
                     except Exception:
                         pass
+                # 5+ fails: close losing positions to protect capital
+                if fails >= 5:
+                    try:
+                        positions = self.tracker.get_open(exchange=exchange.name)
+                        for pos in positions:
+                            if getattr(pos, "unrealized_pnl", 0) < 0:
+                                logger.warning(
+                                    f"[Health] Force-closing losing position "
+                                    f"{pos.symbol} on {ex_name} (5+ API fails)")
+                                self.order_mgr.close_position(
+                                    exchange, pos, reason="exchange_outage_5_fails")
+                    except Exception as close_err:
+                        logger.error(f"[Health] Force-close error: {close_err}")
+
+    def is_exchange_halted(self, exchange_name: str) -> bool:
+        """Check if an exchange is currently halted due to health failures."""
+        return exchange_name.lower() in self._exchange_halted
 
     def _sync_positions(self):
         """Periodically verify tracked LIVE positions still exist on exchange."""
         try:
-            self.tracker.sync_with_exchanges(self.active_exchanges)
+            imported = self.tracker.sync_with_exchanges(self.active_exchanges)
+            if imported:
+                self._protect_imported_positions(imported)
         except Exception as e:
             logger.debug(f"[Engine] Position sync: {e}")
+
+    def _replace_exchange_sl(self, exchange, pos, new_sl: float) -> bool:
+        """Cancel the existing SL conditional order on the exchange and place
+        a new one at `new_sl`. Used by TIGHTEN/BREAKEVEN actions.
+
+        Returns True iff the replace actually succeeded — callers should
+        only mutate `pos.stop_loss` on True so in-memory SL stays consistent
+        with the exchange.
+
+        2026-04-25 (post-audit): pre-flight check added. BREAKEVEN moves
+        targeted entry+fees and Bitget rejected the new SL whenever mark
+        price had pulled back through that level (code 40917 "Stop price
+        for long positions please < mark price"). Cancel-then-place had
+        already removed the working SL, so the fail-closed policy market-
+        closed otherwise-healthy winning trades. The check now refuses
+        replaces that would be rejected, keeping the existing SL intact.
+
+        2026-04-16 (post-audit): Previously these actions only mutated
+        `pos.stop_loss` in memory. The exchange kept running the wider SL,
+        and because `_exchange_sl=True` silences local SL monitoring, the
+        tightened value was never actually enforced anywhere.
+        """
+        if not pos or not new_sl or new_sl <= 0:
+            return False
+        if pos.market_type != "futures":
+            return False  # spot has no exchange-side SL to replace
+
+        # Pre-flight: refuse SL placements that the exchange would reject
+        # for being on the wrong side of current price. For longs the SL
+        # must sit BELOW current price; for shorts ABOVE. Otherwise the
+        # cancel-then-place cycle below would strip the working SL and
+        # the fail-closed policy in _place_exchange_sl_tp would market-
+        # close the position. Skip the move when the new level is invalid;
+        # the next monitor cycle will try again with a refreshed price.
+        try:
+            tkr = exchange.fetch_ticker(pos.symbol, pos.market_type)
+            last = float((tkr or {}).get("last") or (tkr or {}).get("close") or 0)
+        except Exception as e:
+            logger.debug(f"[Replace-SL] mark check unavailable for {pos.symbol}: {e}")
+            last = 0.0
+        if last > 0:
+            side = (pos.side or "").lower()
+            if side == "buy" and new_sl >= last:
+                logger.info(
+                    f"[Replace-SL] SKIP {pos.symbol} BUY: target SL {new_sl:.6g} "
+                    f">= last {last:.6g} (would be exchange-rejected); keeping current SL")
+                return False
+            if side == "sell" and new_sl <= last:
+                logger.info(
+                    f"[Replace-SL] SKIP {pos.symbol} SELL: target SL {new_sl:.6g} "
+                    f"<= last {last:.6g} (would be exchange-rejected); keeping current SL")
+                return False
+
+        # Cancel existing conditional orders for this symbol. We cancel
+        # ALL conditional orders on the symbol because we did not store
+        # the specific SL order ID at placement time — the symbol is a
+        # narrow enough scope for one position.
+        try:
+            if hasattr(exchange, "cancel_all_orders"):
+                exchange.cancel_all_orders(pos.symbol, pos.market_type)
+            else:
+                # ccxt-level fallback
+                exchange.exchange.cancel_all_orders(pos.symbol)
+        except Exception as e:
+            logger.warning(
+                f"[Replace-SL] cancel_all_orders failed for {pos.symbol}: "
+                f"{str(e)[:120]} — proceeding with replacement")
+
+        # Clear flags so a placement failure falls back to local monitoring
+        pos._exchange_sl = False
+        pos._exchange_tp = False
+
+        # Re-place both SL and TP at current tracker values
+        try:
+            self.order_mgr._place_exchange_sl_tp(
+                exchange, pos, new_sl, pos.take_profit,
+                pos.side, pos.symbol, pos.size, pos.market_type)
+            return True
+        except Exception as e:
+            logger.error(
+                f"[Replace-SL] re-place failed for {pos.symbol}: {str(e)[:150]}")
+            return False
+
+    def _protect_imported_positions(self, positions: list) -> None:
+        """Compute ATR-based SL/TP for manually-imported positions and place
+        them on the exchange.  Falls back to liquidation-price fallback if
+        OHLCV is unavailable (leaves the existing tracker stop_loss intact).
+
+        2026-04-16 follow-up: imported positions arrive with stop_loss=liq
+        (placeholder) and take_profit=0. This method refines them to
+        ATR*1.5 / 2.5:1 RR using the risk manager, then asks the order
+        manager to place protective orders on the exchange.
+        """
+        import pandas as pd
+        from utils.indicators import atr as _atr
+
+        for pos in positions:
+            try:
+                exchange = self.active_exchanges.get(pos.exchange.lower())
+                if not exchange:
+                    logger.warning(
+                        f"[Protect] No client for {pos.exchange} — "
+                        f"cannot place SL for imported {pos.symbol}")
+                    continue
+
+                # 2026-04-20: stale-list guard. The caller passes a snapshot
+                # of positions, but concurrent check_sl_tp / close flows may
+                # have already closed the position. Placing SL on a flat
+                # symbol cascades into a naked reverse via the close-retry
+                # path. Re-verify against the exchange and tracker before
+                # proceeding.
+                if not getattr(pos, "is_open", True):
+                    continue
+                try:
+                    _live = exchange.fetch_positions([pos.symbol]) or []
+                    _live_sz = 0.0
+                    for _p in _live:
+                        _live_sz = abs(float(_p.get("contracts") or _p.get("contractSize") or 0))
+                        if _live_sz > 0:
+                            break
+                    if _live_sz <= 0:
+                        logger.info(
+                            f"[Protect] {pos.symbol} flat on exchange — "
+                            f"skipping SL placement (stale-list guard)")
+                        continue
+                except Exception as _fe:
+                    logger.debug(
+                        f"[Protect] live-size check failed for {pos.symbol}: "
+                        f"{str(_fe)[:120]} — proceeding")
+
+                # Fetch 1h OHLCV for ATR(14)
+                try:
+                    raw = exchange.fetch_ohlcv(pos.symbol, "1h", 100, "futures")
+                except Exception as e:
+                    logger.warning(
+                        f"[Protect] OHLCV fetch failed for {pos.symbol}: "
+                        f"{str(e)[:120]} — SL left at liquidation fallback")
+                    continue
+                if not raw or len(raw) < 20:
+                    logger.warning(
+                        f"[Protect] Insufficient OHLCV for {pos.symbol} "
+                        f"({len(raw) if raw else 0} bars) — SL left at fallback")
+                    continue
+
+                df = pd.DataFrame(raw, columns=["ts", "o", "h", "l", "c", "v"])
+                atr_val = float(_atr(df["h"], df["l"], df["c"], 14).iloc[-1] or 0)
+                if atr_val <= 0:
+                    logger.warning(
+                        f"[Protect] ATR invalid for {pos.symbol} — fallback")
+                    continue
+
+                # Compute SL/TP via risk manager. ATR*1.5 SL, 2.5:1 RR.
+                sl, tp = self.risk.get_sl_tp(
+                    entry=pos.entry_price,
+                    side=pos.side,
+                    atr=atr_val,
+                    atr_sl_mult=1.5,
+                    atr_tp_mult=3.75,  # 1.5 * 2.5 = 2.5:1 RR
+                    leverage=pos.leverage,
+                )
+
+                # Update tracker state
+                pos.stop_loss = sl
+                pos.take_profit = tp
+
+                # Place on exchange
+                try:
+                    self.order_mgr._place_exchange_sl_tp(
+                        exchange, pos, sl, tp, pos.side,
+                        pos.symbol, pos.size, "futures")
+                    logger.info(
+                        f"[Protect] {pos.symbol} {pos.side.upper()} "
+                        f"imported SL={sl:.4f} TP={tp:.4f} (ATR={atr_val:.4f})")
+                except Exception as e:
+                    logger.error(
+                        f"[Protect] SL placement failed for {pos.symbol}: "
+                        f"{str(e)[:150]}")
+
+            except Exception as e:
+                logger.error(
+                    f"[Protect] Unexpected error protecting {getattr(pos, 'symbol', '?')}: "
+                    f"{str(e)[:150]}")
+
+        # Persist the updated SL/TP
+        try:
+            self.tracker._save()
+        except Exception:
+            pass
 
     def _fetch_news(self):
         try:
@@ -824,13 +2015,33 @@ class BotEngine:
 
     def _run_dca(self):
         """Run DCA strategy on top coins across all exchanges.
-        Respects MCP Brain: skips DCA if MCP says SELL for that coin."""
+        Gates (in order):
+          1. Static BLACKLIST_HARD — never accumulate a repeat loser
+          2. AutoMutator dynamic blacklist — post-mortem-driven
+          3. MCP Brain — don't DCA-buy coins MCP says to SELL
+        BTC macro trend is intentionally NOT checked: DCA is meant to
+        accumulate on dips, so bear macro is the *desired* environment.
+        """
+        from config import BLACKLIST_HARD
         dca = self.pool.get("dca_spot")
         if not dca:
             return
         dca_coins = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+        dyn_bl = (self.auto_mutator.get_effective_blacklist()
+                  if self.auto_mutator else set())
+
         for ex_name, exchange in self.active_exchanges.items():
             for symbol in dca_coins:
+                # Normalize to futures key for blacklist check (futures keys
+                # are authoritative: repeat losses on futures also gate spot
+                # accumulation of the same base asset).
+                sym_fut_key = f"{symbol}:USDT"
+                if (symbol in BLACKLIST_HARD or sym_fut_key in BLACKLIST_HARD
+                    or symbol in dyn_bl or sym_fut_key in dyn_bl):
+                    logger.debug(
+                        f"[DCA] {symbol}: BLOCKED by blacklist — skipping")
+                    continue
+
                 # MCP Brain gate: don't DCA-buy coins MCP says to SELL
                 if self.mcp_brain and self.mcp_brain.is_enabled:
                     base = symbol.split("/")[0]
@@ -855,6 +2066,100 @@ class BotEngine:
             except Exception as e:
                 logger.debug(f"[Rebalance] {ex_name}: {e}")
 
+    def _run_spot_evaluation(self):
+        """Run spot portfolio evaluation cycle (every 30 min)."""
+        if not self.spot_manager:
+            return
+        try:
+            actions = self.spot_manager.run_cycle()
+            if actions:
+                logger.info(f"[SpotMgr] Cycle: {len(actions)} actions "
+                            f"({', '.join(a.get('action','?') for a in actions)})")
+        except Exception as e:
+            logger.error(f"[SpotMgr] Cycle error: {e}")
+
+    def _run_capital_allocation(self):
+        """Run capital allocation cycle (every 15 min)."""
+        if not self.capital_allocator:
+            return
+        try:
+            executed = self.capital_allocator.run_cycle()
+            if executed:
+                logger.info(f"[CapAlloc] Cycle: {len(executed)} actions executed")
+        except Exception as e:
+            logger.error(f"[CapAlloc] Cycle error: {e}")
+
+    def _daily_self_check(self):
+        """Daily health audit at 00:00 UTC — exchange connectivity, data freshness,
+        strategy health, balance reconciliation, risk state."""
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "exchanges": {},
+            "risk": {},
+            "positions": {},
+            "strategies": {},
+        }
+        # Exchange connectivity
+        for ex_name, exchange in self.exchanges.items():
+            connected = getattr(exchange, "_connected", False)
+            halted = ex_name in self._exchange_halted
+            latency = self._api_latency.get(ex_name, -1)
+            report["exchanges"][ex_name] = {
+                "connected": connected,
+                "halted": halted,
+                "latency_ms": round(latency, 0) if latency > 0 else -1,
+                "consecutive_fails": self._consecutive_api_fails.get(ex_name, 0),
+            }
+        # Risk state
+        report["risk"] = {
+            "is_halted": self.risk.is_halted,
+            "halt_reason": self.risk.halt_reason if self.risk.is_halted else None,
+            "daily_pnl": getattr(self.risk, "_daily_pnl", 0),
+        }
+        # Open positions
+        open_count = self.tracker.count_open()
+        report["positions"] = {
+            "open_count": open_count,
+            "per_exchange": {
+                ex_name: self.tracker.count_open(exchange=ex.name)
+                for ex_name, ex in self.active_exchanges.items()
+            },
+        }
+        # Strategy health from knowledge model
+        try:
+            from core.knowledge_model import KnowledgeModel
+            km = KnowledgeModel()
+            caution = []
+            fee_heavy = km.get_fee_heavy_strategies()
+            for strat in km.model.get("strategies", {}):
+                if km.is_caution_strategy(strat):
+                    caution.append(strat)
+            report["strategies"] = {
+                "caution_strategies": caution,
+                "fee_heavy_strategies": list(fee_heavy),
+            }
+        except Exception:
+            pass
+        # Save report
+        try:
+            Path("data").mkdir(parents=True, exist_ok=True)
+            Path("data/daily_check.json").write_text(
+                json.dumps(report, indent=2, default=str), encoding="utf-8")
+        except Exception:
+            pass
+        # Notify
+        ex_status = ", ".join(
+            f"{n}:{'OK' if r.get('connected') and not r.get('halted') else 'DOWN'}"
+            for n, r in report["exchanges"].items())
+        summary = (
+            f"Daily Self-Check\n"
+            f"Exchanges: {ex_status}\n"
+            f"Open positions: {open_count}\n"
+            f"Risk halted: {self.risk.is_halted}"
+        )
+        logger.info(f"[Engine] {summary}")
+        self.notifier.alert(summary)
+
     def _execute_fund_ops(self, fund_ops: list):
         """Execute MCP Brain fund management operations: TRANSFER, SELL_PORTFOLIO, BUY_PORTFOLIO."""
         for op in fund_ops:
@@ -872,8 +2177,8 @@ class BotEngine:
                     amount = float(op.get("amount", 0))
                     if amount < 1:
                         continue
-                    # Binance, Bitget, MEXC support transfers; Bybit is unified (no need)
-                    if ex_name not in ("binance", "bitget", "mexc"):
+                    # Binance, Bitget support transfers; Bybit is unified (no need)
+                    if ex_name not in ("binance", "bitget"):
                         logger.debug(f"[MCP-FundOps] {ex_name} unified or no transfer support")
                         continue
                     logger.info(
@@ -968,8 +2273,7 @@ class BotEngine:
         def _fetch_one_exchange(ex_name, exchange):
             positions = []
             # ── Futures positions ──
-            is_mexc = ex_name.lower() == "mexc"
-            if not is_mexc:
+            if True:
                 try:
                     raw = exchange.fetch_positions()
                     for ep in (raw or []):
@@ -1075,6 +2379,21 @@ class BotEngine:
 
         self._exchange_positions_cache = results
         self._exchange_positions_time = time.time()
+        # 2026-04-16: Persist the universal snapshot so the dashboard
+        # (a separate process) can display the same unified view instead
+        # of running its own parallel LiveFetcher that can silently fail
+        # when a client init errors at startup.
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            _path = _Path("data/exchange_positions.json")
+            _path.parent.mkdir(parents=True, exist_ok=True)
+            _path.write_text(_json.dumps({
+                "ts": self._exchange_positions_time,
+                "positions": results,
+            }, indent=2), encoding="utf-8")
+        except Exception as _e:
+            logger.debug(f"[ExScan] cache write failed: {_e}")
         return results
 
     def _run_mcp_position_monitor(self):
@@ -1101,13 +2420,15 @@ class BotEngine:
                             pass
                         break
                 if not current_price:
-                    continue
+                    # Fallback to entry price so position is still visible to MCP
+                    current_price = p.entry_price
+                lev = max(1, getattr(p, "leverage", 1) or 1)
                 if p.side == "buy":
-                    unrealized_pnl = (current_price - p.entry_price) * p.size * p.leverage
-                    pnl_pct = (current_price - p.entry_price) / p.entry_price * 100
+                    unrealized_pnl = (current_price - p.entry_price) * p.size
+                    pnl_pct = (current_price - p.entry_price) / p.entry_price * 100 * lev
                 else:
-                    unrealized_pnl = (p.entry_price - current_price) * p.size * p.leverage
-                    pnl_pct = (p.entry_price - current_price) / p.entry_price * 100
+                    unrealized_pnl = (p.entry_price - current_price) * p.size
+                    pnl_pct = (p.entry_price - current_price) / p.entry_price * 100 * lev
 
                 base = p.symbol.split("/")[0].split(":")[0]
                 asset_class = "commodity" if base in self._COMMODITY_BASES else (
@@ -1184,11 +2505,8 @@ class BotEngine:
                 return
 
             # ── Phase 5: Apply actions ──
-            # Build quick lookup for pos_data by ID
-            pd_map = {d["id"]: d for d in pos_data}
-
-            for pd in pos_data:
-                pid = pd["id"]
+            for pos_entry in pos_data:
+                pid = pos_entry["id"]
                 adv = advice.get(pid, {})
                 # Also try short ID (MCP Brain returns first 8 chars as keys)
                 if not adv and len(pid) > 8:
@@ -1197,10 +2515,10 @@ class BotEngine:
                 if not action or action == "HOLD":
                     continue
 
-                source = pd["source"]
+                source = pos_entry["source"]
                 conf = adv.get("confidence", 0)
                 reason = adv.get("reason", "")[:60]
-                _pnl_pct = pd.get("pnl_pct", 0)
+                _pnl_pct = pos_entry.get("pnl_pct", 0)
 
                 # ═══ TRACKER POSITIONS — use existing close_position path ═══
                 if source == "tracker":
@@ -1209,35 +2527,45 @@ class BotEngine:
                         continue
 
                     if action == "TAKE_PROFIT":
-                        if _pnl_pct >= 1.0 and conf >= 0.60:
+                        # Fee-aware: estimate round-trip fees and require net profit >= 0.5%
+                        from config import FEE
+                        if p.market_type == "futures":
+                            rt_fee_pct = (FEE.get("futures_maker", 0.0002) + FEE.get("futures_taker", 0.0005)) * 100
+                        else:
+                            rt_fee_pct = (FEE.get("spot_maker", 0.001) + FEE.get("spot_taker", 0.001)) * 100
+                        net_pnl_pct = _pnl_pct - rt_fee_pct
+                        if net_pnl_pct >= 0.5 and conf >= 0.60:
                             for ex_name, exchange in self.active_exchanges.items():
                                 if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
                                     logger.warning(
                                         f"[MCP-Brain] TAKE PROFIT: {p.symbol} {p.side} "
-                                        f"pnl={_pnl_pct:+.1f}% conf={conf:.0%} — {reason}")
+                                        f"pnl={_pnl_pct:+.1f}% net~{net_pnl_pct:+.1f}% "
+                                        f"conf={conf:.0%} — {reason}")
                                     self.order_mgr.close_position(
                                         exchange, p, "mcp_take_profit")
                                     break
                         else:
                             logger.debug(
                                 f"[MCP-Brain] TAKE_PROFIT skipped: {p.symbol} "
-                                f"pnl={_pnl_pct:+.1f}% conf={conf:.0%} "
-                                f"(need pnl>=1% + conf>=60%)")
+                                f"pnl={_pnl_pct:+.1f}% net~{net_pnl_pct:+.1f}% conf={conf:.0%} "
+                                f"(need net>=0.5% + conf>=60%)")
 
                     elif action == "CLOSE":
-                        age_min = p.duration_minutes
-                        if age_min < 60 and not (conf >= 0.90 and _pnl_pct < -2.0):
-                            logger.info(
-                                f"[MCP-Brain] CLOSE blocked: {p.symbol} only {age_min:.0f}min old "
-                                f"(conf={conf:.0%} pnl={_pnl_pct:+.1f}%)")
-                            continue
-                        for ex_name, exchange in self.active_exchanges.items():
-                            if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
-                                logger.warning(
-                                    f"[MCP-Brain] CLOSE: {p.symbol} {p.side} — {reason}")
-                                self.order_mgr.close_position(
-                                    exchange, p, "mcp_brain_close")
-                                break
+                        # 2026-04-24: systematic_close disabled. Historical 1W/17L
+                        # over 388 trades ($-16.42 total). The monitor was closing
+                        # positions with adverse-indicator narratives but the
+                        # subsequent price action rarely confirmed — net-negative
+                        # drag. SL, trailing_stop, and mcp_take_profit own exits
+                        # now. Suggestion is logged but not actioned; if a real
+                        # hard-loss case appears, the scan-CLOSE rules in
+                        # mcp_brain (leveraged-aware -12%/-3% thresholds) still
+                        # fire and hit close_position with `systematic_close`
+                        # from there — but only as a catastrophic safety rail,
+                        # not a discretionary close.
+                        logger.info(
+                            f"[MCP-Brain] CLOSE suggested but systematic_close "
+                            f"disabled (2026-04-24 policy): {p.symbol} "
+                            f"conf={conf:.0%} pnl={_pnl_pct:+.1f}% — {reason[:60]}")
 
                     elif action == "TIGHTEN":
                         for ex_name, exchange in self.active_exchanges.items():
@@ -1246,80 +2574,86 @@ class BotEngine:
                                     t = exchange.fetch_ticker(p.symbol, p.market_type)
                                     cur = float(t.get("last", 0))
                                     if cur > 0 and p.stop_loss > 0:
+                                        new_sl = None
                                         if p.side == "buy":
-                                            new_sl = p.stop_loss + (cur - p.stop_loss) * 0.3
-                                            if new_sl > p.stop_loss:
-                                                logger.info(f"[MCP-Brain] TIGHTEN: {p.symbol} BUY SL {p.stop_loss:.6g} → {new_sl:.6g}")
-                                                p.stop_loss = new_sl
+                                            candidate = p.stop_loss + (cur - p.stop_loss) * 0.3
+                                            if candidate > p.stop_loss:
+                                                new_sl = candidate
                                         else:
-                                            new_sl = p.stop_loss - (p.stop_loss - cur) * 0.3
-                                            if new_sl < p.stop_loss:
-                                                logger.info(f"[MCP-Brain] TIGHTEN: {p.symbol} SELL SL {p.stop_loss:.6g} → {new_sl:.6g}")
+                                            candidate = p.stop_loss - (p.stop_loss - cur) * 0.3
+                                            if candidate < p.stop_loss:
+                                                new_sl = candidate
+                                        if new_sl is not None:
+                                            logger.info(
+                                                f"[MCP-Brain] TIGHTEN: {p.symbol} {p.side.upper()} "
+                                                f"SL {p.stop_loss:.6g} → {new_sl:.6g}")
+                                            if self._replace_exchange_sl(exchange, p, new_sl):
                                                 p.stop_loss = new_sl
-                                except Exception:
-                                    pass
+                                except Exception as _e:
+                                    logger.debug(f"[MCP-Brain] TIGHTEN {p.symbol}: {_e}")
                                 break
 
                     elif action == "BREAKEVEN":
                         from core.position_tracker import _fee_rate
                         rate = _fee_rate(p.market_type)
+                        new_be = None
                         if p.side == "buy":
                             be = p.entry_price * (1 + rate * 2 + 0.0005)
                             if be > p.stop_loss:
-                                logger.info(f"[MCP-Brain] BREAKEVEN: {p.symbol} BUY SL {p.stop_loss:.6g} → {be:.6g}")
-                                p.stop_loss = be
+                                new_be = be
                         else:
                             be = p.entry_price * (1 - rate * 2 - 0.0005)
                             if be < p.stop_loss:
-                                logger.info(f"[MCP-Brain] BREAKEVEN: {p.symbol} SELL SL {p.stop_loss:.6g} → {be:.6g}")
-                                p.stop_loss = be
+                                new_be = be
+                        if new_be is not None:
+                            logger.info(
+                                f"[MCP-Brain] BREAKEVEN: {p.symbol} {p.side.upper()} "
+                                f"SL {p.stop_loss:.6g} → {new_be:.6g}")
+                            for ex_name, exchange in self.active_exchanges.items():
+                                if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
+                                    try:
+                                        if self._replace_exchange_sl(exchange, p, new_be):
+                                            p.stop_loss = new_be
+                                    except Exception as _e:
+                                        logger.debug(f"[MCP-Brain] BREAKEVEN replace {p.symbol}: {_e}")
+                                    break
 
-                    elif action == "WIDEN":
-                        if p.id not in self.order_mgr._sl_widened:
-                            self.order_mgr._sl_widened.add(p.id)
-                            if p.side == "buy":
-                                new_sl = p.stop_loss * (1 - 0.005)
-                                logger.info(f"[MCP-Brain] WIDEN: {p.symbol} BUY SL {p.stop_loss:.6g} → {new_sl:.6g}")
-                                p.stop_loss = new_sl
-                            else:
-                                new_sl = p.stop_loss * (1 + 0.005)
-                                logger.info(f"[MCP-Brain] WIDEN: {p.symbol} SELL SL {p.stop_loss:.6g} → {new_sl:.6g}")
-                                p.stop_loss = new_sl
+                    # WIDEN removed — spec §2 forbids widening stop losses.
 
                 # ═══ EXTERNAL POSITIONS — direct exchange execution ═══
                 elif source == "exchange":
-                    ex_name = pd["exchange"]
-                    mtype = pd["market_type"]
+                    ex_name = pos_entry["exchange"]
+                    mtype = pos_entry["market_type"]
 
                     if action in ("TAKE_PROFIT", "CLOSE"):
                         # Higher thresholds for external positions (unknown age/history)
                         if action == "CLOSE" and conf < 0.85:
                             logger.debug(
-                                f"[MCP-Brain] EXT CLOSE skipped: {pd['symbol']} on {ex_name} "
+                                f"[MCP-Brain] EXT CLOSE skipped: {pos_entry['symbol']} on {ex_name} "
                                 f"conf={conf:.0%} < 85% threshold")
                             continue
                         if action == "TAKE_PROFIT":
                             if mtype == "futures" and (_pnl_pct < 1.0 or conf < 0.70):
                                 logger.debug(
-                                    f"[MCP-Brain] EXT TP skipped: {pd['symbol']} on {ex_name} "
+                                    f"[MCP-Brain] EXT TP skipped: {pos_entry['symbol']} on {ex_name} "
                                     f"pnl={_pnl_pct:+.1f}% conf={conf:.0%}")
                                 continue
                             if mtype == "spot" and conf < 0.80:
                                 logger.debug(
-                                    f"[MCP-Brain] EXT SPOT TP skipped: {pd['symbol']} on {ex_name} "
+                                    f"[MCP-Brain] EXT SPOT TP skipped: {pos_entry['symbol']} on {ex_name} "
                                     f"conf={conf:.0%} < 80%")
                                 continue
 
                         if DRY_RUN:
                             logger.info(
-                                f"[MCP-Brain] [DRY] EXT {action}: {pd['symbol']} {pd['side']} "
+                                f"[MCP-Brain] [DRY] EXT {action}: {pos_entry['symbol']} {pos_entry['side']} "
                                 f"on {ex_name} ({mtype}) — {reason}")
                         else:
-                            self._close_external_position(ex_name, pd, reason)
+                            self._close_external_position(ex_name, pos_entry, reason)
 
-                    elif action in ("TIGHTEN", "BREAKEVEN", "WIDEN"):
+                    elif action in ("TIGHTEN", "BREAKEVEN"):
                         logger.debug(
-                            f"[MCP-Brain] EXT {action} N/A: {pd['symbol']} on {ex_name} "
+                            f"[MCP-Brain] EXT {action} N/A: {pos_entry['symbol']} on {ex_name} "
                             f"(no tracked SL for external positions)")
 
             # Persist SL changes for tracker positions
@@ -1410,6 +2744,24 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Engine] Learning error: {e}")
 
+        # Update Kelly stats from closed trades
+        if hasattr(self, 'order_mgr') and hasattr(self.order_mgr, 'kelly'):
+            try:
+                closed_trades = [
+                    vars(p) if hasattr(p, '__dict__') else p
+                    for p in self.tracker._closed
+                ]
+                self.order_mgr.kelly.update_from_trades(closed_trades)
+            except Exception as e:
+                logger.debug(f"[Engine] Kelly update error: {e}")
+
+        # Clean up stale sl_widened entries for closed positions
+        if hasattr(self, 'order_mgr'):
+            try:
+                self.order_mgr.cleanup_sl_widened()
+            except Exception:
+                pass
+
     def _run_optimizer(self):
         from core.auto_optimizer import AutoOptimizer
         logger.info("[Engine] Starting auto-optimization...")
@@ -1423,6 +2775,16 @@ class BotEngine:
     # ── Main run ──────────────────────────────────────────────────────
 
     def run(self):
+        # Spec Appendix B: refuse to run CONTROLLED_LIVE without a signed checklist.
+        try:
+            from config import OPERATING_MODE as _op_mode
+            from core.live_gate import enforce_controlled_live_gate
+            enforce_controlled_live_gate(_op_mode)
+        except SystemExit:
+            raise
+        except Exception as _e:
+            logger.warning(f"[LiveGate] check error (non-fatal): {_e}")
+
         logger.info("[Engine] Bot started — Ctrl+C to stop")
         self.notifier.alert(
             f"Bot started | {TRADING_MODE.upper()} | "
@@ -1431,11 +2793,28 @@ class BotEngine:
 
         # ── CLAUDE PORTFOLIO: single unified cycle (replaces per-exchange scans + MCP brain)
         schedule.every(PORTFOLIO_CYCLE_SEC).seconds.do(self._claude_portfolio_cycle)
-        schedule.every(2).minutes.do(self._run_mcp_position_monitor)  # Position monitor (2 min)
+        _pos_mon_sec = CLAUDE_PORTFOLIO.get("position_monitor_sec", 120)
+        schedule.every(_pos_mon_sec).seconds.do(self._run_mcp_position_monitor)
         schedule.every(NEWS_INTERVAL).seconds.do(self._fetch_news)
         schedule.every(LEARN_INTERVAL).seconds.do(self._run_learning)
-        schedule.every(4).hours.do(self._run_dca)
-        schedule.every(24).hours.do(self._run_rebalance)
+        try:
+            from config import ENABLE_DCA, ENABLE_REBALANCE
+        except ImportError:
+            ENABLE_DCA = False
+            ENABLE_REBALANCE = False
+        if ENABLE_DCA:
+            schedule.every(4).hours.do(self._run_dca)
+        if ENABLE_REBALANCE:
+            schedule.every(24).hours.do(self._run_rebalance)
+
+        # Spot portfolio evaluation (30 min) + capital allocation (15 min)
+        if self.spot_manager:
+            schedule.every(30).minutes.do(self._run_spot_evaluation)
+        if self.capital_allocator:
+            schedule.every(15).minutes.do(self._run_capital_allocation)
+
+        # Daily self-check at midnight UTC
+        schedule.every().day.at("00:00").do(self._daily_self_check)
         schedule.every().day.at("00:00").do(self._daily_summary)
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
@@ -1476,10 +2855,10 @@ class BotEngine:
             while True:
                 schedule.run_pending()
 
-                # Watchdog: restart SL/TP thread if it died
-                if not self._sltp_thread.is_alive():
+                # Watchdog: restart SL/TP thread if it died (but not during shutdown)
+                if not self._sltp_thread.is_alive() and not getattr(self, '_shutdown_done', False) and not self._stop_event.is_set():
                     logger.warning("[Engine] SL/TP thread DIED — restarting")
-                    self._stop_event.clear()
+                    self._stop_event = threading.Event()
                     self._sltp_thread = threading.Thread(
                         target=self._sltp_monitor_loop,
                         args=(self._stop_event,),
@@ -1492,9 +2871,14 @@ class BotEngine:
                         f"All positions were UNMONITORED until restart.\n"
                         f"Check logs for the crash cause.")
 
-                # Watchdog: check exchange connectivity every 60s
-                if self._cycle % 12 == 0 and self._cycle > 0:
+                # Watchdog: check exchange connectivity every 60s (time-based)
+                if time.time() - self._last_health_check >= 60:
                     self._check_exchange_health()
+
+                # Heartbeat: write status file every 60s for external monitors
+                if time.time() - self._last_heartbeat >= 60:
+                    self._last_heartbeat = time.time()
+                    self._write_heartbeat()
 
                 self._print_live_status()
                 time.sleep(5)
@@ -1527,8 +2911,21 @@ class BotEngine:
         self._shutdown_done = True
         logger.info("[Engine] Shutting down...")
         s = self.tracker.summary()
+        try:
+            extras = self._build_daily_summary_extras(0.0)
+        except Exception:
+            extras = {}
         self.notifier.daily_summary(
-            s["total_trades"], s["wins"], s["losses"], s["total_pnl"], 0.0)
+            s["total_trades"], s["wins"], s["losses"], s["total_pnl"], 0.0,
+            gross_pnl=s.get("gross_pnl"),
+            total_fees=s.get("total_fees"),
+            avg_win=s.get("avg_win"),
+            avg_loss=s.get("avg_loss"),
+            paper_trades=s.get("paper_trades"),
+            live_trades=s.get("live_trades"),
+            open_positions=s.get("open_positions"),
+            **extras,
+        )
         try:
             summary = self.order_mgr.compliance.export_summary()
             if summary:
@@ -1563,8 +2960,126 @@ class BotEngine:
                             balance += self._extract_usdt(bal, name)
                         except Exception:
                             pass
+        # Build rich extras for the daily email
+        extras = self._build_daily_summary_extras(balance)
         self.notifier.daily_summary(
-            s["total_trades"], s["wins"], s["losses"], s["total_pnl"], balance)
+            s["total_trades"], s["wins"], s["losses"], s["total_pnl"], balance,
+            gross_pnl=s.get("gross_pnl"),
+            total_fees=s.get("total_fees"),
+            avg_win=s.get("avg_win"),
+            avg_loss=s.get("avg_loss"),
+            paper_trades=s.get("paper_trades"),
+            live_trades=s.get("live_trades"),
+            open_positions=s.get("open_positions"),
+            **extras,
+        )
+
+    def _build_daily_summary_extras(self, balance: float) -> dict:
+        """Compute per-exchange, per-strategy, hour, best/worst, drawdown."""
+        extras: dict = {}
+        try:
+            closed = list(self.tracker._closed)
+        except Exception:
+            closed = []
+
+        # Per-exchange
+        per_ex: dict = {}
+        for p in closed:
+            ex = getattr(p, "exchange", "?") or "?"
+            d = per_ex.setdefault(ex, {"trades": 0, "wins": 0, "pnl": 0.0})
+            d["trades"] += 1
+            d["pnl"]    += float(p.pnl or 0)
+            if (p.pnl or 0) > 0:
+                d["wins"] += 1
+        for ex, d in per_ex.items():
+            d["win_rate"] = (d["wins"] / d["trades"] * 100) if d["trades"] else 0
+        if per_ex:
+            extras["per_exchange"] = per_ex
+
+        # Per-strategy
+        per_strat: dict = {}
+        for p in closed:
+            s = getattr(p, "strategy", "?") or "?"
+            d = per_strat.setdefault(s, {"trades": 0, "wins": 0, "pnl": 0.0})
+            d["trades"] += 1
+            d["pnl"]    += float(p.pnl or 0)
+            if (p.pnl or 0) > 0:
+                d["wins"] += 1
+        for s, d in per_strat.items():
+            d["win_rate"] = (d["wins"] / d["trades"] * 100) if d["trades"] else 0
+        if per_strat:
+            extras["per_strategy"] = per_strat
+
+        # Best / worst
+        if closed:
+            best = max(closed, key=lambda p: (p.pnl or 0))
+            worst = min(closed, key=lambda p: (p.pnl or 0))
+            extras["best_trade"] = {
+                "symbol": best.symbol, "side": best.side,
+                "pnl": float(best.pnl or 0),
+            }
+            extras["worst_trade"] = {
+                "symbol": worst.symbol, "side": worst.side,
+                "pnl": float(worst.pnl or 0),
+            }
+
+        # Drawdown from peak equity (running)
+        try:
+            equity = 0.0
+            peak = balance
+            running = balance - sum(float(p.pnl or 0) for p in closed)
+            peak = running
+            for p in sorted(closed, key=lambda x: float(getattr(x, "close_time", 0) or 0)):
+                running += float(p.pnl or 0)
+                if running > peak:
+                    peak = running
+            equity = running
+            if peak > 0:
+                extras["peak_equity"] = peak
+                extras["drawdown_pct"] = (equity - peak) / peak * 100
+        except Exception:
+            pass
+
+        # Unrealized open PnL
+        try:
+            open_pnl = 0.0
+            for p in self.tracker.get_open():
+                ex = self.active_exchanges.get(getattr(p, "exchange", ""))
+                if not ex:
+                    continue
+                try:
+                    tkr = ex.fetch_ticker(p.symbol, p.market_type)
+                    last = float(tkr.get("last", 0) or 0)
+                    if last <= 0:
+                        continue
+                    if p.side == "buy":
+                        open_pnl += (last - p.entry_price) * p.size
+                    else:
+                        open_pnl += (p.entry_price - last) * p.size
+                except Exception:
+                    pass
+            extras["open_pnl"] = open_pnl
+        except Exception:
+            pass
+
+        # Halt status
+        try:
+            if self.risk.is_halted:
+                extras["halt_status"] = self.risk.halt_reason or "HALTED"
+        except Exception:
+            pass
+
+        # Hour scores from knowledge model (now that hour_scores include net_pnl)
+        try:
+            from core.knowledge_model import KnowledgeModel
+            km = KnowledgeModel()
+            hs = km._model.get("hour_scores") if hasattr(km, "_model") else None
+            if hs:
+                extras["hour_scores"] = hs
+        except Exception:
+            pass
+
+        return extras
 
     def _print_live_status(self):
         s        = self.tracker.summary()

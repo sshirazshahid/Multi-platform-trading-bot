@@ -4,9 +4,11 @@ core/pair_discovery.py — Dynamic Trading Pair Discovery
 Queries each exchange for ALL available USDT-margined markets,
 filters by minimum 24h volume, returns the best pairs.
 
-FIX: Volume filter is now actually applied (was defined but never enforced).
-     Low-volume / obscure tokens like DBR, GRASS, etc. are now excluded.
-     Falls back to hardcoded TRADING_PAIRS if discovery finds nothing.
+Includes UniverseFilter for runtime filtering:
+  - Spread thresholds (bid-ask spread check)
+  - Volatility thresholds (ATR-based: too high or too low)
+  - Order book depth validation
+  - Trading halt / maintenance detection
 """
 
 from loguru import logger
@@ -29,7 +31,7 @@ ALL_MAX_SPOT_PAIRS    = 30
 ALL_MAX_FUTURES_PAIRS = 25
 
 # Always include these core symbols regardless of volume ranking
-CORE_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX"}
+CORE_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "AVAX"}
 
 # Commodity symbols to look for on futures
 COMMODITY_BASES = {"XAU", "XAG", "WTI", "CL"}
@@ -53,6 +55,12 @@ EXTENDED_CRYPTO = {
 _SKIP_BASES = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDP",
                "UST", "WBTC", "WETH", "WBNB", "STETH", "HBTC"}
 
+# Meme coins — excluded from trading (low predictability, high noise)
+try:
+    from config import MEME_COINS
+except ImportError:
+    MEME_COINS = {"DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "TURBO", "LOOM"}
+
 
 def discover_pairs(exchange, exchange_name: str) -> dict:
     """
@@ -64,6 +72,8 @@ def discover_pairs(exchange, exchange_name: str) -> dict:
     futures_pairs = []
 
     try:
+        if not hasattr(exchange, 'exchange') or exchange.exchange is None:
+            return {"spot": [], "futures": []}
         markets = exchange.exchange.markets or exchange.exchange.load_markets()
     except Exception as e:
         logger.warning(f"[Discovery] {exchange_name}: load_markets failed: {e}")
@@ -80,8 +90,10 @@ def discover_pairs(exchange, exchange_name: str) -> dict:
             if quote != "USDT" or not active:
                 continue
 
-            # Skip stablecoins and wrapped tokens
+            # Skip stablecoins, wrapped tokens, and meme coins
             if base in _SKIP_BASES:
+                continue
+            if base in MEME_COINS:
                 continue
 
             # Extract 24h volume from market info (varies by exchange)
@@ -360,3 +372,220 @@ def discover_all_mode(active_exchanges: dict) -> dict:
         f"across {len(all_pairs)} exchanges")
 
     return all_pairs
+
+
+# ── Universe Filter: runtime quality checks before trading a symbol ────
+
+class UniverseFilter:
+    """
+    Runtime filter applied BEFORE a signal is acted on.
+    Checks spread, volatility, order book depth, and trading halts.
+    """
+
+    # Configurable thresholds
+    # 2026-04-11: relaxed after 12h of log-observed rejections during a
+    # quiet weekend session. BTC was being rejected at ATR=0.27% and most
+    # mid-cap perpetual books show $2-3k at top 5 levels even in normal
+    # conditions. Previous thresholds were tuned for active trending hours.
+    MAX_SPREAD_PCT     = 0.005     # 0.5% max bid-ask spread
+    MIN_ATR_PCT        = 0.0015    # 0.15% (was 0.3%) — allow BTC in quiet sessions
+    MAX_ATR_PCT        = 0.12      # 12% max ATR (too volatile = too risky)
+    MIN_DEPTH_USD      = 2_000     # $2k (was $5k) — fits typical USDT perp book depth
+    ATR_PERIOD         = 14        # periods for ATR calculation
+
+    def __init__(self):
+        self._cache: dict[str, dict] = {}   # symbol -> {result, ts}
+        self._cache_ttl = 300               # 5 min cache
+        self._reject_counts: dict[str, int] = {}  # tracking rejects
+
+    def check(self, exchange, symbol: str, market_type: str = "spot") -> dict:
+        """
+        Run all universe quality checks on a symbol.
+        Returns {"ok": bool, "reasons": [...], "spread": float, "atr": float, "depth": float}
+        """
+        import time as _t
+
+        # Check cache
+        cache_key = f"{exchange.name}:{symbol}:{market_type}"
+        cached = self._cache.get(cache_key)
+        if cached and (_t.time() - cached["ts"]) < self._cache_ttl:
+            return cached["result"]
+
+        reasons = []
+        spread_pct = 0.0
+        atr_pct = 0.0
+        depth_usd = 0.0
+
+        # 1. Trading halt / active check
+        if not self._check_active(exchange, symbol):
+            reasons.append("halted_or_inactive")
+
+        # 2. Spread check
+        spread_pct = self._check_spread(exchange, symbol, market_type)
+        if spread_pct > self.MAX_SPREAD_PCT:
+            reasons.append(f"spread_too_wide:{spread_pct*100:.2f}%>{self.MAX_SPREAD_PCT*100:.1f}%")
+
+        # 3. Order book depth
+        depth_usd = self._check_depth(exchange, symbol, market_type)
+        if 0 < depth_usd < self.MIN_DEPTH_USD:
+            reasons.append(f"thin_book:${depth_usd:.0f}<${self.MIN_DEPTH_USD}")
+
+        # 4. Volatility check (ATR-based)
+        atr_pct = self._check_volatility(exchange, symbol, market_type)
+        if 0 < atr_pct < self.MIN_ATR_PCT:
+            reasons.append(f"too_calm:ATR={atr_pct*100:.2f}%<{self.MIN_ATR_PCT*100:.1f}%")
+        elif atr_pct > self.MAX_ATR_PCT:
+            reasons.append(f"too_volatile:ATR={atr_pct*100:.1f}%>{self.MAX_ATR_PCT*100:.0f}%")
+
+        ok = len(reasons) == 0
+        result = {
+            "ok": ok,
+            "reasons": reasons,
+            "spread_pct": spread_pct,
+            "atr_pct": atr_pct,
+            "depth_usd": depth_usd,
+        }
+
+        if not ok:
+            self._reject_counts[symbol] = self._reject_counts.get(symbol, 0) + 1
+            logger.info(
+                f"[UniverseFilter] {symbol} REJECTED: {', '.join(reasons)}")
+
+        self._cache[cache_key] = {"result": result, "ts": _t.time()}
+        return result
+
+    def _check_active(self, exchange, symbol: str) -> bool:
+        """Check if the symbol is currently active/tradable on the exchange."""
+        try:
+            markets = exchange.exchange.markets or {}
+            market = markets.get(symbol, {})
+            if not market:
+                return True  # unknown, assume ok
+            active = market.get("active", True)
+            info = market.get("info", {}) or {}
+            # Check exchange-specific halt/maintenance flags
+            status = info.get("status") or info.get("tradingStatus") or ""
+            if isinstance(status, str) and status.lower() in (
+                "halt", "halted", "break", "maintenance", "suspended"
+            ):
+                return False
+            return bool(active)
+        except Exception:
+            return True
+
+    def _check_spread(self, exchange, symbol: str,
+                      market_type: str) -> float:
+        """Return bid-ask spread as fraction of mid price."""
+        try:
+            ob = exchange.fetch_order_book(symbol, limit=5, market_type=market_type)
+            if not ob or not ob.get("bids") or not ob.get("asks"):
+                return 0.0
+            best_bid = float(ob["bids"][0][0])
+            best_ask = float(ob["asks"][0][0])
+            mid = (best_bid + best_ask) / 2
+            return (best_ask - best_bid) / mid if mid > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    def _check_depth(self, exchange, symbol: str,
+                     market_type: str) -> float:
+        """Return total USD liquidity at top 5 order book levels (min of bid/ask side)."""
+        try:
+            ob = exchange.fetch_order_book(symbol, limit=10, market_type=market_type)
+            if not ob or not ob.get("bids") or not ob.get("asks"):
+                return 0.0
+            bid_depth = sum(float(b[0]) * float(b[1]) for b in ob["bids"][:5])
+            ask_depth = sum(float(a[0]) * float(a[1]) for a in ob["asks"][:5])
+            return min(bid_depth, ask_depth)
+        except Exception:
+            return 0.0
+
+    def _check_volatility(self, exchange, symbol: str,
+                          market_type: str) -> float:
+        """Return ATR as percentage of price (14-period on 1h candles)."""
+        try:
+            candles = exchange.fetch_ohlcv(
+                symbol, timeframe="1h", limit=self.ATR_PERIOD + 5,
+                market_type=market_type)
+            if not candles or len(candles) < self.ATR_PERIOD:
+                return 0.0
+            trs = []
+            for i in range(1, len(candles)):
+                h = float(candles[i][2])
+                l = float(candles[i][3])
+                c_prev = float(candles[i-1][4])
+                tr = max(h - l, abs(h - c_prev), abs(l - c_prev))
+                trs.append(tr)
+            atr = sum(trs[-self.ATR_PERIOD:]) / self.ATR_PERIOD
+            last_close = float(candles[-1][4])
+            return atr / last_close if last_close > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    def rank(self, exchange, symbol: str, market_type: str = "spot") -> float:
+        """Composite score 0-100 for symbol quality.
+        Components: liquidity(25) + spread(25) + volatility(25) + funding(25).
+
+        2026-04-14 learning-first pivot: any symbol outside
+        config.UNIVERSE_WHITELIST scores 0 so the meta-filter/engine never
+        considers it. Spec §13 — narrow to BTC/ETH until edge is proven.
+        """
+        try:
+            from config import UNIVERSE_WHITELIST as _WL
+        except ImportError:
+            _WL = None
+        if _WL is not None and symbol not in _WL:
+            return 0.0
+
+        score = 0.0
+
+        # Spread score (25 pts): tighter = better
+        spread = self._check_spread(exchange, symbol, market_type)
+        if spread <= 0:
+            score += 25  # no data = assume ok
+        elif spread < 0.001:
+            score += 25
+        elif spread < 0.003:
+            score += 15
+        elif spread < self.MAX_SPREAD_PCT:
+            score += 5
+
+        # Depth / liquidity score (25 pts)
+        depth = self._check_depth(exchange, symbol, market_type)
+        if depth >= 50_000:
+            score += 25
+        elif depth >= 10_000:
+            score += 20
+        elif depth >= self.MIN_DEPTH_USD:
+            score += 10
+
+        # Volatility score (25 pts): prefer 0.3%-3% ATR sweet spot
+        atr = self._check_volatility(exchange, symbol, market_type)
+        if 0.003 <= atr <= 0.03:
+            score += 25
+        elif 0.0015 <= atr <= 0.05:
+            score += 15
+        elif atr > 0:
+            score += 5
+
+        # Funding score (25 pts, futures only): prefer near-zero funding
+        if market_type == "futures":
+            try:
+                funding = exchange.exchange.fetch_funding_rate(symbol)
+                rate = abs(float(funding.get("fundingRate", 0)))
+                if rate < 0.0001:
+                    score += 25
+                elif rate < 0.0005:
+                    score += 15
+                elif rate < 0.001:
+                    score += 5
+            except Exception:
+                score += 12  # unknown = neutral
+        else:
+            score += 25  # spot doesn't have funding
+
+        return score
+
+    def get_reject_stats(self) -> dict:
+        """Return reject counts per symbol for monitoring."""
+        return dict(self._reject_counts)
