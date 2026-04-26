@@ -56,6 +56,22 @@ def _is_permission_error(e: Exception) -> bool:
     return any(s.lower() in msg for s in _PERM_ERRORS)
 
 
+def _mid_from_ticker(ticker: dict) -> float:
+    """Extract mid price (bid+ask)/2 from a ccxt ticker dict.
+
+    Returns 0.0 when bid or ask are missing. Attribution.record skips rows
+    where either mid is 0, so an unparseable ticker degrades cleanly.
+    """
+    try:
+        bid = float(ticker.get("bid") or 0)
+        ask = float(ticker.get("ask") or 0)
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+    except (TypeError, ValueError):
+        pass
+    return 0.0
+
+
 def _is_position_mode_error(e: Exception) -> bool:
     msg = str(e)
     return any(s in msg for s in _POSITION_MODE_ERRORS)
@@ -135,6 +151,10 @@ class OrderManager:
         self.executor    = SmartExecutor()
         self.sim         = SimExecutionModel()  # DRY_RUN realism
         self.mcp_brain   = None  # Set by bot_engine after construction
+        # Exchange registry for paths (like _finalize_close) that don't
+        # receive an exchange parameter. BotEngine populates this via
+        # set_exchanges() after constructing its exchange dict.
+        self._exchanges: dict = {}
         # Track exchanges where futures is disabled (don't retry)
         # Track exchanges using One-Way Mode (no positionSide param)
         # Bitget is ALWAYS one-way — pre-populate to avoid first-order 40774 error
@@ -170,6 +190,22 @@ class OrderManager:
             logger.info(self.wallet.statement())
         else:
             logger.warning("[Orders] LIVE MODE — real orders will be placed.")
+
+    def set_exchanges(self, exchanges: dict) -> None:
+        """Wire the BotEngine exchange registry. Used by _finalize_close
+        to look up the exchange for funding-history fetches without having
+        an exchange object passed in."""
+        self._exchanges = dict(exchanges or {})
+
+    def _exchange_for(self, name: str):
+        """Return the exchange client for `name` (case-insensitive), or None."""
+        if not name or not self._exchanges:
+            return None
+        key = str(name).lower()
+        for k, v in self._exchanges.items():
+            if str(k).lower() == key:
+                return v
+        return None
 
     # ── SL widened persistence ─────────────────────────────────────────
 
@@ -630,11 +666,15 @@ class OrderManager:
             except (ImportError, Exception):
                 pass
 
-        # Get fill price
+        # Get fill price + mid snapshot for attribution.
+        # The mid is captured BEFORE applying sim slippage / smart-executor
+        # crossing so attribution can decompose fill-vs-mid as `spread`.
         fill_price = price
+        entry_mid = 0.0
         if not fill_price or order_type == "market":
             ticker     = exchange.fetch_ticker(symbol, market_type)
             fill_price = ticker.get("last") or ticker.get("close") or price
+            entry_mid  = _mid_from_ticker(ticker)
         if not fill_price:
             logger.error(f"[Orders] Cannot get price for {symbol}")
             return None
@@ -685,6 +725,7 @@ class OrderManager:
             entry_price=fill_price, size=size,
             stop_loss=sl, take_profit=tp,
             leverage=leverage, order_id=order_id,
+            entry_mid=entry_mid,
         )
 
         if self.dry_run:
@@ -723,6 +764,11 @@ class OrderManager:
                         f"[Orders] {symbol}: spread too wide "
                         f"({spread_info['spread_pct']*100:.3f}%) — skip")
                     return None
+                # Prefer the order-book mid over the ticker mid for LIVE —
+                # check_spread fetches a fresh top-of-book snapshot.
+                _book_mid = float(spread_info.get("mid") or 0)
+                if _book_mid > 0:
+                    pos.entry_mid = _book_mid
 
                 notional_usd = size * fill_price
                 if self.executor.should_use_twap(notional_usd):
@@ -1153,13 +1199,26 @@ class OrderManager:
 
         close_side = "sell" if position.side == "buy" else "buy"
 
+        # Capture exit mid for attribution BEFORE any sim slippage runs.
+        # If the caller passed `price`, fetch the ticker just for mid.
+        exit_mid = 0.0
+        ticker = None
         if not price:
             ticker = exchange.fetch_ticker(position.symbol, position.market_type)
             price  = ticker.get("last") or ticker.get("close")
+        else:
+            try:
+                ticker = exchange.fetch_ticker(position.symbol, position.market_type)
+            except Exception:
+                ticker = None
+        if ticker:
+            exit_mid = _mid_from_ticker(ticker)
         if not price:
             logger.error(f"[Orders] Cannot get close price for {position.symbol}")
             return None
         price = float(price)
+        if exit_mid > 0:
+            position.exit_mid = exit_mid
 
         # ── DRY_RUN realism: apply slippage on close (2026-04-11) ──
         # The caller's `price` is either a ticker.last (monitor poll) or an
@@ -1425,6 +1484,66 @@ class OrderManager:
                     exit_reason=reason,
                     fee=float(getattr(pos, "total_fees", 0.0)),
                 )
+
+                # ── Forward attribution (Phase 2 / Task A) ────────────
+                # Decompose realized_pnl into alpha/spread/slippage/funding/fees
+                # and persist to the attribution table. Skip rows with zero
+                # mids (ghost-sync, pre-Task-A positions, ticker failures) —
+                # those produce a misleading zero-cost decomposition.
+                try:
+                    if (float(getattr(pos, "entry_mid", 0.0) or 0.0) > 0.0
+                            and float(getattr(pos, "exit_mid", 0.0) or 0.0) > 0.0):
+                        from core.attribution import Trade as _AttrTrade, record as _attr_record
+
+                        # LIVE funding accrual: query exchange for funding
+                        # payments over the hold window. Paper positions
+                        # already accumulated `funding_paid` in
+                        # accrue_paper_funding. Never block close on a
+                        # funding-API hiccup.
+                        funding_paid = float(getattr(pos, "funding_paid", 0.0) or 0.0)
+                        if not _is_paper and funding_paid == 0.0:
+                            try:
+                                ex_obj = self._exchange_for(pos.exchange)
+                                if ex_obj is not None:
+                                    open_ms = int(float(getattr(pos, "open_time", 0)) * 1000)
+                                    rows = ex_obj.exchange.fetch_funding_history(
+                                        pos.symbol, since=open_ms)
+                                    close_ms = int(ts_exit * 1000)
+                                    sign = 1.0 if pos.side == "buy" else -1.0
+                                    funding_paid = sum(
+                                        sign * float(r.get("amount") or 0.0)
+                                        for r in (rows or [])
+                                        if open_ms <= int(r.get("timestamp") or 0) <= close_ms
+                                        and (r.get("symbol") in (pos.symbol, None)
+                                             or r.get("info", {}).get("symbol") == pos.symbol)
+                                    )
+                            except Exception as _fe:
+                                logger.debug(
+                                    f"[Attribution] funding fetch skipped "
+                                    f"({pos.symbol}): {_fe}")
+
+                        # Slippage: paper shows the sim-applied slippage as a
+                        # diagnostic; live's spread already captures fill-vs-mid.
+                        slippage = 0.0
+
+                        _attr_record(wh, trade_id=tid, trade=_AttrTrade(
+                            side=pos.side,
+                            size=float(pos.size or 0.0),
+                            entry_mid=float(pos.entry_mid),
+                            entry_fill=float(pos.entry_price or 0.0),
+                            exit_mid=float(pos.exit_mid),
+                            exit_fill=float(price or 0.0),
+                            funding_paid=float(funding_paid),
+                            fees=float(getattr(pos, "total_fees", 0.0) or 0.0),
+                            slippage_modeled=float(slippage),
+                        ))
+                    else:
+                        logger.debug(
+                            f"[Attribution] {pos.symbol} skipped "
+                            f"(entry_mid={getattr(pos, 'entry_mid', 0)}, "
+                            f"exit_mid={getattr(pos, 'exit_mid', 0)})")
+                except Exception as _ae:
+                    logger.debug(f"[Attribution] record skipped: {_ae}")
         except Exception as _we:
             logger.debug(f"[Warehouse] record_trade_close skipped: {_we}")
 
@@ -1602,6 +1721,12 @@ class OrderManager:
                 cost = self.sim.funding_payment(pos, mark, rate)
                 if abs(cost) < 0.0001:
                     continue
+                # Accumulate onto the position so attribution.record sees
+                # total funding paid over the hold (positive = we paid).
+                try:
+                    pos.funding_paid = float(getattr(pos, "funding_paid", 0.0) or 0.0) + float(cost)
+                except Exception:
+                    pass
                 # Apply to wallet: +cost = debit (wallet shrinks), -cost = credit
                 name = exchange.name.lower()
                 prev = self.wallet._balances.get(name, self.wallet._start)
