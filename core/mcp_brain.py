@@ -2182,10 +2182,25 @@ class MCPBrain:
 
         layers_ok = req_pass + bonus_count
 
-        # ── ATR-based SL/TP ────────────────────────────────────────
+        # ── Distribution-fitted SL/TP (Phase 2 / Task B) ───────────
+        # Fit to realized MAE distribution per symbol; falls back to
+        # ATR×1.8 / ATR×4.5 when the cell has < 30 warehouse rows. Both
+        # halves of the bot now route SL/TP through DistFitSL so there
+        # is a single source of truth (the previous split between this
+        # block and risk_manager.get_sl_tp produced inconsistent stops).
         atr_1h_pct = ei_1h.get("atr_pct", 2.0) or 2.0
-        sl_pct = max(1.5, min(3.5, atr_1h_pct * 1.5))  # Clamp [1.5%, 3.5%]
-        tp_pct = sl_pct * 2.0  # 2.0:1 R:R (was 2.5 — only 4/53 SL:TP hits at 2.5)
+        try:
+            from core.dist_fit_sl import DistFitSL
+            _entry_px = ei_1h.get("price", 0) or 0
+            _fit = DistFitSL().compute(
+                symbol=coin if "/" in coin else f"{coin}/USDT:USDT",
+                side=side, atr_pct=atr_1h_pct / 100.0,
+            )
+            sl_pct = max(1.5, _fit.sl_pct * 100.0)  # convert back to percent + floor
+            tp_pct = _fit.tp_pct * 100.0
+        except Exception:
+            sl_pct = max(1.5, min(3.5, atr_1h_pct * 1.5))
+            tp_pct = sl_pct * 2.0
 
         # ── Smart Money SL/TP refinement ──────────────────────────
         # If strong S/D or OB zone provides a tighter SL reference, use it.

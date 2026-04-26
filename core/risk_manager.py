@@ -359,14 +359,21 @@ class RiskManager:
                 logger.info("[Risk] Kelly negative edge — blocking trade")
                 return 0.0
         elif self.sizing_mode == "volatility" and atr_pct:
-            target_risk = balance_usdt * 0.01
-            qty = target_risk / (price * atr_pct)
-            # Apply leverage and cap to max position size
-            qty = qty * leverage
-            qty = min(qty, balance_usdt * self.max_position_pct * 3 * leverage / price)
+            # Phase 2 / Task C: replace the ad-hoc `1% target_risk / atr` with
+            # a proper portfolio-vol-targeting sizer. The clamps inside
+            # VolTarget preserve the existing 5%-floor / 3×lev×pct ceiling.
+            from core.vol_target import VolTarget
+            sized = VolTarget().size(
+                balance=balance_usdt, price=price, atr_pct=atr_pct,
+                leverage=leverage, max_position_pct=self.max_position_pct,
+            )
+            qty = sized.notional / price if price > 0 else 0.0
             logger.info(
-                f"[Risk] Volatility sizing: atr%={atr_pct*100:.2f}% "
-                f"qty={qty:.8f} @ {price:.4f} lev={leverage}x")
+                f"[Risk] VolTarget: atr%={atr_pct*100:.2f}% "
+                f"daily_vol={sized.daily_vol_pct*100:.2f}% "
+                f"target={sized.target_daily_vol_pct*100:.2f}% "
+                f"notional=${sized.notional:.2f} qty={qty:.8f} "
+                f"lev={leverage}x clamp={sized.clamped}")
             return qty
         else:
             pct = self.max_position_pct
@@ -483,16 +490,43 @@ class RiskManager:
 
     def get_sl_tp(self, entry: float, side: str, atr: float = None,
                    atr_sl_mult: float = None, atr_tp_mult: float = None,
-                   leverage: int = 1):
-        if atr and atr > 0:
-            from config import SUPERTREND as ST
-            sl_mult = atr_sl_mult or ST.get("atr_sl_mult", 1.8)
-            tp_mult = atr_tp_mult or ST.get("atr_tp_mult", 4.5)
-            sl_dist = atr * sl_mult
-            tp_dist = atr * tp_mult
-        else:
-            sl_dist = entry * self.default_sl
-            tp_dist = entry * self.default_tp
+                   leverage: int = 1, symbol: str = None,
+                   regime: str = None):
+        # ── Distribution-fitted SL/TP (Phase 2 / Task B) ───────────────
+        # Fit SL to the realized MAE distribution per (symbol[, regime]).
+        # When the cell has < MIN_FIT_TRADES warehouse rows, DistFitSL
+        # returns an ATR×1.8 / ATR×4.5 fallback FitResult so callers see a
+        # uniform interface. We still honor caller-supplied multiplier
+        # overrides when present (preserves backwards compat for callers
+        # tuning specific strategies).
+        sl_dist = tp_dist = None
+        if atr and atr > 0 and symbol and atr_sl_mult is None and atr_tp_mult is None:
+            try:
+                from core.dist_fit_sl import DistFitSL
+                fit = DistFitSL().compute(
+                    symbol=symbol, side=side, atr_pct=atr / entry if entry > 0 else atr,
+                    regime=regime,
+                )
+                sl_dist = entry * fit.sl_pct
+                tp_dist = entry * fit.tp_pct
+                logger.debug(
+                    f"[Risk] dist-fit SL/TP {symbol} ({fit.source}, n={fit.n}, "
+                    f"R={fit.r_target:.2f}): sl={fit.sl_pct*100:.2f}% "
+                    f"tp={fit.tp_pct*100:.2f}%")
+            except Exception as e:
+                logger.debug(f"[Risk] DistFitSL failed for {symbol}: {e}")
+                sl_dist = tp_dist = None
+
+        if sl_dist is None or tp_dist is None:
+            if atr and atr > 0:
+                from config import SUPERTREND as ST
+                sl_mult = atr_sl_mult or ST.get("atr_sl_mult", 1.8)
+                tp_mult = atr_tp_mult or ST.get("atr_tp_mult", 4.5)
+                sl_dist = atr * sl_mult
+                tp_dist = atr * tp_mult
+            else:
+                sl_dist = entry * self.default_sl
+                tp_dist = entry * self.default_tp
 
         # DYNAMIC SL FLOOR: flat 1.0% across all leverages.
         # 2026-04-16 (post-audit): The old `0.015 + (lev-1)*0.003` formula
