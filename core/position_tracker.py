@@ -69,6 +69,13 @@ class Position:
     close_reason: Optional[str]   = None
     order_id:     Optional[str]   = None
     partial_taken: bool            = False
+    # ── Forward-attribution fields (Phase 2 / Task A) ─────────────────
+    # Defaults of 0.0 keep backward-compat with already-open positions
+    # whose JSON payload predates these fields. attribution.record skips
+    # rows where either mid is 0, so unset values produce no bad data.
+    entry_mid:    float           = 0.0
+    exit_mid:     float           = 0.0
+    funding_paid: float           = 0.0
     # ── Mode tag — this is the key field for learning separation ──────
     paper_trade:  bool            = field(default_factory=_is_dry_run)
 
@@ -498,19 +505,18 @@ class PositionTracker:
                 side = (r.get("side") or "buy") or "buy"
                 leverage = int(r.get("leverage", 1) or 1)
 
-                # Binance's income ledger doesn't always carry entry/size. If
-                # we have to synthesize them, `pnl_pct` can only be a
-                # fabrication (entry=1, size=1 gives pnl_pct = pnl/margin*100,
-                # which looks like a real -5% to -30% loss but isn't). Keep
-                # the dollar `pnl` as ground truth; mark pnl_pct as None so
-                # downstream consumers see "unknown" rather than a bad number.
-                synthesized = (entry <= 0) or (size <= 0)
-                if entry <= 0:
-                    entry = 1.0
-                if size <= 0:
-                    size = 1.0
-                if exit_p <= 0:
-                    exit_p = entry + (pnl / size if side == "buy" else -pnl / size)
+                # Binance's income ledger doesn't always carry entry/size.
+                # Per binary-baking-melody Phase 2A: when ALL three context
+                # fields are missing (entry/exit/size), trust ONLY the dollar
+                # realized_pnl from the exchange. Do NOT synthesize entry=1.0
+                # or size=1.0 — those values previously poisoned positions.json
+                # and the warehouse with bogus entry prices, and the resulting
+                # pnl_pct = pnl/margin*100 looked like a real -5% to -30% loss
+                # but was a fabrication that bypassed the 1.5-3.5% ATR SL clamp.
+                # pnl_pct is set to None; downstream consumers (knowledge_model,
+                # kelly_sizer) must skip None for percentage math while still
+                # counting the dollar PnL — those changes ship in Phases 2C/2D.
+                no_context = (entry <= 0) and (exit_p <= 0) and (size <= 0)
 
                 sym_id = sym.replace("/", "_").replace(":", "_")
                 pid = f"RECONCILED-{ex_lower}-{sym_id}-{int(ct)}"
@@ -521,8 +527,11 @@ class PositionTracker:
                     side=side,
                     market_type="futures",
                     strategy="reconciled_exchange",
-                    entry_price=entry,
-                    size=size,
+                    # When no context, store 0.0 (not 1.0) so downstream code
+                    # can detect "unknown" via the falsy entry/size and skip
+                    # any percentage math. The dollar PnL below is authoritative.
+                    entry_price=entry if entry > 0 else 0.0,
+                    size=size if size > 0 else 0.0,
                     stop_loss=0.0,
                     take_profit=0.0,
                     leverage=leverage,
@@ -531,10 +540,14 @@ class PositionTracker:
                 )
                 # Overwrite Position's computed fields with exchange ground truth.
                 # Exchange realized_pnl is already net of fees, so zero out fees.
-                pos.exit_price   = exit_p
+                # exit_price=0.0 (not None) when missing: keeps is_open False
+                # so the closed position is not misread as still-open. The
+                # 0.0 sentinel is consistent with entry_price/size handling
+                # above — downstream readers check `> 0` to decide validity.
+                pos.exit_price   = exit_p if exit_p > 0 else 0.0
                 pos.close_time   = ct
                 pos.close_reason = (
-                    "reconciled_no_context" if synthesized
+                    "reconciled_no_context" if no_context
                     else "reconciled_from_exchange"
                 )
                 pos.entry_fee    = 0.0
@@ -542,7 +555,7 @@ class PositionTracker:
                 pos.total_fees   = 0.0
                 pos.gross_pnl    = pnl
                 pos.pnl          = pnl
-                if synthesized:
+                if no_context:
                     pos.pnl_pct = None
                 else:
                     notional   = entry * size
