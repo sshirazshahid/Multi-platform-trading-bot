@@ -104,9 +104,12 @@ class DirectExecutor:
                 self.name, notional, base_sym))
             return False
 
-        # ATR-based SL/TP (falls back to config defaults)
+        # SL/TP: distribution-fitted per (symbol, side) when ≥30 warehouse
+        # rows in the cell, falls back to ATR×1.8 / ATR×4.5 otherwise.
+        # (`get_sl_tp` will pick the fit branch only if `symbol` is supplied
+        # and no explicit multipliers are given — both true here.)
         atr    = self._fetch_atr(exchange, symbol, mtype)
-        sl, tp = self.risk.get_sl_tp(price, side, atr=atr)
+        sl, tp = self.risk.get_sl_tp(price, side, atr=atr, symbol=symbol)
 
         # R:R check — minimum 1.5:1 (config may enforce stricter)
         risk_d   = abs(price - sl)

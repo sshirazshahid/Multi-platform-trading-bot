@@ -31,12 +31,21 @@ def _isolate_state(tmp_path, monkeypatch):
 @pytest.fixture
 def om(monkeypatch) -> OrderManager:
     """Minimal OrderManager. Notifier stubbed; dry_run forced False so the
-    live SL-placement branch runs."""
+    live SL-placement branch runs.
+
+    BotEngine wires `tracker.on_close = order_mgr._finalize_close` at
+    startup so every close path (normal exit, ghost-sync, fail-closed)
+    flows through the warehouse / risk / notifier pipeline. The fixture
+    instantiates the components directly, so we replicate that wire
+    here — without it the fail-closed test sees tracker.close() that
+    never propagates to the warehouse and asserts a stale OPEN row.
+    """
     notifier = MagicMock()
     tracker = PositionTracker()
     risk = RiskManager()
     manager = OrderManager(tracker, risk, notifier)
     manager.dry_run = False  # exercise the real exchange path
+    tracker.on_close = manager._finalize_close
     return manager
 
 
