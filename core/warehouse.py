@@ -301,7 +301,16 @@ class Warehouse:
         fee: float | None = None,
         slippage: float | None = None,
     ) -> None:
-        """Update a trade row to CLOSED."""
+        """Update a trade row to CLOSED.
+
+        Bug 2C — the trades schema stores `realized_pnl` (dollar) only; there
+        is no separate pct column. Callers that hit a reconciled_no_context
+        path (e.g. `position_tracker.reconcile_closed_pnl` with no entry/size
+        to derive pct) must still pass the trusted dollar `realized_pnl`
+        through. Downstream consumers (`knowledge_model`, `kelly_sizer`) are
+        responsible for skipping rows where `pnl_pct is None` from
+        WR/expectancy aggregations while keeping the dollar in ledger totals.
+        """
         try:
             # Compute hold_sec if not provided
             if hold_sec is None:

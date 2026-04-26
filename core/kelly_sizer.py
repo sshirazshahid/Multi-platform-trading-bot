@@ -66,11 +66,21 @@ class KellySizer:
                 }
 
             pnl = t.get("pnl", 0) or 0
+            # Bug 2D — pnl_pct is None marks a "reconciled_no_context" close
+            # from position_tracker.reconcile_closed_pnl (Binance income event
+            # with no entry/size to derive pct). Dollar PnL is trusted (income
+            # is authoritative), so include it in total_win/total_loss for
+            # ledger integrity (matches Spec §12 daily_pnl). Skip the row from
+            # wins/losses counts since those drive WR / Kelly p, which would
+            # be poisoned by no-context rows.
+            no_context = t.get("pnl_pct") is None
             if pnl > 0:
-                self._stats[strat]["wins"] += 1
+                if not no_context:
+                    self._stats[strat]["wins"] += 1
                 self._stats[strat]["total_win"] += pnl
             elif pnl < 0:
-                self._stats[strat]["losses"] += 1
+                if not no_context:
+                    self._stats[strat]["losses"] += 1
                 self._stats[strat]["total_loss"] += abs(pnl)
 
         self._save()
