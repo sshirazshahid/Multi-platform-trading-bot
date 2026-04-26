@@ -367,6 +367,39 @@ class Warehouse:
             logger.warning(f"[Warehouse] record_claude_review error: {e}")
             return -1
 
+    # ── Attribution (Phase 1) ─────────────────────────────────────────
+
+    def record_attribution(
+        self,
+        *,
+        trade_id: int,
+        alpha: float,
+        spread: float,
+        slippage: float,
+        funding: float,
+        fees: float,
+        realized_pnl: float,
+        attributed_at: int | None = None,
+    ) -> None:
+        """Insert (or replace) per-trade attribution row.
+
+        Keyed on trade_id (PK). Re-running attribution for the same trade
+        replaces the prior row — useful when later analysis adds a slippage
+        snapshot we didn't have at close time.
+        """
+        try:
+            self._conn().execute(
+                """INSERT OR REPLACE INTO attribution(
+                    trade_id, alpha, spread, slippage, funding, fees,
+                    realized_pnl, attributed_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (int(trade_id), float(alpha), float(spread), float(slippage),
+                 float(funding), float(fees), float(realized_pnl),
+                 int(attributed_at) if attributed_at is not None else int(time.time())),
+            )
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] record_attribution error: {e}")
+
     # ── Query helpers ─────────────────────────────────────────────────
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict]:
