@@ -4,6 +4,14 @@ core/arbitrage_engine.py — Cross-Exchange Arbitrage Engine
 8 Institutional Filters + Claude AI confidence scoring.
 Works in DRY_RUN (paper trades) and LIVE (real orders) modes.
 Supports Binance, Bybit, Bitget.
+
+DEPRECATION NOTE (Phase 2 / Task cleanup, 2026-04-26)
+-----------------------------------------------------
+Vestigial in the active Claude Portfolio path. Still imported by
+`core/multi_profile_runner.py:348` for the multi-profile runner. Do NOT
+delete without first auditing that runner. Targeted replacement is the
+cointegration pair-trading strategy (deferred to Future Work — Phase 5 of
+the original quant plan, currently parked behind the Phase 1 STOP gate).
 """
 
 from __future__ import annotations

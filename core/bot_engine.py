@@ -123,6 +123,12 @@ class BotEngine:
             name: ex for name, ex in self.exchanges.items()
             if getattr(ex, "_connected", False)
         }
+        # Hand the exchange registry to OrderManager so _finalize_close can
+        # fetch live funding history without an exchange parameter.
+        try:
+            self.order_mgr.set_exchanges(self.exchanges)
+        except Exception as _se:
+            logger.debug(f"[Engine] order_mgr.set_exchanges skipped: {_se}")
 
         self._start_time = time.time()
         self._cycle      = 0

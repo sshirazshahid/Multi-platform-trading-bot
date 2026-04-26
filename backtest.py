@@ -129,6 +129,10 @@ def _build_exchange(name: str):
 def _build_strategy(name: str, order_mgr, risk):
     """Build strategy object by name."""
     import strategies
+    # Direct imports for strategies that are NOT package re-exported (kept
+    # only for research/backtest replay): Supertrend (KILLED 2026-04-20 per
+    # Phase 1 attribution).
+    from strategies.supertrend import SupertrendStrategy
     kwargs = dict(order_manager=order_mgr, risk_manager=risk)
     tf_map = {
         "supertrend":    "1h",
@@ -139,7 +143,7 @@ def _build_strategy(name: str, order_mgr, risk):
         "grid":          "1h",
     }
     strategy_map = {
-        "supertrend":    lambda: strategies.SupertrendStrategy(**kwargs),
+        "supertrend":    lambda: SupertrendStrategy(**kwargs),
         "meanreversion": lambda: strategies.MeanReversionStrategy(**kwargs),
         "multitf":       lambda: strategies.MultiTFStrategy(**kwargs, market_type="futures"),
         "trend":         lambda: strategies.TrendFollowingStrategy(**kwargs),

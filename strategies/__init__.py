@@ -6,7 +6,10 @@ selector can import them without conditional logic.
 """
 
 from .base_strategy    import BaseStrategy
-from .supertrend       import SupertrendStrategy
+# Supertrend: KILLED 2026-04-20 in strategy_selector.py (39 trades, NEGATIVE_EDGE
+# alpha CI per Phase 1 attribution diagnostic 2026-04-26). Class file kept for
+# backtest.py + auto_optimizer.py research only — package-level re-export pulled
+# so no future caller wires it into the live path by accident.
 from .mean_reversion   import MeanReversionStrategy
 from .multi_tf         import MultiTFStrategy
 # TrendFollowing: 0% WR over 8 live trades — NOT exported in live path.
