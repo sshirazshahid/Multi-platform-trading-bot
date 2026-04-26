@@ -192,15 +192,44 @@ def main():
         "--save", action="store_true",
         help="Also write to reports/attribution_diagnostic_<YYYYMMDD>.md",
     )
+    parser.add_argument(
+        "--exclude-strategy", action="append", default=[],
+        help="Strategy family to exclude (repeatable, e.g. --exclude-strategy Supertrend)",
+    )
+    parser.add_argument(
+        "--mode", default=None,
+        help="Restrict to one trade mode (e.g. CONTROLLED_LIVE, PAPER)",
+    )
+    parser.add_argument(
+        "--exclude-symbol", action="append", default=[],
+        help="Symbol to exclude (repeatable, e.g. --exclude-symbol SOL/USDT:USDT)",
+    )
+    parser.add_argument(
+        "--tag", default=None,
+        help="Tag to embed in the saved filename (e.g. live_only)",
+    )
     args = parser.parse_args()
 
     wh = get_warehouse()
-    rows = wh.query(
+    sql = (
         "SELECT a.*, t.strategy_family, t.symbol, t.exchange, t.mode, t.side "
         "FROM attribution a "
         "JOIN trades t ON t.id = a.trade_id "
         "WHERE t.status = 'CLOSED'"
     )
+    params: list = []
+    if args.mode:
+        sql += " AND t.mode = ?"
+        params.append(args.mode)
+    if args.exclude_strategy:
+        placeholders = ",".join("?" * len(args.exclude_strategy))
+        sql += f" AND t.strategy_family NOT IN ({placeholders})"
+        params.extend(args.exclude_strategy)
+    if args.exclude_symbol:
+        placeholders = ",".join("?" * len(args.exclude_symbol))
+        sql += f" AND t.symbol NOT IN ({placeholders})"
+        params.extend(args.exclude_symbol)
+    rows = wh.query(sql, params)
     if not rows:
         print(
             "No attribution rows. "
@@ -218,10 +247,9 @@ def main():
     print(report)
 
     if args.save:
-        out = (
-            ROOT / "reports"
-            / f"attribution_diagnostic_{datetime.now(timezone.utc).strftime('%Y%m%d')}.md"
-        )
+        date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+        suffix = f"_{args.tag}" if args.tag else ""
+        out = ROOT / "reports" / f"attribution_diagnostic_{date_str}{suffix}.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report, encoding="utf-8")
         print(f"\nSaved to {out}", file=sys.stderr)
