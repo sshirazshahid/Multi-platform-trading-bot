@@ -419,22 +419,29 @@ SHORTS_DISABLED = True
 #   hours where live WR ≥ 45% and volume ≥ 3 trades
 # ==============================================================
 WHITELIST_SYMBOLS = {
-    "ALGO/USDT:USDT",   # 14 trades, 85.7% WR, +$0.12/trade ⭐
-    "LUMIA/USDT:USDT",  # 6 trades, 100% WR, +$0.33/trade ⭐
-    "AVAX/USDT:USDT",   # 10 trades, 60% WR
-    "BNB/USDT:USDT",    # 8 trades, 50% WR, +$0.29/trade
-    "BCH/USDT:USDT",    # 3 trades, 66.7% WR
-    "ORDI/USDT:USDT",   # 8 trades, 50% WR
-    "DOT/USDT:USDT",    # 7 trades, 42.9% WR, +$0.08/trade (positive)
-    "LINK/USDT:USDT",   # 7 trades, 42.9% WR
-    "GRASS/USDT:USDT",  # 3 trades, 66.7% WR, +$0.84/trade
-    "QTUM/USDT:USDT",   # 1 trade, 100% WR, +$3.69 (tentative)
-    "ACT/USDT:USDT",    # 1 trade, 100% WR, +$1.59 (tentative)
-    "IOTA/USDT:USDT",   # 1 trade, 100% WR, +$0.60 (tentative)
-    "FET/USDT:USDT",    # 1 trade, 100% WR, +$0.21 (tentative)
-    "VET/USDT:USDT",    # 1 trade, 100% WR (tentative)
+    # 30-day attribution refresh 2026-04-27. Comments reflect realised
+    # warehouse PnL over the last 30 days (n ≥ 5 only); thin-sample
+    # entries kept as tentative leverage-tier hints.
+    "ATOM/USDT:USDT",   # 12 trades, 42% WR, +$2.02 / 30d ⭐
+    "LUMIA/USDT:USDT",  # 6 trades, 100% WR, +$1.98 / 30d ⭐
+    "BNB/USDT:USDT",    # 23 trades, 43% WR, +$1.84 / 30d
+    "ARB/USDT:USDT",    # 27 trades, 44% WR, +$1.64 / 30d
+    "ALGO/USDT:USDT",   # 33 trades, 64% WR, +$0.72 / 30d
+    "ORDI/USDT:USDT",   # 8 trades, 50% WR, +$0.59 / 30d
+    "DOT/USDT:USDT",    # 10 trades, 40% WR, +$0.51 / 30d
+    "FET/USDT:USDT",    # 7 trades, 57% WR, +$0.25 / 30d
+    "BCH/USDT:USDT",    # 3 trades, 66.7% WR (tentative)
+    "LINK/USDT:USDT",   # marginal — kept on tier hint
+    "GRASS/USDT:USDT",  # 3 trades, 66.7% WR (tentative)
+    "QTUM/USDT:USDT",   # tentative
+    "ACT/USDT:USDT",    # tentative
+    "IOTA/USDT:USDT",   # tentative
+    "VET/USDT:USDT",    # tentative
     "BTC/USDT:USDT",    # macro anchor, always tradeable
-    "ETH/USDT:USDT",    # 6 trades, 50% WR — core asset; STRONG tier only
+    # ETH removed 2026-04-27: 9 trades, 67% WR but -$3.45 / 30d — asymmetric
+    #   R:R wipes wins. Now in BLACKLIST_HARD.
+    # AVAX removed 2026-04-27: 14 trades, 43% WR, -$1.92 / 30d. Now in
+    #   BLACKLIST_HARD.
 }
 
 # 2026-04-13: Cleared. All prior losses were under the old broken engine
@@ -456,7 +463,18 @@ WHITELIST_SYMBOLS = {
 #   XRP/USDT:USDT (n=12)  mean alpha -$0.140, NEGATIVE_EDGE
 # Both are eating ~$0.20+/trade without statistically detectable upside under
 # the current signal mix. Blocking until Phase 3 (fitted model) can re-rate.
-BLACKLIST_HARD: set = {"SOL/USDT:USDT", "XRP/USDT:USDT"}
+#
+# 2026-04-27 (Phase 10.2): expanded with three more sustained negative-edge
+# symbols from the 30-day attribution refresh:
+#   ETH/USDT:USDT  (n=9)   -$3.45  WR=67%  asymmetric R:R wipes wins
+#   ADA/USDT:USDT  (n=6)   -$2.12  WR=17%
+#   AVAX/USDT:USDT (n=14)  -$1.92  WR=43%
+# Re-evaluate after the meta-filter / fitted model has 30+ days of forward-
+# attributed data on the remaining symbols (Phase 3+ from the original draft).
+BLACKLIST_HARD: set = {
+    "SOL/USDT:USDT", "XRP/USDT:USDT",
+    "ETH/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT",
+}
 
 # Hour gating (UTC) — from knowledge_model.hour_scores over 147 trades
 ALLOWED_HOURS_UTC = set(range(24))  # 2026-04-17: opened to all hours at user request (was 12-20 UTC core cluster)
