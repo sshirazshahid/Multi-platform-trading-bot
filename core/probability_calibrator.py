@@ -8,6 +8,13 @@ Example: If signals at 70% confidence only win 50% of the time,
 the calibrator maps 70% → 50% so the bot doesn't overtrade.
 
 Only trade when CALIBRATED confidence > threshold.
+
+2026-04-28 (Phase 13.4): IsotonicCalibrator from `core.calibration`
+runs alongside the legacy bucketed counter. The bucket counter is the
+warm-up calibrator (kicks in at MIN_SAMPLES=15 per bucket); isotonic
+takes precedence once it has MIN_ISOTONIC_SAMPLES=50 (raw_conf,
+outcome) pairs total. Both are persisted — bucket counts to
+data/calibration.json, isotonic to data/calibration_iso.pkl.
 """
 
 import json
@@ -17,7 +24,11 @@ from collections import defaultdict
 from loguru import logger
 
 SAVE_PATH = Path("data/calibration.json")
-MIN_SAMPLES = 15   # Need 15+ trades per bucket for calibration
+ISO_PATH = Path("data/calibration_iso.pkl")
+PAIRS_PATH = Path("data/calibration_pairs.json")
+MIN_SAMPLES = 15            # Need 15+ trades per bucket for bucket calibration
+MIN_ISOTONIC_SAMPLES = 50   # IsotonicCalibrator's own threshold (Phase 13.4)
+ISOTONIC_REFIT_EVERY = 25   # Refit after every N new records
 
 
 class ProbabilityCalibrator:
@@ -29,6 +40,10 @@ class ProbabilityCalibrator:
     def __init__(self):
         # bucket_key → {wins, total}
         self._data: dict[str, dict] = {}
+        # (raw_conf, outcome 0/1) pairs kept for isotonic refit.
+        self._pairs: list[tuple[float, int]] = []
+        self._iso = None  # IsotonicCalibrator | None — lazy, see _ensure_iso
+        self._records_since_refit = 0
         self._load()
 
     def record(self, predicted_conf: float, actual_win: bool,
@@ -45,18 +60,43 @@ class ProbabilityCalibrator:
             if actual_win:
                 self._data[k]["wins"] += 1
 
+        # Phase 13.4 — also accumulate (raw, outcome) for isotonic refit.
+        try:
+            self._pairs.append((float(predicted_conf), 1 if actual_win else 0))
+            self._records_since_refit += 1
+            if (self._records_since_refit >= ISOTONIC_REFIT_EVERY
+                    and len(self._pairs) >= MIN_ISOTONIC_SAMPLES):
+                self._refit_isotonic()
+                self._records_since_refit = 0
+        except Exception as _e:
+            logger.debug(f"[Calibrator] isotonic record skipped: {_e}")
+
         self._save()
 
     def calibrate(self, raw_confidence: float,
                   strategy: str = "all") -> float:
         """Return calibrated confidence based on historical accuracy.
 
-        If we have enough data, maps raw confidence to actual win rate.
-        If not enough data, returns raw confidence (no adjustment).
+        Calibrator preference order:
+          1. Isotonic regression (Phase 13.4) — fitted on all (raw, outcome)
+             pairs across strategies. Smooth, non-parametric, monotone.
+          2. Strategy-specific bucket calibration (legacy, MIN_SAMPLES=15
+             per bucket).
+          3. Global "all"-strategy bucket calibration (legacy fallback).
+          4. Raw confidence (warm-up, not enough data).
         """
+        # 1. Isotonic — preferred when fitted.
+        if self._iso is not None and self._iso.is_fitted():
+            try:
+                import numpy as _np
+                out = self._iso.transform(_np.array([float(raw_confidence)]))
+                return round(float(out[0]), 3)
+            except Exception as _e:
+                logger.debug(f"[Calibrator] isotonic transform fallback: {_e}")
+
         bucket = self._bucket_key(raw_confidence)
 
-        # Try strategy-specific calibration first
+        # 2. Strategy-specific bucket
         key = f"{strategy}:{bucket}"
         data = self._data.get(key)
         if data and data["total"] >= MIN_SAMPLES:
@@ -67,15 +107,51 @@ class ProbabilityCalibrator:
                 f"(n={data['total']})")
             return round(actual_wr, 3)
 
-        # Fall back to global calibration
+        # 3. Global bucket fallback
         all_key = f"all:{bucket}"
         data = self._data.get(all_key)
         if data and data["total"] >= MIN_SAMPLES:
             actual_wr = data["wins"] / data["total"]
             return round(actual_wr, 3)
 
-        # Not enough data — return raw
+        # 4. Warm-up — return raw
         return raw_confidence
+
+    # Phase 13.4 — isotonic plumbing ──────────────────────────────────
+
+    def _ensure_iso(self):
+        if self._iso is None:
+            try:
+                from core.calibration import IsotonicCalibrator
+                self._iso = IsotonicCalibrator(min_samples=MIN_ISOTONIC_SAMPLES)
+            except Exception as e:
+                logger.debug(f"[Calibrator] IsotonicCalibrator import failed: {e}")
+                self._iso = False  # sentinel — don't keep retrying
+        return self._iso if self._iso else None
+
+    def _refit_isotonic(self):
+        iso = self._ensure_iso()
+        if iso is None:
+            return
+        try:
+            import numpy as _np
+            arr = _np.array(self._pairs, dtype=float)
+            raw = arr[:, 0]
+            y = arr[:, 1].astype(int)
+            iso.fit(raw, y)
+            try:
+                ISO_PATH.parent.mkdir(parents=True, exist_ok=True)
+                iso.save(ISO_PATH)
+                PAIRS_PATH.write_text(
+                    json.dumps([[float(r), int(o)] for r, o in self._pairs]),
+                    encoding="utf-8")
+            except Exception as e:
+                logger.debug(f"[Calibrator] iso save: {e}")
+            logger.info(
+                f"[Calibrator] isotonic refit on n={len(self._pairs)} pairs "
+                f"(fitted={iso.is_fitted()})")
+        except Exception as e:
+            logger.debug(f"[Calibrator] iso refit failed: {e}")
 
     def should_trade(self, raw_confidence: float, threshold: float,
                      strategy: str = "all") -> tuple:
@@ -168,3 +244,19 @@ class ProbabilityCalibrator:
                     SAVE_PATH.read_text(encoding="utf-8"))
         except Exception:
             self._data = {}
+        # Phase 13.4 — load persisted isotonic model + pair history if present
+        try:
+            if PAIRS_PATH.exists():
+                pairs = json.loads(PAIRS_PATH.read_text(encoding="utf-8"))
+                self._pairs = [(float(r), int(o)) for r, o in pairs]
+        except Exception:
+            self._pairs = []
+        try:
+            if ISO_PATH.exists():
+                from core.calibration import IsotonicCalibrator
+                self._iso = IsotonicCalibrator.load(ISO_PATH)
+                logger.info(
+                    f"[Calibrator] loaded isotonic from {ISO_PATH} "
+                    f"(fitted={self._iso.is_fitted()})")
+        except Exception as e:
+            logger.debug(f"[Calibrator] iso load skipped: {e}")
