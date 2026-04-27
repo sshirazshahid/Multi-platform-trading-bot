@@ -2341,6 +2341,24 @@ class MCPBrain:
                         skip_reason=skip_reason,
                         features=feat,
                     )
+                    # Phase 13.5 — shadow LR prediction. Logs to warehouse
+                    # `predictions` table only; does NOT influence the
+                    # gate_pass below. The point is to accumulate
+                    # forward-attributed (p_win, outcome) pairs for the
+                    # next re-fit (Phase 13.3 was bottlenecked at n=66).
+                    if gate_pass:  # only log for trades we're actually about to take
+                        try:
+                            import time as _time
+                            from core.shadow_predictor import ShadowPredictor
+                            ShadowPredictor.get().log_entry(
+                                ts=_time.time(),
+                                symbol=f"{coin}/USDT",
+                                side=str(result.get("side", "")),
+                                features=feat,
+                                warehouse=wh,
+                            )
+                        except Exception as _se:
+                            logger.debug(f"[Shadow] log_entry skipped: {_se}")
                 except Exception as _we:
                     logger.debug(f"[MCP-Algo] warehouse emit failed for {coin}: {_we}")
 
