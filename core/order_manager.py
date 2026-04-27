@@ -1956,11 +1956,17 @@ class OrderManager:
                 # for shorts too. Deterministic TP is sole authority.
 
             # ── POSITION AGE LIMIT ENFORCEMENT ──────────────────────────
-            # Two rules:
-            #   1. AGE_LIMIT: open > max_position_age_hours AND losing → force-close
-            #   2. STALE:     open > max_stale_hours AND PnL between -0.5% and +0.5% → force-close
+            # Three rules, checked in order:
+            #   1. AGE_LIMIT: open >= max_position_age_hours AND losing → force-close
+            #   2. AGE_LOSS:  open >= max_loss_age_hours      AND net <= -max_loss_age_pct
+            #                 (Phase 13.1, 2026-04-28). Closes the 2-4h hold-time bleed:
+            #                 warehouse 30d data showed 55 trades / -$17.39 / 35% WR in
+            #                 that bucket. Cuts losers before they slide further.
+            #   3. STALE:     open >= max_stale_hours          AND PnL ≈ 0
             age_hours = (pos.duration_minutes or 0) / 60.0
             max_age_h = RISK.get("max_position_age_hours", 24)
+            max_loss_age_h = RISK.get("max_loss_age_hours", 3.0)
+            max_loss_age_pct = RISK.get("max_loss_age_pct", 0.5)
             max_stale_h = RISK.get("max_stale_hours", 4)
             net_pnl, net_pct, _ = self._net_pnl_at_price(pos, price)
 
@@ -1970,6 +1976,14 @@ class OrderManager:
                     f"open {age_hours:.1f}h (limit {max_age_h}h), "
                     f"net={net_pct:+.2f}% — force-closing losing position")
                 self.close_position(exchange, pos, "AGE_LIMIT", price)
+                continue
+            elif (age_hours >= max_loss_age_h
+                    and net_pct <= -max_loss_age_pct):
+                logger.warning(
+                    f"[Orders] AGE_LOSS: {pos.symbol} {pos.side} "
+                    f"open {age_hours:.1f}h (loss-age limit {max_loss_age_h}h), "
+                    f"net={net_pct:+.2f}% — cutting before mid-hold bleed worsens")
+                self.close_position(exchange, pos, "AGE_LOSS", price)
                 continue
             elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.3:
                 logger.warning(

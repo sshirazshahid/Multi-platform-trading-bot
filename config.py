@@ -314,6 +314,13 @@ RISK = {
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
     "max_position_age_hours": 6,      # 6h hard expiry
     "max_stale_hours":       4.0,     # 4h stale exit (was 1.5h — conflicted with 2h min hold)
+    # 2026-04-28 (Phase 13.1) — AGE_LOSS rule. The 2-4h hold bucket bled
+    # -$17.39 / 35% WR over the last 30d (n=55). Force-closing positions
+    # that have spent 3h+ underwater by more than -0.5% net catches the
+    # bleed before it slides further but doesn't pre-empt SL on
+    # intraday-noise drawdowns.
+    "max_loss_age_hours":    3.0,     # 3h hold age before active-loss exit kicks in
+    "max_loss_age_pct":      0.5,     # close when net PnL <= -0.5% AND age >= 3h
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
     # bleed regardless of per-trade SL discipline.
