@@ -34,6 +34,14 @@ TF_CACHE_TTL = {
 TF_LOOKBACK = {"1d": 60, "4h": 80, "1h": 100, "15m": 100, "1m": 60}
 
 FUTURES_ADX_MIN = 25   # Lowered from 30 — more futures entries in moderate trends
+
+# 2026-04-27 (Phase 10): kill multitf_futures emissions in the live path. The
+# strategy ran in parallel with claude_portfolio's futures direction calls and
+# accumulated -$11.33 across 58 trades over 30 days (mean -$0.20, 48% WR per
+# warehouse attribution). Set to False if you ever want to re-enable for live.
+# Backtest entries (backtest.py / auto_backtest.py) import strategies.multi_tf
+# directly and bypass this gate, so research replay still works.
+_DISABLED_LIVE_STRATEGIES = {"multitf_futures"}
 SPOT_ADX_MIN    = 25   # Lowered from 33 — more spot entries (strategies handle quality)
 
 
@@ -333,6 +341,9 @@ class StrategySelector:
                  regime="trending"):
             # CRITICAL: never create a spot sell opportunity
             if market_type == "spot" and direction == "sell":
+                return None
+            # Phase 10 kill list — see _DISABLED_LIVE_STRATEGIES at module top.
+            if strategy in _DISABLED_LIVE_STRATEGIES:
                 return None
             fsym = futures_symbol if market_type == "futures" else ""
             return TradeOpportunity(
