@@ -44,6 +44,63 @@ def _is_dry_run() -> bool:
         return True
 
 
+def match_ghost_ledger_record(pos, records):
+    """Find the most recent ledger record matching a ghost-detected position.
+
+    Returns ``(exit_price, best_record)`` where ``exit_price`` is > 0 when
+    a match was found, else ``(0.0, None)``.
+
+    Matching policy:
+      - Symbol must match exactly (each exchange's fetch_closed_pnl
+        normalises to ccxt unified ``"BASE/QUOTE:QUOTE"`` already).
+      - Side filter applies only when the record carries a non-None side.
+        Binance's income ledger does not carry side; we trust the
+        (symbol, time) match for those rows.
+      - close_time must be > 0 and >= pos.open_time.
+
+    Exit-price sourcing:
+      - Use ``record["exit_price"]`` when > 0 (Bybit + Bitget).
+      - Otherwise back it out from realized_pnl + entry_price + size + side
+        (Binance income-ledger only reports the income amount). This
+        produces a close_price such that the close path's downstream
+        ``(exit - entry) * size`` computes to roughly the exchange's
+        realized PnL.
+    """
+    if not records:
+        return 0.0, None
+    candidates = []
+    pos_side = (pos.side or "").lower()
+    for r in records:
+        if r.get("symbol") != pos.symbol:
+            continue
+        rside_raw = r.get("side")
+        if rside_raw is not None:
+            rside = str(rside_raw).lower()
+            if rside and rside != pos_side:
+                opp = "buy" if pos_side == "sell" else "sell"
+                if rside != opp:
+                    continue
+        ct = float(r.get("close_time", 0) or 0)
+        if ct <= 0 or ct < float(pos.open_time or 0):
+            continue
+        candidates.append(r)
+    if not candidates:
+        return 0.0, None
+    candidates.sort(
+        key=lambda x: float(x.get("close_time", 0) or 0), reverse=True)
+    best = candidates[0]
+    exit_px = float(best.get("exit_price", 0) or 0)
+    if exit_px <= 0:
+        rpnl = float(best.get("realized_pnl", 0) or 0)
+        sz = float(pos.size or 0)
+        if sz > 0 and rpnl != 0 and (pos.entry_price or 0) > 0:
+            sign = 1.0 if pos_side == "buy" else -1.0
+            exit_px = float(pos.entry_price) + (rpnl / (sz * sign))
+    if exit_px <= 0:
+        return 0.0, None
+    return exit_px, best
+
+
 @dataclass
 class Position:
     id:           str
@@ -373,51 +430,28 @@ class PositionTracker:
             reconciled = False
             if ex and hasattr(ex, "fetch_closed_pnl"):
                 try:
-                    # Look back 2h — ghosts are detected within one sync
-                    # cycle (≤60s) of exchange-side fill, so 2h is ample
-                    # while keeping the result set small.
-                    since_ms = int((time.time() - 2 * 3600) * 1000)
+                    # Look back 6h — wide enough to cover reconcile-cycle lag
+                    # and venue-side ledger latency without blowing up the
+                    # result set. Was 2h, which silently missed records when
+                    # the bot's monitor cycle skipped a beat.
+                    since_ms = int((time.time() - 6 * 3600) * 1000)
                     records = ex.fetch_closed_pnl(
                         since_ms=since_ms, symbol=pos.symbol) or []
-                    # Most recent first, filter by side (futures closes come
-                    # with the entry side, not the closing side — different
-                    # exchanges vary, so match either).
-                    candidates = []
-                    for r in records:
-                        rsym = r.get("symbol", "")
-                        if rsym != pos.symbol:
-                            continue
-                        rside = str(r.get("side", "")).lower()
-                        if rside and rside != pos.side.lower():
-                            # Some exchanges report the closing order's side
-                            # (opposite of entry). Accept both.
-                            opp = "buy" if pos.side.lower() == "sell" else "sell"
-                            if rside != opp:
-                                continue
-                        ct = float(r.get("close_time", 0) or 0)
-                        if ct <= 0 or ct < pos.open_time:
-                            continue
-                        candidates.append(r)
-                    if candidates:
-                        candidates.sort(
-                            key=lambda x: float(x.get("close_time", 0) or 0),
-                            reverse=True)
-                        best = candidates[0]
-                        exit_px = float(best.get("exit_price", 0) or 0)
-                        if exit_px > 0:
-                            close_price = exit_px
-                            reconciled = True
-                            resolved_src = "exchange_ledger"
-                            # Tag the closed reason so warehouse queries can
-                            # distinguish exchange-side SL fills from true
-                            # desync ghosts.
-                            close_reason = "ghost_reconciled"
-                            logger.info(
-                                f"[Positions] GHOST reconciled via ledger: "
-                                f"{pos.symbol} {pos.side.upper()} "
-                                f"exit={exit_px:.6g} "
-                                f"realized_pnl={best.get('realized_pnl')}"
-                            )
+                    exit_px, best = match_ghost_ledger_record(pos, records)
+                    if exit_px > 0:
+                        close_price = exit_px
+                        reconciled = True
+                        resolved_src = "exchange_ledger"
+                        # Tag the closed reason so warehouse queries can
+                        # distinguish exchange-side SL fills from true
+                        # desync ghosts.
+                        close_reason = "ghost_reconciled"
+                        logger.info(
+                            f"[Positions] GHOST reconciled via ledger: "
+                            f"{pos.symbol} {pos.side.upper()} "
+                            f"exit={exit_px:.6g} "
+                            f"realized_pnl={best.get('realized_pnl') if best else None}"
+                        )
                 except Exception as e:
                     logger.debug(
                         f"[Positions] ghost reconcile lookup failed "
