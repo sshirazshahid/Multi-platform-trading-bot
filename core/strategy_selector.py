@@ -1,6 +1,23 @@
 """
 core/strategy_selector.py — Multi-Timeframe Scanner
 
+‼ NOT IN THE LIVE BOT_ENGINE PATH (verified 2026-04-28). The single-profile
+bot launched by `main.py` → `BotEngine` does NOT consult this module —
+entries come from `_claude_portfolio_cycle` (MCP Brain → Claude AI) or its
+`systematic_v3_1` algorithmic fallback. The ONLY caller of StrategySelector
+is `core/multi_profile_runner.py` (separate entry point at
+`multi_profile_main.py`) which runs 3 risk profiles simultaneously.
+
+Phase 10.1 added `_DISABLED_LIVE_STRATEGIES = {"multitf_futures"}` here
+to gate killed strategies. That gate is real protection for the
+multi_profile_runner path; the main bot doesn't reach it.
+
+If you're touching this file: make sure changes are still consistent
+with what multi_profile_runner expects. Run `pytest tests/` and
+`python multi_profile_main.py --report` after edits.
+
+────────────────────────────────────────────────────────────────────────
+
 Produces explicit Spot Long + Futures Long + Futures Short opportunities.
 
 KEY RULES:
