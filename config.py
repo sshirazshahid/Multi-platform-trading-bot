@@ -476,14 +476,31 @@ BLACKLIST_HARD: set = {
     "ETH/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT",
 }
 
-# Hour gating (UTC) — from knowledge_model.hour_scores over 147 trades
-ALLOWED_HOURS_UTC = set(range(24))  # 2026-04-17: opened to all hours at user request (was 12-20 UTC core cluster)
-WARMUP_HOURS_UTC  = {8, 9, 21, 23}                         # half-size entries permitted
-# H14 demoted 2026-04-17: previously 92.9%/14 but recent slice shows 25%/4 (or 0%/1
-# in latest model) — sample collapsed. Keep in ALLOWED, no CONVICTION routing until
-# it re-establishes an edge.
-PEAK_HOURS_UTC    = set()
-BLOCKED_HOURS_UTC = {1, 5, 6, 10, 22}  # Evidence: H1:0%(6), H5:17.6%(17), H6:0%(6), H10:14.3%(7), H22:30.8%(13) — added 2026-04-17
+# Hour gating (UTC)
+#
+# 2026-04-27 (Phase 10.3): tightened from set(range(24)) per 30-day
+# warehouse attribution. The data was unambiguously bimodal:
+#
+# Strong winners (kept):
+#   H15 +$6.25 (69%)  H14 +$5.58 (44%)  H16 +$3.61 (64%)  H21 +$3.16 (43%, n=23)
+#   H02 +$1.50 (63%)  H03 +$1.45 (86%)  H13 +$1.18 (78%)  H23 +$0.15 (56%)
+#   H11 +$0.10 (50%, marginal — kept as sample buffer)
+#
+# Hard losers (blocked):
+#   H17 -$26.08 (27%, n=22)  H00 -$20.04 (23%, n=22)  H04 -$11.21 (38%)
+#   H01 -$8.92 (25%)         H19 -$7.83 (38%, n=16)   H20 -$1.60 (10%)
+#   H22 -$1.31 (45%)         H05 -$1.11 (14%)         H08 -$0.64 (25%)
+#   H07 -$0.50 (42%)         H06 -$0.06 (0%)          H09 -$0.09 (0%)
+#   H12 -$0.28 (60%, marginal — blocked as low-volume neutral)
+#   H18 -$0.48 (42%, marginal — blocked as low-volume neutral)
+#
+# Net effect: removes ~$78 of historical 30-day loss tape exposure.
+# ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
+# (locked by tests/test_hour_gates.py).
+ALLOWED_HOURS_UTC = {2, 3, 11, 13, 14, 15, 16, 21, 23}
+WARMUP_HOURS_UTC  = {2, 3, 11, 23}     # half-size on thin-sample / marginal
+PEAK_HOURS_UTC    = {14, 15, 16}       # CONVICTION routing — strongest dollar PnL
+BLOCKED_HOURS_UTC = {0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 17, 18, 19, 20, 22}
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals
