@@ -2825,7 +2825,17 @@ class BotEngine:
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
         if not DRY_RUN:
-            schedule.every(5).minutes.do(self._sync_positions)
+            # Ghost detection cadence — was 5 minutes, which left up to a
+            # 5-minute window between an exchange-side SL/TP fill and the
+            # bot noticing the position vanished. That window is the root
+            # cause of the high ghost_sync rate (memory:
+            # project_ghost_closes_bypass_safety_rails_2026_04_26).
+            # 15s is well within rate-limit budgets for fetch_positions
+            # across all three exchanges (12 calls/min/venue ≪ any
+            # documented limit) and brings ghost detection close enough
+            # to the SL/TP monitor's own 10s cadence that warehouse PnL
+            # tracks live state in near real time.
+            schedule.every(15).seconds.do(self._sync_positions)
 
         if TRADING_MODE in ("portfolio", "all"):
             schedule.every(PORTFOLIO_RESCAN_MINUTES).minutes.do(
