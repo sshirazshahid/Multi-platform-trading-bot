@@ -194,16 +194,29 @@ class TrailingStopManager:
     @staticmethod
     def _lock_fraction_default(peak_pnl: float) -> float:
         """Hardcoded graduated lock table — used when no fit is available.
+
         2026-04-24 retune: lowered low-peak locks so winners have room to reach
         target TP instead of exiting at ~0.6% clipped profit. Prior config
         (0.60/0.70/0.75/0.80) produced 55W trailing @ $0.09 avg vs 4 full TPs
         @ $2.84 — trailing was intercepting wins before they matured.
-        Low profit  (< 3%):  lock 40% — let winners breathe
+
+        2026-04-28 (Phase 11) re-retune: 30-day data showed the 04-24 numbers
+        UNDER-locked. Trailing exits clustered at +0.6% gross / +0.4% net,
+        right at the cost-floor boundary. mcp_take_profit (which has a 0.5%
+        net-PnL filter at bot_engine.py:2535) lands at +1.4% net — 47% better.
+        Raising the small-win lock 0.40→0.55 converges the trailing exit
+        distribution on mcp_take_profit's, without copying the LLM-in-loop
+        decision path.
+            At peak 2.0%, lock 0.55 → SL = +1.1% gross = +0.9% net
+            At peak 3.0%, lock 0.55 → SL = +1.65% gross = +1.45% net
+                                       (matches mcp_take_profit median 1.47%)
+
+        Low profit  (< 3%):  lock 55% — clears 0.5% net-PnL cost floor
         Medium      (3-5%):  lock 55% — moderate protection
         Good        (5-8%):  lock 70% — tighter lock
         Exceptional (> 8%):  lock 80% — protect the big win"""
         if peak_pnl < 0.03:
-            return 0.40
+            return 0.55
         elif peak_pnl < 0.05:
             return 0.55
         elif peak_pnl < 0.08:

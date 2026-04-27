@@ -298,10 +298,17 @@ RISK = {
     "default_leverage":     2,
     "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop":        True,
-    # 2026-04-24 trailing retune after 50W/0L trailing @ $0.09 avg clipped 4 full
-    # TPs @ $2.84 avg. Activation doubled and lock fraction lowered at low peaks
-    # (see trailing_stop_manager._lock_fraction) so winners have room to run.
-    "trailing_activation":  0.015,    # 1.5% — give winners room before BE lock
+    # 2026-04-28 retune (Phase 11) — converge trailing on the empirical
+    # mcp_take_profit distribution:
+    #   trailing_stop:    n=25, mean +1.00% gross, +0.4-0.5% net (sub-cost-floor)
+    #   mcp_take_profit:  n=13, mean +1.47% gross, +1.2-1.4% net  (clears costs)
+    # The 47% performance gap is NOT Claude AI wisdom — it's the 0.5% net-PnL
+    # filter at bot_engine.py:2535-2557. Raising activation 1.5%→2.0% delays
+    # engagement until peaks are real; lock_fraction small-win tier 0.40→0.55
+    # (in trailing_stop_manager._lock_fraction_default) tightens the lock so
+    # exits land at +1.1% gross / +0.9% net at peak 2.0% — above the cost
+    # floor and matching mcp_take_profit's empirical capture.
+    "trailing_activation":  0.020,    # 2.0% — clear cost floor (was 1.5%)
     "trailing_distance":    0.010,    # 1.0% — wider trail past activation
     "max_drawdown_pct":     0.12,     # 12% max DD before halt
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check

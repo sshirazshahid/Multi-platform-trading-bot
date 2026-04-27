@@ -127,5 +127,8 @@ def test_trailing_stop_manager_falls_back_without_params(monkeypatch, tmp_path):
     reload(tsm)
     mgr = tsm.TrailingStopManager()
     assert mgr._lock_override is None
-    # Falls through to the graduated table
-    assert mgr._lock_fraction(0.02) == pytest.approx(0.40)  # < 3% tier
+    # Falls through to the graduated table.
+    # 2026-04-28 (Phase 11) re-retune: small-win tier 0.40 → 0.55 to land
+    # trailing exits above the 0.5% net-PnL cost floor (matching the
+    # mcp_take_profit close gate at bot_engine.py:2535-2557).
+    assert mgr._lock_fraction(0.02) == pytest.approx(0.55)  # < 3% tier
