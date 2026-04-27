@@ -49,7 +49,7 @@ class AutoOptimizer:
 
         for period, mult in itertools.product(periods, multipliers):
             try:
-                from strategies.supertrend import SupertrendStrategy
+                from strategies.legacy.supertrend import SupertrendStrategy
                 from core.risk_manager     import RiskManager
                 from core.order_manager    import OrderManager
                 from core.position_tracker import PositionTracker
@@ -109,7 +109,7 @@ class AutoOptimizer:
             if ov >= ob:
                 continue
             try:
-                from strategies.mean_reversion import MeanReversionStrategy
+                from strategies.legacy.mean_reversion import MeanReversionStrategy
                 from core.risk_manager          import RiskManager
                 from core.order_manager         import OrderManager
                 from core.position_tracker      import PositionTracker

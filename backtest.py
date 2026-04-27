@@ -127,14 +127,20 @@ def _build_exchange(name: str):
 
 
 def _build_strategy(name: str, order_mgr, risk):
-    """Build strategy object by name."""
-    import strategies
-    # Direct imports for strategies that are NOT package re-exported (kept
-    # only for research/backtest replay):
-    #   Supertrend (KILLED 2026-04-20 per Phase 1 attribution).
-    #   MultiTF    (KILLED 2026-04-27 per Phase 10 attribution).
-    from strategies.supertrend import SupertrendStrategy
-    from strategies.multi_tf import MultiTFStrategy
+    """Build strategy object by name.
+
+    All non-DCA / non-rebalance strategies live in `strategies/legacy/`
+    as of 2026-04-28 (Phase 12.1) — they're not wired into the live
+    bot_engine path. Backtest is the ONLY supported caller.
+    """
+    # Imports kept local because these classes are research-only — never
+    # touched by the live import path.
+    from strategies.legacy.supertrend       import SupertrendStrategy
+    from strategies.legacy.multi_tf         import MultiTFStrategy
+    from strategies.legacy.mean_reversion   import MeanReversionStrategy
+    from strategies.legacy.trend_following  import TrendFollowingStrategy
+    from strategies.legacy.scalping         import ScalpingStrategy
+    from strategies.legacy.grid_trading     import GridTradingStrategy
     kwargs = dict(order_manager=order_mgr, risk_manager=risk)
     tf_map = {
         "supertrend":    "1h",
@@ -146,11 +152,11 @@ def _build_strategy(name: str, order_mgr, risk):
     }
     strategy_map = {
         "supertrend":    lambda: SupertrendStrategy(**kwargs),
-        "meanreversion": lambda: strategies.MeanReversionStrategy(**kwargs),
+        "meanreversion": lambda: MeanReversionStrategy(**kwargs),
         "multitf":       lambda: MultiTFStrategy(**kwargs, market_type="futures"),
-        "trend":         lambda: strategies.TrendFollowingStrategy(**kwargs),
-        "scalping":      lambda: getattr(strategies, "ScalpingStrategy")(**kwargs),
-        "grid":          lambda: strategies.GridTradingStrategy(**kwargs),
+        "trend":         lambda: TrendFollowingStrategy(**kwargs),
+        "scalping":      lambda: ScalpingStrategy(**kwargs),
+        "grid":          lambda: GridTradingStrategy(**kwargs),
     }
     factory = strategy_map.get(name)
     if not factory:
