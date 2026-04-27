@@ -282,11 +282,20 @@ RISK = {
     # 2026-04-16 signed-checklist value; user accepted the trade-off.
     "max_position_pct":     0.05,
     "max_open_positions":   8,        # 2 per exchange — focus capital, reduce correlation risk
-    "max_daily_loss_pct":   0.05,     # 5% daily loss halt
+    # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed. At 5% on a
+    # $400 balance the halt was 12+ losses away — too deep to be an early
+    # brake. 1.5% halts at ~$6, roughly 2-3 design-SL hits, which matches the
+    # observed catastrophic-trade frequency (1 −$3.28 outlier / week was 100%
+    # of weekly net P&L).
+    "max_daily_loss_pct":   0.015,    # 1.5% daily loss halt
     "default_stop_loss":    0.020,    # 2.0% fallback SL (ATR-based is primary)
     "default_take_profit":  0.060,    # 6.0% fallback TP (~3:1 R:R vs 2% SL)
-    "futures_max_leverage": 3,        # 3x hard ceiling per signed checklist
-    "default_leverage":     3,        # 3x baseline
+    # 2026-04-27: leverage cut 3 → 2. Last 7d at 3x: 46 closed trades, 16 wins,
+    # net −$3.19. Single APT outlier was −$3.28 (−9.5% margin = −3.17% price ×
+    # 3x). At 2x the same price move is −6.34% margin = ~−$2.13 worst case;
+    # cuts every loss magnitude by 33% while preserving the 2.5:1 R:R math.
+    "futures_max_leverage": 2,
+    "default_leverage":     2,
     "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop":        True,
     # 2026-04-24 trailing retune after 50W/0L trailing @ $0.09 avg clipped 4 full
@@ -298,6 +307,10 @@ RISK = {
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
     "max_position_age_hours": 6,      # 6h hard expiry
     "max_stale_hours":       4.0,     # 4h stale exit (was 1.5h — conflicted with 2h min hold)
+    # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
+    # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
+    # bleed regardless of per-trade SL discipline.
+    "max_trades_per_day":   20,
 }
 
 RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
@@ -315,9 +328,14 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # Exchange pockets are fragmented ($10-130 per pocket), so 5% of a $10 pocket
 # was producing $0.50 notional and step-rejection spam. Sizing below clears
 # the $50 min-notional floor at 3x for any pocket ≥ $110 (typical post-rebal).
+# 2026-04-27: every tier's leverage dropped 3 → 2 alongside RISK[
+# "futures_max_leverage"]. The size_pct is left untouched: at 0.15 × 2 ×
+# 0.015 = 0.45% balance risk per STANDARD trade (was 0.675% at 3x), still
+# above the cost floor for any pocket ≥ $165 and well under the 1.0%
+# MAX_LOSS_PER_TRADE_PCT cap below.
 LEVERAGE_TIERS = {
     "STANDARD": {
-        "leverage":               3,
+        "leverage":               2,
         "size_pct":               0.15,     # 15% (was 5%) — lift above cost floor
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
@@ -328,7 +346,7 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   False,
     },
     "STRONG": {
-        "leverage":               3,
+        "leverage":               2,
         "size_pct":               0.10,     # 10% (was 3%)
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
@@ -339,7 +357,7 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "CONVICTION": {
-        "leverage":               3,
+        "leverage":               2,
         "size_pct":               0.10,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
@@ -350,7 +368,7 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "AGGRESSIVE": {
-        "leverage":               3,
+        "leverage":               2,
         "size_pct":               0.10,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
@@ -379,6 +397,16 @@ CONSEC_LOSS_PAUSE_HOURS     = 0.5 # pause lasts 30min (was 2h — too long, miss
 
 # Volatility-adaptive leverage cap — high-ATR symbols clamp to STANDARD
 HIGH_ATR_PCT_THRESHOLD = 0.025    # ATR% > 2.5% → max leverage = STANDARD (2x)
+
+# 2026-04-27: hard kill-switch on shorts. Last 7d futures: 9 sells averaging
+# −$0.16/trade vs 37 buys averaging −$0.05 (3.4× worse), with the worst
+# single-trade loss in the dataset coming from the short side. The
+# auto_mutator's existing shorts_blocked_until window only fires on
+# "counter-trend" wording in post-mortem mistakes, which is too narrow to
+# catch the broader negative-EV pattern. AutoMutator.shorts_blocked() honors
+# this flag; bot_engine._execute_open's existing gate at the side=='sell'
+# check then refuses entries with no further wiring needed.
+SHORTS_DISABLED = True
 
 # ==============================================================
 # TRADING GATES — evidence-based whitelist / blacklist / hours

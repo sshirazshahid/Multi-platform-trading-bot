@@ -236,8 +236,21 @@ class AutoMutator:
         return None
 
     def shorts_blocked(self) -> bool:
-        """Whether shorts are currently blocked by a mutation."""
+        """Whether shorts are currently blocked.
+
+        Returns True when EITHER:
+          - the post-mortem-driven shorts_blocked_until window is still active
+            (counter-trend short losses), OR
+          - config.SHORTS_DISABLED is True (manual hard kill-switch added
+            2026-04-27 after sells averaged −$0.16/trade vs longs −$0.05).
+        """
         self._expire()
+        try:
+            from config import SHORTS_DISABLED
+            if SHORTS_DISABLED:
+                return True
+        except ImportError:
+            pass
         return self._state.get("shorts_blocked_until", 0) > _now()
 
     def snapshot(self) -> dict:

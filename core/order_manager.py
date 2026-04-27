@@ -868,6 +868,14 @@ class OrderManager:
 
         self.tracker.add(pos)
 
+        # Daily open counter — feeds RiskManager.can_trade()'s per-day cap.
+        # Wired here (and not earlier) so failed orders don't burn the
+        # day's quota.
+        try:
+            self.risk.note_trade_opened()
+        except Exception as _ne:
+            logger.debug(f"[Risk] note_trade_opened skipped: {_ne}")
+
         # Warehouse trade-open row (spec §4, §6) — MUST run BEFORE
         # _place_exchange_sl_tp so the fail-closed path has a row to patch
         # via record_trade_close → trade_id_by_key. Previously this write
@@ -1420,12 +1428,17 @@ class OrderManager:
         except Exception as re:
             logger.debug(f"[Risk] record_trade_pnl skipped: {re}")
         # Spec §12 pause policy — needs per-symbol + per-family streaks.
+        # Pass pnl_pct + reason so RiskManager can neutralise scratches and
+        # infrastructure exits (STALE/AGE_LIMIT/ghost_force_close/etc.) that
+        # would otherwise false-trip the 5-consec-loss halt.
         try:
             self.risk.record_trade_result(
                 symbol=pos.symbol,
                 family=pos.strategy or "unknown",
                 is_win=is_win,
                 pnl_usd=float(pos.pnl or 0.0),
+                pnl_pct=pnl_pct,
+                reason=reason,
             )
         except Exception as _rte:
             logger.debug(f"[Risk/Spec12] record_trade_result skipped: {_rte}")

@@ -505,12 +505,32 @@ class PositionTracker:
             since_ts = time.time() - 48 * 3600
         since_ms = int(since_ts * 1000)
 
+        # 2026-04-27: dedup widened from 60s to 600s and now includes side.
+        # Exchanges occasionally report the same close at slightly different
+        # timestamps across two 48h-window fetches (LINK on 04-27 was reported
+        # at 05:36:36 then 05:48:02 — both real, both for the same fill —
+        # producing two `reconciled_from_exchange` records that both passed
+        # the per-minute dedup). A 10-minute bucket plus side eliminates that
+        # without risking real intraday round-trip dedups (the 600s key is
+        # still tight enough that re-entering the same symbol/side after
+        # closing won't collide if the exits are >10min apart).
         with self._lock:
             existing_keys = set()
             for p in self._closed:
                 if p.close_time:
                     existing_keys.add(
-                        (p.exchange.lower(), p.symbol, int(p.close_time // 60)))
+                        (p.exchange.lower(), p.symbol, p.side,
+                         int(p.close_time // 600)))
+            # Also collect (exchange, symbol, side) for live tracked positions
+            # so we can skip importing a reconcile record when the bot will
+            # book the same close itself via the ghost-sync path. Without
+            # this skip, LINK got a `reconciled_from_exchange` AND a
+            # `ghost_reconciled` record for the same fill.
+            live_keys = {
+                (p.exchange.lower(), p.symbol, p.side)
+                for p in self._open.values()
+                if not p.paper_trade
+            }
 
         imported = 0
         for ex_name, exchange in active_exchanges.items():
@@ -528,7 +548,14 @@ class PositionTracker:
                     continue
                 sym = r.get("symbol", "")
                 ex_lower = str(r.get("exchange", ex_name)).lower()
-                k = (ex_lower, sym, int(ct // 60))
+                side = (r.get("side") or "buy") or "buy"
+                # Skip if a live tracked position with the same identity
+                # exists — the live close path (sync_with_exchange →
+                # tracker.close → _finalize_close) will produce the
+                # canonical record. Importing here would double-count.
+                if (ex_lower, sym, side) in live_keys:
+                    continue
+                k = (ex_lower, sym, side, int(ct // 600))
                 if k in existing_keys:
                     continue
 
@@ -536,7 +563,6 @@ class PositionTracker:
                 size = float(r.get("size", 0) or 0)
                 entry = float(r.get("entry_price", 0) or 0)
                 exit_p = float(r.get("exit_price", 0) or 0)
-                side = (r.get("side") or "buy") or "buy"
                 leverage = int(r.get("leverage", 1) or 1)
 
                 # Binance's income ledger doesn't always carry entry/size.

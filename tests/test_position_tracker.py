@@ -102,7 +102,9 @@ def test_reconcile_with_full_context_computes_pct_normally():
 def test_reconcile_no_context_is_idempotent():
     """Re-running reconcile on the same record must not double-count.
 
-    The dedup key is (exchange, symbol, close_time//60). A second pass over
+    The dedup key is (exchange, symbol, side, close_time//600) (widened from
+    the original per-minute bucket on 2026-04-27 — see
+    test_reconcile_dedup_within_ten_minute_bucket below). A second pass over
     the same Binance income row should import zero new trades, leaving
     _closed length, pnl, and pnl_pct=None untouched.
     """
@@ -129,3 +131,124 @@ def test_reconcile_no_context_is_idempotent():
     assert pos.pnl == pytest.approx(-1.50)
     assert pos.pnl_pct is None
     assert pos.close_reason == "reconciled_no_context"
+
+
+def test_reconcile_dedup_within_ten_minute_bucket():
+    """2026-04-27: LINK on bybit produced two ``reconciled_from_exchange``
+    records for one physical close because the exchange reported close_time
+    as 05:36:36 in one fetch and 05:48:02 in another. The pre-fix
+    per-minute bucket let both pass; the 10-minute bucket plus side keys
+    them to the same slot.
+    """
+    tracker = PositionTracker()
+    base = {
+        "symbol":       "LINK/USDT:USDT",
+        "exchange":     "bybit",
+        "side":         "buy",
+        "realized_pnl": -0.66,
+        "entry_price":  9.525,
+        "exit_price":   9.341,
+        "size":         3.4,
+        "leverage":     3,
+    }
+    # Pin close_times within one 600s bucket. Bucket index is floor(ts/600);
+    # 1_700_000_036 and 1_700_000_300 both land in bucket 2_833_333 (range
+    # 1_699_999_800 .. 1_700_000_399). The 264s spread mirrors the LINK
+    # 04-27 incident (05:36:36 vs 05:48:02 was 686s, fell in two adjacent
+    # minute-buckets pre-fix; the new 10-min bucket would still catch most
+    # near-bucket collisions and certainly catches same-bucket ones).
+    first_record = dict(base, close_time=1_700_000_036.0)
+    second_record = dict(base, close_time=1_700_000_300.0)
+    ex = _make_exchange_with_records([first_record, second_record])
+    imported = tracker.reconcile_closed_pnl(
+        {"bybit": ex}, since_ts=1_700_000_000.0)
+    assert imported == 1, (
+        "two records for the same physical close in one 10-minute bucket "
+        "must dedup to one")
+    assert len(tracker._closed) == 1
+
+
+def test_reconcile_skips_when_live_position_open():
+    """2026-04-27: when a live tracked position exists for the same
+    (exchange, symbol, side), the live close path will record the canonical
+    close. Reconcile must not import a parallel record — that's how LINK
+    got both `reconciled_from_exchange` and `ghost_reconciled` for the
+    same fill.
+    """
+    tracker = PositionTracker()
+    now = _time.time()
+    live = Position(
+        id="LIVE-bybit-LINK",
+        exchange="bybit",
+        symbol="LINK/USDT:USDT",
+        side="buy",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=9.525,
+        size=3.4,
+        stop_loss=9.10,
+        take_profit=10.0,
+        leverage=3,
+        open_time=now - 3600,
+        paper_trade=False,
+    )
+    tracker._open[live.id] = live
+
+    record = {
+        "symbol":       "LINK/USDT:USDT",
+        "exchange":     "bybit",
+        "side":         "buy",
+        "realized_pnl": -0.66,
+        "entry_price":  9.525,
+        "exit_price":   9.341,
+        "size":         3.4,
+        "leverage":     3,
+        "close_time":   now - 30,
+    }
+    ex = _make_exchange_with_records([record])
+    imported = tracker.reconcile_closed_pnl(
+        {"bybit": ex}, since_ts=now - 120)
+    assert imported == 0, (
+        "reconcile must defer to the live close path when a tracked "
+        "position with the same (exchange, symbol, side) is still open")
+    assert len(tracker._closed) == 0
+
+
+def test_reconcile_imports_when_no_matching_live_position():
+    """Sanity check the live-position skip is identity-scoped: a live
+    position on a different exchange/symbol/side must not block the import.
+    """
+    tracker = PositionTracker()
+    now = _time.time()
+    other_live = Position(
+        id="LIVE-bybit-BTC",
+        exchange="bybit",
+        symbol="BTC/USDT:USDT",
+        side="buy",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=50000.0,
+        size=0.001,
+        stop_loss=49000.0,
+        take_profit=52000.0,
+        leverage=3,
+        open_time=now - 3600,
+        paper_trade=False,
+    )
+    tracker._open[other_live.id] = other_live
+
+    record = {
+        "symbol":       "LINK/USDT:USDT",   # different symbol
+        "exchange":     "bybit",
+        "side":         "buy",
+        "realized_pnl": -0.66,
+        "entry_price":  9.525,
+        "exit_price":   9.341,
+        "size":         3.4,
+        "leverage":     3,
+        "close_time":   now - 30,
+    }
+    ex = _make_exchange_with_records([record])
+    imported = tracker.reconcile_closed_pnl(
+        {"bybit": ex}, since_ts=now - 120)
+    assert imported == 1

@@ -51,6 +51,22 @@ SPEC_FAMILY_PAUSE_HOURS      = 12
 SPEC_GLOBAL_LOSSES_TO_REVIEW = 5
 _REVIEW_FLAG_PATH = Path("data/review_required.json")
 
+# 2026-04-27: §12 streaks should reflect strategy outcomes, not infrastructure
+# artefacts. STALE / AGE_LIMIT / ghost_force_close / sl_placement_failed and
+# the reconcile_closed_pnl import paths all close at near-breakeven or on
+# operational triggers; counting them as "losses" caused 5 consecutive
+# −$0.09 STALE exits to false-trip the global halt and pause claude_portfolio
+# for 12h. Treat scratches and these reasons as null entries.
+_SPEC12_NEUTRAL_REASONS = frozenset({
+    "STALE",
+    "AGE_LIMIT",
+    "ghost_force_close",
+    "sl_placement_failed",
+    "reconciled_from_exchange",
+    "reconciled_no_context",
+})
+_SPEC12_SCRATCH_PCT = 0.5
+
 
 class RiskManager:
 
@@ -74,6 +90,12 @@ class RiskManager:
         self._halt_time:     float = 0.0
         self._recent_results: list = []   # last N trades: True=win, False=loss
         self._trade_history:  list = []   # Kelly: (win, pnl_pct)
+        # 2026-04-27: per-UTC-day open counter, enforced against
+        # RISK["max_trades_per_day"]. _trade_history is the wrong source for
+        # "trades today" because it caps at 100 and is the rolling Kelly
+        # window, not a daily counter — the bot did 52 trades on 2026-04-27
+        # and hit no cap because there was none.
+        self._opens_today:    int  = 0
         self._correlation_mgr = None      # lazy-loaded
 
         # Spec §12 pause tracking
@@ -101,7 +123,7 @@ class RiskManager:
             "start_balance": round(self._start_balance, 2),
             "peak_balance": round(self._peak_balance, 2),
             "trading_day": self._trading_day.isoformat(),
-            "trades_today": len(self._trade_history),
+            "trades_today": self._opens_today,
             "recent_results": self._recent_results[-20:],
             "trade_history": self._trade_history[-100:],
             "symbol_pauses": self._symbol_pauses,
@@ -170,6 +192,10 @@ class RiskManager:
             self._halted = state.get("is_halted", False)
             self._halt_reason = state.get("halt_reason", "")
             self._halt_time = state.get("halt_time", 0.0)
+            # Restore today's open count so the daily-trade cap survives a
+            # mid-day process restart. Default 0 for files saved by older
+            # builds that lacked this counter.
+            self._opens_today = int(state.get("trades_today", 0) or 0)
             logger.info(
                 f"[Risk] Resumed same-day state: daily_pnl={self._daily_pnl:+.4f}, "
                 f"trades={len(self._trade_history)}, halted={self._halted}")
@@ -179,6 +205,7 @@ class RiskManager:
             self._trading_day = date.today()
             self._halted = False
             self._halt_reason = ""
+            self._opens_today = 0
             logger.info(
                 f"[Risk] New day — daily counters reset. "
                 f"Carried over {len(self._trade_history)} trade history entries")
@@ -247,6 +274,16 @@ class RiskManager:
     # ── Trading gate with SMART RECOVERY ─────────────────────────────
 
     def can_trade(self, open_position_count: int) -> bool:
+        # New-day rollover: in long-running processes the load-state path
+        # only fires at startup, so a midnight crossing must be picked up
+        # here. Without this the daily counters never reset.
+        today = date.today()
+        if today != self._trading_day:
+            self._daily_pnl = 0.0
+            self._trading_day = today
+            self._opens_today = 0
+            self._save_state()
+
         if self._halted:
             # Check if we should auto-resume
             if self._should_auto_resume():
@@ -262,7 +299,30 @@ class RiskManager:
             logger.debug(
                 f"[Risk] Max open positions ({self.max_open_positions}) reached.")
             return False
+        # 2026-04-27: per-day open cap. Caller must invoke note_trade_opened()
+        # after a successful open so this counter advances.
+        max_per_day = RISK.get("max_trades_per_day", 0) or 0
+        if max_per_day > 0 and self._opens_today >= max_per_day:
+            logger.info(
+                f"[Risk] Daily trade cap reached: {self._opens_today}/{max_per_day} "
+                f"opens today — refusing new entries until UTC midnight.")
+            return False
         return True
+
+    def note_trade_opened(self) -> None:
+        """Increment today's open counter. Caller invokes after a successful
+        position open so can_trade() can enforce RISK['max_trades_per_day'].
+        """
+        # Roll over the counter on a UTC-midnight crossing the same way
+        # can_trade() does, so a long-running process that opens its first
+        # post-midnight trade doesn't carry yesterday's count forward.
+        today = date.today()
+        if today != self._trading_day:
+            self._daily_pnl = 0.0
+            self._trading_day = today
+            self._opens_today = 0
+        self._opens_today += 1
+        self._save_state()
 
     def _should_auto_resume(self) -> bool:
         """Smart recovery: resume when conditions improve."""
@@ -711,7 +771,9 @@ class RiskManager:
         return bool(until)
 
     def record_trade_result(self, symbol: str, family: str,
-                             is_win: bool, pnl_usd: float = 0.0) -> None:
+                             is_win: bool, pnl_usd: float = 0.0,
+                             pnl_pct: float = None,
+                             reason: str = None) -> None:
         """Spec §12 pause policy. Call once per closed trade.
 
         - 2 consec losses on symbol → pause symbol 6h
@@ -721,7 +783,19 @@ class RiskManager:
 
         This augments record_trade_pnl (which handles daily P&L and drawdown).
         Intentionally a separate entry point so existing call sites keep working.
+
+        Neutrality (2026-04-27): scratches (|pnl_pct| < _SPEC12_SCRATCH_PCT)
+        and infrastructure exits (_SPEC12_NEUTRAL_REASONS) do NOT extend or
+        break any streak — they are recorded by record_trade_pnl for daily
+        accounting but skipped here so a string of timeouts cannot trigger
+        a §12 halt. record_trade_pnl is intentionally untouched: daily P&L
+        and drawdown still see every close.
         """
+        if reason in _SPEC12_NEUTRAL_REASONS:
+            return
+        if pnl_pct is not None and abs(pnl_pct) < _SPEC12_SCRATCH_PCT:
+            return
+
         sym_hist = self._symbol_streaks.setdefault(symbol, [])
         sym_hist.append(is_win)
         if len(sym_hist) > 20:
