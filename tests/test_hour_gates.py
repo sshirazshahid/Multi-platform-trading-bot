@@ -1,10 +1,23 @@
-"""Phase 10.3 — hour-gating invariants.
+"""Phase 12.2 — hour-gating invariants (claude_portfolio-only basis).
 
-Locks the partition between ALLOWED_HOURS_UTC and BLOCKED_HOURS_UTC and
-enforces that the data-driven winners stay allowed and catastrophic
-losers stay blocked. If you're updating these sets, run
-`python scripts/diagnostic_report.py --since <30d-ago>` first and
-update the membership tests with the latest evidence.
+Locks the partition between ALLOWED_HOURS_UTC and BLOCKED_HOURS_UTC.
+The basis was changed in Phase 12.2: previously we used COMBINED-warehouse
+attribution, but combined data was dominated by the deprecated MultiTF /
+Supertrend strategies. The active path is claude_portfolio (+ its
+systematic_v3_1 fallback), so the hour gate must reflect WHERE THAT
+STRATEGY makes/loses money.
+
+When updating these sets, query claude_portfolio-only data:
+
+    SELECT CAST(strftime('%H', ts_entry, 'unixepoch') AS INT) hr,
+           COUNT(*), ROUND(SUM(realized_pnl),2)
+    FROM trades WHERE status='CLOSED' AND strategy_family='claude_portfolio'
+    GROUP BY hr;
+
+Phase 10.3 → 12.2 transition: H00 / H17 / H19 were UNBLOCKED because
+claude_portfolio-only data showed them as net positive (combined data
+was misleading). H02 / H13 / H14 / H15 / H16 / H21 / H23 stayed allowed.
+H06-H10 are thin-sample (n<3) and default-allowed pending data.
 """
 from __future__ import annotations
 
@@ -25,27 +38,33 @@ def test_allowed_and_blocked_partition_24h():
         f"missing hours: {set(range(24)) - union}")
 
 
-def test_phase10_attributed_winners_allowed():
-    """Hours with sum PnL > +$1.00 over the 30-day refresh must stay allowed.
+def test_phase12_claude_portfolio_winners_allowed():
+    """Hours with sum PnL > +$0.50 in claude_portfolio (n>=3) must be allowed.
 
-    Evidence from data/warehouse.sqlite as of 2026-04-27:
-      H02 +$1.50  H03 +$1.45  H13 +$1.18  H14 +$5.58
-      H15 +$6.25  H16 +$3.61  H21 +$3.16
+    Evidence (claude_portfolio-only as of 2026-04-28):
+      H03 +$1.02 (80%, n=5)   H19 +$1.04 (40%, n=5)
+      H00 +$0.98 (50%, n=10)  H17 +$0.89 (33%, n=6)
+      H02 +$0.70 (33%, n=3)   H15 +$0.67 (40%, n=5)
+      H14 +$0.57 (33%, n=6)   H21 +$0.50 (67%, n=3)
     """
-    attributed_winners = {2, 3, 13, 14, 15, 16, 21}
-    assert attributed_winners.issubset(ALLOWED_HOURS_UTC), (
-        f"removed winning hours: {attributed_winners - ALLOWED_HOURS_UTC}")
+    cp_winners = {0, 2, 3, 14, 15, 17, 19, 21}
+    assert cp_winners.issubset(ALLOWED_HOURS_UTC), (
+        f"removed claude_portfolio-winning hours: "
+        f"{cp_winners - ALLOWED_HOURS_UTC}")
 
 
-def test_phase10_catastrophic_losers_blocked():
-    """Hours with sum PnL < -$5 over the 30-day refresh must stay blocked.
+def test_phase12_catastrophic_claude_portfolio_losers_blocked():
+    """Hours with sum PnL < -$0.40 in claude_portfolio (n>=3) must be blocked.
 
-    Evidence:
-      H00 -$20.04  H01 -$8.92  H04 -$11.21  H17 -$26.08  H19 -$7.83
+    Evidence (claude_portfolio-only):
+      H22 -$3.49 (0%, n=5)    H05 -$1.31 (0%, n=6)
+      H18 -$0.54 (40%, n=5)   H20 -$0.53 (20%, n=5)
+      H01 -$0.49 (0%, n=3)    H12 -$0.45 (50%, n=6)
     """
-    catastrophic = {0, 1, 4, 17, 19}
-    assert catastrophic.issubset(BLOCKED_HOURS_UTC), (
-        f"unblocked catastrophic hours: {catastrophic - BLOCKED_HOURS_UTC}")
+    cp_losers = {1, 5, 12, 18, 20, 22}
+    assert cp_losers.issubset(BLOCKED_HOURS_UTC), (
+        f"unblocked claude_portfolio losers: "
+        f"{cp_losers - BLOCKED_HOURS_UTC}")
 
 
 def test_warmup_hours_subset_of_allowed():
@@ -65,3 +84,11 @@ def test_warmup_and_peak_disjoint():
     never both — they request opposite leverage tiers."""
     assert not (WARMUP_HOURS_UTC & PEAK_HOURS_UTC), (
         f"warmup/peak overlap: {WARMUP_HOURS_UTC & PEAK_HOURS_UTC}")
+
+
+def test_phase12_peak_hours_are_strongest_winners():
+    """PEAK should be the highest-EV hours from claude_portfolio data.
+    Strongest sums: H19 +$1.04, H03 +$1.02, H00 +$0.98, H17 +$0.89."""
+    expected_peak = {0, 3, 17, 19}
+    assert expected_peak == PEAK_HOURS_UTC, (
+        f"PEAK should be {expected_peak}; got {PEAK_HOURS_UTC}")

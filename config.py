@@ -426,29 +426,42 @@ SHORTS_DISABLED = True
 #   hours where live WR ≥ 45% and volume ≥ 3 trades
 # ==============================================================
 WHITELIST_SYMBOLS = {
-    # 30-day attribution refresh 2026-04-27. Comments reflect realised
-    # warehouse PnL over the last 30 days (n ≥ 5 only); thin-sample
-    # entries kept as tentative leverage-tier hints.
-    "ATOM/USDT:USDT",   # 12 trades, 42% WR, +$2.02 / 30d ⭐
-    "LUMIA/USDT:USDT",  # 6 trades, 100% WR, +$1.98 / 30d ⭐
-    "BNB/USDT:USDT",    # 23 trades, 43% WR, +$1.84 / 30d
-    "ARB/USDT:USDT",    # 27 trades, 44% WR, +$1.64 / 30d
-    "ALGO/USDT:USDT",   # 33 trades, 64% WR, +$0.72 / 30d
-    "ORDI/USDT:USDT",   # 8 trades, 50% WR, +$0.59 / 30d
-    "DOT/USDT:USDT",    # 10 trades, 40% WR, +$0.51 / 30d
-    "FET/USDT:USDT",    # 7 trades, 57% WR, +$0.25 / 30d
-    "BCH/USDT:USDT",    # 3 trades, 66.7% WR (tentative)
-    "LINK/USDT:USDT",   # marginal — kept on tier hint
-    "GRASS/USDT:USDT",  # 3 trades, 66.7% WR (tentative)
-    "QTUM/USDT:USDT",   # tentative
-    "ACT/USDT:USDT",    # tentative
-    "IOTA/USDT:USDT",   # tentative
-    "VET/USDT:USDT",    # tentative
-    "BTC/USDT:USDT",    # macro anchor, always tradeable
-    # ETH removed 2026-04-27: 9 trades, 67% WR but -$3.45 / 30d — asymmetric
-    #   R:R wipes wins. Now in BLACKLIST_HARD.
-    # AVAX removed 2026-04-27: 14 trades, 43% WR, -$1.92 / 30d. Now in
-    #   BLACKLIST_HARD.
+    # 2026-04-28 (Phase 12.3): refreshed using claude_portfolio-only
+    # warehouse data (NOT combined which is dominated by the deprecated
+    # MultiTF/Supertrend trades). Comments reflect realised PnL inside
+    # the strategy_family that's actually firing today.
+    #
+    # Tier hints (sized up via leverage-tier selector):
+    "ATOM/USDT:USDT",   # ⭐ n=12, +$2.02, 42% WR, $0.168/trade — TOP CONTRIBUTOR
+    "ARB/USDT:USDT",    # ⭐ n=18, +$1.20, 44% WR, $0.067/trade
+    "ETH/USDT:USDT",    #   n=8,  +$0.45, 75% WR — high-WR, small absolute mean
+    "MANA/USDT:USDT",   #   n=3,  +$0.37, 33% WR — thin sample, tentative
+    "BTC/USDT:USDT",    #   macro anchor, always tradeable
+    "AVAX/USDT:USDT",   #   n=4,  near-zero — neutral, kept as tier hint
+    # Tentative thin-sample symbols (n<3 in claude_portfolio):
+    "LUMIA/USDT:USDT",  # historical positive
+    "ORDI/USDT:USDT",
+    "DOT/USDT:USDT",    # n=6 in claude_portfolio, marginal -$0.038/trade
+    "FET/USDT:USDT",
+    "BCH/USDT:USDT",
+    "GRASS/USDT:USDT",
+    "QTUM/USDT:USDT",
+    "ACT/USDT:USDT",
+    "IOTA/USDT:USDT",
+    "VET/USDT:USDT",
+    # REMOVED 2026-04-28 — moved to BLACKLIST_HARD per claude_portfolio data:
+    #   ALGO/USDT:USDT  n=7  -$0.93  29% WR  (was ⭐ on stale combined data)
+    #   LINK/USDT:USDT  n=8  -$0.82  38% WR
+    #   BNB/USDT:USDT   n=12 -$0.49  50% WR  — kept allowed but not whitelisted
+}
+
+# 2026-04-28 (Phase 12.3): symbols proven net-positive in claude_portfolio.
+# Used by leverage-tier selector to auto-promote to STRONG/CONVICTION on
+# matching setups. Sample-size guard: only promote when claude_portfolio
+# has >= 8 trades AND mean PnL > $0.05/trade.
+STAR_SYMBOLS = {
+    "ATOM/USDT:USDT",   # n=12, +$2.02 sum, $0.168/trade
+    "ARB/USDT:USDT",    # n=18, +$1.20 sum, $0.067/trade
 }
 
 # 2026-04-13: Cleared. All prior losses were under the old broken engine
@@ -471,43 +484,83 @@ WHITELIST_SYMBOLS = {
 # Both are eating ~$0.20+/trade without statistically detectable upside under
 # the current signal mix. Blocking until Phase 3 (fitted model) can re-rate.
 #
-# 2026-04-27 (Phase 10.2): expanded with three more sustained negative-edge
-# symbols from the 30-day attribution refresh:
-#   ETH/USDT:USDT  (n=9)   -$3.45  WR=67%  asymmetric R:R wipes wins
-#   ADA/USDT:USDT  (n=6)   -$2.12  WR=17%
-#   AVAX/USDT:USDT (n=14)  -$1.92  WR=43%
-# Re-evaluate after the meta-filter / fitted model has 30+ days of forward-
-# attributed data on the remaining symbols (Phase 3+ from the original draft).
+# 2026-04-27 (Phase 10.2): expanded with three more symbols from the 30-day
+# combined-warehouse attribution. THIS WAS A MISTAKE — see Phase 12.2 below.
+#
+# 2026-04-28 (Phase 12.2): RECTIFIED. The Phase 10.2 BLACKLIST was built on
+# COMBINED-warehouse attribution that was dominated by the deprecated MultiTF
+# / Supertrend strategies (since killed). When restricted to the actually-
+# active claude_portfolio strategy_family, the same symbols look very
+# different:
+#
+#                       combined 30d        claude_portfolio (n>=3, all-time)
+#   ETH/USDT:USDT       -$3.45  67% WR      +$0.45  75% WR (n=8)   ← profitable!
+#   AVAX/USDT:USDT      -$1.92  43% WR      -$0.02  50% WR (n=4)   ← near-zero
+#   ADA/USDT:USDT       -$2.12  17% WR      no claude_portfolio data
+#
+# Phase 10.2 was penalising claude_portfolio for sins of strategies that
+# don't fire anymore. ETH / AVAX / ADA are unblocked.
+#
+# Conversely, the claude_portfolio-only data exposes symbols that ARE
+# net-negative in the active path but were not on the combined blacklist:
+#   ALGO/USDT:USDT  (n=7)   -$0.93   29% WR
+#   LINK/USDT:USDT  (n=8)   -$0.82   38% WR
+#   AAVE/USDT:USDT  (n=3)   -$0.44   0%  WR  (small sample but 100% loss rate)
+#   SOL/USDT:USDT   (n=4)   -$0.32   0%  WR  (already blocked; remains)
+#
+# Adding these per claude_portfolio-only evidence. ALGO is particularly
+# important — it was on the WHITELIST as ⭐ (based on stale combined data
+# from deprecated strategies) which would have sized it UP.
+#
+# Net BLACKLIST_HARD update: removed {ETH, AVAX, ADA}, added {ALGO, LINK,
+# AAVE}, kept {SOL, XRP}. Re-evaluate after 50+ post-restart trades using
+# `python scripts/diagnostic_report.py --since 2026-04-28`.
 BLACKLIST_HARD: set = {
-    "SOL/USDT:USDT", "XRP/USDT:USDT",
-    "ETH/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT",
+    "SOL/USDT:USDT", "XRP/USDT:USDT",       # n=12-13, 0-15% WR (Phase 10.2)
+    "ALGO/USDT:USDT", "LINK/USDT:USDT",     # claude_portfolio: 29-38% WR (Phase 12.2)
+    "AAVE/USDT:USDT",                       # claude_portfolio: 0% WR / n=3 (Phase 12.2)
 }
 
 # Hour gating (UTC)
 #
-# 2026-04-27 (Phase 10.3): tightened from set(range(24)) per 30-day
-# warehouse attribution. The data was unambiguously bimodal:
+# 2026-04-27 (Phase 10.3): tightened from set(range(24)) per COMBINED 30-day
+# warehouse attribution.
+# 2026-04-28 (Phase 12.2): Phase 10.3 was wrong. The combined-data hourly
+# losses were dominated by deprecated MultiTF/Supertrend trades. When
+# restricted to the active claude_portfolio strategy_family, three of
+# Phase 10.3's BLOCKED hours were among the strongest WINNERS:
 #
-# Strong winners (kept):
-#   H15 +$6.25 (69%)  H14 +$5.58 (44%)  H16 +$3.61 (64%)  H21 +$3.16 (43%, n=23)
-#   H02 +$1.50 (63%)  H03 +$1.45 (86%)  H13 +$1.18 (78%)  H23 +$0.15 (56%)
-#   H11 +$0.10 (50%, marginal — kept as sample buffer)
+#   hour  combined-data    claude_portfolio (n>=3)
+#   H00   -$20.04 (23%)    +$0.98  50% WR (n=10)  ← was BLOCKED
+#   H17   -$26.08 (27%)    +$0.89  33% WR (n=6)   ← was BLOCKED
+#   H19   -$7.83  (38%)    +$1.04  40% WR (n=5)   ← was BLOCKED
 #
-# Hard losers (blocked):
-#   H17 -$26.08 (27%, n=22)  H00 -$20.04 (23%, n=22)  H04 -$11.21 (38%)
-#   H01 -$8.92 (25%)         H19 -$7.83 (38%, n=16)   H20 -$1.60 (10%)
-#   H22 -$1.31 (45%)         H05 -$1.11 (14%)         H08 -$0.64 (25%)
-#   H07 -$0.50 (42%)         H06 -$0.06 (0%)          H09 -$0.09 (0%)
-#   H12 -$0.28 (60%, marginal — blocked as low-volume neutral)
-#   H18 -$0.48 (42%, marginal — blocked as low-volume neutral)
+# Re-fitting on claude_portfolio-only data:
 #
-# Net effect: removes ~$78 of historical 30-day loss tape exposure.
+# STRONG WINNERS (sum > +$0.50 in claude_portfolio):
+#   H03 +$1.02 (80%, n=5)  H19 +$1.04 (40%, n=5)
+#   H00 +$0.98 (50%, n=10) H17 +$0.89 (33%, n=6)
+#   H02 +$0.70 (33%, n=3)  H15 +$0.67 (40%, n=5)
+#   H14 +$0.57 (33%, n=6)  H21 +$0.50 (67%, n=3)
+#
+# CATASTROPHIC LOSERS (sum << 0):
+#   H22 -$3.49 (0%, n=5)   H05 -$1.31 (0%, n=6)
+#   H18 -$0.54 (40%)       H20 -$0.53 (20%)
+#   H01 -$0.49 (0%)        H12 -$0.45 (50%)
+#
+# THIN POSITIVE / MARGINAL (kept allowed as upside):
+#   H07 (-$0.17, 67% WR)   H08 (-$0.26, 50% WR)
+#   H16 (-$0.32, 60% WR)   H23 (-$0.11, 50% WR)
+#
+# THIN SAMPLE (n<3 in claude_portfolio — no evidence either way, default
+# allowed so signal can develop): H06, H09, H10, H13.
+#
 # ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
 # (locked by tests/test_hour_gates.py).
-ALLOWED_HOURS_UTC = {2, 3, 11, 13, 14, 15, 16, 21, 23}
-WARMUP_HOURS_UTC  = {2, 3, 11, 23}     # half-size on thin-sample / marginal
-PEAK_HOURS_UTC    = {14, 15, 16}       # CONVICTION routing — strongest dollar PnL
-BLOCKED_HOURS_UTC = {0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 17, 18, 19, 20, 22}
+ALLOWED_HOURS_UTC = {0, 2, 3, 6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 19, 21, 23}
+PEAK_HOURS_UTC    = {0, 3, 17, 19}     # CONVICTION — n>=5, sum > +$0.85
+WARMUP_HOURS_UTC  = {6, 7, 8, 9, 10, 13, 16, 23}  # thin-sample or borderline
+BLOCKED_HOURS_UTC = {1, 4, 5, 11, 12, 18, 20, 22}
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals
