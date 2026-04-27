@@ -814,10 +814,12 @@ class BotEngine:
         Gates checked in order:
           hour class → throttle pause → tier requirements → high-ATR clamp.
         """
-        from config import LEVERAGE_TIERS, WHITELIST_SYMBOLS, HIGH_ATR_PCT_THRESHOLD
+        from config import (LEVERAGE_TIERS, WHITELIST_SYMBOLS,
+                             HIGH_ATR_PCT_THRESHOLD, STAR_SYMBOLS)
 
         hour = self._current_utc_hour()
         hour_class = self._classify_hour(hour)
+        is_star = symbol in STAR_SYMBOLS
 
         if hour_class == "blocked":
             logger.info(
@@ -874,6 +876,13 @@ class BotEngine:
             # Warmup hours — half size
             if hour_class == "warmup":
                 params["size_pct"] *= 0.5
+            # STAR_SYMBOLS — proven net-positive in claude_portfolio (Phase 12.4):
+            # ATOM 12 trades / +$2.02 sum, ARB 18 trades / +$1.20 sum. Bump size
+            # 1.3x (capped at 0.20) so proven winners get proportionally more
+            # capital than the typical EDGE_AMBIGUOUS tape. Conservative
+            # multiplier given small sample (n>=8 each); revisit at n=30+.
+            if is_star:
+                params["size_pct"] = min(0.20, params["size_pct"] * 1.3)
 
             # AutoMutator leverage cap (post-mortem evidence)
             if self.auto_mutator:
@@ -887,7 +896,8 @@ class BotEngine:
             logger.info(
                 f"[Tier] {symbol} → {tier_name} "
                 f"(conf={confidence:.0%}, hour={hour:02d}/{hour_class}, "
-                f"wl={in_whitelist}, btc={btc_trend}, atr%={atr_pct*100:.2f}%, "
+                f"wl={in_whitelist}{' STAR' if is_star else ''}, "
+                f"btc={btc_trend}, atr%={atr_pct*100:.2f}%, "
                 f"lev={params['leverage']}x, size={params['size_pct']*100:.1f}%, "
                 f"sl={params['sl_pct']*100:.1f}%)")
             return tier_name, params
