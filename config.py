@@ -299,8 +299,13 @@ RISK = {
     # similar). Liquidation risk: any 1% adverse move at 99x ≈ wipe the
     # margin. SL at 1.5% = -148% lev loss → exchange liquidates first.
     # Restore by reverting both to 2.
-    "futures_max_leverage": 99,
-    "default_leverage":     99,
+    # 2026-04-29: reverted L99 99→2 per user directive "I don't want 99
+    # leverage". size_pct stays at 0.50 (per "go all-in" — full deployment).
+    # At 2x × 0.50 size on $400 balance: $200 margin × 2 = $400 notional;
+    # 1.5% SL = $6 loss = 1.5% of balance. Survivable; supports ~2-3
+    # concurrent positions per exchange pocket.
+    "futures_max_leverage": 2,
+    "default_leverage":     2,
     "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop":        True,
     # 2026-04-28 retune (Phase 11) — converge trailing on the empirical
@@ -361,8 +366,10 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # MAX_LOSS_PER_TRADE_PCT cap below.
 LEVERAGE_TIERS = {
     "STANDARD": {
-        "leverage":               99,        # L99 ALL-IN
-        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
+        # 2026-04-29: reverted 99→2 per user directive. size_pct retained at
+        # 0.50 for capital deployment ("go all-in with available USDT").
+        "leverage":               2,
+        "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
         # 2026-04-28 (UNBLOCK_ALL/A): 0.65 -> 0.0. STANDARD now accepts
@@ -376,8 +383,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   False,
     },
     "STRONG": {
-        "leverage":               99,        # L99 ALL-IN
-        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
+        "leverage":               2,
+        "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.72,
@@ -387,8 +394,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "CONVICTION": {
-        "leverage":               99,        # L99 ALL-IN
-        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
+        "leverage":               2,
+        "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.80,
@@ -398,8 +405,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "AGGRESSIVE": {
-        "leverage":               99,        # L99 ALL-IN
-        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
+        "leverage":               2,
+        "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.85,

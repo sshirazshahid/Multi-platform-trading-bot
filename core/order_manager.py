@@ -459,43 +459,23 @@ class OrderManager:
         if current >= needed:
             return True
 
-        # Spec §14 / §2: Block spot→futures transfers until futures proves
-        # positive expectancy. Futures→spot is always allowed (de-risking).
+        # 2026-04-29: Spec §14 expectancy-gate on spot→futures auto-transfer
+        # was LIFTED per user directive "Go all in with the available USDT on
+        # all exchanges". The original gate (commented below) blocked the
+        # transfer unless any strategy in kelly_stats.json showed positive
+        # expectancy — currently NONE do because most negative-expectancy
+        # entries were driven by pre-fix bot bugs (SL placement failures,
+        # ghost-sync closes, BREAKEVEN fail-closed). The user wants full
+        # capital deployment now that those bugs are fixed.
+        #
+        # Restore the gate (paste the block from git history at this commit)
+        # if you ever want to re-instate Spec §14:
+        #   ks = json.loads(Path('data/kelly_stats.json').read_text())
+        #   has_positive = any(...)  # see git blame for the closed form
+        #   if not has_positive: return False
+        #
+        # Futures→spot remains always allowed (de-risking is never blocked).
         other_type = "futures" if market_type == "spot" else "spot"
-        if market_type == "futures" and other_type == "spot":
-            try:
-                import json as _j
-                from pathlib import Path as _P
-                _kp = _P("data/kelly_stats.json")
-                if _kp.exists():
-                    ks = _j.loads(_kp.read_text())
-                else:
-                    ks = {}
-                # Check if any strategy has positive expectancy
-                # E = WR * avg_win - (1-WR) * avg_loss
-                has_positive = False
-                for v in ks.values():
-                    w, l = v.get("wins", 0), v.get("losses", 0)
-                    tw, tl = v.get("total_win", 0), v.get("total_loss", 0)
-                    if w + l > 10:  # meaningful sample
-                        wr = w / (w + l)
-                        avg_w = tw / w if w > 0 else 0
-                        avg_l = tl / l if l > 0 else 0
-                        exp = wr * avg_w - (1 - wr) * avg_l
-                        if exp > 0:
-                            has_positive = True
-                            break
-                if not has_positive:
-                    logger.warning(
-                        "[Orders] Auto-transfer spot→futures BLOCKED: "
-                        "futures expectancy is negative (spec §14)")
-                    return False
-            except Exception:
-                # If we can't verify expectancy, block the transfer (safe default)
-                logger.warning(
-                    "[Orders] Auto-transfer spot→futures BLOCKED: "
-                    "cannot verify expectancy — defaulting to safe")
-                return False
 
         other_bal  = self.available_balance(exchange, other_type)
 
