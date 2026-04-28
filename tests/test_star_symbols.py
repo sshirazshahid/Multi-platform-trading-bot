@@ -42,13 +42,19 @@ def test_star_set_is_evidence_based():
         f"the new membership and update the config docstring evidence.")
 
 
-def test_star_size_bump_capped_at_20pct():
-    """STAR size bump is 1.3x but capped at 0.20. Worked example:
-       STANDARD size 0.15 × 1.3 = 0.195 → uncapped
-       Hypothetical 0.18 × 1.3 = 0.234 → capped to 0.20
-    The cap prevents accidental >20% sizing on a single trade."""
+def test_star_size_bump_increases_size_on_standard():
+    """STAR size bump is 1.3x with cap at 1.0 (effectively no cap at our scale).
+
+    2026-04-28 (L99 ALL-IN): STANDARD base size raised 0.15 → 0.50, so the
+    prior 0.20 cap would have SHRUNK STAR symbols below the non-STAR
+    baseline. Cap raised to 1.0; the bump remains a 1.3x multiplier. STAR
+    symbols thus receive +30% size relative to non-STAR at every base.
+    Worked examples:
+       L99 STANDARD: 0.50 × 1.3 = 0.65 → uncapped (≤ 1.0)
+       Pre-L99 STANDARD (0.15): 0.15 × 1.3 = 0.195 → uncapped
+       Hypothetical 0.80: 0.80 × 1.3 = 1.04 → capped to 1.0
+    """
     base = LEVERAGE_TIERS["STANDARD"]["size_pct"]
-    bumped = min(0.20, base * 1.3)
-    assert bumped <= 0.20, "size_pct must be capped at 0.20"
-    # And the bump must actually do something on STANDARD
+    bumped = min(1.0, base * 1.3)
+    assert bumped <= 1.0, "size_pct must be capped at 1.0"
     assert bumped > base, "STAR bump must increase size on STANDARD tier"

@@ -282,20 +282,25 @@ RISK = {
     # 2026-04-16 signed-checklist value; user accepted the trade-off.
     "max_position_pct":     0.05,
     "max_open_positions":   8,        # 2 per exchange — focus capital, reduce correlation risk
-    # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed. At 5% on a
-    # $400 balance the halt was 12+ losses away — too deep to be an early
-    # brake. 1.5% halts at ~$6, roughly 2-3 design-SL hits, which matches the
-    # observed catastrophic-trade frequency (1 −$3.28 outlier / week was 100%
-    # of weekly net P&L).
-    "max_daily_loss_pct":   0.015,    # 1.5% daily loss halt
+    # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed.
+    # 2026-04-28 (L99): KEPT at 0.015. Daily-loss halt is the last
+    # post-trade circuit breaker — at 99x leverage a single -1% move
+    # is catastrophic; this halt limits damage to one bad day. Removal
+    # would require explicit user authorization.
+    "max_daily_loss_pct":   0.015,
     "default_stop_loss":    0.020,    # 2.0% fallback SL (ATR-based is primary)
     "default_take_profit":  0.060,    # 6.0% fallback TP (~3:1 R:R vs 2% SL)
     # 2026-04-27: leverage cut 3 → 2. Last 7d at 3x: 46 closed trades, 16 wins,
     # net −$3.19. Single APT outlier was −$3.28 (−9.5% margin = −3.17% price ×
     # 3x). At 2x the same price move is −6.34% margin = ~−$2.13 worst case;
     # cuts every loss magnitude by 33% while preserving the 2.5:1 R:R math.
-    "futures_max_leverage": 2,
-    "default_leverage":     2,
+    # 2026-04-28 (L99 ALL-IN): max leverage 2 → 99 per user directive.
+    # Exchange-side caps will clamp (Binance ~75-125x by symbol; Bybit
+    # similar). Liquidation risk: any 1% adverse move at 99x ≈ wipe the
+    # margin. SL at 1.5% = -148% lev loss → exchange liquidates first.
+    # Restore by reverting both to 2.
+    "futures_max_leverage": 99,
+    "default_leverage":     99,
     "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop":        True,
     # 2026-04-28 retune (Phase 11) — converge trailing on the empirical
@@ -310,7 +315,11 @@ RISK = {
     # floor and matching mcp_take_profit's empirical capture.
     "trailing_activation":  0.020,    # 2.0% — clear cost floor (was 1.5%)
     "trailing_distance":    0.010,    # 1.0% — wider trail past activation
-    "max_drawdown_pct":     0.12,     # 12% max DD before halt
+    # 2026-04-28 (L99): KEPT at 0.12. Drawdown halt is the from-peak
+    # circuit breaker; at 99x leverage it's the only thing standing
+    # between a few bad trades and a wiped account. Removal would
+    # require explicit user authorization.
+    "max_drawdown_pct":     0.12,
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
     "max_position_age_hours": 6,      # 6h hard expiry
     "max_stale_hours":       4.0,     # 4h stale exit (was 1.5h — conflicted with 2h min hold)
@@ -352,8 +361,8 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # MAX_LOSS_PER_TRADE_PCT cap below.
 LEVERAGE_TIERS = {
     "STANDARD": {
-        "leverage":               2,
-        "size_pct":               0.15,     # 15% (was 5%) — lift above cost floor
+        "leverage":               99,        # L99 ALL-IN
+        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
         # 2026-04-28 (UNBLOCK_ALL/A): 0.65 -> 0.0. STANDARD now accepts
@@ -367,8 +376,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   False,
     },
     "STRONG": {
-        "leverage":               2,
-        "size_pct":               0.10,     # 10% (was 3%)
+        "leverage":               99,        # L99 ALL-IN
+        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.72,
@@ -378,8 +387,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "CONVICTION": {
-        "leverage":               2,
-        "size_pct":               0.10,
+        "leverage":               99,        # L99 ALL-IN
+        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.80,
@@ -389,8 +398,8 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "AGGRESSIVE": {
-        "leverage":               2,
-        "size_pct":               0.10,
+        "leverage":               99,        # L99 ALL-IN
+        "size_pct":               0.50,      # 50% — concentrated bets per L99 directive
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.85,

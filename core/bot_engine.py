@@ -874,15 +874,19 @@ class BotEngine:
 
             params = dict(t)
             # Warmup hours — half size
+            # 2026-04-28 (L99 ALL-IN): warmup half-size disabled. The half
+            # was the cause of the DOGE rejection ($16.27 < $30 min); under
+            # L99 the user wants every signal sized at full tier. Restore
+            # by un-commenting the multiplier.
             if hour_class == "warmup":
-                params["size_pct"] *= 0.5
-            # STAR_SYMBOLS — proven net-positive in claude_portfolio (Phase 12.4):
-            # ATOM 12 trades / +$2.02 sum, ARB 18 trades / +$1.20 sum. Bump size
-            # 1.3x (capped at 0.20) so proven winners get proportionally more
-            # capital than the typical EDGE_AMBIGUOUS tape. Conservative
-            # multiplier given small sample (n>=8 each); revisit at n=30+.
+                pass  # params["size_pct"] *= 0.5  # L99 ALL-IN: keep full size
+            # STAR_SYMBOLS — proven net-positive in claude_portfolio (Phase 12.4).
+            # 2026-04-28 (L99 ALL-IN): cap raised 0.20 → 1.0 because the L99
+            # base size is 0.50; the 0.20 cap would have SHRUNK STAR symbols
+            # below the non-STAR baseline. Cap at 1.0 = no cap in practice;
+            # the underlying balance and exchange limits do the clamping.
             if is_star:
-                params["size_pct"] = min(0.20, params["size_pct"] * 1.3)
+                params["size_pct"] = min(1.0, params["size_pct"] * 1.3)
 
             # AutoMutator leverage cap (post-mortem evidence)
             if self.auto_mutator:
@@ -1499,17 +1503,12 @@ class BotEngine:
                 f"[Claude] {symbol} size reduced {_meta_size_multiplier:.0%} "
                 f"(meta-filter quality gate)")
         notional = mtype_bal * size_fraction
-        # 2026-04-24: min-notional floor raised to keep the bot from placing
-        # trades whose P&L range is smaller than the cost floor (fees + spread
-        # + slippage ~$0.20-0.40 per round-trip at market). Below $15-30
-        # notional at 3x, even a +3% unleveraged move nets <$1 gross, making
-        # any fee drag dominant. Pockets smaller than the floor just skip.
-        if mtype_bal < 100:
-            min_notional = 10.0
-        elif mtype_bal < 500:
-            min_notional = 30.0
-        else:
-            min_notional = 50.0
+        # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
+        # min-notional floor reduced to the exchange-side minimum ($5).
+        # User directive: maximum aggression — let small trades through;
+        # at 99x leverage the cost floor doesn't bind. Restore the
+        # cost-floor tiers (10/30/50) by reverting this hunk.
+        min_notional = 5.0
         if notional < min_notional:
             logger.info(
                 f"[Claude] Notional ${notional:.2f} < ${min_notional:.2f} minimum "
