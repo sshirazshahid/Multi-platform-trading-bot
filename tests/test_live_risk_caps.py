@@ -93,9 +93,21 @@ def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):
     assert rm._opens_today == 0
 
 
-def test_shorts_disabled_kill_switch(monkeypatch):
-    """config.SHORTS_DISABLED=True must block shorts immediately, even
-    when the post-mortem-driven window is inactive."""
+def test_shorts_unblock_all_overrides_post_mortem_window(monkeypatch):
+    """2026-04-28 (UNBLOCK_ALL/A): shorts_blocked() now always returns
+    False per user directive. The post-mortem-driven window AND the
+    config.SHORTS_DISABLED flag are short-circuited at the method top.
+
+    Restoring the kill-switch semantics requires removing the early
+    `return False` in `core.auto_mutator.AutoMutator.shorts_blocked` —
+    after which a re-enabled assertion (preserved below as commented
+    expected behaviour) becomes the right test:
+
+        monkeypatch.setattr(config, "SHORTS_DISABLED", True)
+        assert am.shorts_blocked() is True
+
+    Until then, this test pins the UNBLOCK_ALL contract.
+    """
     import config
 
     from core.auto_mutator import AutoMutator
@@ -106,4 +118,12 @@ def test_shorts_disabled_kill_switch(monkeypatch):
     assert am.shorts_blocked() is False
 
     monkeypatch.setattr(config, "SHORTS_DISABLED", True)
-    assert am.shorts_blocked() is True
+    assert am.shorts_blocked() is False, (
+        "UNBLOCK_ALL/A overrides the SHORTS_DISABLED kill-switch — "
+        "see core.auto_mutator.AutoMutator.shorts_blocked docstring."
+    )
+
+    # Even with an active post-mortem window, UNBLOCK_ALL must dominate.
+    am._state["shorts_blocked_until"] = 9999999999
+    monkeypatch.setattr(config, "SHORTS_DISABLED", False)
+    assert am.shorts_blocked() is False

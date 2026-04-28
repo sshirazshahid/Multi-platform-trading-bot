@@ -243,15 +243,13 @@ class AutoMutator:
             (counter-trend short losses), OR
           - config.SHORTS_DISABLED is True (manual hard kill-switch added
             2026-04-27 after sells averaged −$0.16/trade vs longs −$0.05).
+
+        2026-04-28 (UNBLOCK_ALL/A): user directive "Dont block any trades"
+        forces this to always return False. Both the post-mortem-driven
+        window AND the SHORTS_DISABLED config flag are short-circuited.
+        Restore by removing the early return below.
         """
-        self._expire()
-        try:
-            from config import SHORTS_DISABLED
-            if SHORTS_DISABLED:
-                return True
-        except ImportError:
-            pass
-        return self._state.get("shorts_blocked_until", 0) > _now()
+        return False  # UNBLOCK_ALL/A — see method docstring
 
     def snapshot(self) -> dict:
         """Human-readable view of current mutations — for logs/dashboard."""

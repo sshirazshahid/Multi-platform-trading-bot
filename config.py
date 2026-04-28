@@ -356,8 +356,12 @@ LEVERAGE_TIERS = {
         "size_pct":               0.15,     # 15% (was 5%) — lift above cost floor
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
-        "min_confidence":         0.65,
+        # 2026-04-28 (UNBLOCK_ALL/A): 0.65 -> 0.0. STANDARD now accepts
+        # any candidate the score gate passed. Restore by reverting to 0.65.
+        "min_confidence":         0.0,
         "requires_whitelist":     False,
+        # 2026-04-28 (UNBLOCK_ALL/A): hour gate already empty — flag retained
+        # for higher tiers' use; doesn't matter for STANDARD when allowed=24h.
         "requires_allowed_hour":  True,
         "requires_peak_hour":     False,
         "requires_btc_aligned":   False,
@@ -400,10 +404,20 @@ LEVERAGE_TIERS = {
 # 2026-04-24: clamp loosened with size_pct increase. 0.15 × 3 × 0.015 = 0.675%
 # balance risk worst-case; 1.0% clamp leaves headroom for strategy-level SL
 # overrides up to 2.2%.
+# Original entry-clamp value. Kept at 0.010 (1% of balance per trade)
+# because:
+#   - the entry-side clamp (bot_engine._within_loss_clamp) is now
+#     short-circuited regardless of this value (UNBLOCK_ALL/A);
+#   - the SAME constants are read by risk_manager.record_trade_result
+#     to set the post-trade outlier review flag — that's safety, not
+#     an entry block. Keep the threshold sane so safety still fires.
 MAX_LOSS_PER_TRADE_PCT = 0.010
 
 # 2026-04-24: raised from $2 → $4 to allow 15% × 3x × 1.5% sizing on $377
 # balance (~$2.55 risk/trade). $4 cap still prevents oversize on spikes.
+# Same rationale as MAX_LOSS_PER_TRADE_PCT above — kept at the original
+# safety threshold because it gates the post-trade review flag, not the
+# entry path. The entry clamp is short-circuited in bot_engine.
 MAX_LOSS_PER_TRADE_USD = 4.0
 
 # Consecutive-loss throttle — dynamic leverage downgrade + pause

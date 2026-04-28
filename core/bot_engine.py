@@ -917,7 +917,17 @@ class BotEngine:
         The dollar ceiling catches strategies that bypass mcp_brain's $4 sizer
         (legacy Supertrend etc. that ran outside the scoring engine and
         produced -$11/-$8 fat-tail losses in the Apr 2026 review).
+
+        2026-04-28 (UNBLOCK_ALL/A): user directive "Dont block any trades"
+        forces this to always return True. The post-trade outlier safety
+        (risk_manager.record_trade_result → MAX_LOSS_PER_TRADE_USD review
+        flag) still operates — that path is a SAFETY response, not an
+        entry-side block, and was kept intentional. Restore by removing
+        the early return below.
         """
+        return True  # UNBLOCK_ALL/A — clamp disabled for entry path
+
+        # ── Original logic preserved below (unreachable until early-return removed):
         from config import MAX_LOSS_PER_TRADE_PCT, MAX_LOSS_PER_TRADE_USD
         if balance <= 0:
             return False
