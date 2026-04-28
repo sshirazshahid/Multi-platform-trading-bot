@@ -324,7 +324,10 @@ RISK = {
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
     # bleed regardless of per-trade SL discipline.
-    "max_trades_per_day":   20,
+    # 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" —
+    # raised from 20 to 200 so the daily cap effectively never binds.
+    # Restore by reverting to 20 if you want the data-driven cap back.
+    "max_trades_per_day":   200,
 }
 
 RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
@@ -420,7 +423,10 @@ HIGH_ATR_PCT_THRESHOLD = 0.025    # ATR% > 2.5% → max leverage = STANDARD (2x)
 # catch the broader negative-EV pattern. AutoMutator.shorts_blocked() honors
 # this flag; bot_engine._execute_open's existing gate at the side=='sell'
 # check then refuses entries with no further wiring needed.
-SHORTS_DISABLED = True
+# 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" —
+# re-enabled shorts. Restore the 7-day-evidence kill-switch by setting True
+# (last evidence: 9 sells avg -$0.16/trade vs 37 buys avg -$0.05).
+SHORTS_DISABLED = False
 
 # ==============================================================
 # TRADING GATES — evidence-based whitelist / blacklist / hours
@@ -522,11 +528,15 @@ STAR_SYMBOLS = {
 # Net BLACKLIST_HARD update: removed {ETH, AVAX, ADA}, added {ALGO, LINK,
 # AAVE}, kept {SOL, XRP}. Re-evaluate after 50+ post-restart trades using
 # `python scripts/diagnostic_report.py --since 2026-04-28`.
-BLACKLIST_HARD: set = {
-    "SOL/USDT:USDT", "XRP/USDT:USDT",       # n=12-13, 0-15% WR (Phase 10.2)
-    "ALGO/USDT:USDT", "LINK/USDT:USDT",     # claude_portfolio: 29-38% WR (Phase 12.2)
-    "AAVE/USDT:USDT",                       # claude_portfolio: 0% WR / n=3 (Phase 12.2)
-}
+# 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" — emptied.
+# Prior evidence-driven contents (recoverable via git):
+#   SOL/USDT:USDT  n=12-13, 0-15% WR (Phase 10.2)
+#   XRP/USDT:USDT  n=12-13, 0-15% WR (Phase 10.2)
+#   ALGO/USDT:USDT n=7,  29% WR (Phase 12.2)
+#   LINK/USDT:USDT n=8,  38% WR (Phase 12.2)
+#   AAVE/USDT:USDT n=3,  0%  WR (Phase 12.2)
+# AutoMutator's runtime blacklist (consec-loss based) still operates on top.
+BLACKLIST_HARD: set = set()
 
 # Hour gating (UTC)
 #
@@ -564,10 +574,19 @@ BLACKLIST_HARD: set = {
 #
 # ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
 # (locked by tests/test_hour_gates.py).
-ALLOWED_HOURS_UTC = {0, 2, 3, 6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 19, 21, 23}
-PEAK_HOURS_UTC    = {0, 3, 17, 19}     # CONVICTION — n>=5, sum > +$0.85
-WARMUP_HOURS_UTC  = {6, 7, 8, 9, 10, 13, 16, 23}  # thin-sample or borderline
-BLOCKED_HOURS_UTC = {1, 4, 5, 11, 12, 18, 20, 22}
+#
+# 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" — opened
+# all 24 hours. PEAK_HOURS_UTC retained as leverage-tier hint (CONVICTION
+# routing on the strongest hours); WARMUP_HOURS_UTC retained as half-size
+# hint on thin-sample hours. Neither REJECTS entries — they only modulate
+# sizing on entries that the (now-empty) gate accepts.
+# Prior data-driven values (recoverable via git):
+#   ALLOWED = {0,2,3,6,7,8,9,10,13,14,15,16,17,19,21,23}
+#   BLOCKED = {1,4,5,11,12,18,20,22}
+ALLOWED_HOURS_UTC = set(range(24))
+PEAK_HOURS_UTC    = {0, 3, 17, 19}
+WARMUP_HOURS_UTC  = {6, 7, 8, 9, 10, 13, 16, 23}
+BLOCKED_HOURS_UTC = set()
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals

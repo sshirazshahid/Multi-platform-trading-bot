@@ -54,13 +54,22 @@ def test_phase12_claude_portfolio_winners_allowed():
 
 
 def test_phase12_catastrophic_claude_portfolio_losers_blocked():
-    """Hours with sum PnL < -$0.40 in claude_portfolio (n>=3) must be blocked.
+    """Hours with sum PnL < -$0.40 in claude_portfolio (n>=3) SHOULD be
+    blocked when block-mode is engaged.
 
-    Evidence (claude_portfolio-only):
+    Evidence preserved (claude_portfolio-only attribution as of Phase 12.2):
       H22 -$3.49 (0%, n=5)    H05 -$1.31 (0%, n=6)
       H18 -$0.54 (40%, n=5)   H20 -$0.53 (20%, n=5)
       H01 -$0.49 (0%, n=3)    H12 -$0.45 (50%, n=6)
+
+    2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" means
+    BLOCKED_HOURS_UTC may legitimately be empty. When that's the case, the
+    test passes — the policy is "let everything through and let
+    AutoMutator's runtime blacklist do the policing." Restore evidence-
+    based blocking by repopulating BLOCKED_HOURS_UTC in config.py.
     """
+    if not BLOCKED_HOURS_UTC:
+        return  # UNBLOCK_ALL mode — assertion intentionally relaxed
     cp_losers = {1, 5, 12, 18, 20, 22}
     assert cp_losers.issubset(BLOCKED_HOURS_UTC), (
         f"unblocked claude_portfolio losers: "
