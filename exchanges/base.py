@@ -348,14 +348,56 @@ class BaseExchange(ABC):
             logger.error(f"[{self.name}] fetch_open_orders: {e}")
             return []
 
-    def set_leverage(self, symbol: str, leverage: int):
+    def set_leverage(self, symbol: str, leverage: int) -> int:
+        """Set leverage for symbol on this exchange.
+
+        Returns the actually-applied leverage. Exchanges cap per-symbol
+        leverage by notional tier (e.g. Binance allows 125x on BTC at low
+        notional but only 25x on AXS at $20K notional). When the requested
+        value is rejected, this probes market metadata for the symbol's
+        max and walks down a ladder until one succeeds. The caller MUST
+        use the returned value (not the requested one) to size the
+        position, otherwise margin math diverges from reality.
+
+        Returns 0 if the exchange isn't ready or every attempt failed.
+        """
         if not self._ready():
-            return
+            return 0
         try:
             self.exchange.set_leverage(leverage, symbol)
             logger.info(f"[{self.name}] Leverage set: {leverage}x for {symbol}")
+            return leverage
         except Exception as e:
-            logger.warning(f"[{self.name}] set_leverage: {e}")
+            logger.warning(
+                f"[{self.name}] set_leverage({leverage}x) rejected for {symbol}: {e}")
+
+        market_max = None
+        try:
+            markets = self.exchange.markets or self.exchange.load_markets()
+            lim = (markets.get(symbol, {}) or {}).get("limits", {}).get("leverage", {})
+            if lim.get("max"):
+                market_max = int(lim["max"])
+        except Exception:
+            pass
+
+        ladder = [75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1]
+        ladder = [x for x in ladder if x < leverage]
+        if market_max and market_max < leverage:
+            ladder = [market_max] + [x for x in ladder if x < market_max]
+
+        for lev in ladder:
+            try:
+                self.exchange.set_leverage(lev, symbol)
+                logger.warning(
+                    f"[{self.name}] Leverage CLAMPED {leverage}x → {lev}x "
+                    f"for {symbol} (exchange tier cap)")
+                return lev
+            except Exception:
+                continue
+
+        logger.error(
+            f"[{self.name}] Could not set ANY leverage for {symbol}; aborting trade")
+        return 0
 
     def get_min_order_size(self, symbol: str) -> float:
         if not self._ready():

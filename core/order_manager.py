@@ -600,7 +600,20 @@ class OrderManager:
         if market_type == "futures" and leverage > 1:
             safe_lev = self.risk.validate_leverage(leverage)
             if not self.dry_run:
-                exchange.set_leverage(symbol, safe_lev)
+                applied = exchange.set_leverage(symbol, safe_lev)
+                if applied == 0:
+                    logger.warning(
+                        f"[Orders] {symbol}: leverage setup failed entirely on "
+                        f"{exchange.name}; aborting trade")
+                    return None
+                if applied != safe_lev:
+                    ratio = applied / safe_lev
+                    size = size * ratio
+                    logger.info(
+                        f"[Orders] {symbol}: leverage clamped {safe_lev}x → "
+                        f"{applied}x by exchange; size rescaled ×{ratio:.3f} "
+                        f"to preserve margin (notional reduces accordingly)")
+                    safe_lev = applied
             leverage = safe_lev
 
         # LIVE: Auto-transfer if needed
