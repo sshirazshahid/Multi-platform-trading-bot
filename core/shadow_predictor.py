@@ -85,13 +85,23 @@ class ShadowPredictor:
         try:
             from core.models import LRModel
             self._model = LRModel.load(LATEST_MODEL)
-            # The model artifact filename encodes the version
-            # (lr_v_<tag>_<ts>.pkl). Read the resolved symlink target.
+            # Phase 13.5b: read the actual model_version from the saved
+            # joblib payload (set by scripts/train_models). On Windows the
+            # symlink-stem fallback is "lr_v_latest" which loses the
+            # version metadata, so we read it from inside the artifact.
             try:
-                target = LATEST_MODEL.resolve()
-                self._model_version = target.stem
+                import joblib
+                payload = joblib.load(LATEST_MODEL)
+                self._model_version = str(
+                    payload.get("model_version")
+                    or payload.get("version_name")
+                    or LATEST_MODEL.resolve().stem
+                )
             except Exception:
-                self._model_version = LATEST_MODEL.stem
+                try:
+                    self._model_version = LATEST_MODEL.resolve().stem
+                except Exception:
+                    self._model_version = LATEST_MODEL.stem
             try:
                 from scripts.train_models import FEATURE_KEYS
                 self._feature_keys = list(FEATURE_KEYS)
@@ -135,19 +145,39 @@ class ShadowPredictor:
         side: str,
         features: dict,
         warehouse=None,
+        candidate_id: Optional[int] = None,
+        market_type: Optional[str] = None,
     ) -> Optional[float]:
         """Compute p_win and persist to warehouse.predictions.
 
-        Returns the p_win value (or None if predictor inactive) so callers
-        can opt to log it elsewhere.
+        Args
+        ----
+        symbol : str
+            Use unified ccxt format. If `market_type='futures'` and the
+            symbol lacks the `:USDT` suffix, the predictor appends it so
+            the row joins cleanly to trades (which always use the
+            settle-currency suffix).
+        candidate_id : int | None
+            The warehouse candidate row id this prediction is logged
+            against. Phase 13.5b — enables `predictions JOIN trades ON
+            trades.candidate_id = predictions.candidate_id` for
+            re-fitting with realised outcomes.
+
+        Returns the p_win value (or None if predictor inactive).
         """
         p = self.predict_p_win(features)
         if p is None:
             return None
+        # Phase 13.5b: normalise symbol to the trades.symbol format so
+        # downstream joins work. Trades for futures are stored as
+        # "BASE/QUOTE:QUOTE"; predictions previously stored
+        # "BASE/QUOTE" which never matched.
+        sym = str(symbol)
+        if market_type == "futures" and ":" not in sym:
+            sym = f"{sym}:USDT"
         try:
             from core.warehouse import get_warehouse
             wh = warehouse if warehouse is not None else get_warehouse()
-            # Hash the feature vector for idempotency
             feat_canonical = json.dumps(
                 {k: _safe_float(features.get(k)) for k in self._feature_keys},
                 sort_keys=True,
@@ -156,13 +186,15 @@ class ShadowPredictor:
             feat_hash = hashlib.sha256(feat_canonical.encode()).hexdigest()[:16]
             wh._conn().execute(
                 "INSERT OR REPLACE INTO predictions"
-                "(ts, model_version, symbol, side, p_win, raw_score, feature_hash) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(ts, model_version, symbol, side, p_win, raw_score, "
+                " feature_hash, candidate_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     int(ts), str(self._model_version),
-                    str(symbol), str(side),
+                    sym, str(side),
                     float(p), float(features.get("score") or 0.0),
                     feat_hash,
+                    int(candidate_id) if candidate_id is not None else None,
                 ),
             )
         except Exception as e:

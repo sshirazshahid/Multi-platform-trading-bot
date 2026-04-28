@@ -272,7 +272,11 @@ def main():
     ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     suffix = f"_{args.tag}" if args.tag else ""
     art = ROOT / "data" / "models" / f"lr_v{suffix}_{ts_str}.pkl"
-    final.save(art)
+    # Phase 13.5b — embed model_version in the artifact so ShadowPredictor
+    # can recover the canonical version name even when loading via the
+    # `lr_v_latest.pkl` symlink/copy (Windows = always a copy).
+    model_version = f"lr_v{suffix}_{ts_str}"
+    final.save(art, model_version=model_version)
     latest = ROOT / "data" / "models" / "lr_v_latest.pkl"
     try:
         if latest.exists():

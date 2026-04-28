@@ -103,25 +103,29 @@ class LRModel:
             return proba[:, idx]
         return proba[:, -1]
 
-    def save(self, path) -> None:
+    def save(self, path, *, model_version: Optional[str] = None) -> None:
+        """Persist to a single .pkl. `model_version`, when provided, is
+        embedded in the payload so callers (e.g. ShadowPredictor on
+        Windows where symlinks aren't reliable) can recover the
+        canonical version name regardless of the on-disk filename."""
         if self._clf is None:
             raise RuntimeError("Cannot save unfit model")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(
-            {
-                "version": 1,
-                "C": self.C,
-                "random_state": self.random_state,
-                "max_iter": self.max_iter,
-                "class_weight": self.class_weight,
-                "scaler": self._scaler,
-                "clf": self._clf,
-                "n_features": self.n_features_,
-                "classes": self.classes_,
-            },
-            path,
-        )
+        payload = {
+            "version": 1,
+            "C": self.C,
+            "random_state": self.random_state,
+            "max_iter": self.max_iter,
+            "class_weight": self.class_weight,
+            "scaler": self._scaler,
+            "clf": self._clf,
+            "n_features": self.n_features_,
+            "classes": self.classes_,
+        }
+        if model_version is not None:
+            payload["model_version"] = str(model_version)
+        joblib.dump(payload, path)
 
     @classmethod
     def load(cls, path) -> "LRModel":

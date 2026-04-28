@@ -2342,10 +2342,13 @@ class MCPBrain:
                         features=feat,
                     )
                     # Phase 13.5 — shadow LR prediction. Logs to warehouse
-                    # `predictions` table only; does NOT influence the
-                    # gate_pass below. The point is to accumulate
-                    # forward-attributed (p_win, outcome) pairs for the
-                    # next re-fit (Phase 13.3 was bottlenecked at n=66).
+                    # `predictions` table only; does NOT influence gate_pass.
+                    # Phase 13.5b — pass candidate_id + market_type so:
+                    #   1. predictions row JOINs cleanly to trades via
+                    #      candidate_id (trades.candidate_id == this cand_id
+                    #      when the candidate becomes a trade);
+                    #   2. predictions.symbol uses the same "BASE/QUOTE:QUOTE"
+                    #      format the trades table uses.
                     if gate_pass:  # only log for trades we're actually about to take
                         try:
                             import time as _time
@@ -2356,6 +2359,8 @@ class MCPBrain:
                                 side=str(result.get("side", "")),
                                 features=feat,
                                 warehouse=wh,
+                                candidate_id=cand_id,
+                                market_type="futures",
                             )
                         except Exception as _se:
                             logger.debug(f"[Shadow] log_entry skipped: {_se}")

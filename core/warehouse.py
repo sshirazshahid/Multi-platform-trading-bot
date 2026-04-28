@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS features (
 CREATE INDEX IF NOT EXISTS idx_features_symbol_ts ON features(symbol, ts);
 
 -- predictions: every model inference. PK is composite to make replays idempotent.
+-- candidate_id (Phase 13.5b) lets predictions JOIN cleanly to trades via the
+-- candidates.id → trades.candidate_id chain. NULL on imported / pre-Phase-13.5
+-- rows so existing data doesn't trip the constraint.
 CREATE TABLE IF NOT EXISTS predictions (
     ts             INTEGER NOT NULL,
     model_version  TEXT    NOT NULL,
@@ -122,9 +125,13 @@ CREATE TABLE IF NOT EXISTS predictions (
     p_win          REAL    NOT NULL,
     raw_score      REAL,
     feature_hash   TEXT,
+    candidate_id   INTEGER,
     PRIMARY KEY (ts, model_version, symbol, side)
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts ON predictions(symbol, ts);
+-- idx_predictions_candidate is created in __init__ AFTER the migration
+-- ALTER TABLE adds the column on legacy databases. Doing it here would
+-- fail when the column doesn't exist yet.
 
 -- shadow_decisions: shadow runner's would-have decisions + sim PnL.
 CREATE TABLE IF NOT EXISTS shadow_decisions (
@@ -184,6 +191,18 @@ class Warehouse:
             # which we catch and ignore.
             try:
                 conn.execute("ALTER TABLE trades ADD COLUMN mcp_score REAL")
+            except sqlite3.OperationalError:
+                pass
+            # Phase 13.5b: predictions.candidate_id added for clean
+            # predictions→trades join. NULL on legacy rows.
+            try:
+                conn.execute("ALTER TABLE predictions ADD COLUMN candidate_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_predictions_candidate "
+                    "ON predictions(candidate_id)")
             except sqlite3.OperationalError:
                 pass
             conn.commit()
