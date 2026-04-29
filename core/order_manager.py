@@ -581,6 +581,12 @@ class OrderManager:
             safe_lev = self.risk.validate_leverage(leverage)
             if not self.dry_run:
                 applied = exchange.set_leverage(symbol, safe_lev)
+                # Defensive: any exchange override that pre-dates the
+                # int-return contract returns None. Treat None as "assume
+                # the requested leverage was applied" — preserves legacy
+                # behavior and avoids the NoneType / int crash.
+                if applied is None:
+                    applied = safe_lev
                 if applied == 0:
                     logger.warning(
                         f"[Orders] {symbol}: leverage setup failed entirely on "

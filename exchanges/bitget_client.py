@@ -355,20 +355,24 @@ class BitgetClient(BaseExchange):
 
     # ── set_leverage ──────────────────────────────────────────────────
 
-    def set_leverage(self, symbol: str, leverage: int):
+    def set_leverage(self, symbol: str, leverage: int) -> int:
+        """Returns actually-applied leverage; 0 if request fails for a real
+        reason (anything other than 'leverage not modified' = already set)."""
         if not self._ok():
-            return
+            return 0
         self.switch_to_futures()
         try:
             self.exchange.set_leverage(
                 leverage, symbol,
                 params={"marginCoin": "USDT"})
             logger.info(f"[Bitget] Leverage set: {leverage}x for {symbol}")
+            return leverage
         except Exception as e:
             if "leverage not modified" in str(e).lower():
                 logger.debug(f"[Bitget] Leverage already {leverage}x for {symbol}")
-            else:
-                logger.warning(f"[Bitget] set_leverage {symbol}: {e}")
+                return leverage
+            logger.warning(f"[Bitget] set_leverage {symbol}: {e}")
+            return 0
         finally:
             self.switch_to_spot()
 

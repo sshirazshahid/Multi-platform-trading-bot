@@ -243,12 +243,13 @@ class BinanceClient(BaseExchange):
         finally:
             self.switch_to_spot()
 
-    def set_leverage(self, symbol: str, leverage: int):
+    def set_leverage(self, symbol: str, leverage: int) -> int:
+        """Returns actually-applied leverage; 0 if exchange not ready."""
         if not self._ok():
-            return
+            return 0
         self.switch_to_futures()
         try:
-            super().set_leverage(symbol, leverage)
+            return super().set_leverage(symbol, leverage)
         finally:
             self.switch_to_spot()
 

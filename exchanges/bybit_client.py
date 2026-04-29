@@ -265,10 +265,16 @@ class BybitClient(BaseExchange):
 
     # ── set_leverage ──────────────────────────────────────────────────
 
-    def set_leverage(self, symbol: str, leverage: int):
-        """Bybit v5 requires buyLeverage and sellLeverage as strings."""
+    def set_leverage(self, symbol: str, leverage: int) -> int:
+        """Bybit v5 requires buyLeverage and sellLeverage as strings.
+
+        Returns the actually-applied leverage. 0 if exchange not ready or
+        request fails for a reason other than "already at this level"
+        (which is success). The order_manager rescales position size by
+        applied/requested to preserve margin.
+        """
         if not self._ok():
-            return
+            return 0
         self.switch_to_futures()
         try:
             self.exchange.set_leverage(
@@ -279,12 +285,14 @@ class BybitClient(BaseExchange):
                 }
             )
             logger.info(f"[Bybit] Leverage set: {leverage}x for {symbol}")
+            return leverage
         except Exception as e:
             # Leverage already set at this level — not an error
             if "leverage not modified" in str(e).lower():
                 logger.debug(f"[Bybit] Leverage already {leverage}x for {symbol}")
-            else:
-                logger.warning(f"[Bybit] set_leverage {symbol}: {e}")
+                return leverage
+            logger.warning(f"[Bybit] set_leverage {symbol}: {e}")
+            return 0
         finally:
             self.switch_to_spot()
 
