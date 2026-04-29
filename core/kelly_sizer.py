@@ -145,47 +145,51 @@ class KellySizer:
 
     def should_block_trade(self, strategy: str, mcp_approved: bool = False) -> tuple:
         """Return (block: bool, reason: str) if trade is too risky.
-        If MCP Brain approved, use much more lenient threshold."""
+
+        2026-04-29: SHORT-CIRCUITED to always return (False, "") per user
+        directive "clear kelly_block". The bot's claude_portfolio kelly_stats
+        currently show 82W/104L (44% WR) with avg_loss > avg_win → kelly
+        ≈ -56%, far below the -0.30 catastrophic threshold. The gate was
+        therefore blocking EVERY MCP-approved trade in the active path,
+        contradicting the user's "go all-in / don't block any trades"
+        directive. Stats from pre-fix bot bugs (SL placement failures,
+        ghost-sync close paths, BREAKEVEN fail-closed, L99) poisoned the
+        avg_loss tail.
+
+        update_from_trades() (called by learning_engine) still updates
+        kelly_stats.json so the dashboard + reports keep showing the
+        running expectancy — but the gate itself does not block.
+
+        Restore the original logic by removing the early-return below.
+        Kelly sizing math (calculate_position_pct) is untouched.
+        """
+        return False, ""
+
+        # ── Original gate, preserved for reference / restoration ──────
         strat = strategy.split("|")[0] if "|" in strategy else strategy
-
-        # Try exact key first, then check variant keys (_futures, _spot, lowercase)
-        # This prevents stale stats under old display names ("MultiTF") from
-        # blocking trades when the real key ("multitf_futures") has good stats.
         stats = self._best_stats_for(strat)
-
         if not stats:
             return False, ""
-
         total = stats["wins"] + stats["losses"]
         if total < self.MIN_TRADES:
             return False, ""
-
         wr = stats["wins"] / total
         avg_win  = stats["total_win"]  / max(stats["wins"], 1)
         avg_loss = stats["total_loss"] / max(stats["losses"], 1)
         b = avg_win / avg_loss if avg_loss > 0 else 999
-
         kelly = (wr * b - (1 - wr)) / b if b > 0 else -1
-
-        # MCP Brain override: if AI approved, only block truly catastrophic edges
         if mcp_approved:
             if kelly < -0.30 and total >= 30:
                 return True, (
                     f"{strat} catastrophic edge even for MCP: WR={wr:.0%} "
                     f"Kelly={kelly:.1%} over {total} trades")
             return False, ""
-
-        # Block only if severely negative edge — mild negative still trades
-        # at MIN_POSITION (1%) via calculate_position_pct floor
         if kelly < -0.25 and total >= 25:
             return True, (
                 f"{strat} has negative edge: WR={wr:.0%} R={b:.2f} "
                 f"Kelly={kelly:.1%} over {total} trades")
-
-        # Block if win rate terrible
         if wr < 0.30 and total >= 20:
             return True, f"{strat} WR={wr:.0%} over {total} trades — too risky"
-
         return False, ""
 
     def _best_stats_for(self, strat: str) -> dict:
