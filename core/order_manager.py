@@ -940,16 +940,22 @@ class OrderManager:
             _rr = (tp_pct / sl_pct) if sl_pct > 0 else None
         except Exception:
             pass
-        self.notifier.trade_opened(
-            exchange.name, symbol, side, fill_price,
-            size, sl, tp, strategy, market_type,
-            leverage=leverage,
-            rr_ratio=_rr,
-            risk_usd=_risk_usd,
-            balance=_bal if _bal > 0 else None,
-            open_positions=_open_n,
-            total_exposure=_exposure,
-        )
+        # Notifier wrapped: any rendering / SMTP failure here must NOT lose
+        # the open position. The position is already created + persisted at
+        # this point; the notifier is purely informational.
+        try:
+            self.notifier.trade_opened(
+                exchange.name, symbol, side, fill_price,
+                size, sl, tp, strategy, market_type,
+                leverage=leverage,
+                rr_ratio=_rr,
+                risk_usd=_risk_usd,
+                balance=_bal if _bal > 0 else None,
+                open_positions=_open_n,
+                total_exposure=_exposure,
+            )
+        except Exception as _ne:
+            logger.warning(f"[Orders] trade_opened notifier failed: {_ne}")
         return pos
 
     def _place_exchange_sl_tp(self, exchange, pos, sl, tp, side, symbol, size, market_type):
@@ -1630,7 +1636,10 @@ class OrderManager:
                 open_positions=_open_n,
             )
         except Exception as ne:
-            logger.debug(f"[Notifier] trade_closed skipped: {ne}")
+            # Upgraded from debug → warning so an email failure is visible
+            # at normal log levels. The trade close itself already
+            # succeeded; this is purely informational delivery.
+            logger.warning(f"[Notifier] trade_closed email failed: {ne}")
 
     # ── SL / TP / Trailing check ──────────────────────────────────────
 
