@@ -1267,6 +1267,31 @@ class BotEngine:
         except Exception as _mfe:
             logger.debug(f"[MetaFilter] skipped ({_mfe}) -- defaulting to ALLOW")
 
+        # ── LR MODEL SOFT SIZE MULTIPLIER (Phase 13.5b → 13.6) ──────────
+        # Wire the shadow LR model as a SOFT size multiplier. The model
+        # has AUC ≈ 0.68 / DSR ≈ 0.18 — marginal signal, NOT deployable
+        # as a hard gate (would block too many true positives), but
+        # usable as a directional nudge on sizing. Map p_win to a
+        # multiplier in [0.7, 1.3]: high-confidence trades get +30%,
+        # low-confidence get -30%. Neutral 1.0x when model unavailable.
+        # Combined with _meta_size_multiplier multiplicatively below.
+        _lr_size_multiplier = 1.0
+        try:
+            if _fv is not None:  # only if features were hydrated for meta-filter
+                from core.shadow_predictor import ShadowPredictor as _SP
+                p_win = _SP.get().predict_p_win(_feat)
+                if p_win is not None:
+                    # Linear map: p_win=0.5 → 1.0x; p_win=0.65 → 1.3x;
+                    # p_win=0.35 → 0.7x. Clamp to [0.7, 1.3] so the
+                    # model never zeroes a trade or doubles size — that
+                    # would over-trust a marginal-signal model.
+                    _lr_size_multiplier = max(0.7, min(1.3, 1.0 + 2.0 * (p_win - 0.5)))
+                    logger.info(
+                        f"[LR-SIZE] {symbol} {side}: p_win={p_win:.2f} "
+                        f"→ size×{_lr_size_multiplier:.2f}")
+        except Exception as _lre:
+            logger.debug(f"[LR-SIZE] skipped ({_lre}) — neutral 1.0x")
+
         # ── HIGH-WR MECHANISM GATES (applied BEFORE legacy checks) ──────
 
         # (a) Symbol blacklist — evidence-based hard block (static + dynamic)
@@ -1502,6 +1527,14 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size reduced {_meta_size_multiplier:.0%} "
                 f"(meta-filter quality gate)")
+        # Apply LR model soft size multiplier (Phase 13.6).
+        # Symmetric in [0.7, 1.3] — can BOTH increase and decrease size
+        # based on the model's p_win prediction. Never gates; never zeroes.
+        if _lr_size_multiplier != 1.0:
+            size_fraction *= _lr_size_multiplier
+            logger.info(
+                f"[Claude] {symbol} size ×{_lr_size_multiplier:.2f} "
+                f"(LR model p_win)")
         notional = mtype_bal * size_fraction
         # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
         # min-notional floor reduced to the exchange-side minimum ($5).

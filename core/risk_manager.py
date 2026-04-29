@@ -331,13 +331,20 @@ class RiskManager:
         # (SPEC12_AUTO_RESUME_COOLDOWN_MIN) so the losing regime has time to shift,
         # then clear the stale streak and delete the review flag so future halts
         # can retrigger cleanly.
-        if "spec12" in self._halt_reason and "consec_global" in self._halt_reason:
+        # Spec §12 / flag-based halts: any halt_reason starting "spec12:" is
+        # backed by data/review_required.json on disk. Originally only the
+        # "consec_global_losses" flavour had auto-resume — a bug, because
+        # _honour_review_flag_if_present builds reasons like
+        # "spec12:flag:manual_review" for outlier-loss and operator-review
+        # halts, leaving them with NO auto-resume path. The bot got stuck
+        # halted until a human deleted the flag file. 2026-04-29: fixed.
+        if self._halt_reason.startswith("spec12"):
             elapsed_min = (_time.time() - self._halt_time) / 60
             if elapsed_min < SPEC12_AUTO_RESUME_COOLDOWN_MIN:
                 remaining = SPEC12_AUTO_RESUME_COOLDOWN_MIN - elapsed_min
                 logger.debug(
-                    f"[Risk] Spec §12 cooldown — {remaining:.0f} min left "
-                    f"before auto-resume.")
+                    f"[Risk] {self._halt_reason} cooldown — {remaining:.0f} min "
+                    f"left before auto-resume.")
                 return False
             # Cooldown elapsed. Delete the flag FIRST; only clear in-memory
             # halt if the unlink succeeds. Prevents the class of bugs where
@@ -349,14 +356,18 @@ class RiskManager:
                     _REVIEW_FLAG_PATH.unlink()
                 except Exception as e:
                     logger.error(
-                        f"[Risk] Spec §12 auto-resume BLOCKED — could not "
-                        f"delete {_REVIEW_FLAG_PATH}: {e}. Staying halted to "
-                        f"avoid silent wipe. Remove the file manually to resume.")
+                        f"[Risk] auto-resume BLOCKED — could not delete "
+                        f"{_REVIEW_FLAG_PATH}: {e}. Staying halted to avoid "
+                        f"silent wipe. Remove the file manually to resume.")
                     return False
+            # Clear the consec-global streak so a stale streak from before the
+            # halt can't immediately re-fire Spec §12 on the next loss. Safe
+            # for non-consec_global flag halts too (outlier_loss, manual_review)
+            # — they care about the flag file, not the streak.
             self._global_streak = []
             logger.warning(
-                f"[Risk] Spec §12 auto-resume after {SPEC12_AUTO_RESUME_COOLDOWN_MIN}min "
-                f"cooldown — flag deleted, streak cleared.")
+                f"[Risk] {self._halt_reason} auto-resume after "
+                f"{SPEC12_AUTO_RESUME_COOLDOWN_MIN}min cooldown — flag deleted.")
             return True
 
         # Daily loss resets at midnight

@@ -417,24 +417,19 @@ LEVERAGE_TIERS = {
     },
 }
 
-# 2026-04-24: clamp loosened with size_pct increase. 0.15 × 3 × 0.015 = 0.675%
-# balance risk worst-case; 1.0% clamp leaves headroom for strategy-level SL
-# overrides up to 2.2%.
-# Original entry-clamp value. Kept at 0.010 (1% of balance per trade)
-# because:
-#   - the entry-side clamp (bot_engine._within_loss_clamp) is now
-#     short-circuited regardless of this value (UNBLOCK_ALL/A);
-#   - the SAME constants are read by risk_manager.record_trade_result
-#     to set the post-trade outlier review flag — that's safety, not
-#     an entry block. Keep the threshold sane so safety still fires.
-MAX_LOSS_PER_TRADE_PCT = 0.010
+# 2026-04-29: raised in lockstep with the L99→2 + size_pct=0.50 sizing
+# regime. At 50% size × 2x × 1.5% SL = 1.5% balance per normal SL hit. The
+# old 1.0% / $4 thresholds were calibrated for 0.225%-0.45% balance/trade
+# (15% size × 2-3x × 1.5%) and would fire the outlier flag on EVERY normal
+# SL hit, halting the bot — which combined with a separate auto-resume
+# bug in risk_manager.py would deadlock the bot indefinitely. New
+# thresholds: 2.5× the new typical SL loss, so genuine outliers (slippage,
+# SL placement bug, exchange glitch) still fire but normal trading doesn't.
+MAX_LOSS_PER_TRADE_PCT = 0.025
 
-# 2026-04-24: raised from $2 → $4 to allow 15% × 3x × 1.5% sizing on $377
-# balance (~$2.55 risk/trade). $4 cap still prevents oversize on spikes.
-# Same rationale as MAX_LOSS_PER_TRADE_PCT above — kept at the original
-# safety threshold because it gates the post-trade review flag, not the
-# entry path. The entry clamp is short-circuited in bot_engine.
-MAX_LOSS_PER_TRADE_USD = 4.0
+# 2.5× normal $6 SL loss. At $400 balance × 50% × 2x × 1.5% = $6 expected;
+# $15 catches anything 2.5x larger (e.g. 4% gap-down past a 1.5% SL).
+MAX_LOSS_PER_TRADE_USD = 15.0
 
 # Consecutive-loss throttle — dynamic leverage downgrade + pause
 CONSEC_LOSS_DOWNGRADE_COUNT = 2   # 2 losses in a row → drop tier cap by 1
