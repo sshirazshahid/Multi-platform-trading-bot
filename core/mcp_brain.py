@@ -2235,6 +2235,23 @@ class MCPBrain:
                     sl_pct = zone_sl_pct
                     tp_pct = sl_pct * 2.5
 
+        # ── STAR_SYMBOLS TP extender (2026-04-29 / Phase 14) ──────────
+        # Warehouse data: ATOM avg realized R = 4.7, ARB avg R = 1.85,
+        # both substantially above the 2.0 R the default tp_pct = sl_pct*2
+        # assumes. STAR symbols have proven follow-through — clipping the
+        # TP at 2× SL caps wins below where the realized MFE distribution
+        # actually peaks. Multiply by 1.25× to push TP to ~2.5× SL on
+        # default path, ~3.1× on SMC-tightened path.
+        # Non-STAR symbols are NOT affected — they generally don't run
+        # past 2× SL and the wider TP would just convert them to STALE.
+        try:
+            from config import STAR_SYMBOLS as _STAR
+            _coin = coin if "/" in coin else f"{coin}/USDT:USDT"
+            if _coin in _STAR:
+                tp_pct *= 1.25
+        except Exception:
+            pass
+
         # Confidence: base 0.66 for 4 required, +0.08 per bonus, cap 0.95
         # (2026-04-17: stepped from 0.04 → 0.08 at user request; saturates at 4 bonuses)
         confidence = min(0.95, 0.66 + bonus_count * 0.08)

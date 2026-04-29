@@ -326,15 +326,21 @@ RISK = {
     # require explicit user authorization.
     "max_drawdown_pct":     0.12,
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
-    "max_position_age_hours": 6,      # 6h hard expiry
-    "max_stale_hours":       4.0,     # 4h stale exit (was 1.5h — conflicted with 2h min hold)
-    # 2026-04-28 (Phase 13.1) — AGE_LOSS rule. The 2-4h hold bucket bled
-    # -$17.39 / 35% WR over the last 30d (n=55). Force-closing positions
-    # that have spent 3h+ underwater by more than -0.5% net catches the
-    # bleed before it slides further but doesn't pre-empt SL on
-    # intraday-noise drawdowns.
-    "max_loss_age_hours":    3.0,     # 3h hold age before active-loss exit kicks in
-    "max_loss_age_pct":      0.5,     # close when net PnL <= -0.5% AND age >= 3h
+    # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h after
+    # warehouse retrenchment showed the bot's edge expires past 60min:
+    #   <10min:    -$22.26 / 0% WR  (the L99 disaster, post-revert mostly clean)
+    #   10-30min:  +$1.28  / 38% WR / R:R 3:1  ← FAST WINNERS, the edge zone
+    #   30-60min:  +$0.31  / 55% WR / R:R 1:1  ← slow winners, breakeven-ish
+    #   1-2h:      -$1.89  / 40% WR / avg_win=avg_loss (no edge)
+    #   >2h:       -$4.34  / 39% WR over 56 trades (slow bleed cluster)
+    # The 1-2h and >2h buckets together account for -$6.23 / 94 trades.
+    # Cutting losers earlier doesn't hurt winners (winners exit via
+    # mcp_take_profit / trailing well before AGE_LOSS fires) but does
+    # save the slow-bleed losers from sliding deeper.
+    "max_position_age_hours": 4,      # was 6 — hard expiry tightened
+    "max_stale_hours":       2.0,     # was 4.0 — stale (flat) exit at 2h
+    "max_loss_age_hours":    1.5,     # was 3.0 — losing position cut at 1.5h
+    "max_loss_age_pct":      0.3,     # was 0.5 — looser threshold complements earlier cutoff
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
     # bleed regardless of per-trade SL discipline.
