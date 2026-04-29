@@ -10,6 +10,11 @@ Tests cover:
 """
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("joblib")
+pytest.importorskip("sklearn")
+
 import importlib
 import sys
 from pathlib import Path

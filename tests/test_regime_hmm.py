@@ -7,6 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("hmmlearn")
+pytest.importorskip("joblib")
+
 from core.regime_hmm import RegimeHMM
 
 

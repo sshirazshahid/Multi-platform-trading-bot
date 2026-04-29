@@ -42,7 +42,12 @@ class ProbabilityCalibrator:
         self._data: dict[str, dict] = {}
         # (raw_conf, outcome 0/1) pairs kept for isotonic refit.
         self._pairs: list[tuple[float, int]] = []
-        self._iso = None  # IsotonicCalibrator | None — lazy, see _ensure_iso
+        # Either None (not yet attempted), an IsotonicCalibrator (live), or
+        # left as None with `_iso_unavailable=True` once import has failed.
+        # Avoids the `_iso = False` sentinel pattern that triggered
+        # `False.is_fitted()` AttributeErrors when sklearn was missing.
+        self._iso = None
+        self._iso_unavailable = False
         self._records_since_refit = 0
         self._load()
 
@@ -85,12 +90,14 @@ class ProbabilityCalibrator:
           3. Global "all"-strategy bucket calibration (legacy fallback).
           4. Raw confidence (warm-up, not enough data).
         """
-        # 1. Isotonic — preferred when fitted.
-        if self._iso is not None and self._iso.is_fitted():
+        # 1. Isotonic — preferred when fitted. Only call .is_fitted() on a
+        # real instance; `_iso` may be None (never attempted or import failed).
+        if self._iso is not None:
             try:
-                import numpy as _np
-                out = self._iso.transform(_np.array([float(raw_confidence)]))
-                return round(float(out[0]), 3)
+                if self._iso.is_fitted():
+                    import numpy as _np
+                    out = self._iso.transform(_np.array([float(raw_confidence)]))
+                    return round(float(out[0]), 3)
             except Exception as _e:
                 logger.debug(f"[Calibrator] isotonic transform fallback: {_e}")
 
@@ -120,14 +127,18 @@ class ProbabilityCalibrator:
     # Phase 13.4 — isotonic plumbing ──────────────────────────────────
 
     def _ensure_iso(self):
-        if self._iso is None:
-            try:
-                from core.calibration import IsotonicCalibrator
-                self._iso = IsotonicCalibrator(min_samples=MIN_ISOTONIC_SAMPLES)
-            except Exception as e:
-                logger.debug(f"[Calibrator] IsotonicCalibrator import failed: {e}")
-                self._iso = False  # sentinel — don't keep retrying
-        return self._iso if self._iso else None
+        if self._iso is not None:
+            return self._iso
+        if self._iso_unavailable:
+            return None
+        try:
+            from core.calibration import IsotonicCalibrator
+            self._iso = IsotonicCalibrator(min_samples=MIN_ISOTONIC_SAMPLES)
+        except Exception as e:
+            logger.debug(f"[Calibrator] IsotonicCalibrator import failed: {e}")
+            self._iso_unavailable = True
+            return None
+        return self._iso
 
     def _refit_isotonic(self):
         iso = self._ensure_iso()

@@ -15,6 +15,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# Phase 0.3 walk-forward CV uses sklearn TimeSeriesSplit + joblib.
+# Skip cleanly if either is missing rather than reporting "errors".
+pytest.importorskip("sklearn")
+pytest.importorskip("joblib")
+
 ROOT = Path(__file__).resolve().parents[1]
 
 

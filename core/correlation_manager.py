@@ -21,31 +21,40 @@ from loguru import logger
 # ── Predefined correlation groups ────────────────────────────────────
 # Assets within the same group tend to move together (corr > 0.7)
 
+# 2026-04-29: caps lifted to align with the "go all-in" sizing regime.
+# At 50% × 2x = 100% leveraged notional per trade, the prior 0.10-0.30
+# caps fired on the FIRST position in any group, hard-blocking the
+# user's directed capital deployment. New caps allow ~2 leveraged
+# positions per group (~200% notional = ~100% margin per group),
+# which combined with 6 concurrent slots across 3 exchanges means
+# the soft size multiplier kicks in after 2 positions in a group
+# rather than blocking outright. Hard block converted to ALWAYS-ALLOW
+# with size taper down to 50% — see group_exposure below.
 CORRELATION_GROUPS = {
     "btc_proxy": {
         "assets": {"BTC", "WBTC"},
-        "max_group_pct": 0.20,  # Max 20% portfolio in BTC proxies
+        "max_group_pct": 1.50,
     },
     "major_l1": {
         "assets": {"ETH", "SOL", "BNB", "ADA", "AVAX", "DOT", "ATOM",
                    "NEAR", "APT", "SUI", "SEI"},
-        "max_group_pct": 0.30,  # Max 30% in L1s
+        "max_group_pct": 2.00,
     },
     "defi": {
         "assets": {"UNI", "AAVE", "LINK", "INJ", "FET", "RNDR"},
-        "max_group_pct": 0.15,
+        "max_group_pct": 1.50,
     },
     "meme": {
         "assets": {"DOGE", "PEPE", "WIF", "BONK", "FLOKI", "TURBO"},
-        "max_group_pct": 0.10,  # Max 10% in memes
+        "max_group_pct": 1.00,
     },
     "commodities": {
         "assets": {"XAU", "XAG", "WTI", "CL"},
-        "max_group_pct": 0.15,
+        "max_group_pct": 1.50,
     },
     "l2_scaling": {
         "assets": {"OP", "ARB", "IMX", "MANTA", "STX"},
-        "max_group_pct": 0.15,
+        "max_group_pct": 1.50,
     },
 }
 
@@ -107,16 +116,24 @@ class CorrelationManager:
         current_pct = group_notional / balance if balance > 0 else 0
         remaining_pct = max(0, max_pct - current_pct)
 
-        # Can we add more?
-        can_add = current_pct < max_pct
+        # 2026-04-29: hard correlation block REMOVED per "Don't block any
+        # trades" + "go all-in" directives. We always allow — the soft
+        # size multiplier alone signals concentration risk by tapering.
+        # Restore by reverting to `can_add = current_pct < max_pct`.
+        can_add = True
 
-        # Size multiplier: reduce position size as group fills up
+        # Size multiplier: taper as group fills up. Floor at 0.5 (was 0.0)
+        # so even at saturation we still take half-size — never zero.
+        # The tapering still discourages concentration without forbidding
+        # it. Combined with risk_manager.max_open_positions (8 across
+        # exchanges) and the LR p_win multiplier, concurrent correlated
+        # entries get progressively smaller without being banned.
         if remaining_pct <= 0:
-            size_mult = 0.0
+            size_mult = 0.5
         elif remaining_pct < max_pct * 0.3:
-            size_mult = 0.3  # Last 30% of group capacity: use 30% size
+            size_mult = 0.6
         elif remaining_pct < max_pct * 0.6:
-            size_mult = 0.6  # Mid range: use 60% size
+            size_mult = 0.8
         else:
             size_mult = 1.0  # Plenty of room
 

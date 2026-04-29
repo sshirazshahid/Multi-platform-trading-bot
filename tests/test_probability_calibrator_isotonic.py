@@ -14,6 +14,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# IsotonicCalibrator depends on sklearn + joblib. When those aren't
+# installed in the venv, the production path correctly falls back to
+# the bucket calibrator (verified separately) but THESE tests can't
+# exercise the isotonic-fitted branch — they require the real fit.
+pytest.importorskip("sklearn")
+pytest.importorskip("joblib")
+
 
 @pytest.fixture
 def fresh_calibrator(monkeypatch, tmp_path):

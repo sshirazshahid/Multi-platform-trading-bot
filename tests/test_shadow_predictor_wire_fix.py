@@ -23,6 +23,11 @@ Bugs found in the Phase 13.5 review:
 """
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("joblib")
+pytest.importorskip("sklearn")
+
 import importlib.util
 import sys
 from pathlib import Path

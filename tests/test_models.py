@@ -13,6 +13,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("joblib")
+pytest.importorskip("sklearn")
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
