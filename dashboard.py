@@ -1503,11 +1503,14 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             else:
                 hb_status = col("RUNNING", GREEN + BOLD)
                 hb_reason = ""
-            print("  {} {}  {} {}h {}m  {} {}  {} {:.0f}MB  {} {}s ago{}".format(
+            # Mem: bot writes 0 when psutil isn't available in the venv —
+            # display "n/a" instead of the misleading "0MB".
+            mem_str = "n/a" if (not hb_mem or hb_mem == 0) else "{:.0f}MB".format(hb_mem)
+            print("  {} {}  {} {}h {}m  {} {}  {} {}  {} {}s ago{}".format(
                 col("Bot:", DIM), hb_status,
                 col("Up:", DIM), hb_hours, hb_mins,
                 col("Cycle:", DIM), col(str(hb_cycle), WHITE),
-                col("Mem:", DIM), hb_mem,
+                col("Mem:", DIM), mem_str,
                 col("HB:", DIM), hb_age_s,
                 hb_reason))
         else:
@@ -2754,18 +2757,28 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             max_positions = 15
             max_leverage = 5
 
-        # Drawdown bar
+        # Drawdown bar — :.1f on the limit so 12% renders as "12.0%" and a
+        # configured 1.5%-style cap renders correctly. (Prior :.0f rounded
+        # 1.5 to "2", giving the user the wrong impression of the limit.)
         dd_fill = min(dd_pct / max_dd_limit, 1.0) if max_dd_limit > 0 else 0
         dd_bar_len = int(dd_fill * 20)
         dd_bar_rem = 20 - dd_bar_len
         dd_bar_c = GREEN if dd_fill < 0.5 else (YELLOW if dd_fill < 0.8 else RED)
         dd_bar = col("█" * dd_bar_len, dd_bar_c) + col("░" * dd_bar_rem, DIM)
-        row("  Drawdown:    {} {:.1f}% / {:.0f}% max".format(
+        row("  Drawdown:    {} {:.1f}% / {:.1f}% max".format(
             dd_bar, dd_pct, max_dd_limit))
 
-        # Daily loss bar
-        if total_live > 0:
-            daily_used = abs(min(daily_pnl, 0)) / total_live * 100
+        # Daily loss bar — base the percentage on `start_balance` (which is
+        # what risk_manager actually uses for the halt trigger). Prior code
+        # divided by current `total_live`, which drifts away from the halt
+        # trigger as PnL moves and confuses the user about how close to halt
+        # they are. Falls back to total_live when start_balance is missing
+        # (older risk_state.json files).
+        denom = float(risk_data.get("start_balance") or 0.0) if risk_data else 0.0
+        if denom <= 0:
+            denom = total_live
+        if denom > 0:
+            daily_used = abs(min(daily_pnl, 0)) / denom * 100
         else:
             daily_used = 0
         dl_fill = min(daily_used / daily_loss_limit, 1.0) if daily_loss_limit > 0 else 0
@@ -2773,19 +2786,28 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         dl_bar_rem = 20 - dl_bar_len
         dl_bar_c = GREEN if dl_fill < 0.5 else (YELLOW if dl_fill < 0.8 else RED)
         dl_bar = col("█" * dl_bar_len, dl_bar_c) + col("░" * dl_bar_rem, DIM)
-        row("  Daily Loss:  {} {:.2f}% / {:.0f}% max  ({})".format(
+        row("  Daily Loss:  {} {:.2f}% / {:.1f}% max  ({})".format(
             dl_bar, daily_used, daily_loss_limit,
             pnl_str_short(daily_pnl)))
 
-        # Position usage
-        n_open = len(open_pos)
+        # Position usage — count ONLY futures. The bot's
+        # max_open_positions cap applies to bot-tracked positions; spot
+        # holdings (manual coins like SUI/BTC etc.) are not gated by it,
+        # so including them here over-reports the panel as 42/8 when the
+        # actual capacity used is 3/8. Match heartbeat.json's
+        # `open_positions` count.
+        n_open = sum(1 for p in open_pos if p.get("market_type") == "futures")
+        n_spot = sum(1 for p in open_pos if p.get("market_type") == "spot")
         pos_fill = min(n_open / max_positions, 1.0) if max_positions > 0 else 0
         pos_bar_len = int(pos_fill * 20)
         pos_bar_rem = 20 - pos_bar_len
         pos_bar_c = GREEN if pos_fill < 0.6 else (YELLOW if pos_fill < 0.9 else RED)
         pos_bar = col("█" * pos_bar_len, pos_bar_c) + col("░" * pos_bar_rem, DIM)
-        row("  Positions:   {} {} / {} max".format(
-            pos_bar, n_open, max_positions))
+        # Show "+N spot" suffix when manual spot holdings exist so the user
+        # can see the full picture without the gauge being polluted by them.
+        spot_suffix = "  ({} spot)".format(n_spot) if n_spot else ""
+        row("  Positions:   {} {} / {} futures max{}".format(
+            pos_bar, n_open, max_positions, col(spot_suffix, DIM)))
 
         # Halt status + trades today
         if halted:
