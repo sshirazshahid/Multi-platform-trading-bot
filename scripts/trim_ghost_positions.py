@@ -107,6 +107,14 @@ def main() -> int:
     drop_count: dict[str, int] = {}
     for c in closed:
         reason = (c.get("close_reason") or "").strip()
+        # 2026-05-01: also drop paper_trade=True rows. They survived
+        # from earlier DRY_RUN sessions and pollute aggregate stats
+        # that don't pre-filter (analyze_trades.py, dashboard PnL,
+        # learning_engine seeds). The bot is in CONTROLLED_LIVE
+        # exclusively now — paper rows are pure noise.
+        if c.get("paper_trade") is True:
+            drop_count["paper_trade"] = drop_count.get("paper_trade", 0) + 1
+            continue
         if reason in GHOST_REASONS:
             drop_count[reason] = drop_count.get(reason, 0) + 1
             continue

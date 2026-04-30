@@ -153,13 +153,20 @@ CLAUDE_PORTFOLIO = {
 # ==============================================================
 MODEL_GATE = {
     "enabled":           os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
-    # Default shadow_only=TRUE: logs p_win_ensemble + model_version on every
-    # decision to data/warehouse.sqlite (predictions, trades.model_version)
-    # without filtering entries. Honors the user's "Don't block any trades"
-    # directive (UNBLOCK_ALL, 2026-04-28). Flip MODEL_GATE_SHADOW=false to
-    # activate gating once the live p_win distribution has been inspected
-    # and a non-blocking threshold chosen empirically.
-    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "true").lower() == "true",
+    # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model
+    # logged but didn't gate.
+    # 2026-05-01 (stop-bleed plan): flipped to FALSE. The live ensemble
+    # (AUC 0.76 / OOS WR 70.7% at p>=0.55) is now the entry authority.
+    # Candidates with p_win_ensemble < threshold_futures (0.55) are
+    # blocked at core/mcp_brain.py:~2509-2526. When no model bundle is
+    # loaded (fresh install / artifact missing) the gate auto-bypasses
+    # via the `mscore["model_version"] is None` check, so the bot still
+    # falls through to the rule-only path. Operational consequence: with
+    # the current model and current setups, the bot may open zero trades
+    # for hours/days until either market regime shifts or the next weekly
+    # retrain produces stronger predictions. Revert via env override:
+    #   MODEL_GATE_SHADOW=true python main.py
+    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "false").lower() == "true",
     "threshold_futures": float(os.getenv("MODEL_GATE_THRESHOLD_FUTURES", "0.55")),
     "threshold_spot":    float(os.getenv("MODEL_GATE_THRESHOLD_SPOT",    "0.58")),
 }
