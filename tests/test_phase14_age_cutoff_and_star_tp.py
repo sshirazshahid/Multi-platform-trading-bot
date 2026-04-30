@@ -96,11 +96,14 @@ def test_star_tp_extender_only_applies_to_star():
     # We can't easily call _score_coin in isolation (heavy deps), but
     # we pin the contract: if the multiplier line is `if _coin in _STAR`,
     # then a non-STAR coin yields the un-multiplied tp_pct.
+    # 2026-05-01 update: DOGE was promoted to STAR (n=10, +$4.83, 50% WR);
+    # use BTC + a clearly-out-of-set symbol as the pass-through anchors.
     from config import STAR_SYMBOLS
     assert "BTC/USDT:USDT" not in STAR_SYMBOLS, (
         "BTC must not be a STAR symbol for this test to validate the "
         "non-STAR pass-through invariant")
-    assert "DOGE/USDT:USDT" not in STAR_SYMBOLS
+    assert "ETH/USDT:USDT" not in STAR_SYMBOLS, (
+        "ETH must remain non-STAR for this pass-through test")
 
 
 def test_star_tp_extender_compounds_correctly_with_smc_path():

@@ -31,11 +31,17 @@ def test_star_disjoint_with_blacklist():
 
 
 def test_star_set_is_evidence_based():
-    """STAR membership is the empirical-evidence list. As of 2026-04-28,
-    only ATOM and ARB qualify (n>=8 trades, mean PnL > $0.05 in
+    """STAR membership is the empirical-evidence list. As of 2026-05-01,
+    ATOM, ARB, and DOGE qualify (n>=8 trades, mean PnL > $0.05 in
     claude_portfolio). If this set grows, the membership criteria
-    documented in config.py:STAR_SYMBOLS must still apply."""
-    expected = {"ATOM/USDT:USDT", "ARB/USDT:USDT"}
+    documented in config.py:STAR_SYMBOLS must still apply.
+
+    Membership history:
+      2026-04-28: {ATOM, ARB} — Phase 12.3 initial set
+      2026-05-01: + DOGE — n=10, +$4.83, 50% WR, $0.483/trade
+                            (top contributor, surfaced by ultrareview audit)
+    """
+    expected = {"ATOM/USDT:USDT", "ARB/USDT:USDT", "DOGE/USDT:USDT"}
     assert STAR_SYMBOLS == expected, (
         f"STAR set changed from {expected} to {STAR_SYMBOLS}; "
         f"verify the underlying claude_portfolio attribution still supports "

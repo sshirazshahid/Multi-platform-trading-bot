@@ -809,12 +809,25 @@ class BotEngine:
 
     def _select_leverage_tier(self, symbol: str, side: str,
                               confidence: float, btc_trend: str,
-                              atr_pct: float = 0.0) -> tuple:
+                              atr_pct: float = 0.0,
+                              mcp_score: float = 0.0) -> tuple:
         """
         Select the highest leverage tier this candidate qualifies for.
         Returns (tier_name, tier_params) or (None, None) if rejected.
         Gates checked in order:
-          hour class → throttle pause → tier requirements → high-ATR clamp.
+          hour class → throttle pause → tier requirements → high-ATR clamp →
+          high-score over-confidence cap.
+
+        2026-05-01: added `mcp_score` argument to support the high-score
+        anti-EV cap. claude_portfolio realized data shows score 85+ trades
+        flip to NEGATIVE expectancy:
+          score 65-74:  n=18  +$2.41   avg+$0.134  WR=44%
+          score 75-84:  n=20  +$4.86   avg+$0.243  WR=40%
+          score 85-100: n=16  -$2.98   avg-$0.186  WR=31%   ← anti-EV
+        High-score setups appear to over-fit late-trend / parabolic
+        continuations that mean-revert. Cap them at STANDARD tier so we
+        still take the trade (don't waste the signal entirely) but at
+        smaller size than the score implies.
         """
         from config import (LEVERAGE_TIERS, WHITELIST_SYMBOLS,
                              HIGH_ATR_PCT_THRESHOLD, STAR_SYMBOLS)
@@ -853,6 +866,12 @@ class BotEngine:
         # half-size path unreachable and silently discarding WARMUP_HOURS_UTC opportunities.
         is_allowed_hour = hour_class in ("peak", "allowed", "warmup")
         high_atr        = atr_pct >= HIGH_ATR_PCT_THRESHOLD
+        # 2026-05-01: high-score anti-EV cap. score >= 85 in claude_portfolio
+        # data is net-negative. Force STANDARD tier so we still take the
+        # trade but don't size it up. tier_cap is also set by the consec-
+        # loss throttle above; combine via "tightest wins".
+        if mcp_score >= 85.0:
+            tier_cap = "STANDARD"
 
         # Try tiers highest → lowest (20x → 15x → 10x → 5x)
         for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD"):
@@ -1359,7 +1378,10 @@ class BotEngine:
         # The tier selector also handles: BLOCKED_HOURS_UTC, consec-loss pause/downgrade,
         # min-confidence threshold, whitelist requirement, BTC alignment, peak hour.
         tier_name, tier_params = self._select_leverage_tier(
-            symbol_key, side, confidence, btc_trend, atr_pct=_atr_frac_hint)
+            symbol_key, side, confidence, btc_trend,
+            atr_pct=_atr_frac_hint,
+            mcp_score=float(action.get("mcp_score") or action.get("score") or 0.0),
+        )
         if tier_params is None:
             return False
 

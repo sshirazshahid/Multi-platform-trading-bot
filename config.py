@@ -497,8 +497,9 @@ WHITELIST_SYMBOLS = {
     # the strategy_family that's actually firing today.
     #
     # Tier hints (sized up via leverage-tier selector):
-    "ATOM/USDT:USDT",   # ⭐ n=12, +$2.02, 42% WR, $0.168/trade — TOP CONTRIBUTOR
+    "ATOM/USDT:USDT",   # ⭐ n=14, +$2.06, 43% WR, $0.147/trade
     "ARB/USDT:USDT",    # ⭐ n=18, +$1.20, 44% WR, $0.067/trade
+    "DOGE/USDT:USDT",   # ⭐ n=10, +$4.83, 50% WR, $0.483/trade — TOP CONTRIBUTOR (added 2026-05-01)
     "ETH/USDT:USDT",    #   n=8,  +$0.45, 75% WR — high-WR, small absolute mean
     "MANA/USDT:USDT",   #   n=3,  +$0.37, 33% WR — thin sample, tentative
     "BTC/USDT:USDT",    #   macro anchor, always tradeable
@@ -524,9 +525,17 @@ WHITELIST_SYMBOLS = {
 # Used by leverage-tier selector to auto-promote to STRONG/CONVICTION on
 # matching setups. Sample-size guard: only promote when claude_portfolio
 # has >= 8 trades AND mean PnL > $0.05/trade.
+# 2026-05-01: DOGE added — outperforms both prior STAR symbols on every
+# axis (claude_portfolio only):
+#   ATOM:  n=14  sum=+$2.06   avg=+$0.147  WR=43%
+#   ARB:   n=18  sum=+$1.20   avg=+$0.067  WR=44%
+#   DOGE:  n=10  sum=+$4.83   avg=+$0.483  WR=50%   ← strongest cell
+# Phase 12 missed DOGE because the analysis filter cut it; today's data
+# (n>=8, mean>$0.05) puts it well above the sample-size guard.
 STAR_SYMBOLS = {
-    "ATOM/USDT:USDT",   # n=12, +$2.02 sum, $0.168/trade
-    "ARB/USDT:USDT",    # n=18, +$1.20 sum, $0.067/trade
+    "ATOM/USDT:USDT",   # n=14, +$2.06 sum, +$0.147/trade, 43% WR
+    "ARB/USDT:USDT",    # n=18, +$1.20 sum, +$0.067/trade, 44% WR
+    "DOGE/USDT:USDT",   # n=10, +$4.83 sum, +$0.483/trade, 50% WR
 }
 
 # 2026-04-13: Cleared. All prior losses were under the old broken engine
