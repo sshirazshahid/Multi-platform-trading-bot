@@ -25,11 +25,10 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-# Pick a Python: prefer venv, fall back to system python.
-$Python = Join-Path $Root "venv\Scripts\python.exe"
-if (-not (Test-Path $Python)) {
-    $Python = "python"
-}
+# Pick a Python. Default: whatever `python` is on PATH (the same interpreter
+# the user runs scripts with interactively, where the deps are installed).
+# Override by setting the TRADINGBOT_PYTHON env var to a specific exe path.
+$Python = if ($env:TRADINGBOT_PYTHON) { $env:TRADINGBOT_PYTHON } else { "python" }
 
 # Log file (one per run, timestamped).
 $LogDir = Join-Path $Root "data\retrain_logs"
@@ -45,12 +44,12 @@ function Log {
 }
 
 function RunStep {
-    param([string]$Description, [string[]]$Args)
+    param([string]$Description, [string[]]$ArgList)
     Log "BEGIN $Description"
-    Log ("  cmd: $Python " + ($Args -join ' '))
-    & $Python @Args 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Log ("  cmd: $Python " + ($ArgList -join ' '))
+    & $Python @ArgList 2>&1 | Tee-Object -FilePath $LogFile -Append
     if ($LASTEXITCODE -ne 0) {
-        Log "FAIL  $Description (exit=$LASTEXITCODE) — aborting weekly retrain"
+        Log "FAIL  $Description (exit=$LASTEXITCODE) -- aborting weekly retrain"
         exit $LASTEXITCODE
     }
     Log "OK    $Description"
