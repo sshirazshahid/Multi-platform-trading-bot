@@ -1313,6 +1313,64 @@ class BotEngine:
         except Exception as _lre:
             logger.debug(f"[LR-SIZE] skipped ({_lre}) — neutral 1.0x")
 
+        # ── CELL-FILTER ENTRY GATE (2026-05-01) ──────────────────────────
+        # Only fire on proven-edge cells. STAR symbols are always allowed
+        # (subject to existing tier-cap on score>=85). Non-STAR symbols
+        # require mcp_score in the proven [70, 84] band — score >= 85 is
+        # anti-EV per claude_portfolio attribution. See
+        # docs/superpowers/specs/2026-05-01-cell-filter-entry-gate-design.md
+        try:
+            from config import CELL_FILTER as _CF, STAR_SYMBOLS as _STAR
+        except ImportError:
+            _CF = {"enabled": False}
+            _STAR = set()
+        if _CF.get("enabled", True):
+            _symbol_key = symbol if ":" in symbol else f"{symbol}:USDT"
+            _is_star = (
+                _CF.get("star_overrides", True)
+                and (symbol in _STAR or _symbol_key in _STAR)
+            )
+            _score = action.get("mcp_score") or action.get("score") or 0.0
+            try:
+                _score = float(_score)
+            except (TypeError, ValueError):
+                _score = 0.0
+            _band_min = float(_CF.get("score_band_min", 70.0))
+            _band_max = float(_CF.get("score_band_max", 84.0))
+            if not _is_star:
+                if _score < _band_min:
+                    logger.info(
+                        f"[CellFilter] BLOCKED {symbol}: non-STAR + "
+                        f"score {_score:.1f} < {_band_min:.1f} band_min")
+                    # Patch warehouse skip-reason if we have a candidate id.
+                    try:
+                        if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                            from core.warehouse import get_warehouse as _gw
+                            _gw().query(
+                                "UPDATE candidates SET decision='SKIP', "
+                                "skip_reason=? WHERE id=?",
+                                ("cell_filter:score_below_band", _cid),
+                            )
+                    except Exception:
+                        pass
+                    return False
+                if _score > _band_max:
+                    logger.info(
+                        f"[CellFilter] BLOCKED {symbol}: non-STAR + "
+                        f"score {_score:.1f} > {_band_max:.1f} band_max "
+                        f"(anti-EV per claude_portfolio data)")
+                    try:
+                        if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                            from core.warehouse import get_warehouse as _gw
+                            _gw().query(
+                                "UPDATE candidates SET decision='SKIP', "
+                                "skip_reason=? WHERE id=?",
+                                ("cell_filter:score_above_band", _cid),
+                            )
+                    except Exception:
+                        pass
+                    return False
+
         # ── HIGH-WR MECHANISM GATES (applied BEFORE legacy checks) ──────
 
         # (a) Symbol blacklist — evidence-based hard block (static + dynamic)

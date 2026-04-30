@@ -551,6 +551,30 @@ STAR_SYMBOLS = {
     "DOGE/USDT:USDT",   # n=10, +$4.83 sum, +$0.483/trade, 50% WR
 }
 
+# 2026-05-01 — Cell-Filter Entry Gate
+# Ref: docs/superpowers/specs/2026-05-01-cell-filter-entry-gate-design.md
+#
+# Hard entry gate: only fire on proven-edge cells.
+#   STAR symbols (ATOM/ARB/DOGE): always allowed (star_overrides=True).
+#   Non-STAR: allowed only when score_band_min <= mcp_score <= score_band_max.
+# Other cells (score < band_min, score > band_max on non-STAR) are blocked.
+#
+# Anchored in claude_portfolio realised data (2026-05-01):
+#   score 65-74:   n=18  +$2.41   +$0.134/trade  44% WR
+#   score 75-84:   n=20  +$4.86   +$0.243/trade  40% WR  <- mid-band
+#   score 85-100:  n=16  -$2.98   -$0.186/trade  31% WR  <- anti-EV
+#
+# The score-85 tier-cap (commit 86acef3) stays as defense-in-depth on
+# STAR symbols at high score — they're allowed but tier-capped to STANDARD.
+#
+# Rollback: set enabled=False. No data migration needed.
+CELL_FILTER = {
+    "enabled":         True,
+    "score_band_min":  70.0,
+    "score_band_max":  84.0,
+    "star_overrides":  True,
+}
+
 # 2026-04-13: Cleared. All prior losses were under the old broken engine
 # (ANTI-LOSS gate widening SL, fuzzy scoring, no max-loss cap, wrong sizing).
 # The new systematic engine (EMA cross + RSI + hard SL + 1.5% risk) is a
