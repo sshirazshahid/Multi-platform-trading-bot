@@ -1654,6 +1654,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             coin_rows = []
             for asset, info in ex_coins.items():
                 amt = info.get("total", 0)
+                free = float(info.get("free", 0) or 0)
                 if amt <= 0:
                     continue
                 if asset in _stables:
@@ -1664,19 +1665,39 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                     usdt_val = amt * px if px > 0 else 0.0
                 if usdt_val < 0.01:
                     continue
-                coin_rows.append((asset, amt, usdt_val))
+                coin_rows.append((asset, amt, free, usdt_val))
                 # Unified exchanges (Bybit): totalEquity in total_live already
                 # includes all coin values, so skip adding to grand totals to
                 # avoid double-counting in Est. Total.
                 if not is_unified:
                     grand_coins[asset] = grand_coins.get(asset, 0.0) + amt
                     grand_usdt_vals[asset] = grand_usdt_vals.get(asset, 0.0) + usdt_val
-            coin_rows.sort(key=lambda r: (0 if r[0] in _stables else 1, -r[2]))
+            coin_rows.sort(key=lambda r: (0 if r[0] in _stables else 1, -r[3]))
             if coin_rows:
                 parts = []
-                for asset, amt, uval in coin_rows[:6]:
+                for asset, amt, free, uval in coin_rows[:6]:
                     if asset in _stables:
-                        parts.append("{} {:.2f}".format(col(asset, YELLOW), amt))
+                        # 2026-05-01 fix: show FREE (truly available for new
+                        # orders) instead of TOTAL (wallet balance). On Bybit
+                        # Unified Account, margin locked on open positions
+                        # makes free < total — the user cares about free.
+                        # When there's a meaningful gap, append "(+N locked)"
+                        # so they can see at a glance how much margin is
+                        # currently used.
+                        locked = max(0.0, float(amt) - free)
+                        if free > 0 and locked > 0.5:
+                            parts.append("{} {:.2f} {}".format(
+                                col(asset, YELLOW), free,
+                                col("(+{:.2f} locked)".format(locked), DIM),
+                            ))
+                        elif free > 0:
+                            parts.append("{} {:.2f}".format(
+                                col(asset, YELLOW), free))
+                        else:
+                            # No free reported — fall back to total so the
+                            # user still sees a number rather than zero.
+                            parts.append("{} {:.2f}".format(
+                                col(asset, YELLOW), amt))
                     else:
                         parts.append("{} {:.6g} {}".format(
                             col(asset, CYAN), amt,
