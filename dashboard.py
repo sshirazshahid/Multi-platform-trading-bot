@@ -849,6 +849,77 @@ def load_positions(fetcher: "LiveFetcher" = None):
     for profile in ("conservative", "moderate", "aggressive"):
         _ingest(_file_cache.load("data/profiles/{}/positions.json".format(profile)))
 
+    # 2026-04-30: external "extras" feed for closed trades that the bot's
+    # tracker doesn't have in memory (e.g. closes that happened while the
+    # bot was running but the runtime path didn't reach tracker._closed,
+    # so tracker._save() overwrites direct positions.json edits within
+    # seconds). The bot NEVER writes to data/positions_extra.json — it's
+    # operator-owned.
+    #
+    # Format: same as positions.json — `{"open": [...], "closed": [...]}`.
+    # Only `closed` is read here; `open` is ignored to prevent confusion
+    # about non-existent positions.
+    #
+    # Dedup is by (exchange, symbol, side, close_time within ±60s) — NOT
+    # by id — because the extras file is typically built from the
+    # warehouse, which assigns synthetic IDs (e.g. WAREHOUSE-binance-...)
+    # while positions.json uses the exchange's order_id. The plain
+    # `seen_ids` dedup would let the SAME trade through both files under
+    # different IDs and double-count totals.
+    extras = _file_cache.load("data/positions_extra.json")
+    if extras and isinstance(extras, dict):
+        # Build a (exchange_lower, symbol, side, close_time_bucket) set
+        # from already-loaded closed records. Bucket = close_time // 60
+        # (1-minute bucket gives ±30s collision tolerance — tight enough
+        # that two genuinely-different intraday round-trips of the same
+        # symbol/side don't dedup, loose enough that a +/- few seconds
+        # of timestamp drift between warehouse and positions.json doesn't
+        # bypass the dedup).
+        existing_close_keys = set()
+        for p in all_closed:
+            ct = p.get("close_time") or 0
+            if not ct:
+                continue
+            existing_close_keys.add((
+                (p.get("exchange") or "").lower(),
+                p.get("symbol", ""),
+                p.get("side", ""),
+                int(float(ct) // 60),
+            ))
+        skipped_dup = 0
+        ingested_new = 0
+        for pos in (extras.get("closed", []) or []):
+            ct = pos.get("close_time") or 0
+            key = (
+                (pos.get("exchange") or "").lower(),
+                pos.get("symbol", ""),
+                pos.get("side", ""),
+                int(float(ct) // 60) if ct else None,
+            )
+            # Also fuzzy-check the adjacent buckets to absorb close_time
+            # drift across the bucket boundary. (60s bucket size + ±1
+            # bucket = up to ±60s real-world tolerance.)
+            adjacent = {key}
+            if ct:
+                bucket = int(float(ct) // 60)
+                adjacent.add((key[0], key[1], key[2], bucket - 1))
+                adjacent.add((key[0], key[1], key[2], bucket + 1))
+            if any(k in existing_close_keys for k in adjacent):
+                skipped_dup += 1
+                continue
+            pid = pos.get("id", "")
+            if pid in seen_ids:
+                skipped_dup += 1
+                continue
+            seen_ids.add(pid)
+            all_closed.append(pos)
+            existing_close_keys.add(key)
+            ingested_new += 1
+        if ingested_new or skipped_dup:
+            logger.debug(
+                f"[Dashboard] positions_extra: +{ingested_new} new, "
+                f"{skipped_dup} duplicates skipped")
+
     tracked_syms = set()
     for p in all_open:
         ex = (p.get("exchange") or "").lower()
