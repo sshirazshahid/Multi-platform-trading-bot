@@ -144,6 +144,21 @@ CLAUDE_PORTFOLIO = {
 }
 
 # ==============================================================
+# MODEL GATE — calibrated LR+GBM ensemble blended with the MCP rule score
+# Loads data/models/ensemble_{market}_latest.json on startup.
+# When `enabled=False` or no latest pointer exists, the gate is bypassed
+# and the rule-only path runs (existing behavior).
+# `shadow_only=True` keeps p_win logged to the warehouse but does NOT block
+# entries — used for soak windows where we want bit-for-bit baseline.
+# ==============================================================
+MODEL_GATE = {
+    "enabled":           os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
+    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "false").lower() == "true",
+    "threshold_futures": float(os.getenv("MODEL_GATE_THRESHOLD_FUTURES", "0.55")),
+    "threshold_spot":    float(os.getenv("MODEL_GATE_THRESHOLD_SPOT",    "0.58")),
+}
+
+# ==============================================================
 # SMART SCANNER (legacy — kept for reference, not used by Claude Portfolio mode)
 # ==============================================================
 SCANNER = {

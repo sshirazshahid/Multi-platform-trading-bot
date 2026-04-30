@@ -171,6 +171,25 @@ CREATE TABLE IF NOT EXISTS model_versions (
     pbo                 REAL,
     artifact_path       TEXT
 );
+
+-- labels: triple-barrier labels per candidate. y in {0, 1}; rows with the
+-- time-bar firing are dropped before insert (kept out of the table to keep
+-- the training set balanced). market_type lets the trainer split futures vs
+-- spot without re-deriving from the candidate.
+CREATE TABLE IF NOT EXISTS labels (
+    candidate_id       INTEGER PRIMARY KEY,
+    ts                 REAL    NOT NULL,
+    symbol             TEXT    NOT NULL,
+    side               TEXT    NOT NULL,
+    market_type        TEXT    NOT NULL,
+    y                  INTEGER NOT NULL,
+    exit_bars          INTEGER,
+    label_horizon_bars INTEGER NOT NULL,
+    sl_pct             REAL,
+    tp_pct             REAL
+);
+CREATE INDEX IF NOT EXISTS idx_labels_market_ts ON labels(market_type, ts);
+CREATE INDEX IF NOT EXISTS idx_labels_symbol    ON labels(symbol);
 """
 
 
@@ -191,6 +210,12 @@ class Warehouse:
             # which we catch and ignore.
             try:
                 conn.execute("ALTER TABLE trades ADD COLUMN mcp_score REAL")
+            except sqlite3.OperationalError:
+                pass
+            # Phase: ensemble model gate — record the model that approved the
+            # entry so realized PnL can be attributed to a specific version.
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN model_version TEXT")
             except sqlite3.OperationalError:
                 pass
             # Phase 13.5b: predictions.candidate_id added for clean
@@ -282,6 +307,7 @@ class Warehouse:
         slippage: float = 0.0,
         mode: str = "PAPER",
         mcp_score: float | None = None,
+        model_version: str | None = None,
     ) -> int:
         """Insert an OPEN trade row. Idempotent on (exchange, symbol, ts_entry, side)."""
         try:
@@ -289,11 +315,11 @@ class Warehouse:
                 """INSERT OR IGNORE INTO trades(
                     candidate_id, ts_entry, exchange, symbol, market_type,
                     side, strategy_family, entry_px, size, leverage,
-                    fee, slippage, status, mode, mcp_score)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    fee, slippage, status, mode, mcp_score, model_version)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (candidate_id, ts_entry, exchange, symbol, market_type,
                  side, strategy_family, entry_px, size, leverage,
-                 fee, slippage, "OPEN", mode, mcp_score),
+                 fee, slippage, "OPEN", mode, mcp_score, model_version),
             )
             if cur.lastrowid:
                 return int(cur.lastrowid)
@@ -427,6 +453,68 @@ class Warehouse:
             )
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_attribution error: {e}")
+
+    # ── Labels (triple-barrier) ───────────────────────────────────────
+
+    def record_label(
+        self,
+        *,
+        candidate_id: int,
+        ts: float,
+        symbol: str,
+        side: str,
+        market_type: str,
+        y: int,
+        exit_bars: int | None,
+        label_horizon_bars: int,
+        sl_pct: float | None = None,
+        tp_pct: float | None = None,
+    ) -> None:
+        """Idempotent insert of a triple-barrier label. PK is candidate_id —
+        re-running the labeler with a different horizon is allowed and replaces
+        the prior row for that candidate."""
+        try:
+            self._conn().execute(
+                """INSERT OR REPLACE INTO labels(
+                    candidate_id, ts, symbol, side, market_type, y, exit_bars,
+                    label_horizon_bars, sl_pct, tp_pct)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (int(candidate_id), float(ts), str(symbol), str(side),
+                 str(market_type), int(y),
+                 int(exit_bars) if exit_bars is not None else None,
+                 int(label_horizon_bars),
+                 float(sl_pct) if sl_pct is not None else None,
+                 float(tp_pct) if tp_pct is not None else None),
+            )
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] record_label error: {e}")
+
+    def record_model_version(
+        self,
+        *,
+        model_version: str,
+        trained_at: int,
+        train_window_start: int,
+        train_window_end: int,
+        oos_sharpe: float,
+        oos_wr: float,
+        deflated_sharpe: float,
+        pbo: float,
+        artifact_path: str,
+    ) -> None:
+        try:
+            self._conn().execute(
+                """INSERT OR REPLACE INTO model_versions(
+                    model_version, trained_at, train_window_start, train_window_end,
+                    oos_sharpe, oos_wr, deflated_sharpe, pbo, artifact_path)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (str(model_version), int(trained_at),
+                 int(train_window_start), int(train_window_end),
+                 float(oos_sharpe), float(oos_wr),
+                 float(deflated_sharpe), float(pbo), str(artifact_path)),
+            )
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] record_model_version error: {e}")
 
     # ── Query helpers ─────────────────────────────────────────────────
 

@@ -200,3 +200,71 @@ class ShadowPredictor:
         except Exception as e:
             logger.debug(f"[Shadow] log_entry persistence failed: {e}")
         return p
+
+    # ── Drift watch (Phase 7) ────────────────────────────────────────
+    def check_drift(
+        self,
+        *,
+        warehouse=None,
+        window: int = 50,
+        threshold: float = 0.10,
+        alert_path: str = "data/model_drift_alert.json",
+    ) -> dict | None:
+        """Compare predicted vs realized WR over the last `window` trades.
+
+        Joins `predictions` to `trades` via `candidate_id` and computes:
+          predicted_WR = mean(p_win)
+          realized_WR  = mean(realized_pnl > 0)
+        When |predicted - realized| > threshold, writes an alert JSON the
+        notifier surfaces. Returns the diag dict (or None when sample <
+        window). Safe to call frequently — only writes the alert file
+        when the threshold is exceeded.
+        """
+        try:
+            from core.warehouse import get_warehouse
+            wh = warehouse if warehouse is not None else get_warehouse()
+            rows = wh.query(
+                "SELECT p.p_win, t.realized_pnl "
+                "FROM predictions p JOIN trades t "
+                "  ON t.candidate_id = p.candidate_id "
+                "WHERE t.status = 'CLOSED' AND p.p_win IS NOT NULL "
+                "ORDER BY t.ts_exit DESC LIMIT ?",
+                (int(window),),
+            )
+        except Exception as e:
+            logger.debug(f"[Shadow] drift query failed: {e}")
+            return None
+        if len(rows) < window:
+            return None
+
+        import statistics as _st
+        p_pred = [float(r["p_win"]) for r in rows]
+        wins = [1.0 if (r["realized_pnl"] or 0) > 0 else 0.0 for r in rows]
+        pred_wr = _st.fmean(p_pred)
+        real_wr = _st.fmean(wins)
+        gap = abs(pred_wr - real_wr)
+
+        diag = {
+            "model_version": self._model_version,
+            "window": int(window),
+            "predicted_wr": pred_wr,
+            "realized_wr":  real_wr,
+            "gap":          gap,
+            "threshold":    float(threshold),
+            "alert":        bool(gap > threshold),
+        }
+        try:
+            ap = Path(alert_path)
+            ap.parent.mkdir(parents=True, exist_ok=True)
+            if diag["alert"]:
+                ap.write_text(json.dumps(diag, indent=2, default=float))
+                logger.warning(
+                    f"[Shadow] DRIFT ALERT: predicted={pred_wr:.3f} vs "
+                    f"realized={real_wr:.3f} gap={gap:.3f} "
+                    f"(threshold={threshold:.2f})")
+            elif ap.exists():
+                # Auto-clear the alert when drift falls back inside threshold.
+                ap.unlink()
+        except Exception as e:
+            logger.debug(f"[Shadow] drift alert write failed: {e}")
+        return diag

@@ -498,7 +498,8 @@ class OrderManager:
                       market_type: str, strategy: str, size: float,
                       sl: float, tp: float, leverage: int = 1,
                       order_type: str = "market", price: float = None,
-                      candidate_id: int = None, mcp_score: float = None):
+                      candidate_id: int = None, mcp_score: float = None,
+                      model_version: str = None):
 
         if self.blacklist.is_blacklisted(symbol):
             logger.warning(f"[Orders] {symbol} blacklisted — skipped.")
@@ -897,6 +898,7 @@ class OrderManager:
                 fee=float(getattr(pos, "entry_fee", 0.0)),
                 mode=_mode,
                 mcp_score=float(mcp_score) if mcp_score is not None else None,
+                model_version=str(model_version) if model_version else None,
             )
         except Exception as _we:
             logger.debug(f"[Warehouse] record_trade_open skipped: {_we}")

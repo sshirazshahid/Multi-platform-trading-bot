@@ -248,6 +248,147 @@ def _kurt(x: np.ndarray) -> float:
     return float(((x - mu) ** 4).mean() / (s ** 4))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Model-version gate (Phase 5 of the predict-spot+futures plan).
+#
+# Distinct from `PromotionGate.evaluate` above: that one promotes the *shadow
+# runner* over the *live rubric*. THIS one decides whether a freshly-trained
+# `model_versions` row is good enough to overwrite `data/models/ensemble_*_latest.json`.
+# Both gates share the same statistical primitives (`core.stat_tests`); they
+# just answer different questions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Thresholds — see plan §Phase 5. n_oos floors are different per market because
+# spot has structurally less data (long-only, longer hold).
+MIN_OOS = {"futures": 200, "spot": 100}
+MIN_OOS_WR = 0.55
+MIN_DSR = 0.5
+MAX_PBO = 0.5
+
+LATEST_TEMPLATE = "ensemble_{market}_latest.json"
+AUDIT_LOG = Path("data/models/audit.jsonl")
+
+
+def _audit(payload: dict) -> None:
+    """Append-only newline-delimited JSON of every promotion attempt."""
+    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with AUDIT_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, default=float) + "\n")
+
+
+def evaluate_model_version(
+    row: dict,
+    *,
+    market_type: str,
+    min_oos: int | None = None,
+    min_oos_wr: float = MIN_OOS_WR,
+    min_dsr: float = MIN_DSR,
+    max_pbo: float = MAX_PBO,
+) -> tuple[bool, str, dict]:
+    """Decide whether `row` (a `model_versions` row + paired ensemble JSON) is
+    fit to publish as the live `*_latest.json` pointer.
+
+    Args:
+        row: dict with keys `model_version, oos_wr, deflated_sharpe, pbo,
+             artifact_path` — i.e. the columns of `core.warehouse.model_versions`.
+        market_type: 'futures' or 'spot' — controls the n_oos floor.
+
+    Returns:
+        (promote, reason, diag) where `promote` is bool. On True the caller
+        should rewrite `data/models/ensemble_{market}_latest.json` to point
+        at `row['artifact_path']`.
+    """
+    floor_n = int(min_oos if min_oos is not None else MIN_OOS.get(market_type, 100))
+    art_path = row.get("artifact_path") or ""
+    n_oos = 0
+    auc = float("nan")
+    try:
+        if art_path:
+            payload = json.loads(Path(art_path).read_text())
+            metrics = payload.get("metrics") or {}
+            n_oos = int(metrics.get("n_oos_ensemble") or 0)
+            auc = float(metrics.get("auc_ensemble") or float("nan"))
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+
+    diag = {
+        "model_version": str(row.get("model_version")),
+        "market_type": market_type,
+        "oos_wr": float(row.get("oos_wr") or 0.0),
+        "deflated_sharpe": float(row.get("deflated_sharpe") or 0.0),
+        "pbo": float(row.get("pbo") or 1.0),
+        "n_oos": n_oos,
+        "auc_ensemble": auc,
+        "thresholds": {
+            "min_oos": floor_n,
+            "min_oos_wr": float(min_oos_wr),
+            "min_dsr": float(min_dsr),
+            "max_pbo": float(max_pbo),
+        },
+    }
+    reasons: list[str] = []
+    if diag["oos_wr"] < min_oos_wr:
+        reasons.append(f"oos_wr {diag['oos_wr']:.3f} < {min_oos_wr:.2f}")
+    if diag["deflated_sharpe"] < min_dsr:
+        reasons.append(f"DSR {diag['deflated_sharpe']:.2f} < {min_dsr:.2f}")
+    # PBO can be NaN when not enough folds — treat NaN as fail-closed.
+    pbo_v = diag["pbo"]
+    if not np.isfinite(pbo_v) or pbo_v > max_pbo:
+        reasons.append(f"PBO {pbo_v} > {max_pbo:.2f}")
+    if n_oos < floor_n:
+        reasons.append(f"n_oos {n_oos} < {floor_n}")
+
+    promote = (not reasons)
+    reason = "OK" if promote else "; ".join(reasons)
+    diag["promote"] = promote
+    diag["reason"] = reason
+    return promote, reason, diag
+
+
+def promote_if_eligible(
+    row: dict,
+    *,
+    market_type: str,
+    models_dir: str | Path = "data/models",
+    **kwargs,
+) -> bool:
+    """End-to-end: evaluate, log audit row, atomically rewrite *_latest.json on pass.
+
+    The latest pointer is itself a small JSON file (NOT a symlink — Windows
+    where the bot runs doesn't reliably support symlinks). Atomicity comes
+    from write-to-temp + replace.
+    """
+    promote, reason, diag = evaluate_model_version(
+        row, market_type=market_type, **kwargs
+    )
+    diag["ts"] = int(__import__("time").time())
+    _audit(diag)
+
+    if not promote:
+        return False
+
+    art_path = row.get("artifact_path") or ""
+    if not art_path or not Path(art_path).exists():
+        diag["reason"] = f"artifact missing: {art_path}"
+        diag["promote"] = False
+        _audit(diag)
+        return False
+
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    latest = models_dir / LATEST_TEMPLATE.format(market=market_type)
+    tmp = latest.with_suffix(".json.tmp")
+    payload = {
+        "model_version": str(row.get("model_version")),
+        "artifact_path": str(art_path),
+        "promoted_at": int(__import__("time").time()),
+        "diag": diag,
+    }
+    tmp.write_text(json.dumps(payload, indent=2, default=float))
+    tmp.replace(latest)
+    return True
+
+
 def apply_split(percent_to_shadow: float, path: str | Path = "data/ab_split.json") -> None:
     """Write the A/B traffic-split flag for `bot_engine` to consume.
 

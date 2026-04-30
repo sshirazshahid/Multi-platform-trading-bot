@@ -121,6 +121,33 @@ _POSITION_MONITOR_SYSTEM_PROMPT = (
 
 
 
+def _sigmoid(x: float) -> float:
+    """Numerically-stable scalar sigmoid; saturates at the float64 edges."""
+    try:
+        if x >= 0:
+            ex = math.exp(-x) if x < 700 else 0.0
+            return 1.0 / (1.0 + ex)
+        ex = math.exp(x) if x > -700 else 0.0
+        return ex / (1.0 + ex)
+    except OverflowError:
+        return 1.0 if x > 0 else 0.0
+
+
+def _safe_feat(v) -> float:
+    """Coerce model-input feature to float; bools to 0/1, NaN/None to 0.0."""
+    if v is None:
+        return 0.0
+    if isinstance(v, bool):
+        return 1.0 if v else 0.0
+    try:
+        f = float(v)
+        if f != f:  # NaN
+            return 0.0
+        return f
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _http_get(url: str, timeout: int = FETCH_TIMEOUT, headers: dict = None):
     """Simple HTTP GET returning parsed JSON or empty dict/list on failure."""
     try:
@@ -719,6 +746,10 @@ class MCPBrain:
         self._last_fund_ops = []       # TRANSFER / SELL_PORTFOLIO operations
         self._last_trade_actions = []  # OPEN/CLOSE actions from analyze_portfolio
         self._accuracy = AccuracyTracker()
+        # Model-gate state (Phase 6). Loaded lazily so MCPBrain can boot without
+        # any trained models present.
+        self._model_bundle: dict = {}   # market_type -> {lr, gbm, iso_lr, iso_gbm, weights, version}
+        self._model_load_attempted: set = set()
 
         # Exchange clients for direct OHLCV fetching (set by bot_engine)
         self._exchanges = {}
@@ -756,6 +787,102 @@ class MCPBrain:
     @property
     def is_enabled(self) -> bool:
         return self._enabled
+
+    # ── Model gate (Phase 6) ─────────────────────────────────────────
+    def _load_model_bundle(self, market_type: str) -> dict:
+        """Lazy-load the calibrated LR+GBM bundle for `market_type`.
+
+        Returns {} when no `*_latest.json` pointer exists or any artifact
+        fails to load — callers fall back to rule-only behavior.
+        """
+        if market_type in self._model_bundle:
+            return self._model_bundle[market_type]
+        if market_type in self._model_load_attempted:
+            return {}
+        self._model_load_attempted.add(market_type)
+
+        try:
+            latest = Path(f"data/models/ensemble_{market_type}_latest.json")
+            if not latest.exists():
+                logger.debug(
+                    f"[ModelGate] no latest pointer for market={market_type} — "
+                    f"rule-only fallback")
+                return {}
+            ptr = json.loads(latest.read_text())
+            art_path = Path(ptr["artifact_path"])
+            if not art_path.exists():
+                logger.warning(
+                    f"[ModelGate] latest pointer references missing artifact: {art_path}")
+                return {}
+            payload = json.loads(art_path.read_text())
+            from core.calibration import IsotonicCalibrator
+            from core.models import GBMModel, LRModel
+            arts = payload["artifacts"]
+            base = art_path.parent
+            bundle = {
+                "version":  payload["model_version"],
+                "weights":  payload["weights"],
+                "feature_keys": payload["feature_keys"],
+                "lr":       LRModel.load(base / arts["lr"]),
+                "gbm":      GBMModel.load(base / arts["gbm"]),
+                "iso_lr":   IsotonicCalibrator.load(base / arts["iso_lr"]),
+                "iso_gbm":  IsotonicCalibrator.load(base / arts["iso_gbm"]),
+            }
+            self._model_bundle[market_type] = bundle
+            logger.info(
+                f"[ModelGate] loaded {market_type} ensemble "
+                f"(version={bundle['version']}, weights={bundle['weights']})")
+            return bundle
+        except Exception as e:
+            logger.warning(f"[ModelGate] failed to load {market_type} bundle: {e}")
+            return {}
+
+    def score_via_model(
+        self,
+        *,
+        market_type: str,
+        feats: dict,
+        rule_score: float,
+    ) -> dict:
+        """Calibrated p_win blend.
+
+        Returns dict with keys: `p_win_lr`, `p_win_gbm`, `p_win_ensemble`,
+        `model_version`. When the bundle is unavailable returns sensible
+        rule-only stand-ins so callers don't have to special-case.
+        """
+        out = {
+            "p_win_lr":       float("nan"),
+            "p_win_gbm":      float("nan"),
+            "p_win_ensemble": _sigmoid((float(rule_score) - 65.0) / 8.0),
+            "model_version":  None,
+        }
+        bundle = self._load_model_bundle(market_type)
+        if not bundle:
+            return out
+        try:
+            import numpy as _np
+            keys = bundle["feature_keys"]
+            x = _np.array([[_safe_feat(feats.get(k)) for k in keys]], dtype=float)
+            p_lr_raw = float(bundle["lr"].p_win(x)[0])
+            p_gbm_raw = float(bundle["gbm"].p_win(x)[0])
+            p_lr = float(bundle["iso_lr"].transform(_np.array([p_lr_raw]))[0])
+            p_gbm = float(bundle["iso_gbm"].transform(_np.array([p_gbm_raw]))[0])
+            w = bundle["weights"]
+            w_lr = float(w.get("lr", 0.5))
+            w_gbm = float(w.get("gbm", 0.5))
+            w_mcp = float(w.get("mcp_rule", 0.25))
+            p_models = w_lr * p_lr + w_gbm * p_gbm
+            rule_term = _sigmoid((float(rule_score) - 65.0) / 8.0)
+            p_ens = w_mcp * rule_term + (1.0 - w_mcp) * p_models
+            out.update({
+                "p_win_lr":       p_lr,
+                "p_win_gbm":      p_gbm,
+                "p_win_ensemble": float(p_ens),
+                "model_version":  bundle["version"],
+            })
+        except Exception as e:
+            logger.debug(f"[ModelGate] score_via_model({market_type}) error: {e}")
+        return out
 
     def _check_rate_limit(self) -> bool:
         """Enforce MAX_API_CALLS_HR budget."""
@@ -2313,35 +2440,79 @@ class MCPBrain:
                 continue  # No indicator data
             result = self._score_coin(coin, data, ei)
 
+            # ── Calibrated p_win blend (Phase 6) ─────────────────────
+            # Build the model-input feature dict from the snapshot keys the
+            # trainer learned on. Falls back to rule-only when no model is
+            # loaded — `score_via_model` returns p_ens=sigmoid((score-65)/8)
+            # in that case so the gate logic below stays uniform.
+            ei_1h = ei.get("1h", {})
+            ei_4h = ei.get("4h", {})
+            model_input = {
+                "score":       result.get("score"),
+                "layers_ok":   result.get("layers_ok"),
+                "confidence":  result.get("confidence"),
+                "sl_pct":      result.get("sl_pct"),
+                "tp_pct":      result.get("tp_pct"),
+                "rsi_1h":      ei_1h.get("rsi"),
+                "adx_1h":      ei_1h.get("adx"),
+                "adx_4h":      ei_4h.get("adx"),
+                "atr_pct_1h":  ei_1h.get("atr_pct"),
+                "bb_width_4h": ei_4h.get("bb_width"),
+                "vol_ratio":   ei_1h.get("vol_ratio"),
+                "ema20_above_50_4h": ei_4h.get("ema20_above_50"),
+                "ema20_above_50_1h": ei_1h.get("ema20_above_50"),
+                "funding_rate": (data.get("funding", {}).get(coin, {}) or {}).get("funding_rate"),
+                "ob_imbalance": (data.get("orderbook", {}).get(coin, {}) or {}).get("imbalance"),
+            }
+            mscore = self.score_via_model(
+                market_type="futures",
+                feats=model_input,
+                rule_score=float(result.get("score") or 0),
+            )
+            result["p_win_lr"]       = mscore["p_win_lr"]
+            result["p_win_gbm"]      = mscore["p_win_gbm"]
+            result["p_win_ensemble"] = mscore["p_win_ensemble"]
+            result["model_version"]  = mscore["model_version"]
+
             # Warehouse candidate emission — every scored symbol (spec §4, §6).
-            # ALLOW if it passes the entry gate; otherwise SKIP with reason.
-            gate_pass = result["score"] >= 66 and result["layers_ok"] >= 6
+            # ALLOW if BOTH the rule gate AND the model gate pass.
+            try:
+                from config import MODEL_GATE
+            except ImportError:
+                MODEL_GATE = {"enabled": False, "shadow_only": True,
+                              "threshold_futures": 0.55, "threshold_spot": 0.58}
+            rule_gate = result["score"] >= 66 and result["layers_ok"] >= 6
+            model_gate_active = (
+                MODEL_GATE.get("enabled", False)
+                and not MODEL_GATE.get("shadow_only", False)
+                and mscore["model_version"] is not None
+            )
+            if model_gate_active:
+                threshold = float(MODEL_GATE.get("threshold_futures", 0.55))
+                model_pass = float(result["p_win_ensemble"]) >= threshold
+            else:
+                model_pass = True  # shadow-only or no model loaded
+            gate_pass = rule_gate and model_pass
             decision = "ALLOW" if gate_pass else "SKIP"
-            skip_reason = "" if gate_pass else (result.get("reason") or "gate_fail")
+            if not rule_gate:
+                skip_reason = result.get("reason") or "gate_fail"
+            elif not model_pass:
+                skip_reason = (
+                    f"model_gate(p_ens={result['p_win_ensemble']:.3f}<"
+                    f"{threshold:.2f},v={mscore['model_version']})"
+                )
+            else:
+                skip_reason = ""
             cand_id = -1
             if get_warehouse is not None:
                 try:
                     wh = get_warehouse()
-                    ei_1h = ei.get("1h", {})
-                    ei_4h = ei.get("4h", {})
-                    feat = {
-                        "score":       result.get("score"),
-                        "layers_ok":   result.get("layers_ok"),
-                        "confidence":  result.get("confidence"),
-                        "sl_pct":      result.get("sl_pct"),
-                        "tp_pct":      result.get("tp_pct"),
-                        "rsi_1h":      ei_1h.get("rsi"),
-                        "adx_1h":      ei_1h.get("adx"),
-                        "adx_4h":      ei_4h.get("adx"),
-                        "atr_pct_1h":  ei_1h.get("atr_pct"),
-                        "bb_width_4h": ei_4h.get("bb_width"),
-                        "vol_ratio":   ei_1h.get("vol_ratio"),
-                        "ema20_above_50_4h": ei_4h.get("ema20_above_50"),
-                        "ema20_above_50_1h": ei_1h.get("ema20_above_50"),
-                        "funding_rate": (data.get("funding", {}).get(coin, {}) or {}).get("funding_rate"),
-                        "ob_imbalance": (data.get("orderbook", {}).get(coin, {}) or {}).get("imbalance"),
-                        "reason":       result.get("reason"),
-                    }
+                    feat = dict(model_input)
+                    feat["reason"] = result.get("reason")
+                    feat["p_win_lr"]       = mscore["p_win_lr"]
+                    feat["p_win_gbm"]      = mscore["p_win_gbm"]
+                    feat["p_win_ensemble"] = mscore["p_win_ensemble"]
+                    feat["model_version"]  = mscore["model_version"]
                     cand_id = wh.record_candidate(
                         exchange="*",  # exchange picked later
                         symbol=f"{coin}/USDT",
@@ -2471,7 +2642,13 @@ class MCPBrain:
                 "tp_pct": tp_pct,
                 "confidence": result["confidence"],
                 "mcp_score": result.get("score", 0),
-                "reason": f"ALGO score={result['score']} layers={result['layers_ok']}/7 {result['reason']}",
+                "model_version": result.get("model_version"),
+                "p_win_ensemble": result.get("p_win_ensemble"),
+                "reason": (
+                    f"ALGO score={result['score']} layers={result['layers_ok']}/7 "
+                    f"p_ens={result.get('p_win_ensemble', float('nan')):.3f} "
+                    f"{result['reason']}"
+                ),
                 "position_id": "",
                 "candidate_id": result.get("_candidate_id", -1),
             })

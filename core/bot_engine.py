@@ -164,7 +164,9 @@ class BotEngine:
             if SpotPortfolioManager:
                 try:
                     self.spot_manager = SpotPortfolioManager(
-                        self.active_exchanges, self.risk)
+                        self.active_exchanges, self.risk,
+                        mcp_brain=self.mcp_brain,
+                    )
                 except Exception as e:
                     logger.debug(f"[Engine] SpotManager init: {e}")
             if CapitalAllocator:
@@ -1617,6 +1619,7 @@ class BotEngine:
                 leverage=leverage,
                 candidate_id=_cid if (_cid or 0) > 0 else None,
                 mcp_score=action.get("mcp_score"),
+                model_version=action.get("model_version"),
             )
             if pos is None:
                 logger.info(f"[Claude] open_position returned None — rejected by order manager")

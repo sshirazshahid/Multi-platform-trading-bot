@@ -2360,6 +2360,82 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         print()
 
     # ══════════════════════════════════════════════════════════════════
+    #  MODEL GATE  (calibrated LR+GBM ensemble)
+    # ══════════════════════════════════════════════════════════════════
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        try:
+            from config import MODEL_GATE as _MG
+        except Exception:
+            _MG = {"enabled": False, "threshold_futures": 0.55,
+                   "threshold_spot": 0.58, "shadow_only": False}
+        rows_to_show: list[tuple[str, dict]] = []
+        for mk in ("futures", "spot"):
+            latest = _P(f"data/models/ensemble_{mk}_latest.json")
+            if not latest.exists():
+                continue
+            try:
+                ptr = _json.loads(latest.read_text())
+                art = _P(ptr.get("artifact_path") or "")
+                if not art.exists():
+                    continue
+                payload = _json.loads(art.read_text())
+                metrics = payload.get("metrics") or {}
+                rows_to_show.append((mk, {
+                    "version": payload.get("model_version"),
+                    "auc":     metrics.get("auc_ensemble"),
+                    "wr":      metrics.get("wr_at_0_55_ensemble"),
+                    "n":       metrics.get("n_oos_ensemble"),
+                    "thr":     _MG.get(f"threshold_{mk}"),
+                }))
+            except Exception:
+                continue
+        if rows_to_show:
+            box_top("MODEL GATE  (LR+GBM ensemble)")
+            mode_lbl = "SHADOW-ONLY" if _MG.get("shadow_only") else (
+                "ACTIVE" if _MG.get("enabled") else "DISABLED")
+            row("  {} {}".format(
+                vljust(col("State:", DIM), 12),
+                col(mode_lbl, GREEN if mode_lbl == "ACTIVE" else YELLOW)
+            ))
+            row("  {} {} {} {} {} {}".format(
+                vljust(col("Market", DIM), 8),
+                vljust(col("Version",     DIM), 28),
+                vrjust(col("AUC",         DIM),  6),
+                vrjust(col("WR@0.55",     DIM),  8),
+                vrjust(col("n_oos",       DIM),  6),
+                vrjust(col("τ",           DIM),  5),
+            ))
+            for mk, d in rows_to_show:
+                ver = (d["version"] or "")[:28]
+                auc = "{:.3f}".format(d["auc"]) if d["auc"] is not None else "-"
+                wr = "{:.3f}".format(d["wr"]) if d["wr"] is not None else "-"
+                n = str(d["n"] or "-")
+                thr = "{:.2f}".format(d["thr"]) if d["thr"] is not None else "-"
+                row("  {} {} {} {} {} {}".format(
+                    vljust(mk, 8), vljust(ver, 28),
+                    vrjust(auc, 6), vrjust(wr, 8),
+                    vrjust(n, 6), vrjust(thr, 5),
+                ))
+            # Drift alert if present.
+            drift_p = _P("data/model_drift_alert.json")
+            if drift_p.exists():
+                try:
+                    di = _json.loads(drift_p.read_text())
+                    row("  " + col(
+                        f"DRIFT: predicted_WR={di.get('predicted_wr', 0):.3f} "
+                        f"vs realized={di.get('realized_wr', 0):.3f} "
+                        f"(gap={di.get('gap', 0):.3f})", RED + BOLD))
+                except Exception:
+                    pass
+            box_bot()
+            print()
+    except Exception:
+        # Dashboard panels must not crash the renderer.
+        pass
+
+    # ══════════════════════════════════════════════════════════════════
     #  MARKET REGIME
     # ══════════════════════════════════════════════════════════════════
     regime_data = fetcher.regime_data()

@@ -42,12 +42,47 @@ class HoldingInfo:
 
 class SpotPortfolioManager:
 
-    def __init__(self, exchanges: dict, risk_manager=None):
+    def __init__(self, exchanges: dict, risk_manager=None, mcp_brain=None):
         self._exchanges = exchanges
         self._risk = risk_manager
+        self._mcp_brain = mcp_brain  # optional — used by score_spot_candidate
         self._holdings: dict[str, dict[str, HoldingInfo]] = {}
         self._state_file = STATE_FILE
         self._load_state()
+
+    def score_spot_candidate(
+        self,
+        *,
+        symbol: str,
+        feats: dict,
+        rule_score: float = 65.0,
+    ) -> dict:
+        """Calibrated p_win for a spot entry candidate.
+
+        Mirrors `MCPBrain.score_via_model(market_type='spot')`. When no spot
+        model has been promoted, returns the rule-only sigmoid fallback so
+        the caller can still apply a soft threshold.
+
+        Args:
+            symbol:     e.g. 'BTC/USDT'.
+            feats:      flat dict matching the trainer's FEATURE_KEYS.
+            rule_score: long-only spot rule score (0-100). Plug in your own
+                        deterministic spot scorer here.
+
+        Returns: same shape as `MCPBrain.score_via_model` —
+            {p_win_lr, p_win_gbm, p_win_ensemble, model_version}.
+        """
+        if self._mcp_brain is None:
+            from core.mcp_brain import _sigmoid
+            return {
+                "p_win_lr":       float("nan"),
+                "p_win_gbm":      float("nan"),
+                "p_win_ensemble": _sigmoid((float(rule_score) - 65.0) / 8.0),
+                "model_version":  None,
+            }
+        return self._mcp_brain.score_via_model(
+            market_type="spot", feats=feats, rule_score=rule_score,
+        )
 
     def scan_holdings(self) -> dict:
         """Pull spot balances from all connected exchanges."""
