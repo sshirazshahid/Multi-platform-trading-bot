@@ -90,6 +90,10 @@ class RiskManager:
         self._halt_time:     float = 0.0
         self._recent_results: list = []   # last N trades: True=win, False=loss
         self._trade_history:  list = []   # Kelly: (win, pnl_pct)
+        # Tracks the last balance reading for the 30%-down-spike guard in
+        # update_current_balance. Not persisted — re-seeded by the first
+        # balance update after restart.
+        self._last_balance_seen: float = 0.0
         # 2026-04-27: per-UTC-day open counter, enforced against
         # RISK["max_trades_per_day"]. _trade_history is the wrong source for
         # "trades today" because it caps at 100 and is the rolling Kelly
@@ -735,7 +739,7 @@ class RiskManager:
             logger.info(f"[Risk] Starting balance: {balance:.4f} USDT (peak reset)")
 
     def update_current_balance(self, balance: float):
-        """Update balance without resetting peak or clearing halts.
+        """Update peak balance without resetting peak or clearing halts.
         Called on subsequent cycles after startup.
 
         2026-04-13 FIX: Guard against artificial balance spikes. A single
@@ -744,8 +748,46 @@ class RiskManager:
         peak, triggering a fake drawdown halt that required manual reset.
         Now: if balance jumps > 30% above peak in a single cycle, log a
         warning and DON'T update peak — real P&L never spikes 30% in 5 min.
+
+        2026-04-30 FIX: do NOT overwrite `self._start_balance` on every
+        cycle. start_balance is the SESSION START balance — set once via
+        set_start_balance() and held constant — because the drawdown
+        circuit-breaker math is:
+            effective = start_balance + daily_pnl
+            drawdown  = (peak - effective) / peak
+        That formula assumes start_balance is constant. If we overwrite
+        it with the current balance every cycle, then effective ≈ current
+        balance + daily_pnl (double-counting), and the moment a single
+        exchange stalls and returns a partial-balance read, start_balance
+        drops to that low number → drawdown formula computes a phantom
+        loss → halt fires for no real reason.
+
+        Live evidence (2026-04-30): peak_balance=$364, balance reads
+        fluctuated $108↔$221↔$357 across the day as one or another
+        exchange momentarily stalled. The bug clobbered start_balance to
+        $108, drawdown calc returned 70.2% (= (364-(108-0.65))/364), and
+        the bot halted on a drawdown that never happened.
+
+        Also added: a 30% DOWN-spike rejection mirroring the existing UP
+        spike guard. If current reads >30% below the prior cycle's
+        snapshot, treat it as a fetch flake (one exchange offline) and
+        skip the peak update without poisoning state. The peak is only
+        ever advanced by genuinely-higher cycles.
         """
-        self._start_balance = balance
+        # Symmetric flake guard: reject 30% DROPS too (e.g. one exchange
+        # API momentarily returns 0). Without this, every transient
+        # fetch hiccup looks like a P&L disaster to the drawdown calc.
+        prior = float(getattr(self, "_last_balance_seen", 0.0) or 0.0)
+        if prior > 0 and balance > 0:
+            drop_pct = (prior - balance) / prior
+            if drop_pct > 0.30:
+                logger.warning(
+                    f"[Risk] Balance drop rejected: ${balance:.2f} is "
+                    f"{drop_pct*100:.0f}% below last reading ${prior:.2f} "
+                    f"— likely a partial-exchange-fetch flake, not real P&L. "
+                    f"Skipping peak update for this cycle.")
+                return
+        self._last_balance_seen = balance
         if balance > self._peak_balance:
             if self._peak_balance > 0:
                 jump_pct = (balance - self._peak_balance) / self._peak_balance
