@@ -153,7 +153,13 @@ CLAUDE_PORTFOLIO = {
 # ==============================================================
 MODEL_GATE = {
     "enabled":           os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
-    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "false").lower() == "true",
+    # Default shadow_only=TRUE: logs p_win_ensemble + model_version on every
+    # decision to data/warehouse.sqlite (predictions, trades.model_version)
+    # without filtering entries. Honors the user's "Don't block any trades"
+    # directive (UNBLOCK_ALL, 2026-04-28). Flip MODEL_GATE_SHADOW=false to
+    # activate gating once the live p_win distribution has been inspected
+    # and a non-blocking threshold chosen empirically.
+    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "true").lower() == "true",
     "threshold_futures": float(os.getenv("MODEL_GATE_THRESHOLD_FUTURES", "0.55")),
     "threshold_spot":    float(os.getenv("MODEL_GATE_THRESHOLD_SPOT",    "0.58")),
 }
