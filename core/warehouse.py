@@ -378,12 +378,54 @@ class Warehouse:
 
     def trade_id_by_key(
         self, *, exchange: str, symbol: str, ts_entry: float, side: str,
+        tolerance_sec: float = 2.0,
     ) -> int | None:
-        """Look up a trade row by its idempotency key. Returns id or None."""
+        """Look up an OPEN trade row by its idempotency key.
+
+        2026-04-30 fix: previously this did exact-float equality on
+        `ts_entry`. The caller (`order_manager._finalize_close`) passes the
+        Position object's `open_time` — which is a different float source
+        than what was originally written to the warehouse (see
+        `record_trade_open`). They're typically the same value, but
+        sub-second drift, json-roundtrip truncation, or even microsecond
+        precision differences silently caused the lookup to miss → the
+        warehouse update was skipped → the trade row stayed
+        `status='OPEN'` forever despite a real close having fired.
+
+        Symptom: dashboard "Best PnL" stat omitted closed trades whose
+        warehouse row was orphaned. As of this fix's discovery, 5 DOGE
+        trades + 17 others were stuck OPEN in the warehouse.
+
+        Fix:
+          1. Try exact match first (preserves the prior behaviour for
+             callers whose ts_entry is bit-for-bit identical).
+          2. Fall back to a `±tolerance_sec` window, picking the OPEN
+             row closest in time to the requested ts_entry.
+          3. Restrict to `status='OPEN'` — never silently overwrite a
+             previously-closed trade with new close data.
+        """
         try:
+            # Step 1: exact match, OPEN-only.
             row = self._conn().execute(
-                "SELECT id FROM trades WHERE exchange=? AND symbol=? AND ts_entry=? AND side=?",
+                "SELECT id FROM trades "
+                "WHERE exchange=? AND symbol=? AND ts_entry=? AND side=? "
+                "AND status='OPEN' "
+                "ORDER BY id DESC LIMIT 1",
                 (exchange, symbol, ts_entry, side),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+            # Step 2: tolerance window, pick the closest OPEN match.
+            tol = float(tolerance_sec)
+            if tol <= 0:
+                return None
+            row = self._conn().execute(
+                "SELECT id, ts_entry FROM trades "
+                "WHERE exchange=? AND symbol=? AND side=? AND status='OPEN' "
+                "AND ts_entry >= ? AND ts_entry <= ? "
+                "ORDER BY ABS(ts_entry - ?) ASC, id DESC LIMIT 1",
+                (exchange, symbol, side,
+                 ts_entry - tol, ts_entry + tol, ts_entry),
             ).fetchone()
             return int(row["id"]) if row else None
         except sqlite3.Error as e:
