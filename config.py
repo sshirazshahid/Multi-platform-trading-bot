@@ -401,7 +401,15 @@ LEVERAGE_TIERS = {
         "tp_pct":                 0.0375,   # 2.5:1 R:R
         # 2026-04-28 (UNBLOCK_ALL/A): 0.65 -> 0.0. STANDARD now accepts
         # any candidate the score gate passed. Restore by reverting to 0.65.
-        "min_confidence":         0.0,
+        # 2026-05-01 (stop-bleed plan): raised 0.0 -> 0.55 — recent
+        # mcp_decisions.jsonl shows OPENs at confidence 0.44/0.51/0.52
+        # with `algo_confidence: null` (Claude advisor timed out → bot
+        # opening blind). 0.55 still permits the warmup band but blocks
+        # the lowest-quality fallback signals. Functionally a no-op for
+        # the algorithmic path (confidence = 0.66 + bonus×0.08 starts
+        # ≥ 0.66) — gates Claude-AI-proposed entries which can return
+        # arbitrary confidence values.
+        "min_confidence":         0.55,
         "requires_whitelist":     False,
         # 2026-04-28 (UNBLOCK_ALL/A): hour gate already empty — flag retained
         # for higher tiers' use; doesn't matter for STANDARD when allowed=24h.
@@ -478,7 +486,12 @@ HIGH_ATR_PCT_THRESHOLD = 0.025    # ATR% > 2.5% → max leverage = STANDARD (2x)
 # 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" —
 # re-enabled shorts. Restore the 7-day-evidence kill-switch by setting True
 # (last evidence: 9 sells avg -$0.16/trade vs 37 buys avg -$0.05).
-SHORTS_DISABLED = False
+# 2026-05-01 (stop-bleed plan): re-enabled. Stronger 262-trade sample
+# from data/positions.json shows shorts at 39.4% WR / -$51.48 net vs
+# longs at 46.8% / -$3.48. The bleed is concentrated entirely on the
+# short side. Reverts the UNBLOCK_ALL directive on shorts only — longs
+# stay open. Restore by setting False.
+SHORTS_DISABLED = True
 
 # ==============================================================
 # TRADING GATES — evidence-based whitelist / blacklist / hours
