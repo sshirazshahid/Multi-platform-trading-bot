@@ -749,7 +749,12 @@ class MCPBrain:
         # Model-gate state (Phase 6). Loaded lazily so MCPBrain can boot without
         # any trained models present.
         self._model_bundle: dict = {}   # market_type -> {lr, gbm, iso_lr, iso_gbm, weights, version}
-        self._model_load_attempted: set = set()
+        # Track LAST FAILED load timestamp per market_type so a retrain that
+        # writes a fresh `*_latest.json` mid-session can be picked up without
+        # a process restart. The retry-after window strikes a balance:
+        # frequent enough to avoid blocking new models for hours; long enough
+        # that a permanently-misconfigured bot doesn't spam the loader.
+        self._model_load_failed_at: dict[str, float] = {}
 
         # Exchange clients for direct OHLCV fetching (set by bot_engine)
         self._exchanges = {}
@@ -789,17 +794,29 @@ class MCPBrain:
         return self._enabled
 
     # ── Model gate (Phase 6) ─────────────────────────────────────────
+    # Retry window for failed bundle loads (seconds). 5 minutes balances
+    # "let the weekly retrain be picked up promptly" vs "don't spam the
+    # loader on every cycle when the model is permanently missing".
+    _MODEL_LOAD_RETRY_SEC = 300
+
     def _load_model_bundle(self, market_type: str) -> dict:
         """Lazy-load the calibrated LR+GBM bundle for `market_type`.
 
         Returns {} when no `*_latest.json` pointer exists or any artifact
         fails to load — callers fall back to rule-only behavior.
+
+        2026-04-30: previously used a permanent negative cache via
+        `_model_load_attempted: set`, which meant the bot never picked up
+        a fresh model promoted by the weekly retrain mid-session. Now the
+        negative cache expires after `_MODEL_LOAD_RETRY_SEC` so a retrain
+        that writes a new `ensemble_*_latest.json` is reflected on the
+        next entry cycle without requiring a process restart.
         """
         if market_type in self._model_bundle:
             return self._model_bundle[market_type]
-        if market_type in self._model_load_attempted:
+        last_fail = self._model_load_failed_at.get(market_type, 0.0)
+        if last_fail and (time.time() - last_fail) < self._MODEL_LOAD_RETRY_SEC:
             return {}
-        self._model_load_attempted.add(market_type)
 
         try:
             latest = Path(f"data/models/ensemble_{market_type}_latest.json")
@@ -807,12 +824,14 @@ class MCPBrain:
                 logger.debug(
                     f"[ModelGate] no latest pointer for market={market_type} — "
                     f"rule-only fallback")
+                self._model_load_failed_at[market_type] = time.time()
                 return {}
             ptr = json.loads(latest.read_text())
             art_path = Path(ptr["artifact_path"])
             if not art_path.exists():
                 logger.warning(
                     f"[ModelGate] latest pointer references missing artifact: {art_path}")
+                self._model_load_failed_at[market_type] = time.time()
                 return {}
             payload = json.loads(art_path.read_text())
             from core.calibration import IsotonicCalibrator
@@ -829,12 +848,17 @@ class MCPBrain:
                 "iso_gbm":  IsotonicCalibrator.load(base / arts["iso_gbm"]),
             }
             self._model_bundle[market_type] = bundle
+            # Clear any stale failure stamp now that a successful load has
+            # happened — defensive in case the same market_type ever rolls
+            # from "missing" to "promoted" inside one process lifetime.
+            self._model_load_failed_at.pop(market_type, None)
             logger.info(
                 f"[ModelGate] loaded {market_type} ensemble "
                 f"(version={bundle['version']}, weights={bundle['weights']})")
             return bundle
         except Exception as e:
             logger.warning(f"[ModelGate] failed to load {market_type} bundle: {e}")
+            self._model_load_failed_at[market_type] = time.time()
             return {}
 
     def score_via_model(

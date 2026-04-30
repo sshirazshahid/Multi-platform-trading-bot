@@ -153,6 +153,220 @@ def test_promotion_gate_keeps_prior_on_reject(tmp_path: Path, monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 2026-04-30 (gate-restore): the original "permissive DSR/PBO" change cited
+# AUC + WR-uplift as the load-bearing guards but never wired them. These
+# tests pin the new floors so a future relaxation can't silently re-break it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_ensemble_json_v2(
+    path: Path, *, n_oos: int, auc: float, wr_train: float | None = None,
+) -> None:
+    """Like _make_ensemble_json but also writes wr_train for WR-uplift checks."""
+    metrics = {"n_oos_ensemble": n_oos, "auc_ensemble": auc}
+    if wr_train is not None:
+        metrics["wr_train"] = wr_train
+    path.write_text(json.dumps({
+        "model_version": path.stem,
+        "metrics": metrics,
+    }))
+
+
+def test_promotion_gate_refuses_low_auc(tmp_path: Path, monkeypatch):
+    """A model with AUC barely above 0.5 must NOT promote, even if every
+    other guard is permissive. AUC is the load-bearing discrimination guard.
+    """
+    from core import promotion_gate as pg
+
+    monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
+    art = tmp_path / "ensemble_low_auc.json"
+    _make_ensemble_json_v2(art, n_oos=300, auc=0.55, wr_train=0.40)
+
+    row = {
+        "model_version": "low_auc",
+        "oos_wr": 0.62,                # WR floor passes
+        "deflated_sharpe": 0.80,       # DSR permissive (always passes at 0.0)
+        "pbo": 0.30,                   # PBO permissive
+        "artifact_path": str(art),
+    }
+    promote = pg.promote_if_eligible(row, market_type="futures",
+                                     models_dir=tmp_path)
+    assert promote is False
+    audit_line = json.loads(
+        (tmp_path / "audit.jsonl").read_text().strip().splitlines()[0]
+    )
+    assert "AUC" in audit_line["reason"]
+
+
+def test_promotion_gate_refuses_low_wr_uplift(tmp_path: Path, monkeypatch):
+    """A model whose oos_wr barely beats the training base rate must NOT
+    promote, even with high AUC. Catches degenerate fits that look good
+    in absolute WR but have no real edge over the base rate."""
+    from core import promotion_gate as pg
+
+    monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
+    art = tmp_path / "ensemble_low_uplift.json"
+    # AUC=0.7 looks good, but base_rate=0.55 means uplift=0.60/0.55 ≈ 1.09
+    _make_ensemble_json_v2(art, n_oos=300, auc=0.70, wr_train=0.55)
+
+    row = {
+        "model_version": "low_uplift",
+        "oos_wr": 0.60,
+        "deflated_sharpe": 0.80,
+        "pbo": 0.30,
+        "artifact_path": str(art),
+    }
+    promote = pg.promote_if_eligible(row, market_type="futures",
+                                     models_dir=tmp_path)
+    assert promote is False
+    audit_line = json.loads(
+        (tmp_path / "audit.jsonl").read_text().strip().splitlines()[0]
+    )
+    assert "wr_uplift" in audit_line["reason"]
+
+
+def test_promotion_gate_promotes_with_strong_uplift(tmp_path: Path, monkeypatch):
+    """Mirror of the deployed ensemble's profile (rounded):
+    AUC=0.76, oos_wr=0.71, base_rate=0.14 → uplift=5.0 — must promote."""
+    from core import promotion_gate as pg
+
+    monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
+    art = tmp_path / "ensemble_real.json"
+    _make_ensemble_json_v2(art, n_oos=4670, auc=0.76, wr_train=0.14)
+
+    row = {
+        "model_version": "real_like_deployed",
+        "oos_wr": 0.71,
+        "deflated_sharpe": 0.0,        # DSR permissive — known broken
+        "pbo": 1.0,                    # PBO permissive — known broken
+        "artifact_path": str(art),
+    }
+    promote = pg.promote_if_eligible(row, market_type="futures",
+                                     models_dir=tmp_path)
+    assert promote is True
+    audit_line = json.loads(
+        (tmp_path / "audit.jsonl").read_text().strip().splitlines()[0]
+    )
+    diag = audit_line
+    assert diag["promote"] is True
+    assert diag["wr_uplift"] >= 5.0, (
+        f"deployed-like profile must show ≥5x uplift, got {diag['wr_uplift']}")
+
+
+def test_promotion_gate_legacy_artifact_without_wr_train_passes(
+    tmp_path: Path, monkeypatch,
+):
+    """Legacy artifacts (pre wr_train) must still be able to promote on
+    AUC + n_oos + oos_wr alone. WR-uplift check is fail-open when
+    base_rate is unknown — we don't punish callers for missing optional
+    metadata."""
+    from core import promotion_gate as pg
+
+    monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
+    art = tmp_path / "ensemble_legacy.json"
+    # No wr_train field — older trainer.
+    _make_ensemble_json_v2(art, n_oos=300, auc=0.65, wr_train=None)
+
+    row = {
+        "model_version": "legacy",
+        "oos_wr": 0.59,
+        "deflated_sharpe": 0.80,
+        "pbo": 0.30,
+        "artifact_path": str(art),
+    }
+    promote = pg.promote_if_eligible(row, market_type="futures",
+                                     models_dir=tmp_path)
+    assert promote is True
+
+
+def test_module_constants_match_documented_intent():
+    """The module-level constants are consumed by `evaluate_model_version`'s
+    default kwargs. Pin them so a future "tune the floors" commit has to
+    explicitly update this test."""
+    from core import promotion_gate as pg
+    assert pg.MIN_OOS == {"futures": 200, "spot": 100}
+    assert pg.MIN_OOS_WR == 0.55
+    assert pg.MIN_AUC == 0.60
+    assert pg.MIN_WR_UPLIFT == 1.5
+    # DSR / PBO permissive — see docstring for the rationale.
+    assert pg.MIN_DSR == 0.0
+    assert pg.MAX_PBO == 1.0
+
+
+def test_load_model_bundle_recovers_after_retry_window(tmp_path: Path, monkeypatch):
+    """Regression: previously `_load_model_bundle` cached load failures
+    permanently in a `_model_load_attempted: set`. If the bot started
+    BEFORE the weekly retrain wrote `ensemble_*_latest.json`, the gate
+    stayed dormant for the rest of the process lifetime — a fresh model
+    would never be picked up without a restart.
+
+    Fix: timestamped negative cache that expires after
+    `_MODEL_LOAD_RETRY_SEC`. This test simulates the failure → wait →
+    fresh-pointer-appears → next call succeeds path.
+    """
+    import time as _t
+
+    from core.mcp_brain import MCPBrain
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data" / "models").mkdir(parents=True)
+
+    b = MCPBrain()
+    # 1st call: no latest pointer → fails, stamps the failure.
+    out1 = b._load_model_bundle("futures")
+    assert out1 == {}
+    assert "futures" in b._model_load_failed_at
+
+    # 2nd call within the retry window: short-circuits to {} without
+    # re-attempting (previous behavior was permanent stamp; new behavior
+    # is time-bounded).
+    out2 = b._load_model_bundle("futures")
+    assert out2 == {}
+
+    # Now: weekly retrain "appears" — write a minimal valid bundle on disk.
+    from core.calibration import IsotonicCalibrator
+    from core.models import GBMModel, LRModel
+
+    rng = np.random.default_rng(1)
+    X = rng.standard_normal((100, 3))
+    y = (X[:, 0] > 0).astype(int)
+    lr = LRModel().fit(X, y)
+    gbm = GBMModel(max_iter=50).fit(X, y)
+    iso_l = IsotonicCalibrator(min_samples=10).fit(lr.p_win(X), y)
+    iso_g = IsotonicCalibrator(min_samples=10).fit(gbm.p_win(X), y)
+    md = tmp_path / "data" / "models"
+    lr.save(md / "lr.pkl")
+    gbm.save(md / "gbm.pkl")
+    iso_l.save(md / "iso_lr.pkl")
+    iso_g.save(md / "iso_gbm.pkl")
+    art = md / "ensemble_futures_v_x.json"
+    art.write_text(json.dumps({
+        "model_version": "fresh",
+        "feature_keys": ["a", "b", "c"],
+        "weights": {"lr": 0.4, "gbm": 0.6, "mcp_rule": 0.25},
+        "artifacts": {
+            "lr": "lr.pkl", "gbm": "gbm.pkl",
+            "iso_lr": "iso_lr.pkl", "iso_gbm": "iso_gbm.pkl",
+        },
+    }))
+    (md / "ensemble_futures_latest.json").write_text(json.dumps({
+        "model_version": "fresh", "artifact_path": str(art),
+    }))
+
+    # 3rd call: still inside retry window, NEW pointer ignored.
+    out3 = b._load_model_bundle("futures")
+    assert out3 == {}, "still inside retry window — should not have loaded yet"
+
+    # Force the stamp into the past so the retry window is elapsed.
+    b._model_load_failed_at["futures"] = _t.time() - (b._MODEL_LOAD_RETRY_SEC + 1)
+    out4 = b._load_model_bundle("futures")
+    assert out4, "retry window elapsed + valid pointer present → must load"
+    assert out4["version"] == "fresh"
+    # Successful load clears the failure stamp.
+    assert "futures" not in b._model_load_failed_at
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MCPBrain.score_via_model
 # ─────────────────────────────────────────────────────────────────────────────
 

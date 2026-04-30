@@ -272,12 +272,24 @@ def _kurt(x: np.ndarray) -> float:
 # the full hyperparameter grid for CSCV, PBO from this pipeline is not a
 # trustworthy signal. The TRAINER TODO lives in scripts/train_models.py.
 #
-# The ENSEMBLE AUC, WR uplift over base rate, and n_oos floor are stronger
-# guards for this gate's question ("is the trained ensemble ready to
-# ship?") so MIN_DSR / MAX_PBO are set permissive. The shadow-vs-live gate
-# above keeps its strict 0.5 floors where they belong.
+# 2026-04-30 (gate-restore): the original commit citing "ENSEMBLE AUC, WR
+# uplift over base rate, and n_oos floor are stronger guards" relaxed
+# MIN_DSR/MAX_PBO but did NOT actually wire the AUC and WR-uplift floors
+# it claimed were load-bearing. Result: a model with AUC barely above
+# 0.5 would have promoted past the gate. Floors below now make those
+# guards real:
+#   - MIN_AUC = 0.60: model must materially discriminate (random = 0.5).
+#   - MIN_WR_UPLIFT = 1.5: oos_wr at decision threshold must be at least
+#     1.5x the training-set base rate. Catches models that "achieve" high
+#     OOS WR only because they predict the positive class on rare events.
+# DSR / PBO stay permissive (the underlying computations are documented
+# unreliable for this trainer); flip the per-call kwargs to tighten once
+# the trainer's PBO is fixed (see TODO in scripts/train_models.py).
+# The shadow-vs-live PromotionGate above keeps its strict 0.5 floors.
 MIN_OOS = {"futures": 200, "spot": 100}
 MIN_OOS_WR = 0.55
+MIN_AUC = 0.60
+MIN_WR_UPLIFT = 1.5
 MIN_DSR = 0.0
 MAX_PBO = 1.0
 
@@ -300,6 +312,8 @@ def evaluate_model_version(
     min_oos_wr: float = MIN_OOS_WR,
     min_dsr: float = MIN_DSR,
     max_pbo: float = MAX_PBO,
+    min_auc: float = MIN_AUC,
+    min_wr_uplift: float = MIN_WR_UPLIFT,
 ) -> tuple[bool, str, dict]:
     """Decide whether `row` (a `model_versions` row + paired ensemble JSON) is
     fit to publish as the live `*_latest.json` pointer.
@@ -318,26 +332,41 @@ def evaluate_model_version(
     art_path = row.get("artifact_path") or ""
     n_oos = 0
     auc = float("nan")
+    base_rate = float("nan")  # training-set positive base rate
     try:
         if art_path:
             payload = json.loads(Path(art_path).read_text())
             metrics = payload.get("metrics") or {}
             n_oos = int(metrics.get("n_oos_ensemble") or 0)
             auc = float(metrics.get("auc_ensemble") or float("nan"))
+            # `wr_train` is the trainer-emitted base rate (mean of training
+            # labels). Used to enforce min_wr_uplift.
+            wr_train = metrics.get("wr_train")
+            if wr_train is not None:
+                base_rate = float(wr_train)
     except (FileNotFoundError, ValueError, OSError):
         pass
+
+    oos_wr = float(row.get("oos_wr") or 0.0)
+    wr_uplift = (
+        oos_wr / base_rate if (np.isfinite(base_rate) and base_rate > 0) else float("nan")
+    )
 
     diag = {
         "model_version": str(row.get("model_version")),
         "market_type": market_type,
-        "oos_wr": float(row.get("oos_wr") or 0.0),
+        "oos_wr": oos_wr,
         "deflated_sharpe": float(row.get("deflated_sharpe") or 0.0),
         "pbo": float(row.get("pbo") or 1.0),
         "n_oos": n_oos,
         "auc_ensemble": auc,
+        "base_rate": base_rate,
+        "wr_uplift": wr_uplift,
         "thresholds": {
             "min_oos": floor_n,
             "min_oos_wr": float(min_oos_wr),
+            "min_auc": float(min_auc),
+            "min_wr_uplift": float(min_wr_uplift),
             "min_dsr": float(min_dsr),
             "max_pbo": float(max_pbo),
         },
@@ -345,6 +374,18 @@ def evaluate_model_version(
     reasons: list[str] = []
     if diag["oos_wr"] < min_oos_wr:
         reasons.append(f"oos_wr {diag['oos_wr']:.3f} < {min_oos_wr:.2f}")
+    # AUC is the load-bearing discrimination guard. NaN means the artifact
+    # JSON didn't carry an `auc_ensemble` field — fail-closed.
+    if not np.isfinite(auc) or auc < min_auc:
+        reasons.append(f"AUC {auc} < {min_auc:.2f}")
+    # WR-uplift over base rate. Skip if base_rate is unknown (older
+    # artifacts that don't carry `wr_train` — fail-open here so legacy
+    # artifacts can still pass; new trainer always emits wr_train).
+    if np.isfinite(wr_uplift) and wr_uplift < min_wr_uplift:
+        reasons.append(
+            f"wr_uplift {wr_uplift:.2f} < {min_wr_uplift:.2f} "
+            f"(oos_wr={oos_wr:.3f}, base_rate={base_rate:.3f})"
+        )
     if diag["deflated_sharpe"] < min_dsr:
         reasons.append(f"DSR {diag['deflated_sharpe']:.2f} < {min_dsr:.2f}")
     # PBO can be NaN when not enough folds — treat NaN as fail-closed.
