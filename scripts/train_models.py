@@ -258,7 +258,7 @@ def _ensemble_weights(p_lr: np.ndarray, p_gbm: np.ndarray, y: np.ndarray) -> tup
 # ─────────────────────────────────────────────────────────────────────────────
 
 def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
-                     no_save: bool):
+                     no_save: bool, auto_promote: bool = False):
     print("=" * 72)
     print(f"TRAIN — market={market} tag={tag}")
     print("=" * 72)
@@ -452,7 +452,26 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     )
     print(f"inserted model_versions row: {model_version}")
 
-    # Promotion gate decides the *_latest.json pointer (Phase 5).
+    # ── Promotion gate (--auto-promote) ──────────────────────────────
+    # Walk the just-written model_versions row through the gate. On pass,
+    # data/models/ensemble_{market}_latest.json is rewritten atomically;
+    # on fail, the prior pointer (if any) is left untouched. Either way an
+    # audit row is appended to data/models/audit.jsonl.
+    if auto_promote:
+        from core.promotion_gate import promote_if_eligible
+        # Reload the row we just inserted so we feed the gate the same shape
+        # production would see (avoids field-name drift between record_model_version
+        # and the gate's expectations).
+        rows = wh.query(
+            "SELECT * FROM model_versions WHERE model_version = ?",
+            (model_version,),
+        )
+        if rows:
+            promoted = promote_if_eligible(rows[0], market_type=market)
+            print(f"promotion gate: {'PROMOTED' if promoted else 'HELD'} "
+                  f"(see data/models/audit.jsonl for reasons)")
+        else:
+            print("promotion gate: SKIPPED — model_versions row vanished")
     return model_version
 
 
@@ -464,6 +483,9 @@ def main() -> int:
                         help="3-split CV instead of 5 (faster, less robust)")
     parser.add_argument("--no-save", action="store_true",
                         help="evaluate only; don't write model artifact or version row")
+    parser.add_argument("--auto-promote", action="store_true",
+                        help="after each market trains, run the promotion gate; "
+                             "on pass rewrite data/models/ensemble_{market}_latest.json")
     args = parser.parse_args()
 
     n_splits = 3 if args.quick else 5
@@ -473,7 +495,7 @@ def main() -> int:
     for m in markets:
         train_one_market(
             m, tag=args.tag, n_splits=n_splits, embargo_bars=embargo_bars,
-            no_save=args.no_save,
+            no_save=args.no_save, auto_promote=args.auto_promote,
         )
     return 0
 
