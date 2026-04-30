@@ -435,18 +435,30 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     train_start = int(ts.min()) if len(ts) else int(time.time())
     train_end = int(ts.max()) if len(ts) else int(time.time())
     # Pick the better of LR/GBM for the headline DSR; gate uses ensemble AUC.
-    headline_dsr = max(
-        float(sum_lr.get("deflated_sharpe", 0.0) or 0.0),
-        float(sum_gbm.get("deflated_sharpe", 0.0) or 0.0),
-    )
+    # Headline DSR = the ensemble's deflated Sharpe at τ=0.55. Per-model
+    # DSR is reported in the sweep table (see sum_lr, sum_gbm) but the
+    # ensemble is what actually ships, so this is what the promotion gate
+    # must judge against.
+    paper_ens = np.where(y_oos == 1, 1.0, -1.0)[p_ens >= 0.55]
+    if paper_ens.size > 1:
+        ens_sharpe = float(sharpe(paper_ens))
+        ens_dsr = float(deflated_sharpe(
+            sr_observed=ens_sharpe,
+            n_trials=len(LR_C_GRID) + len(GBM_LR_GRID),
+            n_obs=int(paper_ens.size),
+        ))
+    else:
+        ens_sharpe = 0.0
+        ens_dsr = 0.0
+    print(f"  ensemble paper Sharpe@0.55={ens_sharpe:.3f}  DSR={ens_dsr:.3f}")
     wh.record_model_version(
         model_version=model_version,
         trained_at=int(time.time()),
         train_window_start=train_start,
         train_window_end=train_end,
-        oos_sharpe=float(sum_lr.get("paper_sharpe_at_0_55", 0.0) or 0.0),
+        oos_sharpe=ens_sharpe,
         oos_wr=float(ens_wr_55) if not np.isnan(ens_wr_55) else 0.0,
-        deflated_sharpe=headline_dsr,
+        deflated_sharpe=ens_dsr,
         pbo=float(pbo_score) if not np.isnan(pbo_score) else 1.0,
         artifact_path=str(ens_path),
     )

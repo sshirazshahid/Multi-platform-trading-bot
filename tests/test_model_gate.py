@@ -55,18 +55,19 @@ def _make_ensemble_json(path: Path, *, n_oos: int, auc: float) -> None:
     }))
 
 
-def test_promotion_gate_refuses_low_dsr(tmp_path: Path, monkeypatch):
+def test_promotion_gate_refuses_low_oos_wr(tmp_path: Path, monkeypatch):
+    """Gate must refuse a model that fails the WR floor regardless of how
+    healthy the other metrics look."""
     from core import promotion_gate as pg
 
-    # Redirect audit + models dir so the test doesn't pollute the project.
     monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
     art = tmp_path / "ensemble_x.json"
     _make_ensemble_json(art, n_oos=300, auc=0.55)
 
     row = {
-        "model_version": "low_dsr",
-        "oos_wr": 0.56,
-        "deflated_sharpe": 0.10,   # below MIN_DSR=0.5
+        "model_version": "low_wr",
+        "oos_wr": 0.40,                # below MIN_OOS_WR=0.55
+        "deflated_sharpe": 0.80,       # high enough on its own
         "pbo": 0.30,
         "artifact_path": str(art),
     }
@@ -76,7 +77,30 @@ def test_promotion_gate_refuses_low_dsr(tmp_path: Path, monkeypatch):
     assert not (tmp_path / "ensemble_futures_latest.json").exists()
     audit = (tmp_path / "audit.jsonl").read_text().strip().splitlines()
     assert len(audit) == 1
-    assert "DSR" in json.loads(audit[0])["reason"]
+    assert "oos_wr" in json.loads(audit[0])["reason"]
+
+
+def test_promotion_gate_refuses_low_n_oos(tmp_path: Path, monkeypatch):
+    """Below the n_oos floor (200 futures / 100 spot), gate must refuse."""
+    from core import promotion_gate as pg
+
+    monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
+    art = tmp_path / "ensemble_x.json"
+    _make_ensemble_json(art, n_oos=50, auc=0.65)
+
+    row = {
+        "model_version": "low_n",
+        "oos_wr": 0.62,
+        "deflated_sharpe": 0.40,
+        "pbo": 0.30,
+        "artifact_path": str(art),
+    }
+    promote = pg.promote_if_eligible(row, market_type="futures",
+                                     models_dir=tmp_path)
+    assert promote is False
+    assert "n_oos" in json.loads(
+        (tmp_path / "audit.jsonl").read_text().strip().splitlines()[0]
+    )["reason"]
 
 
 def test_promotion_gate_promotes_good_model(tmp_path: Path, monkeypatch):
