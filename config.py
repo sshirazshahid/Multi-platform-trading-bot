@@ -656,13 +656,31 @@ ENTRY_STALENESS_EXIT = {
 # STAR symbols at high score — they're allowed but tier-capped to STANDARD.
 #
 # Rollback: set enabled=False. No data migration needed.
-# 2026-05-01 (capital-preservation pass): added `star_only` flag.
-# 30-day data showed STAR cells +$9.20 / 78 trades, BAND cells
-# -$3.61 / 36 trades. Operator chose to drop the BAND tier and
-# trade only proven-edge symbols. Restore by setting star_only=False.
+# 2026-05-01 evening (UNBLOCK_ALL restoration): cell-filter disabled
+# entirely. User reasoning: if MCP score + model gate + meta-filter
+# already determined "profitable," layering symbol-universe blocking
+# on top contradicts our own engine. The historical loss-tape that
+# justified the cell-filter was generated under OLDER, looser gates
+# (no model gate, no expectancy filter, no tighter caps) — so it
+# doesn't predict losses under CURRENT config.
+#
+# Engine thinking layers (the "block if not profitable" sources):
+#   - MCP scoring: 4 required + 6 bonus, score >= 65 to fire
+#   - Model gate: LR+GBM ensemble p_win >= 0.55
+#   - Meta-filter: spread/vol/depth percentile floors
+#   - Expectancy filter: per-symbol mean PnL >= floor (self-correcting)
+#
+# Capital safety nets (the "stop if losing" rails):
+#   - Daily loss limit: 1.0% of balance
+#   - Drawdown halt: 8% from peak
+#   - Per-position SL (exchange-side or soft monitor)
+#   - Score-85 tier-cap (downsize, not block)
+#
+# Restore tightening by setting enabled=True + star_only=False (BAND
+# tier active, score 70-84 only) or star_only=True (STAR-only mode).
 CELL_FILTER = {
-    "enabled":         True,
-    "star_only":       True,    # STARS-only mode (was: STARS + score 70-84)
+    "enabled":         False,   # was True with star_only=True
+    "star_only":       True,    # ignored when enabled=False
     "score_band_min":  70.0,
     "score_band_max":  84.0,
     "star_overrides":  True,

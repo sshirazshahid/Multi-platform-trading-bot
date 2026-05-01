@@ -195,10 +195,14 @@ def test_production_gate_matches_replica_signature():
 
 
 def test_config_carries_documented_defaults():
-    """Defaults must match the spec exactly. Future tuning has to update
-    both this test and the spec doc."""
+    """Pin the cell-filter config keys exist with sane values. The
+    `enabled` flag is operator-set (currently False per UNBLOCK_ALL —
+    user reasoning: don't double-count when MCP score + model gate +
+    expectancy filter already evaluate profitability per-trade).
+
+    Restore by setting CELL_FILTER.enabled=True if losses resume."""
     from config import CELL_FILTER
-    assert CELL_FILTER["enabled"] is True
+    assert isinstance(CELL_FILTER["enabled"], bool)
     assert CELL_FILTER["score_band_min"] == 70.0
     assert CELL_FILTER["score_band_max"] == 84.0
     assert CELL_FILTER["star_overrides"] is True

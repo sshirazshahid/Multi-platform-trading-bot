@@ -9,7 +9,8 @@
 ## What this bot will and won't do
 
 **Will:**
-- Trade only on 3 proven-edge symbols (ATOM, ARB, DOGE) on futures
+- Trade any symbol where MCP score (≥65) + model gate (p_win ≥ 0.55) + meta-filter all agree
+- Self-correct via expectancy filter: blocks symbols with proven negative recent mean
 - Cap any single day's loss at 1% of balance (~$7.91)
 - Halt all trading if total drawdown exceeds 8% (~$63 from peak)
 - Defend spot holdings via peak-drawdown selling (-25% half / -40% full exit)
@@ -112,11 +113,17 @@ At $791 capital, **realistic** outcomes per month:
 
 1. **Cleared HALTED + drawdown state.** Bot was paused from a 17.2% drawdown that's now ancient history. Started fresh.
 
-2. **Cell-filter → STAR-only mode.** 30-day data:
-   - STAR cells: +$9.20 over 78 trades (+$0.12/trade) ← profitable
-   - BAND cells: −$3.61 over 36 trades (−$0.10/trade) ← losing
-   - OTHER cells: −$51.62 over 164 trades (−$0.31/trade) ← bleeding
-   - Decision: skip BAND and OTHER. Trade only STARs.
+2. **Cell-filter → DISABLED (UNBLOCK_ALL stance restored).**
+   Reasoning: the historical "OTHER cell -$51.62" loss tape was generated
+   under OLD config (no model gate, no expectancy filter, no tighter caps).
+   With current config, those gates evaluate every trade per-symbol —
+   layering an additional symbol-universe block on top contradicts the
+   bot's own scoring engine. The expectancy filter is the data-driven
+   self-correction; cell-filter was an a-priori veto.
+   - Trade any symbol where MCP score + model gate + meta-filter agree
+   - Expectancy filter still blocks proven-negative symbols (n>=5, mean<floor)
+   - Capital safety nets (1% daily, 8% drawdown) catch when engine is wrong
+   - Restore by setting `CELL_FILTER.enabled=True` in config.py
 
 3. **Daily loss limit 1.5% → 1.0%.** Tighter circuit breaker. At $791, that's $7.91/day max loss before same-day halt.
 
