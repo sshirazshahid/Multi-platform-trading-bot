@@ -315,7 +315,10 @@ RISK = {
     # post-trade circuit breaker — at 99x leverage a single -1% move
     # is catastrophic; this halt limits damage to one bad day. Removal
     # would require explicit user authorization.
-    "max_daily_loss_pct":   0.015,
+    # 2026-05-01: tightened 1.5% → 1.0% per capital-preservation pass.
+    # At $791 balance: 1.0% = $7.91 daily loss limit. Triggers same-day
+    # halt, recovers next UTC day. Goal: cap any one bad day's damage.
+    "max_daily_loss_pct":   0.010,
     "default_stop_loss":    0.020,    # 2.0% fallback SL (ATR-based is primary)
     "default_take_profit":  0.060,    # 6.0% fallback TP (~3:1 R:R vs 2% SL)
     # 2026-04-27: leverage cut 3 → 2. Last 7d at 3x: 46 closed trades, 16 wins,
@@ -352,7 +355,11 @@ RISK = {
     # circuit breaker; at 99x leverage it's the only thing standing
     # between a few bad trades and a wiped account. Removal would
     # require explicit user authorization.
-    "max_drawdown_pct":     0.12,
+    # 2026-05-01: 12% → 8% per capital-preservation pass. At $791 balance,
+    # 8% = $63 max drawdown before halt. Combined with 1% daily loss limit,
+    # bot has at most ~8 bad days before forced halt. Recovery requires
+    # operator-cleared peak (or 4h auto-cooldown for consec_global halts).
+    "max_drawdown_pct":     0.08,
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
     # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h after
     # warehouse retrenchment showed the bot's edge expires past 60min:
@@ -649,8 +656,13 @@ ENTRY_STALENESS_EXIT = {
 # STAR symbols at high score — they're allowed but tier-capped to STANDARD.
 #
 # Rollback: set enabled=False. No data migration needed.
+# 2026-05-01 (capital-preservation pass): added `star_only` flag.
+# 30-day data showed STAR cells +$9.20 / 78 trades, BAND cells
+# -$3.61 / 36 trades. Operator chose to drop the BAND tier and
+# trade only proven-edge symbols. Restore by setting star_only=False.
 CELL_FILTER = {
     "enabled":         True,
+    "star_only":       True,    # STARS-only mode (was: STARS + score 70-84)
     "score_band_min":  70.0,
     "score_band_max":  84.0,
     "star_overrides":  True,

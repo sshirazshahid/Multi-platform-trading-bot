@@ -1445,6 +1445,24 @@ class BotEngine:
                 _score = 0.0
             _band_min = float(_CF.get("score_band_min", 70.0))
             _band_max = float(_CF.get("score_band_max", 84.0))
+            # 2026-05-01: star_only mode — block ALL non-STAR regardless
+            # of score. 30-day BAND tier was -$3.61 / 36 trades (-10%/trade).
+            # Operator chose to skip non-STAR entirely.
+            if not _is_star and _CF.get("star_only", False):
+                logger.info(
+                    f"[CellFilter] BLOCKED {symbol}: non-STAR + star_only mode "
+                    f"(BAND tier was -$3.61/36 trades over 30d)")
+                try:
+                    if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                        from core.warehouse import get_warehouse as _gw
+                        _gw().query(
+                            "UPDATE candidates SET decision='SKIP', "
+                            "skip_reason=? WHERE id=?",
+                            ("cell_filter:non_star_blocked_star_only_mode", _cid),
+                        )
+                except Exception:
+                    pass
+                return False
             if not _is_star:
                 if _score < _band_min:
                     logger.info(
