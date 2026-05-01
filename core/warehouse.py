@@ -376,6 +376,59 @@ class Warehouse:
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_close error: {e}")
 
+    def recent_expectancy(
+        self, symbol: str, *,
+        side: str | None = None,
+        days: int = 30,
+        min_n: int = 5,
+        max_rows: int = 50,
+    ) -> dict | None:
+        """Per-symbol realised expectancy from the last `days` of CLOSED trades.
+
+        Returns dict with keys {n, mean, win_rate, sum} or None when fewer
+        than `min_n` rows exist (insufficient evidence — caller falls
+        through and lets the trade through; we don't block on noise).
+
+        2026-05-01: powers the per-trade expectancy filter
+        (Tier 1.2 from the predictive-strategy stack). Used in
+        bot_engine._execute_open — skip trades whose cell shows
+        expected dollar PnL below 2x round-trip fee.
+
+        Side filter: when `side` is passed, restricts to matching trades
+        only (longs vs shorts have very different distributions). When
+        None, aggregates across both sides.
+        """
+        try:
+            since = int(__import__("time").time() - days * 86400)
+            where = ["status='CLOSED'", "symbol=?", "ts_entry>=?"]
+            params: list = [symbol, since]
+            if side:
+                where.append("side=?")
+                params.append(side)
+            params.append(int(max_rows))
+            sql = (
+                "SELECT realized_pnl FROM trades "
+                f"WHERE {' AND '.join(where)} "
+                "ORDER BY ts_entry DESC LIMIT ?"
+            )
+            rows = self._conn().execute(sql, tuple(params)).fetchall()
+            pnls = [
+                float(r["realized_pnl"]) for r in rows
+                if r["realized_pnl"] is not None
+            ]
+            n = len(pnls)
+            if n < min_n:
+                return None
+            return {
+                "n": n,
+                "mean": sum(pnls) / n,
+                "sum": sum(pnls),
+                "win_rate": sum(1 for p in pnls if p > 0) / n,
+            }
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] recent_expectancy error: {e}")
+            return None
+
     def trade_id_by_key(
         self, *, exchange: str, symbol: str, ts_entry: float, side: str,
         tolerance_sec: float = 2.0,

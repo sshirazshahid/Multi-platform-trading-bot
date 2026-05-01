@@ -1078,6 +1078,74 @@ class MCPBrain:
         """Accept exchange client refs for direct OHLCV fetching."""
         self._exchanges = exchanges
 
+    def is_entry_invalidated(
+        self, *, symbol: str, side: str, gap_pct: float = 0.15,
+    ) -> tuple[bool, str]:
+        """Check whether the 4h EMA20/50 hypothesis still supports `side`.
+
+        2026-05-01 (Tier 1.1): re-evaluates the SIDE-determining signal
+        from `_score_coin` (line ~1976: side = 'buy' if ema20_above_50_4h).
+        If the 4h EMA20/50 has flipped against the position with margin
+        ≥ `gap_pct`%, returns (True, reason) — the entry rationale is
+        structurally invalid.
+
+        Returns (False, reason) on:
+        - 4h EMAs still aligned with `side`
+        - EMAs touching the cross-line (gap < threshold) — whipsaw guard
+        - Indicator fetch failure (don't close on transient errors)
+
+        Reuses the 120s `_indicator_cache` so this is cheap on every
+        90s monitor cycle when the cache is warm.
+
+        Args:
+            symbol: e.g. "ATOM/USDT:USDT" — the perp symbol from the
+                    Position object. The base coin is extracted for the
+                    indicator lookup.
+            side:   'buy' or 'sell' (the Position's side).
+            gap_pct: Minimum EMA gap (in WRONG direction) to fire, as a
+                     percentage. Default 0.15% matches `_score_coin`'s
+                     R1 threshold for "decisive 4h cross".
+
+        Returns:
+            (invalidated: bool, reason: str)
+        """
+        try:
+            base = symbol.split("/")[0].split(":")[0].upper()
+        except Exception:
+            return False, "symbol_parse_fail"
+
+        # Fetch fresh indicators for just this coin (or read cache)
+        ei = self._indicator_cache.get(base) if self._indicator_cache else None
+        if not ei:
+            try:
+                ei_all = self._fetch_exchange_indicators([base])
+                ei = ei_all.get(base) if ei_all else None
+            except Exception as e:
+                return False, f"indicator_fetch_fail({str(e)[:40]})"
+        if not ei:
+            return False, "no_indicators"
+        ei_4h = ei.get("4h", {})
+        ema20 = ei_4h.get("ema20", 0)
+        ema50 = ei_4h.get("ema50", 0)
+        if not ema20 or not ema50 or ema50 <= 0:
+            return False, "no_ema_data"
+
+        gap = (ema20 - ema50) / ema50 * 100.0  # signed, in percent
+
+        if side == "buy":
+            # Long entry was predicated on ema20 > ema50. Invalidate when
+            # ema20 is now BELOW ema50 by at least `gap_pct`%.
+            if gap <= -gap_pct:
+                return True, f"4h ema20-ema50 gap={gap:+.2f}% (long invalidated)"
+            return False, f"4h gap={gap:+.2f}% (long still valid)"
+        elif side == "sell":
+            # Short entry was predicated on ema20 < ema50. Invalidate when
+            # ema20 is now ABOVE ema50 by at least `gap_pct`%.
+            if gap >= gap_pct:
+                return True, f"4h ema20-ema50 gap={gap:+.2f}% (short invalidated)"
+            return False, f"4h gap={gap:+.2f}% (short still valid)"
+        return False, f"unknown_side:{side}"
+
     def _fetch_exchange_indicators(self, coins: list) -> dict:
         """Fetch OHLCV from primary exchange for 3 TFs and compute indicators.
         Returns {COIN: {tf: {adx, rsi, ema_dir, atr_pct, vol_ratio}}}."""

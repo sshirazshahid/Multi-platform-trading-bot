@@ -1965,6 +1965,49 @@ class OrderManager:
                 # 2026-04-16 (post-audit): Proactive MCP TP-at-+2% REMOVED
                 # for shorts too. Deterministic TP is sole authority.
 
+            # ── ENTRY-STALENESS EXIT (2026-05-01 Tier 1.1) ──────────────
+            # Re-check the directional hypothesis. If the 4h EMA20/50 has
+            # flipped against the position (with margin), the entry rationale
+            # is invalid — close at market BEFORE waiting for SL or AGE_LOSS.
+            #
+            # Why 4h EMA? It's the SIDE-determining signal in
+            # mcp_brain._score_coin (line 1976: side='buy' if ema20 > ema50_4h).
+            # If that flips, the trade has no hypothesis left.
+            #
+            # Why a margin (0.15%)? Avoids whipsaw on tight crosses. EMAs
+            # touching the cross-line by 0.05% isn't a regime change.
+            #
+            # Why min_hold_minutes? Entries that fired right before a brief
+            # 4h cross deserve the chance to resolve. 30min grace.
+            #
+            # Skips on transient errors (don't close on a fetch failure).
+            try:
+                from config import ENTRY_STALENESS_EXIT as _ES
+            except ImportError:
+                _ES = {"enabled": False}
+            age_minutes_for_staleness = (pos.duration_minutes or 0)
+            if (_ES.get("enabled", True)
+                    and age_minutes_for_staleness >= int(_ES.get("min_hold_minutes", 30))
+                    and pos.market_type == "futures"
+                    and self.mcp_brain is not None):
+                try:
+                    invalidated, reason = self.mcp_brain.is_entry_invalidated(
+                        symbol=pos.symbol,
+                        side=pos.side,
+                        gap_pct=float(_ES.get("invalidation_gap_pct", 0.15)),
+                    )
+                    if invalidated:
+                        logger.warning(
+                            f"[Orders] ENTRY_STALE: {pos.symbol} {pos.side} "
+                            f"opened {age_minutes_for_staleness:.0f}m ago, "
+                            f"4h EMA hypothesis invalidated ({reason}) — closing")
+                        self.close_position(
+                            exchange, pos, "entry_invalidated", price)
+                        continue
+                except Exception as _ese:
+                    logger.debug(
+                        f"[Orders] entry-staleness check skipped ({_ese})")
+
             # ── POSITION AGE LIMIT ENFORCEMENT ──────────────────────────
             # Three rules, checked in order:
             #   1. AGE_LIMIT: open >= max_position_age_hours AND losing → force-close

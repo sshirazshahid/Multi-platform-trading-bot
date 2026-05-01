@@ -580,6 +580,48 @@ SPOT_STRATEGY = {
     "drawdown_full_pct":    0.40,   # SELL trigger (full exit)
 }
 
+# 2026-05-01 — Expectancy Filter (Tier 1.2 from predictive-strategy stack).
+# Per-trade abstain rule: if the candidate's symbol has insufficient recent
+# realised expectancy (mean PnL after fees < min_expected_dollar), skip.
+#
+# Cell-filter (above) is binary — in or out. This adds magnitude: a STAR
+# symbol whose recent expectancy has flipped below the floor gets blocked
+# even though it's in the allowed set. Self-correcting over time as the
+# bot accumulates more data.
+#
+# `min_expected_dollar = 0.30` ≈ 2× typical round-trip fee at this scale.
+# A trade clearing this threshold has positive expectation after costs.
+#
+# `min_sample_size`: when fewer than N closed trades exist for the symbol
+# in the lookback window, return None (allow through). We don't block on
+# noise — only on evidence-backed negative cells.
+EXPECTANCY_FILTER = {
+    "enabled":              True,
+    "min_expected_dollar":  0.30,
+    "lookback_days":        30,
+    "min_sample_size":      5,
+}
+
+# 2026-05-01 — Entry-Staleness Exit (Tier 1.1 from predictive-strategy stack).
+# On every position monitor cycle, re-check the entry's directional
+# hypothesis. If the 4h EMA20/50 has flipped against the position with
+# margin >= invalidation_gap_pct, close the position at market.
+#
+# Why 4h EMA? It's the SIDE-determining signal in mcp_brain._score_coin
+# (line 1976: `side = "buy" if ema20_above_50_4h else "sell"`). If that
+# flips, the entry rationale is structurally invalid.
+#
+# Why a margin? Avoids whipsaw on tight crosses that flip back. EMAs
+# touching the cross-line by 0.05% isn't a regime change.
+#
+# `min_hold_minutes`: don't fire in the first 30 minutes — entries that
+# fired right before a brief 4h cross deserve a chance to resolve.
+ENTRY_STALENESS_EXIT = {
+    "enabled":               True,
+    "invalidation_gap_pct":  0.15,   # min EMA gap (in WRONG direction) to fire
+    "min_hold_minutes":      30,     # grace period after entry
+}
+
 # 2026-05-01 — Cell-Filter Entry Gate
 # Ref: docs/superpowers/specs/2026-05-01-cell-filter-entry-gate-design.md
 #
