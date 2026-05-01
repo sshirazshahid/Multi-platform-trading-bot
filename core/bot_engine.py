@@ -1385,6 +1385,7 @@ class BotEngine:
         if _EF.get("enabled", True):
             try:
                 from core.warehouse import get_warehouse as _gw
+                from config import STAR_SYMBOLS as _STAR_FOR_EF
                 _sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
                 _exp = _gw().recent_expectancy(
                     _sym_key,
@@ -1392,10 +1393,19 @@ class BotEngine:
                     days=int(_EF.get("lookback_days", 30)),
                     min_n=int(_EF.get("min_sample_size", 5)),
                 )
-                _floor = float(_EF.get("min_expected_dollar", 0.30))
+                # STAR symbols use a relaxed floor (just must not be
+                # net-negative). Cell-filter has already validated them
+                # as proven-edge; the expectancy filter's role here is
+                # to catch regime-flip into outright loss only.
+                _is_star = (symbol in _STAR_FOR_EF or _sym_key in _STAR_FOR_EF)
+                _floor = float(
+                    _EF.get("min_expected_star", 0.00) if _is_star
+                    else _EF.get("min_expected_dollar", 0.05)
+                )
                 if _exp is not None and _exp["mean"] < _floor:
+                    _tag = "STAR" if _is_star else "non-STAR"
                     logger.info(
-                        f"[Expectancy] BLOCKED {symbol} {side}: recent mean "
+                        f"[Expectancy] BLOCKED {symbol} {side} ({_tag}): recent mean "
                         f"${_exp['mean']:+.3f} < ${_floor:.2f} floor "
                         f"(n={_exp['n']}, WR={_exp['win_rate']:.0%})")
                     try:

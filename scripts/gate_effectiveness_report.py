@@ -268,16 +268,33 @@ def report_per_symbol(c, since_ts: int) -> str:
     """, (since_ts,)).fetchall()
     if not rows:
         return out + "_no data in window_\n"
+    # Read live floor values from config so report stays in sync.
+    try:
+        from config import EXPECTANCY_FILTER as _EF, STAR_SYMBOLS as _STAR
+        nonstar_floor = float(_EF.get("min_expected_dollar", 0.05))
+        star_floor    = float(_EF.get("min_expected_star", 0.00))
+        min_n         = int(_EF.get("min_sample_size", 5))
+    except Exception:
+        nonstar_floor, star_floor, min_n = 0.05, 0.00, 5
+        _STAR = STAR_SYMBOLS
+
+    out += (
+        f"_floors: STAR ≥ ${star_floor:.2f} | non-STAR ≥ ${nonstar_floor:.2f} "
+        f"| min_n={min_n}_\n\n"
+    )
     out += "| symbol | n | sum | avg | WR | filter status |\n|---|---:|---:|---:|---:|---|\n"
     for r in rows:
         avg = r["avg_pnl"] or 0
         n = r["n"]
-        if n < 5:
-            flag = "_n too low to filter_"
-        elif avg < 0.30:
-            flag = "**WOULD BE BLOCKED**" if avg < 0.0 else "_below floor_"
+        is_star = r["symbol"] in _STAR
+        floor = star_floor if is_star else nonstar_floor
+        star_tag = " (STAR)" if is_star else ""
+        if n < min_n:
+            flag = f"_n<{min_n} (allow){star_tag}_"
+        elif avg < floor:
+            flag = f"**BLOCK**{star_tag}"
         else:
-            flag = "_pass_"
+            flag = f"_pass_{star_tag}"
         out += (
             f"| {r['symbol']} | {n} | {_fmt_pnl(r['sum_pnl'])} | "
             f"{_fmt_pnl(avg)} | {r['wr']}% | {flag} |\n"

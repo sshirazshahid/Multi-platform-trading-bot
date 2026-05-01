@@ -584,20 +584,30 @@ SPOT_STRATEGY = {
 # Per-trade abstain rule: if the candidate's symbol has insufficient recent
 # realised expectancy (mean PnL after fees < min_expected_dollar), skip.
 #
-# Cell-filter (above) is binary — in or out. This adds magnitude: a STAR
-# symbol whose recent expectancy has flipped below the floor gets blocked
-# even though it's in the allowed set. Self-correcting over time as the
-# bot accumulates more data.
+# Cell-filter (above) is binary — in or out. This adds magnitude: a symbol
+# whose recent expectancy has flipped below the floor gets blocked even
+# though it's in the allowed set. Self-correcting over time.
 #
-# `min_expected_dollar = 0.30` ≈ 2× typical round-trip fee at this scale.
-# A trade clearing this threshold has positive expectation after costs.
+# Floor calibration (2026-05-01 ultrathink wire-check):
+#   30d avg fee per trade: $0.027
+#   30d STAR avg fee:     $0.029-$0.048
+#   Original $0.30 floor (≈ 2× fee at $75 notional) was 17× too high
+#   for current $4.40 notional — would block ALL 3 STAR symbols
+#   (ATOM $0.147, ARB $0.061, DOGE $0.285) despite being net-positive.
+# Fix: $0.05 = ~2× actual round-trip fee, just above breakeven.
+#
+# STAR exemption: STAR symbols pass at mean >= $0.0 (just must not be
+# net-negative). The cell-filter has already validated them as proven-
+# edge cells; the expectancy filter's role for them is only to catch
+# regime-flip into outright loss, not to demand strong positive edge.
 #
 # `min_sample_size`: when fewer than N closed trades exist for the symbol
 # in the lookback window, return None (allow through). We don't block on
 # noise — only on evidence-backed negative cells.
 EXPECTANCY_FILTER = {
     "enabled":              True,
-    "min_expected_dollar":  0.30,
+    "min_expected_dollar":  0.05,   # non-STAR floor (~2× actual round-trip fee)
+    "min_expected_star":    0.00,   # STAR floor: just must not be net-negative
     "lookback_days":        30,
     "min_sample_size":      5,
 }
