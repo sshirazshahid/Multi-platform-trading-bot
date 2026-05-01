@@ -50,6 +50,11 @@ JSONL_LOG = REPORT_DIR / "gate_effectiveness.jsonl"
 # Anchored in the 2026-05-01 cell-filter spec.
 STAR_SYMBOLS = {"ATOM/USDT:USDT", "ARB/USDT:USDT", "DOGE/USDT:USDT"}
 
+# When the cell-filter went live (commit 6ca74d9 at 2026-05-01 01:31 +0500
+# = 2026-04-30 20:31 UTC). Trades opened before this bypass the filter
+# entirely — they are NOT a filter leak; they are pre-wire history.
+CELL_FILTER_ACTIVE_TS = 1777581060  # 2026-04-30 20:31:00 UTC
+
 
 def _conn() -> sqlite3.Connection:
     if not WH_PATH.exists():
@@ -122,11 +127,14 @@ def report_cell_performance(c, since_ts: int) -> str:
         "Closed-trade attribution by cell. STAR symbols, score-band "
         "non-STAR, and blocks (visible only via SKIP rows in the "
         "candidates table). A blocked cell with no realised data is "
-        "good — the filter is doing its job.",
+        "good — the filter is doing its job. Trades opened before the "
+        "cell-filter went live (2026-04-30 20:31 UTC) are split out "
+        "separately as PRE-FILTER and do not represent filter leaks.",
     )
     star_list = "(" + ",".join(f"'{s}'" for s in STAR_SYMBOLS) + ")"
     rows = c.execute(f"""
         SELECT
+          CASE WHEN ts_entry >= ? THEN 'POST' ELSE 'PRE' END AS era,
           CASE
             WHEN symbol IN {star_list} THEN 'STAR'
             WHEN mcp_score BETWEEN 70 AND 84 THEN 'BAND'
@@ -138,14 +146,15 @@ def report_cell_performance(c, since_ts: int) -> str:
           ROUND(100.0 * SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END)/COUNT(*), 1) AS wr
         FROM trades
         WHERE status='CLOSED' AND ts_entry >= ?
-        GROUP BY cell
-        ORDER BY sum_pnl DESC
-    """, (since_ts,)).fetchall()
+        GROUP BY era, cell
+        ORDER BY era DESC, sum_pnl DESC
+    """, (CELL_FILTER_ACTIVE_TS, since_ts)).fetchall()
     if not rows:
         return out + "_no data in window_\n"
-    out += "| cell | n | sum | avg | WR |\n|---|---:|---:|---:|---:|\n"
+    out += "| era | cell | n | sum | avg | WR |\n|---|---|---:|---:|---:|---:|\n"
     for r in rows:
-        out += f"| {r['cell']} | {r['n']} | {_fmt_pnl(r['sum_pnl'])} | {_fmt_pnl(r['avg_pnl'])} | {r['wr']}% |\n"
+        era_label = "active" if r["era"] == "POST" else "pre-wire"
+        out += f"| {era_label} | {r['cell']} | {r['n']} | {_fmt_pnl(r['sum_pnl'])} | {_fmt_pnl(r['avg_pnl'])} | {r['wr']}% |\n"
 
     # Skip-reason distribution (gate firing rates)
     skips = c.execute("""
