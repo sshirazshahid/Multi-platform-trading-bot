@@ -558,6 +558,28 @@ STAR_SYMBOLS = {
     "DOGE/USDT:USDT",   # n=10, +$4.83 sum, +$0.483/trade, 50% WR
 }
 
+# 2026-05-01 — SPOT-PROTECT-V1 (peak-drawdown spot strategy).
+# Ref: docs/superpowers/specs/2026-05-01-spot-protect-v1-design.md
+#
+# Replaces SpotPortfolioManager.evaluate_holding's EMA/RSI logic with
+# peak-drawdown stop rules. For every spot holding ≥ min_position_usd:
+#   drawdown >= drawdown_full_pct  → SELL (full exit)
+#   drawdown >= drawdown_half_pct  → SCALE_OUT (half exit, peak resets)
+#   else                           → HOLD
+#
+# Rationale: at $1052 across 32 holdings the existing TA logic was
+# fee-eaten whipsaw. Peak-based rules are mechanical, regime-agnostic,
+# and asymmetric (cap downside, preserve upside).
+#
+# Rollback: enabled=False → existing TA path runs unchanged.
+SPOT_STRATEGY = {
+    "enabled":              True,
+    "dust_cutoff_usd":      25.0,   # Component A — sell positions worth less
+    "min_position_usd":     50.0,   # Component B — below this, no rules apply
+    "drawdown_half_pct":    0.25,   # SCALE_OUT trigger (half-exit, peak resets)
+    "drawdown_full_pct":    0.40,   # SELL trigger (full exit)
+}
+
 # 2026-05-01 — Cell-Filter Entry Gate
 # Ref: docs/superpowers/specs/2026-05-01-cell-filter-entry-gate-design.md
 #

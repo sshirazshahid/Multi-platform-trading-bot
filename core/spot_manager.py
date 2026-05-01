@@ -169,6 +169,62 @@ class SpotPortfolioManager:
         result = {"action": "HOLD", "reason": "", "confidence": 0.5,
                   "value_usdt": h.balance * h.current_price}
 
+        # ── SPOT-PROTECT-V1 peak-drawdown stop (2026-05-01) ──────────────
+        # Replaces the EMA/RSI exit chain when SPOT_STRATEGY.enabled=True.
+        # Mechanical rules:
+        #   drawdown >= drawdown_full_pct → SELL (full exit)
+        #   drawdown >= drawdown_half_pct → SCALE_OUT (half, peak resets)
+        # Skipped for positions below min_position_usd (no rules apply to
+        # tiny holdings — those are Component A's dust-consolidation job).
+        # When enabled=False, falls through to legacy TA logic.
+        try:
+            from config import SPOT_STRATEGY as _SS
+        except ImportError:
+            _SS = {"enabled": False}
+        if _SS.get("enabled", False):
+            value_usdt = h.balance * h.current_price
+            min_pos = float(_SS.get("min_position_usd", 50.0))
+            half_pct = float(_SS.get("drawdown_half_pct", 0.25))
+            full_pct = float(_SS.get("drawdown_full_pct", 0.40))
+            if value_usdt < min_pos:
+                # Too small for active rules — let dust-consolidation
+                # handle it. HOLD short-circuit avoids the heavyweight
+                # OHLCV fetch on positions we don't act on.
+                result["reason"] = (
+                    f"below_min_position(${value_usdt:.2f}<${min_pos:.0f})")
+                return result
+            if h.peak_price > 0:
+                drawdown = (h.peak_price - h.current_price) / h.peak_price
+            else:
+                drawdown = 0.0
+            # Full exit dominates half (check higher threshold first).
+            if drawdown >= full_pct:
+                return {
+                    "action": "SELL", "confidence": 0.90,
+                    "reason": (
+                        f"peak_drawdown_full(dd={drawdown:.1%}>="
+                        f"{full_pct:.0%})"),
+                    "value_usdt": value_usdt,
+                }
+            if drawdown >= half_pct:
+                # Reset peak so subsequent rules trigger only on a NEW
+                # drawdown, not the same continuing one.
+                h.peak_price = h.current_price
+                self._save_state()
+                return {
+                    "action": "SCALE_OUT", "confidence": 0.85,
+                    "reason": (
+                        f"peak_drawdown_half(dd={drawdown:.1%}>="
+                        f"{half_pct:.0%})"),
+                    "value_usdt": value_usdt,
+                }
+            # Neither trigger fired — HOLD but skip the legacy TA path
+            # entirely so behavior is fully deterministic.
+            result["reason"] = (
+                f"peak_drawdown_ok(dd={drawdown:.1%}<{half_pct:.0%})")
+            result["confidence"] = 0.65
+            return result
+
         # Fetch 4h candle data for trend analysis
         symbol = f"{coin}/USDT"
         if exchange:
