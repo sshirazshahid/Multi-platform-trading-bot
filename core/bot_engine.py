@@ -7,6 +7,7 @@ FIX: _extract_usdt now handles Bybit Unified Account correctly.
      Also: _log_balances now fetches Bybit balance ONCE (not spot+futures twice).
 """
 
+import sys
 import time
 import json
 import signal
@@ -2556,6 +2557,31 @@ class BotEngine:
         )
         logger.info(f"[Engine] {summary}")
         self.notifier.alert(summary)
+
+        # 2026-05-01: also generate the gate-effectiveness report and STAR
+        # review as part of the daily check. These produce dated markdown
+        # reports under data/reports/ that the operator can review.
+        # Failures here do NOT crash the daily check — best-effort only.
+        try:
+            import subprocess
+            subprocess.run(
+                [sys.executable, "scripts/gate_effectiveness_report.py", "--window", "7"],
+                cwd=str(Path(__file__).resolve().parents[1]),
+                timeout=120, capture_output=True, check=False,
+            )
+            logger.info("[Engine] daily gate effectiveness report generated")
+        except Exception as e:
+            logger.debug(f"[Engine] gate effectiveness report skipped: {e}")
+        try:
+            import subprocess
+            subprocess.run(
+                [sys.executable, "scripts/star_review.py", "--window", "30"],
+                cwd=str(Path(__file__).resolve().parents[1]),
+                timeout=60, capture_output=True, check=False,
+            )
+            logger.info("[Engine] daily STAR review generated")
+        except Exception as e:
+            logger.debug(f"[Engine] STAR review skipped: {e}")
 
     def _execute_fund_ops(self, fund_ops: list):
         """Execute MCP Brain fund management operations: TRANSFER, SELL_PORTFOLIO, BUY_PORTFOLIO."""
