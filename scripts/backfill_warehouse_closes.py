@@ -63,32 +63,55 @@ def _parse_log_ts(s: str) -> float:
     return dt.timestamp()
 
 
-def parse_close_events(log_files: list[Path]) -> list[dict]:
-    """Yield close-event dicts from every matching log line."""
-    events: list[dict] = []
-    for p in log_files:
+def _open_log(p: Path):
+    """Open .log or .log.zip transparently — returns iterable of decoded lines."""
+    if p.suffix == ".zip":
+        import io
+        import zipfile
+        try:
+            with zipfile.ZipFile(p) as zf:
+                # Each daily zip contains one log file; iterate inner members
+                for name in zf.namelist():
+                    with zf.open(name) as raw:
+                        for ln in io.TextIOWrapper(raw, encoding="utf-8",
+                                                   errors="replace"):
+                            yield ln
+        except (zipfile.BadZipFile, OSError):
+            return
+    else:
         try:
             with p.open("r", encoding="utf-8", errors="replace") as f:
-                for ln in f:
-                    if "[LIVE] CLOSED" not in ln:
-                        continue
-                    m = LINE_RE.match(ln.rstrip())
-                    if not m:
-                        continue
-                    try:
-                        events.append({
-                            "ts": _parse_log_ts(m.group("ts")),
-                            "symbol": m.group("symbol"),
-                            "gross_pnl": float(m.group("gross")),
-                            "fees": float(m.group("fees")),
-                            "realized_pnl": float(m.group("net")),
-                            "reason": m.group("reason").strip(),
-                            "log_file": str(p.name),
-                        })
-                    except (ValueError, AttributeError):
-                        continue
+                yield from f
         except OSError:
-            continue
+            return
+
+
+def parse_close_events(log_files: list[Path]) -> list[dict]:
+    """Yield close-event dicts from every matching log line.
+
+    Reads both .log and .log.zip files. Daily log rotation zips after a day,
+    so historical close events for OPEN rows >24h old live in zips.
+    """
+    events: list[dict] = []
+    for p in log_files:
+        for ln in _open_log(p):
+            if "[LIVE] CLOSED" not in ln:
+                continue
+            m = LINE_RE.match(ln.rstrip())
+            if not m:
+                continue
+            try:
+                events.append({
+                    "ts": _parse_log_ts(m.group("ts")),
+                    "symbol": m.group("symbol"),
+                    "gross_pnl": float(m.group("gross")),
+                    "fees": float(m.group("fees")),
+                    "realized_pnl": float(m.group("net")),
+                    "reason": m.group("reason").strip(),
+                    "log_file": str(p.name),
+                })
+            except (ValueError, AttributeError):
+                continue
     events.sort(key=lambda e: e["ts"])
     return events
 
@@ -134,7 +157,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 1. Collect close events from every bot log on disk.
-    log_files = sorted(LOG_DIR.glob("bot_*.log"))
+    log_files = sorted(LOG_DIR.glob("bot_*.log")) + sorted(LOG_DIR.glob("bot_*.log.zip"))
     if not log_files:
         print("no bot_*.log files found in logs/", file=sys.stderr)
         return 1

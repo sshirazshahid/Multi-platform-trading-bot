@@ -954,11 +954,19 @@ PARTIAL_TP = {
 # ==============================================================
 SPOT_PORTFOLIO = {
     "enabled":                  True,
-    "recommendation_only":      True,    # NEW — never executes orders
+    # 2026-05-01 (under-supervision readiness pass): flip to False so
+    # SPOT-PROTECT-V1 (peak-DD half/full exits at -25%/-40%) actually
+    # places SELL orders. Was True since 2026-04-14 learning-first pivot.
+    # User explicitly authorized autonomous defensive sells. The
+    # threshold is deep (-25% from peak) so triggers are rare; bot
+    # only sells what's already deeply drawn down — not hair-trigger.
+    # Hedge_via_futures STAYS off (no perp overlay on spot DD).
+    # Sell_on_structure_break STAYS off (we only act on peak-DD).
+    "recommendation_only":      False,
     "scan_interval_min":        30,
     "cost_basis_method":        "average",
     "scale_out_threshold_pct":  0.20,
-    "sell_on_structure_break":  False,   # downgraded to recommendation-only
+    "sell_on_structure_break":  False,   # disabled — only peak-DD triggers exits
     "hedge_via_futures":        False,   # disabled — no derivatives overlay
     "hedge_drawdown_pct":       0.10,
 }

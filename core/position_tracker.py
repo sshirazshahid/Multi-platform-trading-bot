@@ -135,6 +135,11 @@ class Position:
     funding_paid: float           = 0.0
     # ── Mode tag — this is the key field for learning separation ──────
     paper_trade:  bool            = field(default_factory=_is_dry_run)
+    # ── Exchange-side SL registration flag ────────────────────────────
+    # True once OrderManager._place_exchange_sl_tp succeeds. Persisted
+    # so a restart doesn't try to re-place an SL that's already live.
+    # 2026-05-01: added so manual-position SL recovery is idempotent.
+    _exchange_sl: bool            = False
 
     def __post_init__(self):
         rate = _fee_rate(self.market_type)

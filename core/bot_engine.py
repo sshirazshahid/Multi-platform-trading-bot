@@ -204,6 +204,114 @@ class BotEngine:
         except Exception:
             pass
 
+        # 2026-05-01: surface wired-but-misconfigured gate state at startup
+        # so silent-mode flags don't go undetected. Logs WARNING-level
+        # findings; bot continues either way.
+        try:
+            self._gate_health_check()
+        except Exception as e:
+            logger.debug(f"[GateHealth] check skipped ({e})")
+
+    def _gate_health_check(self) -> None:
+        """Surface wired-but-misconfigured gates at startup.
+
+        Each finding is a WARNING — bot still starts, but operator sees
+        the actual state of every defensive layer in one place. Designed
+        to catch silent-mode flags (e.g., SPOT recommendation_only=True
+        means SPOT-PROTECT-V1 logs but never sells), missing exchange-
+        side SL on tracked positions, and gates that are wired but
+        ineffective due to threshold mis-calibration.
+        """
+        from config import (
+            EXPECTANCY_FILTER, ENTRY_STALENESS_EXIT, CELL_FILTER,
+            SPOT_PORTFOLIO, SPOT_STRATEGY, MODEL_GATE, STAR_SYMBOLS,
+        )
+        findings: list[str] = []
+
+        # 1) Active gates summary
+        gate_lines = []
+        gate_lines.append(
+            f"cell-filter={'on' if CELL_FILTER.get('enabled') else 'OFF'} "
+            f"(stars={len(STAR_SYMBOLS)}, "
+            f"band=[{CELL_FILTER.get('score_band_min')},"
+            f"{CELL_FILTER.get('score_band_max')}])")
+        gate_lines.append(
+            f"expectancy={'on' if EXPECTANCY_FILTER.get('enabled') else 'OFF'} "
+            f"(floor=${EXPECTANCY_FILTER.get('min_expected_dollar')}, "
+            f"star_floor=${EXPECTANCY_FILTER.get('min_expected_star')})")
+        gate_lines.append(
+            f"staleness={'on' if ENTRY_STALENESS_EXIT.get('enabled') else 'OFF'} "
+            f"(gap={ENTRY_STALENESS_EXIT.get('invalidation_gap_pct')}%, "
+            f"min_hold={ENTRY_STALENESS_EXIT.get('min_hold_minutes')}min)")
+        model_active = (MODEL_GATE.get('enabled')
+                        and not MODEL_GATE.get('shadow_only'))
+        gate_lines.append(
+            f"model-gate={'live' if model_active else ('shadow' if MODEL_GATE.get('enabled') else 'OFF')} "
+            f"(p_win>={MODEL_GATE.get('threshold_futures')})")
+        spot_active = (SPOT_STRATEGY.get('enabled')
+                       and not SPOT_PORTFOLIO.get('recommendation_only', True))
+        gate_lines.append(
+            f"spot-protect={'live' if spot_active else 'recommend-only'} "
+            f"(half=-{SPOT_STRATEGY.get('drawdown_half_pct')*100:.0f}%, "
+            f"full=-{SPOT_STRATEGY.get('drawdown_full_pct')*100:.0f}%)")
+        logger.info(f"[GateHealth] {' | '.join(gate_lines)}")
+
+        # 2) Silent-mode flags — wired but doesn't act
+        if SPOT_PORTFOLIO.get("recommendation_only", True) and SPOT_STRATEGY.get("enabled"):
+            findings.append(
+                "SPOT-PROTECT-V1 is enabled but SPOT_PORTFOLIO.recommendation_only=True — "
+                "drawdown triggers are computed but never sell. Set "
+                "recommendation_only=False to enable autonomous defense.")
+
+        # 3) Calibration sanity — expectancy floor must be reachable
+        floor = EXPECTANCY_FILTER.get("min_expected_dollar", 0.05)
+        # Heuristic: at $4-5 notional and 0.1% fees, round-trip is ~$0.01.
+        # A floor > $0.50 is almost certainly mis-calibrated.
+        if EXPECTANCY_FILTER.get("enabled") and floor > 0.50:
+            findings.append(
+                f"EXPECTANCY_FILTER floor=${floor:.2f} is suspiciously high — at "
+                f"current notional this is >50× round-trip fee and may block "
+                f"all symbols. Sanity-check vs warehouse data.")
+
+        # 4) Open positions without exchange-side SL — flag count, not error
+        try:
+            naked = [p for p in self.tracker.get_open()
+                     if not getattr(p, "_exchange_sl", False)
+                     and p.market_type == "futures"
+                     and not p.paper_trade]
+            if naked:
+                findings.append(
+                    f"{len(naked)} live futures position(s) have no exchange-side "
+                    f"SL — relying on bot's monitor cycle for soft-SL only. "
+                    f"If bot crashes, these are unprotected.")
+        except Exception:
+            pass
+
+        # 5) Recent gate-stack soak status (last-7d closed trade volume)
+        try:
+            import sqlite3 as _sq
+            import time as _time
+            con = _sq.connect("data/warehouse.sqlite")
+            since_7d = int(_time.time()) - 7 * 86400
+            n_recent = con.execute(
+                "SELECT COUNT(*) FROM trades WHERE status='CLOSED' AND ts_entry >= ?",
+                (since_7d,)).fetchone()[0]
+            con.close()
+            if n_recent < 10:
+                findings.append(
+                    f"only {n_recent} closed trade(s) in last 7d — gate-stack "
+                    f"calibration is statistically unverified.")
+        except Exception:
+            pass
+
+        # 6) Surface findings to operator
+        if findings:
+            logger.warning(f"[GateHealth] {len(findings)} finding(s):")
+            for i, f in enumerate(findings, 1):
+                logger.warning(f"  ({i}) {f}")
+        else:
+            logger.info("[GateHealth] all gates healthy, no findings")
+
     # ── Strategy pool ─────────────────────────────────────────────────
 
     def _build_strategy_pool(self):
@@ -2259,16 +2367,95 @@ class BotEngine:
                 logger.debug(f"[Rebalance] {ex_name}: {e}")
 
     def _run_spot_evaluation(self):
-        """Run spot portfolio evaluation cycle (every 30 min)."""
+        """Run spot portfolio evaluation cycle (every 30 min).
+
+        2026-05-01: when SPOT_PORTFOLIO['recommendation_only'] is False,
+        execute SELL/SCALE_OUT actions. SPOT-PROTECT-V1 emits these only
+        on peak-drawdown >= 25% (half) / 40% (full). Recommendation-only
+        was the 2026-04-14 learning-first pivot default; flipping to
+        execute requires explicit user authorization.
+        """
         if not self.spot_manager:
             return
         try:
             actions = self.spot_manager.run_cycle()
-            if actions:
-                logger.info(f"[SpotMgr] Cycle: {len(actions)} actions "
-                            f"({', '.join(a.get('action','?') for a in actions)})")
+            if not actions:
+                return
+            logger.info(f"[SpotMgr] Cycle: {len(actions)} actions "
+                        f"({', '.join(a.get('action','?') for a in actions)})")
+
+            from config import SPOT_PORTFOLIO as _SP
+            if _SP.get("recommendation_only", True):
+                # Recommendation-only mode: spot_manager already wrote
+                # to data/spot_recommendations.jsonl; nothing to execute.
+                return
+
+            for a in actions:
+                self._execute_spot_action(a)
         except Exception as e:
             logger.error(f"[SpotMgr] Cycle error: {e}")
+
+    def _execute_spot_action(self, action: dict) -> None:
+        """Execute one SPOT-PROTECT-V1 action (SELL full or SCALE_OUT half).
+
+        Safety guards:
+          * Only handles SELL and SCALE_OUT (no buys, no rotations)
+          * Verifies free balance from the exchange before sizing
+          * Skips if free balance is dust (< $5)
+          * Market-sells only — no limit orders, simplest path
+          * Wraps failures so one symbol's error doesn't stall the cycle
+        """
+        try:
+            kind = action.get("action")
+            if kind not in ("SELL", "SCALE_OUT"):
+                return  # ignore HOLD / unknown actions defensively
+
+            ex_name = action.get("exchange")
+            coin    = action.get("coin")
+            symbol  = action.get("symbol") or f"{coin}/USDT"
+            reason  = action.get("reason", "")
+
+            exchange = self.exchanges.get(ex_name)
+            if exchange is None:
+                logger.warning(f"[SpotMgr] no exchange '{ex_name}' for {symbol}")
+                return
+
+            bal = exchange.fetch_balance(market_type="spot") or {}
+            free = float((bal.get(coin, {}) or {}).get("free", 0.0))
+            if free <= 0:
+                logger.warning(f"[SpotMgr] {ex_name}:{coin} no free balance")
+                return
+
+            # Resolve current price for dust-check; reuse manager state.
+            holdings = self.spot_manager._holdings.get(ex_name, {})  # noqa: SLF001
+            h = holdings.get(coin)
+            px = float(getattr(h, "current_price", 0.0)) if h else 0.0
+            if px <= 0:
+                logger.warning(f"[SpotMgr] {ex_name}:{coin} no current price")
+                return
+
+            sell_qty = free if kind == "SELL" else free * 0.5
+            sell_value_usd = sell_qty * px
+            if sell_value_usd < 5.0:
+                logger.info(
+                    f"[SpotMgr] {ex_name}:{coin} skipping {kind} — "
+                    f"sell value ${sell_value_usd:.2f} < $5 dust floor")
+                return
+
+            logger.warning(
+                f"[SpotMgr] EXECUTING {kind} {ex_name}:{coin}: "
+                f"qty={sell_qty:.6g} ≈ ${sell_value_usd:.2f} | reason={reason}")
+            order = exchange.create_order(
+                symbol=symbol, order_type="market", side="sell",
+                amount=sell_qty, price=None, market_type="spot",
+            )
+            order_id = (order or {}).get("id", "?")
+            logger.info(
+                f"[SpotMgr] {kind} placed {ex_name}:{coin} | order_id={order_id}")
+        except Exception as e:
+            logger.error(
+                f"[SpotMgr] execution failed for {action.get('exchange')}:"
+                f"{action.get('coin')}: {e}")
 
     def _run_capital_allocation(self):
         """Run capital allocation cycle (every 15 min)."""
