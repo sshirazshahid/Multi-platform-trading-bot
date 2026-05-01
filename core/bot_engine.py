@@ -1371,6 +1371,47 @@ class BotEngine:
                         pass
                     return False
 
+        # ── EXPECTANCY FILTER (2026-05-01 Tier 1.2) ──────────────────────
+        # Per-symbol abstain: if recent realised mean PnL < min_expected,
+        # skip even if cell-filter allowed. Self-correcting as data
+        # accumulates — a STAR symbol whose recent performance flipped
+        # negative gets auto-vetoed without manual STAR_SYMBOLS edits.
+        # Returns None on insufficient evidence (< min_sample_size in
+        # lookback) — we let those through, won't block on noise.
+        try:
+            from config import EXPECTANCY_FILTER as _EF
+        except ImportError:
+            _EF = {"enabled": False}
+        if _EF.get("enabled", True):
+            try:
+                from core.warehouse import get_warehouse as _gw
+                _sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
+                _exp = _gw().recent_expectancy(
+                    _sym_key,
+                    side=side,
+                    days=int(_EF.get("lookback_days", 30)),
+                    min_n=int(_EF.get("min_sample_size", 5)),
+                )
+                _floor = float(_EF.get("min_expected_dollar", 0.30))
+                if _exp is not None and _exp["mean"] < _floor:
+                    logger.info(
+                        f"[Expectancy] BLOCKED {symbol} {side}: recent mean "
+                        f"${_exp['mean']:+.3f} < ${_floor:.2f} floor "
+                        f"(n={_exp['n']}, WR={_exp['win_rate']:.0%})")
+                    try:
+                        if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                            _gw().query(
+                                "UPDATE candidates SET decision='SKIP', "
+                                "skip_reason=? WHERE id=?",
+                                (f"expectancy:mean${_exp['mean']:+.2f}<${_floor:.2f}",
+                                 _cid),
+                            )
+                    except Exception:
+                        pass
+                    return False
+            except Exception as _ee:
+                logger.debug(f"[Expectancy] check skipped ({_ee}) — defaulting to ALLOW")
+
         # ── HIGH-WR MECHANISM GATES (applied BEFORE legacy checks) ──────
 
         # (a) Symbol blacklist — evidence-based hard block (static + dynamic)
