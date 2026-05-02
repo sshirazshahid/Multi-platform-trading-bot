@@ -434,8 +434,16 @@ class BotEngine:
 
     def _log_balances(self):
         logger.info("[Engine] Fetching balances...")
+        # Two parallel totals (2026-05-02 fix):
+        #   total        = sum of FREE margin (used for sizing, conservative)
+        #   total_equity = sum of WALLET BALANCE (used for drawdown tracking,
+        #                  stable across position open/close margin shuffles)
+        # Drawdown computed against equity prevents phantom flakes from margin
+        # reallocation. Sizing uses free margin to avoid "ab not enough" rejects.
         total = 0.0
+        total_equity = 0.0
         balances = {}
+        equity_cache = getattr(self, "_equity_balances", {})
         if DRY_RUN:
             wallet = self.order_mgr.wallet
             for ex_name in self.active_exchanges:
@@ -443,48 +451,70 @@ class BotEngine:
                 logger.info(
                     f"[Engine] {ex_name.upper()} virtual: {bal:.4f} USDT (paper)")
                 total += bal
+                total_equity += bal  # paper: free == equity
                 balances[ex_name] = {"spot": bal, "futures": bal}
+                equity_cache[ex_name] = {"spot": bal, "futures": bal}
         else:
             for name, ex in self.active_exchanges.items():
                 # Retain previous balance on fetch failure (don't default to 0 for 15 min)
                 prev = self._balances.get(name, {"spot": 0.0, "futures": 0.0})
                 balances[name] = {"spot": prev.get("spot", 0.0), "futures": prev.get("futures", 0.0)}
+                prev_eq = equity_cache.get(name, {"spot": 0.0, "futures": 0.0})
+                eq_now = {"spot": prev_eq.get("spot", 0.0), "futures": prev_eq.get("futures", 0.0)}
                 if name in _UNIFIED_EXCHANGES:
                     # Bybit: single unified account — fetch once only
                     try:
                         bal  = ex.fetch_balance("spot")
                         usdt = self._extract_usdt(bal, name)
+                        usdt_eq = self._extract_usdt_equity(bal, name)
                         if usdt > 0:
-                            logger.info(f"[Engine] {name.upper()} unified: {usdt:.4f} USDT")
+                            logger.info(f"[Engine] {name.upper()} unified: free=${usdt:.2f} equity=${usdt_eq:.2f}")
                             total += usdt
                             balances[name] = {"spot": usdt, "futures": usdt}
                         else:
                             total += balances[name]["spot"]  # Use retained balance
+                        if usdt_eq > 0:
+                            total_equity += usdt_eq
+                            eq_now = {"spot": usdt_eq, "futures": 0.0}
+                        else:
+                            total_equity += eq_now["spot"]  # retained equity
                     except Exception as e:
                         logger.debug(f"[Engine] {name} balance: {e}")
                         total += balances[name]["spot"]  # Use retained balance
+                        total_equity += eq_now["spot"]
                 else:
                     for mtype in ("spot", "futures"):
                         try:
                             bal  = ex.fetch_balance(mtype)
                             usdt = self._extract_usdt(bal, name)
+                            usdt_eq = self._extract_usdt_equity(bal, name)
                             if usdt > 0:
                                 balances[name][mtype] = usdt
                                 logger.info(
-                                    f"[Engine] {name.upper()} {mtype}: {usdt:.4f} USDT")
+                                    f"[Engine] {name.upper()} {mtype}: free=${usdt:.2f} equity=${usdt_eq:.2f}")
                             total += balances[name][mtype]
+                            if usdt_eq > 0:
+                                eq_now[mtype] = usdt_eq
+                            total_equity += eq_now[mtype]
                         except Exception as e:
                             logger.debug(f"[Engine] {name} balance: {e}")
                             total += balances[name][mtype]  # Use retained balance
+                            total_equity += eq_now[mtype]
+                equity_cache[name] = eq_now
         self._balances = balances
-        if total > 0:
-            # Only set start balance once at startup — subsequent calls just update current
+        self._equity_balances = equity_cache
+        if total > 0 or total_equity > 0:
+            # Drawdown tracker reads EQUITY (stable wallet balance).
+            # Sizing reads FREE via self._balances (conservative).
+            equity_for_risk = total_equity if total_equity > 0 else total
             if not getattr(self, '_balance_initialized', False):
-                self.risk.set_start_balance(total)
+                self.risk.set_start_balance(equity_for_risk)
                 self._balance_initialized = True
             else:
-                self.risk.update_current_balance(total)
-            logger.info(f"[Engine] Total USDT: {total:.4f}")
+                self.risk.update_current_balance(equity_for_risk)
+            logger.info(
+                f"[Engine] Total USDT: free=${total:.2f} equity=${total_equity:.2f} "
+                f"(drawdown tracked against equity)")
         else:
             logger.warning(
                 "[Engine] Could not read balance — "
@@ -623,6 +653,93 @@ class BotEngine:
         if isinstance(total, dict) and total.get("USDT"):
             try:
                 return float(total["USDT"])
+            except (TypeError, ValueError):
+                pass
+        return 0.0
+
+    def _extract_usdt_equity(self, bal: dict, exchange_name: str = "") -> float:
+        """Return wallet equity (free + locked margin) for drawdown tracking.
+
+        Different from `_extract_usdt` which returns FREE balance for sizing.
+
+        Why a separate function:
+          Drawdown should track stable wallet equity, not free margin which
+          swings violently as positions open/close (margin gets locked/freed).
+          Using free margin for drawdown tracking causes phantom flake-rejects
+          and false halts every time the bot opens or closes a position.
+
+          Pre-fix (2026-05-02): bot used `_extract_usdt` for both sizing and
+          drawdown. Bybit returned $50 free + $157 locked = $207 wallet, but
+          bot tracked drawdown against the $50 free number — which fluctuated
+          with margin allocation, not P&L. Result: 53 phantom flake rejections
+          per day from margin-locking noise misinterpreted as balance drops.
+
+        Field priority:
+          - Bybit: `totalWalletBalance` (deposited + closed PnL, excludes
+                   unrealized — stable across position state changes).
+                   Falls back to `totalMarginBalance`, then 'total' from
+                   ccxt's parsed view.
+          - Other: ccxt's `total` field (free + used) — wallet balance.
+                   Falls back to `free` if total missing (degraded but safe).
+        """
+        if not bal:
+            return 0.0
+        ex = exchange_name.lower() if exchange_name else ""
+
+        if ex == "bybit":
+            try:
+                lst = bal.get("info", {}).get("result", {}).get("list", [])
+                if lst and isinstance(lst, list):
+                    acct = lst[0] if lst else {}
+                    # totalWalletBalance excludes unrealized PnL — stable across
+                    # margin allocation. totalMarginBalance similar fallback.
+                    for field in ("totalWalletBalance", "totalMarginBalance"):
+                        val = acct.get(field)
+                        if val is not None:
+                            try:
+                                v = float(val)
+                                if v > 0:
+                                    return v
+                            except (TypeError, ValueError):
+                                pass
+                    # Per-coin walletBalance for USDT — same idea per-coin
+                    coins = acct.get("coin", [])
+                    if isinstance(coins, list):
+                        for c in coins:
+                            if c.get("coin") == "USDT":
+                                val2 = c.get("walletBalance")
+                                if val2 is not None:
+                                    try:
+                                        v2 = float(val2)
+                                        if v2 > 0:
+                                            return v2
+                                    except (TypeError, ValueError):
+                                        pass
+            except Exception:
+                pass
+
+        # Standard ccxt: prefer 'total' (wallet = free + used) over 'free'
+        usdt = bal.get("USDT")
+        if isinstance(usdt, dict):
+            for key in ("total", "free"):
+                val = usdt.get(key)
+                if val is not None:
+                    try:
+                        v = float(val)
+                        if v > 0:
+                            return v
+                    except (TypeError, ValueError):
+                        pass
+        total_d = bal.get("total", {})
+        if isinstance(total_d, dict) and total_d.get("USDT"):
+            try:
+                return float(total_d["USDT"])
+            except (TypeError, ValueError):
+                pass
+        free_d = bal.get("free", {})
+        if isinstance(free_d, dict) and free_d.get("USDT"):
+            try:
+                return float(free_d["USDT"])
             except (TypeError, ValueError):
                 pass
         return 0.0
@@ -3378,19 +3495,21 @@ class BotEngine:
         if DRY_RUN:
             balance = self.order_mgr.wallet.total_balance()
         else:
+            # Daily summary shows user's actual wallet (free + locked margin),
+            # NOT just free margin. Use equity extractor for an accurate picture.
             balance = 0.0
             for name, ex in self.active_exchanges.items():
                 if name in _UNIFIED_EXCHANGES:
                     try:
                         bal = ex.fetch_balance("spot")
-                        balance += self._extract_usdt(bal, name)
+                        balance += self._extract_usdt_equity(bal, name)
                     except Exception:
                         pass
                 else:
                     for mtype in ("spot", "futures"):
                         try:
                             bal = ex.fetch_balance(mtype)
-                            balance += self._extract_usdt(bal, name)
+                            balance += self._extract_usdt_equity(bal, name)
                         except Exception:
                             pass
         # Build rich extras for the daily email
