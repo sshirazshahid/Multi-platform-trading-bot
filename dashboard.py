@@ -230,24 +230,34 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
     ex = exchange_name.lower()
 
     if ex == "bybit":
-        # Bybit Unified Account has several balance fields with very different meanings:
-        #   totalEquity           = wallet + unrealized PnL + USD value of every non-USDT
-        #                           spot holding (BTC/ETH/DOGE/... all counted as collateral).
-        #                           Matches the Bybit app's top-line "Total Equity" number
-        #                           but over-states spendable USDT by the value of non-USDT
-        #                           spot coins — for the dashboard we want to report actual
-        #                           USDT, not total equity.
-        #   totalAvailableBalance = free USDT-equivalent margin for new orders
-        #   availableToWithdraw   = free USDT (excludes locked margin)
-        # Priority order below matches core/bot_engine.py._extract_usdt (2026-04-12 fix)
-        # so dashboard and sizing agree on the same number.
+        # Bybit Unified Account has several balance fields:
+        #   totalEquity           = wallet + unrealized PnL + USD value of every
+        #                           non-USDT spot holding (BTC/ETH/etc counted as
+        #                           collateral). Display-friendly "Total Equity".
+        #   totalWalletBalance    = USDT free + locked margin (no unrealized PnL,
+        #                           no spot-coin collateral). Stable across
+        #                           position open/close shuffles.
+        #   totalAvailableBalance = free USDT margin for new orders only.
+        #
+        # 2026-05-02 fix: this is a USER-FACING DISPLAY. Use totalWalletBalance
+        # (USDT free + locked) so the dashboard shows the user's actual USDT,
+        # not just spendable margin. With the previous priority
+        # (totalAvailableBalance first), Bybit displayed ~$50 when actual
+        # wallet was ~$207 — looked like balance had crashed every time a
+        # position opened and locked margin.
+        # Spot-coin holdings are shown separately in the SPOT panel — using
+        # totalEquity here would double-count them.
+        # bot_engine's `_extract_usdt` keeps the old priority for SIZING
+        # (free-margin-conservative); dashboard uses the new priority for
+        # DISPLAY (wallet-accurate).
         try:
             result_list = bal.get("info", {}).get("result", {}).get("list", [])
             if result_list and isinstance(result_list, list):
                 acct = result_list[0] if result_list else {}
-                for field in ("totalAvailableBalance",
+                # Display priority: wallet > margin > available
+                for field in ("totalWalletBalance",
                               "totalMarginBalance",
-                              "totalWalletBalance"):
+                              "totalAvailableBalance"):
                     val = acct.get(field)
                     if val is not None:
                         try:
@@ -256,14 +266,14 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
                                 return v
                         except (TypeError, ValueError):
                             pass
-                # Per-coin USDT free balance
+                # Per-coin USDT walletBalance fallback
                 coins = acct.get("coin", [])
                 if isinstance(coins, list):
                     for c in coins:
                         if c.get("coin") == "USDT":
-                            for f2 in ("availableToWithdraw",
+                            for f2 in ("walletBalance",
                                        "availableBalance",
-                                       "walletBalance"):
+                                       "availableToWithdraw"):
                                 val2 = c.get(f2)
                                 if val2 is not None:
                                     try:
@@ -2029,15 +2039,22 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                     row("      Now:{}  Value:{}  Qty:{:.6g}  {}m".format(
                         live_s, val_s, sz, dur))
                 # Line 3: SL/TP or value
+                # 2026-05-02: show SL protection coverage. _exchange_sl=True
+                # means the SL is registered on the exchange (hard, fires
+                # automatically). False means soft-SL only (relies on bot's
+                # monitor cycle — at risk if bot crashes or has API delay).
+                exch_sl = pos.get("_exchange_sl", False)
                 if sl and tp:
+                    sl_tag = (col("hard", GREEN) if exch_sl
+                              else col("soft", YELLOW))
                     if entry > 0:
                         sl_pct = abs(sl - entry) / entry * 100
                         tp_pct = abs(tp - entry) / entry * 100
-                        row("      SL:{:.6g}({:.1f}%)  TP:{:.6g}({:.1f}%)  [{}]".format(
-                            sl, sl_pct, tp, tp_pct, col(strat, DIM)))
+                        row("      SL:{:.6g}({:.1f}%) {} TP:{:.6g}({:.1f}%)  [{}]".format(
+                            sl, sl_pct, sl_tag, tp, tp_pct, col(strat, DIM)))
                     else:
-                        row("      SL:{:.6g}  TP:{:.6g}  [{}]".format(
-                            sl, tp, col(strat, DIM)))
+                        row("      SL:{:.6g} {} TP:{:.6g}  [{}]".format(
+                            sl, sl_tag, tp, col(strat, DIM)))
                 elif mtype == "spot" and sz > 0 and live_px > 0:
                     value = sz * live_px
                     row("      Qty:{:.6g}  Value:{:.2f} USDT  [{}]".format(
