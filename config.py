@@ -806,6 +806,14 @@ SHORTS_REQUIRE_BTC_BEAR = False
 BTC_TREND_TIMEFRAME     = "4h"
 BTC_TREND_EMA_PERIOD    = 200
 
+# Short-side filter (May 2026, evidence-based). Warehouse: 126 shorts net
+# -$54 vs 210 longs net -$4. Filter blocks SELL when BTC is up-aligned on
+# both 4h and 1h EMA20>EMA50. Idiosyncratic bearish news on the symbol
+# overrides the block. Toggle off via env or by setting `enabled=False`.
+SHORT_SIDE_FILTER = {
+    "enabled": os.getenv("SHORT_SIDE_FILTER_ENABLED", "true").lower() == "true",
+}
+
 # ==============================================================
 # BLACKLISTING
 # ==============================================================
@@ -982,6 +990,17 @@ PARTIAL_TP = {
 # Spec §13: "No autonomous futures funding from spot during the rebuild
 # phase." Hedging is disabled until futures proves positive expectancy.
 # ==============================================================
+# SPOT-PROTECT-V2 (May 2026): model-driven early SCALE_OUT.
+# When the promoted spot ensemble outputs p_win_ensemble < p_win_floor
+# AND the holding is already past drawdown_pct from peak, take half off.
+# Complements the deterministic SPOT-PROTECT-V1 25%/40% peak-DD rules
+# with model-aware risk reduction. No-op when no spot model is promoted.
+SPOT_PROTECT_V2 = {
+    "enabled":      True,
+    "drawdown_pct": 0.15,
+    "p_win_floor":  0.40,
+}
+
 SPOT_PORTFOLIO = {
     "enabled":                  True,
     # 2026-05-01 (under-supervision readiness pass): flip to False so

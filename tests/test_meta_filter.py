@@ -96,3 +96,32 @@ def test_priority_spread_beats_chop(mf):
     d = mf.evaluate(_base(spread_pctl=0.99, regime_label="chop"), side="buy")
     assert d.decision == "SKIP"
     assert "spread" in d.reason  # not 'chop'
+
+
+def test_high_score_high_vol_skips(mf):
+    """Score 80+ + top-decile ATR is a known loss bucket — must SKIP."""
+    d = mf.evaluate(_base(vol_pctl=0.90), side="buy", confidence=0.85,
+                    mcp_score=88.0)
+    assert d.decision == "SKIP"
+    assert "mcp_score" in d.reason
+    assert "vol_pctl" in d.reason
+
+
+def test_high_score_normal_vol_still_allows(mf):
+    """High score is fine on its own — only the high-vol pairing is a trap."""
+    d = mf.evaluate(_base(vol_pctl=0.50), side="buy", confidence=0.85,
+                    mcp_score=88.0)
+    assert d.decision == "ALLOW"
+
+
+def test_low_score_high_vol_still_allows(mf):
+    """Vol percentile 0.85 alone is below the 0.95 SKIP threshold."""
+    d = mf.evaluate(_base(vol_pctl=0.86), side="buy", confidence=0.70,
+                    mcp_score=70.0)
+    assert d.decision == "ALLOW"
+
+
+def test_high_score_filter_optional_when_unset(mf):
+    """When mcp_score is omitted (legacy callers), no new SKIP is introduced."""
+    d = mf.evaluate(_base(vol_pctl=0.90), side="buy", confidence=0.85)
+    assert d.decision == "ALLOW"

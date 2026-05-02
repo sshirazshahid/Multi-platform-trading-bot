@@ -218,6 +218,42 @@ class SpotPortfolioManager:
                         f"{half_pct:.0%})"),
                     "value_usdt": value_usdt,
                 }
+            # ── SPOT-PROTECT-V2 model-driven early SCALE_OUT (May 2026) ──
+            # When the spot ensemble model is loaded AND signals low p_win
+            # AND we're already drawing down past the early threshold, take
+            # half off well before the V1 25% trigger. Lets the model add
+            # value on holdings the deterministic peak-DD rules would still
+            # be holding through. Skipped silently when no model is loaded.
+            try:
+                from config import SPOT_PROTECT_V2 as _SPV2
+            except ImportError:
+                _SPV2 = {"enabled": True, "drawdown_pct": 0.15, "p_win_floor": 0.40}
+            if _SPV2.get("enabled", True):
+                early_dd = float(_SPV2.get("drawdown_pct", 0.15))
+                p_floor  = float(_SPV2.get("p_win_floor", 0.40))
+                if drawdown >= early_dd and self._mcp_brain is not None:
+                    try:
+                        score = self.score_spot_candidate(
+                            symbol=f"{coin}/USDT",
+                            feats={},
+                            rule_score=50.0,
+                        )
+                        p_ens = float(score.get("p_win_ensemble") or 0.0)
+                        model_v = score.get("model_version")
+                        if model_v and p_ens < p_floor:
+                            h.peak_price = h.current_price
+                            self._save_state()
+                            return {
+                                "action": "SCALE_OUT", "confidence": 0.78,
+                                "reason": (
+                                    f"spot_v2_model(dd={drawdown:.1%}>="
+                                    f"{early_dd:.0%},p_win={p_ens:.2f}<"
+                                    f"{p_floor:.2f},v={model_v})"),
+                                "value_usdt": value_usdt,
+                            }
+                    except Exception as _spe:
+                        logger.debug(f"[SpotMgr] V2 score skipped: {_spe}")
+
             # Neither trigger fired — HOLD but skip the legacy TA path
             # entirely so behavior is fully deterministic.
             result["reason"] = (

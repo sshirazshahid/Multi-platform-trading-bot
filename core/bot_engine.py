@@ -108,6 +108,18 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Engine] AutoMutator init failed: {e}")
             self.auto_mutator = None
+
+        # Health watchdog — observes heartbeat, halts, SL failures, loss streaks.
+        # Constructed after notifier+risk so checks have what they need.
+        try:
+            from core.health_watchdog import HealthWatchdog
+            self.watchdog = HealthWatchdog(
+                bot_engine=self, notifier=self.notifier, risk_manager=self.risk,
+            )
+            logger.info("[Engine] HealthWatchdog enabled")
+        except Exception as e:
+            logger.debug(f"[Engine] HealthWatchdog init failed: {e}")
+            self.watchdog = None
         # Universe filter: runtime quality checks before trading
         try:
             from core.pair_discovery import UniverseFilter
@@ -912,13 +924,55 @@ class BotEngine:
     def _current_utc_hour(self) -> int:
         return datetime.now(timezone.utc).hour
 
+    # Hour-gate evidence file (refreshed by scripts/refresh_hour_gates.py).
+    # Cached for 5 min in-process so the file is read at most ~12×/hour.
+    _HOUR_GATE_PATH = Path("data/hour_gate_evidence.json")
+    _HOUR_GATE_TTL_SEC = 300
+    _HOUR_GATE_MAX_AGE_DAYS = 14
+
+    def _load_dynamic_blocked_hours(self) -> set:
+        """Read hour_gate_evidence.json and return its `blocked` set.
+
+        Returns empty set when:
+        - file is missing
+        - file is older than _HOUR_GATE_MAX_AGE_DAYS (stale evidence is ignored)
+        - file is malformed
+        Cached for _HOUR_GATE_TTL_SEC so disk hits are bounded.
+        """
+        now = time.time()
+        if (now - getattr(self, "_hour_gate_loaded_at", 0)) < self._HOUR_GATE_TTL_SEC:
+            return getattr(self, "_hour_gate_cached", set())
+
+        blocked: set = set()
+        try:
+            p = self._HOUR_GATE_PATH
+            if p.exists():
+                age_days = (now - p.stat().st_mtime) / 86400
+                if age_days <= self._HOUR_GATE_MAX_AGE_DAYS:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    raw = data.get("blocked") or []
+                    blocked = {int(h) for h in raw if isinstance(h, (int, float))}
+        except Exception as e:
+            logger.debug(f"[HourGate] evidence load skipped: {e}")
+            blocked = set()
+
+        self._hour_gate_cached = blocked
+        self._hour_gate_loaded_at = now
+        return blocked
+
     def _classify_hour(self, hour: int) -> str:
-        """Return 'peak' | 'allowed' | 'warmup' | 'blocked'."""
+        """Return 'peak' | 'allowed' | 'warmup' | 'blocked'.
+
+        Combines the static config sets with `data/hour_gate_evidence.json`
+        which is refreshed weekly by `scripts/refresh_hour_gates.py`.
+        Evidence-based blocked hours take precedence over peak/warmup.
+        """
         from config import (
             ALLOWED_HOURS_UTC, WARMUP_HOURS_UTC,
             PEAK_HOURS_UTC, BLOCKED_HOURS_UTC,
         )
-        if hour in BLOCKED_HOURS_UTC:
+        dynamic_blocked = self._load_dynamic_blocked_hours()
+        if hour in BLOCKED_HOURS_UTC or hour in dynamic_blocked:
             return "blocked"
         if hour in PEAK_HOURS_UTC:
             return "peak"
@@ -1381,6 +1435,55 @@ class BotEngine:
                 )
                 return False
 
+        # (C.3a) Side-aware AutoMutator short blacklist (May 2026).
+        # Symbols where the recent short cohort has lost ≥3 with ≥65% rate
+        # are temporarily un-shortable. Long entries on the same symbol
+        # remain allowed.
+        if side == "sell" and self.auto_mutator is not None:
+            try:
+                _short_bl = self.auto_mutator.get_short_blacklist()
+                if symbol in _short_bl or symbol.split(":")[0] in _short_bl:
+                    logger.info(
+                        f"[AutoMutator] SHORT-blacklisted: {symbol} "
+                        f"(active short ban)"
+                    )
+                    return False
+            except Exception as _ame:
+                logger.debug(f"[AutoMutator] short blacklist probe failed: {_ame}")
+
+        # (C.3) Short-side filter — block SELL into a BTC up-aligned regime.
+        # Catches Claude-AI-proposed actions that bypass _algorithmic_portfolio's
+        # gate. See core/short_side_filter.py for evidence and rationale.
+        try:
+            from config import SHORT_SIDE_FILTER as _SSF_CFG
+        except ImportError:
+            _SSF_CFG = {"enabled": True}
+        if side == "sell" and _SSF_CFG.get("enabled", True):
+            try:
+                from core.short_side_filter import (
+                    evaluate as _ssf_eval,
+                    extract_btc_trends as _ssf_btc,
+                )
+                _ei_cache = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
+                _btc4, _btc1 = _ssf_btc(_ei_cache)
+                _sym_sent = None
+                try:
+                    _sym_sent = self.news.symbol_sentiment(symbol)
+                except Exception:
+                    _sym_sent = None
+                _ssf_d = _ssf_eval(
+                    side="sell", symbol=symbol,
+                    btc_4h_uptrend=_btc4, btc_1h_uptrend=_btc1,
+                    symbol_news_sentiment=_sym_sent,
+                )
+                if _ssf_d.block:
+                    logger.info(
+                        f"[ShortFilter] BLOCKED {symbol} sell -- {_ssf_d.reason}"
+                    )
+                    return False
+            except Exception as _ssfe:
+                logger.debug(f"[ShortFilter] gate skipped ({_ssfe}) -- defaulting to ALLOW")
+
         # (D) Per-symbol pause (spec §12). Family pause is checked at (D.1)
         # below once strategy_family is known.
         if self.risk and self.risk.is_symbol_paused(symbol):
@@ -1481,8 +1584,14 @@ class BotEngine:
                         raw=_feat,
                     )
             if _fv is not None:
+                _mcp_score_for_filter = action.get("mcp_score") or action.get("score")
+                try:
+                    _mcp_score_for_filter = float(_mcp_score_for_filter) if _mcp_score_for_filter is not None else None
+                except (TypeError, ValueError):
+                    _mcp_score_for_filter = None
                 _decision = _MetaFilter().evaluate(
                     _fv, side=side, confidence=confidence,
+                    mcp_score=_mcp_score_for_filter,
                 )
                 logger.info(
                     f"[MetaFilter] {symbol} {side}: {_decision.decision} "
@@ -3380,6 +3489,9 @@ class BotEngine:
         # Daily self-check at midnight UTC
         schedule.every().day.at("00:00").do(self._daily_self_check)
         schedule.every().day.at("00:00").do(self._daily_summary)
+        # Health watchdog tick — once per minute. Cheap, in-process.
+        if self.watchdog is not None:
+            schedule.every(60).seconds.do(self.watchdog.tick)
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
         if not DRY_RUN:

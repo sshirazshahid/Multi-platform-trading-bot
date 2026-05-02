@@ -45,6 +45,15 @@ LEVERAGE_LOSS_COUNT     = 3      # ≥N 'leverage amplified' losses → cap
 LEVERAGE_CAP_VALUE      = 5      # cap at 5x when triggered
 LEVERAGE_CAP_HOURS      = 12
 
+# Side-aware short blacklist (May 2026). Warehouse evidence: the bot's
+# losses concentrate on the sell side per symbol — APT, ETC, XRP, UNI,
+# OP, GRT, ADA shorts collectively cost $40+. The symmetric SYMBOL_LOSS_*
+# threshold above is too lax for shorts because a symbol's short cohort
+# is always a small fraction of its total trades.
+SHORT_SYMBOL_LOSS_BLACKLIST   = 3
+SHORT_SYMBOL_BLACKLIST_MIN_RATE = 0.65
+SHORT_SYMBOL_BLACKLIST_HOURS  = 18
+
 POST_MORTEM_FILE        = Path("data/post_mortem.json")
 MUTATIONS_FILE          = Path("data/auto_mutations.json")
 
@@ -182,6 +191,38 @@ class AutoMutator:
                         f"{LOOKBACK_ANALYSES} trades")
                     mutations_applied += 1
 
+        # ── 1b) Per-symbol SHORT-only loss accumulation (May 2026) ──
+        # Tighter thresholds for shorts — concentrated short losers don't
+        # show up under the symmetric 4/70% rule because their total
+        # trade count is small.
+        sym_total_short: dict = {}
+        sym_losses_short: dict = {}
+        for a in analyses:
+            s = a.get("symbol", "")
+            if not s or (a.get("side") or "").lower() != "sell":
+                continue
+            sym_total_short[s] = sym_total_short.get(s, 0) + 1
+            if a.get("verdict") == "LOSS":
+                sym_losses_short[s] = sym_losses_short.get(s, 0) + 1
+
+        for sym, n_loss in sym_losses_short.items():
+            total = sym_total_short.get(sym, n_loss)
+            rate = n_loss / total if total else 0.0
+            if (n_loss >= SHORT_SYMBOL_LOSS_BLACKLIST
+                    and rate >= SHORT_SYMBOL_BLACKLIST_MIN_RATE):
+                key = f"SHORT:{sym}"
+                current_exp = self._state["blacklist"].get(key, 0)
+                if current_exp < now:
+                    self._state["blacklist"][key] = (
+                        now + SHORT_SYMBOL_BLACKLIST_HOURS * 3600
+                    )
+                    logger.warning(
+                        f"[AutoMutator] SHORT-BLACKLIST {sym} for "
+                        f"{SHORT_SYMBOL_BLACKLIST_HOURS}h — {n_loss}/{total} "
+                        f"sell losses ({rate:.0%})"
+                    )
+                    mutations_applied += 1
+
         # ── 2) Counter-trend short losses ───────────────────────────
         short_counter_trend = sum(
             1 for a in losses
@@ -224,9 +265,25 @@ class AutoMutator:
     # ── Public API used by bot_engine ────────────────────────────────
 
     def get_effective_blacklist(self) -> set:
-        """Return the set of dynamically-blacklisted symbols (still active)."""
+        """Return the set of dynamically-blacklisted symbols (still active).
+
+        Excludes side-prefixed entries (e.g. 'SHORT:ETH/USDT:USDT') — those
+        are side-specific bans surfaced via `get_short_blacklist()`.
+        """
         self._expire()
-        return set(self._state["blacklist"].keys())
+        return {
+            k for k in self._state["blacklist"].keys()
+            if not k.startswith("SHORT:")
+        }
+
+    def get_short_blacklist(self) -> set:
+        """Return the set of symbols banned for SHORTS only (still active)."""
+        self._expire()
+        return {
+            k.split(":", 1)[1]
+            for k in self._state["blacklist"].keys()
+            if k.startswith("SHORT:")
+        }
 
     def get_leverage_cap(self) -> Optional[int]:
         """Return an active leverage cap (int) or None."""

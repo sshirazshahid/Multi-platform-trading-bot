@@ -75,7 +75,19 @@ RunStep "train_models (both, --auto-promote)" @(
     "--auto-promote"
 )
 
-# 4. Summary — read latest pointer per market so the log reflects the outcome.
+# 4. Refresh hour gate evidence from the rolling warehouse window.
+RunStep "refresh_hour_gates" @(
+    "scripts\refresh_hour_gates.py",
+    "--lookback-days", "60"
+)
+
+# 5. Crypto signal postmortem — actionables digest for the week.
+RunStep "run_signal_postmortem" @(
+    "scripts\run_signal_postmortem.py",
+    "--lookback-days", "7"
+)
+
+# 6. Summary — read latest pointer per market so the log reflects the outcome.
 foreach ($market in @("futures", "spot")) {
     $latest = Join-Path $Root "data\models\ensemble_${market}_latest.json"
     if (Test-Path $latest) {

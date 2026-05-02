@@ -2654,6 +2654,53 @@ class MCPBrain:
         if skipped_bl:
             logger.debug(f"[MCP-Algo] pre-filtered {skipped_bl} blacklisted coins")
 
+        # ── SHORT-SIDE FILTER (May 2026) ─────────────────────────────
+        # Drop SELL candidates while BTC trends up on both 4h+1h. Warehouse
+        # evidence: shorts net -$54 vs longs net -$4. Filter is opt-in via
+        # config.SHORT_SIDE_FILTER.enabled (default True).
+        try:
+            from config import SHORT_SIDE_FILTER as _SSF
+        except ImportError:
+            _SSF = {"enabled": True}
+        if _SSF.get("enabled", True):
+            try:
+                from core.short_side_filter import (
+                    evaluate as _ssf_eval,
+                    extract_btc_trends as _ssf_btc,
+                )
+                btc_4h_up, btc_1h_up = _ssf_btc(exchange_indicators)
+                _filtered = []
+                _ssf_blocked = 0
+                for coin, result in scored:
+                    if (result.get("side") or "").lower() == "sell":
+                        sent = None
+                        try:
+                            sent = self._news_sentiment_for(coin) if hasattr(self, "_news_sentiment_for") else None
+                        except Exception:
+                            sent = None
+                        d = _ssf_eval(
+                            side="sell",
+                            symbol=f"{coin}/USDT",
+                            btc_4h_uptrend=btc_4h_up,
+                            btc_1h_uptrend=btc_1h_up,
+                            symbol_news_sentiment=sent,
+                        )
+                        if d.block:
+                            _ssf_blocked += 1
+                            logger.info(
+                                f"[ShortFilter] SKIP {coin}/USDT sell -- {d.reason}"
+                            )
+                            continue
+                    _filtered.append((coin, result))
+                if _ssf_blocked:
+                    logger.info(
+                        f"[ShortFilter] blocked {_ssf_blocked} short candidate(s) "
+                        f"(btc_4h_up={btc_4h_up}, btc_1h_up={btc_1h_up})"
+                    )
+                scored = _filtered
+            except Exception as _ssfe:
+                logger.debug(f"[ShortFilter] skipped ({_ssfe}) -- defaulting to ALLOW")
+
         # Sort by score descending, take top N
         scored.sort(key=lambda x: x[1]["score"], reverse=True)
 
