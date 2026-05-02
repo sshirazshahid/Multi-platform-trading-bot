@@ -2700,6 +2700,30 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Engine] STAR review skipped: {e}")
 
+        # 2026-05-02: orphan stop-order cleanup. Bybit accumulates stuck
+        # conditional orders when positions close without cancelling their
+        # SL/TP. Per-symbol limit is ~10; once hit, new entries fail-close.
+        # Run --commit (cancels orphans automatically). Script's defensive
+        # design (per-symbol position verification, dry-run on uncertainty)
+        # makes auto-run safe.
+        try:
+            import subprocess
+            result = subprocess.run(
+                [sys.executable, "scripts/cleanup_orphan_stop_orders.py",
+                 "--exchange", "bybit", "--commit"],
+                cwd=str(Path(__file__).resolve().parents[1]),
+                timeout=180, capture_output=True, check=False,
+            )
+            out = (result.stdout or b"").decode("utf-8", errors="replace")
+            cancelled = "Cancelled:"
+            if cancelled in out:
+                line = next((l for l in out.splitlines() if cancelled in l), "")
+                logger.info(f"[Engine] daily orphan stop-order cleanup: {line.strip()}")
+            else:
+                logger.info("[Engine] daily orphan stop-order cleanup: no orphans")
+        except Exception as e:
+            logger.debug(f"[Engine] orphan stop-order cleanup skipped: {e}")
+
     def _execute_fund_ops(self, fund_ops: list):
         """Execute MCP Brain fund management operations: TRANSFER, SELL_PORTFOLIO, BUY_PORTFOLIO."""
         for op in fund_ops:

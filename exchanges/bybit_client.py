@@ -296,6 +296,72 @@ class BybitClient(BaseExchange):
         finally:
             self.switch_to_spot()
 
+    # ── cancel_all_orders override — handles conditional stop orders ──
+
+    def cancel_all_orders(self, symbol: str, market_type: str = "spot"):
+        """Cancel ALL orders (regular + conditional/stop) for a symbol.
+
+        Why an override:
+          The base `cancel_all_orders` uses ccxt's fetch_open_orders with
+          `params={"stop": True}` for the algo path. On Bybit V5 unified
+          this does NOT return conditional stop orders — they live in a
+          separate ledger queried by `orderFilter='StopOrder'`. Result:
+          before this override, a position close left its SL/TP attached
+          stop orders ORPHANED on Bybit. After 5 days the per-symbol limit
+          (~10 stop orders) was hit, causing retCode=110009 on every new
+          entry's SL placement → fail-closed cascade → fee bleed.
+
+          Live incident at 2026-05-02 08:03 UTC: 24 orphans accumulated
+          (8 on DOGEUSDT alone) → DOGE entry failed SL placement → bot
+          fail-closed → ghost-reconciler re-imported orphan → loop.
+          See scripts/cleanup_orphan_stop_orders.py for the manual repair.
+
+        Implementation:
+          1. Call base.cancel_all_orders for regular orders (limit/market
+             that haven't filled yet).
+          2. For futures (linear), additionally query Bybit's StopOrder
+             filter and cancel each conditional order found for the symbol.
+        """
+        # First cancel regular orders via base
+        try:
+            super().cancel_all_orders(symbol, market_type)
+        except Exception as e:
+            logger.debug(f"[Bybit] base cancel_all_orders {symbol}: {e}")
+
+        # Then handle conditional stop orders (linear futures only)
+        if market_type != "futures":
+            return
+        try:
+            native = symbol.replace("/", "").replace(":USDT", "")
+            if not native.endswith("USDT"):
+                native = native + "USDT"
+            resp = self.exchange.privateGetV5OrderRealtime({
+                "category": "linear",
+                "orderFilter": "StopOrder",
+                "symbol": native,
+            })
+            stops = resp.get("result", {}).get("list", [])
+            cancelled = 0
+            for o in stops:
+                oid = o.get("orderId")
+                if not oid:
+                    continue
+                try:
+                    self.exchange.privatePostV5OrderCancel({
+                        "category": "linear",
+                        "symbol": native,
+                        "orderId": oid,
+                    })
+                    cancelled += 1
+                except Exception as ce:
+                    logger.debug(f"[Bybit] cancel stop {oid[:8]}: {str(ce)[:80]}")
+            if cancelled > 0:
+                logger.info(
+                    f"[Bybit] Cancelled {cancelled} conditional stop order(s) "
+                    f"for {symbol}")
+        except Exception as e:
+            logger.debug(f"[Bybit] stop-order cleanup {symbol}: {str(e)[:120]}")
+
     # ── get_min_order_size ────────────────────────────────────────────
 
     def fetch_positions(self, symbols: list = None) -> list:

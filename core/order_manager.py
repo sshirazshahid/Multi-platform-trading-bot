@@ -1389,6 +1389,25 @@ class OrderManager:
         if position.id in self._close_fail_count:
             self._close_fail_count.pop(position.id, None)
             self._save_close_fail_count()
+
+        # 2026-05-02 fix (orphan stop-order accumulation):
+        # When a position closes, the OTHER conditional order (TP if SL
+        # hit, SL if TP hit, both if market close) becomes an orphan.
+        # Pre-fix the close path never cancelled these. Over 5 days, 24
+        # orphans accumulated on Bybit, hitting the per-symbol stop-order
+        # limit and triggering fail-closed cascades on new entries.
+        # Now we cancel all open orders for the symbol after close.
+        # cancel_all_orders is best-effort — failure here doesn't break
+        # the close. Bybit-specific path handles its conditional ledger
+        # via the override in bybit_client.cancel_all_orders.
+        if not _is_paper:
+            try:
+                exchange.cancel_all_orders(position.symbol, position.market_type)
+            except Exception as e:
+                logger.debug(
+                    f"[Orders] post-close cancel_all_orders {position.symbol}: "
+                    f"{str(e)[:120]}")
+
         # tracker.close() now invokes self._finalize_close via its on_close
         # hook (wired in BotEngine.__init__). All post-close work — wallet,
         # risk, Spec §12 streaks, compliance, blacklist, trailing cleanup,
