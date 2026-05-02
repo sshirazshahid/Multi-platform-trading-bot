@@ -192,3 +192,13 @@ def test_projected_sizer_importable():
 def test_shadow_compare_report_importable():
     from scripts.shadow_vs_live_report import build_report, write_report
     assert build_report is not None and write_report is not None
+
+
+def test_pattern_agent_importable():
+    from core.agents.pattern_agent import PatternAgent
+    assert PatternAgent().name == "PatternAgent"
+
+
+def test_liquidity_agent_importable():
+    from core.agents.liquidity_agent import LiquidityAgent
+    assert LiquidityAgent().name == "LiquidityAgent"

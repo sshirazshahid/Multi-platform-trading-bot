@@ -12,7 +12,9 @@ from loguru import logger
 
 from core.agents.coordinator import AgentCoordinator
 from core.agents.execution_agent import ExecutionAgent
+from core.agents.liquidity_agent import LiquidityAgent
 from core.agents.mean_reversion_agent import MeanReversionAgent
+from core.agents.pattern_agent import PatternAgent
 from core.agents.projected_sizer import make_sizer
 from core.agents.risk_agent import RiskAgent
 from core.agents.scalp_agent import ScalpAgent
@@ -36,7 +38,10 @@ class ShadowRunner:
         self._ctx_provider = ctx_provider
         self._symbols_provider = symbols_provider
         self._enabled = enabled_flag
-        agents = [TrendAgent(), ScalpAgent(), MeanReversionAgent()]
+        agents = [
+            TrendAgent(), ScalpAgent(), MeanReversionAgent(),
+            PatternAgent(), LiquidityAgent(),
+        ]
         self._coord = AgentCoordinator(
             agents=agents,
             risk_agent=RiskAgent(),
