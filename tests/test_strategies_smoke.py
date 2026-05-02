@@ -134,3 +134,61 @@ def test_capital_allocator_importable():
 def test_strategy_selector_importable():
     from core.strategy_selector import StrategySelector
     assert StrategySelector is not None
+
+
+# ─── 4. Multi-agent shadow build (Phase A) ────────────────────────────
+
+
+def test_base_agent_importable():
+    from core.agents.base_agent import BaseAgent, Proposal
+    assert BaseAgent is not None and Proposal is not None
+
+
+def test_trend_agent_importable():
+    from core.agents.trend_agent import TrendAgent
+    assert TrendAgent().name == "TrendAgent"
+
+
+def test_scalp_agent_importable():
+    from core.agents.scalp_agent import ScalpAgent
+    assert ScalpAgent().name == "ScalpAgent"
+
+
+def test_mean_reversion_agent_importable():
+    from core.agents.mean_reversion_agent import MeanReversionAgent
+    assert MeanReversionAgent().name == "MeanReversionAgent"
+
+
+def test_risk_agent_importable():
+    from core.agents.risk_agent import RiskAgent
+    assert RiskAgent().name == "RiskAgent"
+
+
+def test_execution_agent_importable():
+    from core.agents.execution_agent import ExecutionAgent
+    assert ExecutionAgent().name == "ExecutionAgent"
+
+
+def test_agent_coordinator_importable():
+    from core.agents.coordinator import AgentCoordinator
+    assert AgentCoordinator is not None
+
+
+def test_shadow_runner_importable():
+    from core.shadow_runner import ShadowRunner
+    assert ShadowRunner is not None
+
+
+def test_kill_criteria_monitor_importable():
+    from core.agents.kill_criteria import KillCriteriaMonitor
+    assert KillCriteriaMonitor() is not None
+
+
+def test_projected_sizer_importable():
+    from core.agents.projected_sizer import project, make_sizer
+    assert project is not None and make_sizer is not None
+
+
+def test_shadow_compare_report_importable():
+    from scripts.shadow_vs_live_report import build_report, write_report
+    assert build_report is not None and write_report is not None
