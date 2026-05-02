@@ -168,14 +168,61 @@ class SmartExecutor:
                 except Exception:
                     pass
 
-            # Timeout — cancel and go market
+            # Timeout — try to cancel, then fall back to market.
+            #
+            # 2026-05-02 BUG FIX (Bybit double-fill):
+            # Pre-fix, this swallowed cancel errors silently and ALWAYS
+            # placed a market order. But "order not exists or too late to
+            # cancel" (Bybit retCode 110001 etc.) means the limit order
+            # ALREADY FILLED in the timeout window. Placing a market on
+            # top doubled the position size, then SL placement saw too
+            # many open positions and fail-closed. Net result: the bot
+            # had a phantom "unprotected" extra fill that the
+            # ghost-reconciler then re-imported as a manual position.
+            #
+            # New behavior:
+            #   1. Try to cancel the limit order
+            #   2. ALWAYS re-fetch the order's true status from exchange
+            #   3. If status == 'closed' / fully filled → return it,
+            #      DO NOT place market (would be a double-fill)
+            #   4. If status == 'canceled' or unknown → proceed to market
+            cancel_failed = False
             try:
                 exchange.cancel_order(order_id, symbol)
-                logger.info(
-                    f"[Executor] {symbol}: limit timeout, cancelled → market order")
-            except Exception:
-                pass
+            except Exception as cancel_err:
+                cancel_failed = True
+                logger.debug(
+                    f"[Executor] {symbol}: cancel raised "
+                    f"({str(cancel_err)[:80]}) — verifying actual fill state")
 
+            # Re-check the order's true status. If it filled during the
+            # timeout window, return without placing a market order.
+            try:
+                status = exchange.exchange.fetch_order(order_id, symbol)
+                state = (status.get("status") or "").lower()
+                filled_qty = float(status.get("filled") or 0)
+                if state == "closed" or (filled_qty > 0 and filled_qty >= amount * 0.95):
+                    fill_price = float(status.get("average") or status.get("price") or entry_price)
+                    logger.info(
+                        f"[Executor] {symbol}: limit FILLED in timeout window "
+                        f"@ {fill_price:.6f} (cancel was {'rejected' if cancel_failed else 'accepted'} "
+                        f"because order already filled) — NO market fallback")
+                    self._record_stat("limit_fills")
+                    return status
+            except Exception as verify_err:
+                # Verification failed too — fall through to market only if
+                # we got a CLEAN cancel (the order's gone for sure).
+                if cancel_failed:
+                    logger.warning(
+                        f"[Executor] {symbol}: cancel failed AND verification "
+                        f"failed ({str(verify_err)[:80]}) — refusing to market "
+                        f"to avoid double-fill. Operator should reconcile.")
+                    return {"status": "uncertain", "id": order_id,
+                            "symbol": symbol, "amount": amount,
+                            "_executor_warning": "cancel+verify both failed"}
+
+            logger.info(
+                f"[Executor] {symbol}: limit timeout, cancelled → market order")
             return self._market_order(exchange, symbol, side, amount,
                                        market_type, params)
 
