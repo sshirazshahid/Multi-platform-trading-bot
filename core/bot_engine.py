@@ -1891,6 +1891,47 @@ class BotEngine:
             except Exception as _ee:
                 logger.debug(f"[Expectancy] check skipped ({_ee}) — defaulting to ALLOW")
 
+        # ── 2026-05-03 (Phase 16): Regime-aware entry gate ──────────────
+        # Block entries when the market regime contradicts the signal:
+        #   - long signal in TRENDING_DOWN regime → skip
+        #   - short signal in TRENDING_UP regime → skip
+        #   - any signal in VOLATILE regime → skip (extreme vol)
+        # RANGING / TRENDING-aligned regime → allow.
+        # Regime detector cached 15min — check is cheap.
+        try:
+            from core.market_regime import (
+                MarketRegimeDetector, REGIME_TRENDING_UP, REGIME_TRENDING_DOWN,
+                REGIME_VOLATILE,
+            )
+            if not hasattr(self, "_regime_detector"):
+                self._regime_detector = MarketRegimeDetector()
+            ex_obj = self.exchanges.get(ex_name)
+            if ex_obj is not None:
+                regime = self._regime_detector.detect(ex_obj, symbol)
+                _block = False
+                _why = ""
+                if regime == REGIME_VOLATILE:
+                    _block, _why = True, "regime:volatile"
+                elif side == "buy" and regime == REGIME_TRENDING_DOWN:
+                    _block, _why = True, "regime:trending_down_blocks_long"
+                elif side == "sell" and regime == REGIME_TRENDING_UP:
+                    _block, _why = True, "regime:trending_up_blocks_short"
+                if _block:
+                    logger.info(f"[Regime] BLOCKED {symbol} {side}: {_why}")
+                    try:
+                        if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                            from core.warehouse import get_warehouse as _gw
+                            _gw().query(
+                                "UPDATE candidates SET decision='SKIP', "
+                                "skip_reason=? WHERE id=?",
+                                (_why, _cid),
+                            )
+                    except Exception:
+                        pass
+                    return False
+        except Exception as _re:
+            logger.debug(f"[Regime] check skipped ({_re}) — defaulting to ALLOW")
+
         # ── HIGH-WR MECHANISM GATES (applied BEFORE legacy checks) ──────
 
         # (a) Symbol blacklist — evidence-based hard block (static + dynamic)
