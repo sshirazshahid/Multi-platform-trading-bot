@@ -421,6 +421,50 @@ class RiskManager:
 
     # ── Position sizing ──────────────────────────────────────────────
 
+    def _adaptive_size_multiplier(self, lookback: int = 50) -> float:
+        """Adaptive position-size multiplier from rolling EV (2026-05-03).
+
+        Reads last N closed futures trades from the warehouse and returns
+        a multiplier in [0.25, 1.0]. Closes the feedback loop the bot
+        otherwise lacks — sizing tracks recent realized expectancy.
+
+        Tiers:
+          n < 30:           1.0   (insufficient sample, full size)
+          EV >= +$0.10:     1.0   (proven positive — full size)
+          EV in [-0.05, +0.10]: 0.75  (break-even zone — moderate size)
+          EV in [-0.20, -0.05]: 0.50  (bleeding — half size)
+          EV < -$0.20:      0.25  (deep negative — quarter size, slow bleed)
+        """
+        try:
+            import sqlite3
+            from pathlib import Path
+            db = Path("data/warehouse.sqlite")
+            if not db.exists():
+                return 1.0
+            con = sqlite3.connect(str(db))
+            con.row_factory = sqlite3.Row
+            rows = list(con.execute(
+                "SELECT realized_pnl FROM trades WHERE status='CLOSED' "
+                "AND market_type='futures' "
+                "ORDER BY ts_exit DESC LIMIT ?",
+                (lookback,)
+            ))
+            con.close()
+        except Exception:
+            return 1.0
+        n = len(rows)
+        if n < 30:
+            return 1.0
+        pnls = [r["realized_pnl"] or 0.0 for r in rows]
+        ev = sum(pnls) / n
+        if ev >= 0.10:
+            return 1.0
+        if ev >= -0.05:
+            return 0.75
+        if ev >= -0.20:
+            return 0.50
+        return 0.25
+
     def calculate_position_size(self, balance_usdt: float, price: float,
                                  leverage: int = 1,
                                  atr_pct: float = None) -> float:
@@ -458,7 +502,17 @@ class RiskManager:
         # Apply scaling multiplier if conditions met (200+ trades, 60%+ WR, <10% DD)
         scale = self._check_scaling_eligible()
 
-        notional = balance_usdt * pct * leverage * scale
+        # 2026-05-03 (Phase 16): adaptive sizing from rolling 50-trade EV.
+        # Closes the feedback loop — the bot now sizes itself based on recent
+        # realized expectancy. EV positive → full size. EV negative → scale
+        # down to limit bleed. EV deeply negative → quarter-size.
+        # Falls back to 1.0× when warehouse is empty / inaccessible (fail-safe).
+        try:
+            ev_mult = self._adaptive_size_multiplier()
+        except Exception:
+            ev_mult = 1.0
+
+        notional = balance_usdt * pct * leverage * scale * ev_mult
         qty      = notional / price
 
         # MIN NOTIONAL: exchanges reject < $5
