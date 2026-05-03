@@ -221,6 +221,24 @@ MAKER_ONLY = {
 # `shadow_only=True` keeps p_win logged to the warehouse but does NOT block
 # entries — used for soak windows where we want bit-for-bit baseline.
 # ==============================================================
+# ==============================================================
+# SHADOW MODE (Phase A multi-agent build, 2026-05-02)
+# ==============================================================
+# When enabled, a parallel multi-agent runner (TrendAgent + ScalpAgent +
+# MeanReversionAgent) computes proposed trades on the same tick stream
+# as the live bot, but writes to warehouse.shadow_decisions instead of
+# placing orders. Live path is untouched. Auto-disables on kill criteria.
+# Default TRUE per user directive 2026-05-02 (Option 4 multi-agent build).
+SHADOW_MODE = {
+    "enabled":         os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true",
+    "tick_interval_s": int(os.getenv("SHADOW_TICK_INTERVAL_S", "300")),  # 5 min
+    "alt_notional":    float(os.getenv("SHADOW_ALT_NOTIONAL", "200.0")),
+    "kill_fee_burn_x": float(os.getenv("SHADOW_KILL_FEE_BURN_X", "2.0")),
+    "kill_wr_floor":   float(os.getenv("SHADOW_KILL_WR_FLOOR", "0.30")),
+    "kill_min_decisions": int(os.getenv("SHADOW_KILL_MIN_DECISIONS", "100")),
+    "kill_max_halts_7d": int(os.getenv("SHADOW_KILL_MAX_HALTS_7D", "3")),
+}
+
 MODEL_GATE = {
     "enabled":           os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model

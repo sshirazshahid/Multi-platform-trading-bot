@@ -230,6 +230,21 @@ class Warehouse:
                     "ON predictions(candidate_id)")
             except sqlite3.OperationalError:
                 pass
+            for col_def in (
+                "agent_id TEXT",
+                "proposal_id TEXT",
+                "proposed_at INTEGER",
+                "vetoed_by TEXT",
+                "veto_reason TEXT",
+                "projected_notional_current REAL",
+                "projected_notional_alt REAL",
+                "projected_pnl REAL",
+                "projected_fee REAL",
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE shadow_decisions ADD COLUMN {col_def}")
+                except sqlite3.OperationalError:
+                    pass
             conn.commit()
         logger.info(f"[Warehouse] Ready at {self.path}")
 

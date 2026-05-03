@@ -225,6 +225,114 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[GateHealth] check skipped ({e})")
 
+        # 2026-05-02: Phase A multi-agent shadow runner. Runs in parallel
+        # to live, writes to warehouse.shadow_decisions, places NO orders.
+        # Auto-disables on kill criteria (see config.SHADOW_MODE).
+        self._shadow_runner = None
+        self._shadow_thread = None
+        try:
+            from config import SHADOW_MODE
+            if SHADOW_MODE.get("enabled"):
+                self._init_shadow_runner()
+        except Exception as e:
+            logger.debug(f"[Engine] Shadow init skipped: {e}")
+
+    def _init_shadow_runner(self) -> None:
+        """Lazy-init the multi-agent ShadowRunner. Failures don't crash the bot."""
+        try:
+            from core.shadow_runner import ShadowRunner
+            from core.warehouse import Warehouse
+            wh = getattr(self, "warehouse", None) or Warehouse()
+            self.warehouse = wh
+            try:
+                from config import BLACKLIST_HARD, ALLOWED_HOURS_UTC
+                bl = set(BLACKLIST_HARD or set())
+                ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
+            except Exception:
+                bl, ah = set(), None
+            self._shadow_runner = ShadowRunner(
+                warehouse=wh,
+                ctx_provider=self._shadow_ctx_for_symbol,
+                free_balance_provider=self._shadow_free_balance,
+                symbols_provider=self._shadow_symbols,
+                blacklist=bl, allowed_hours=ah,
+                enabled_flag=self._shadow_enabled_flag,
+            )
+            logger.info("[Engine] ShadowRunner initialized (multi-agent, log-only)")
+        except Exception as e:
+            logger.error(f"[Engine] ShadowRunner init failed: {e}")
+            self._shadow_runner = None
+
+    def _shadow_enabled_flag(self) -> bool:
+        try:
+            from config import SHADOW_MODE
+            return bool(SHADOW_MODE.get("enabled"))
+        except Exception:
+            return False
+
+    def _shadow_free_balance(self) -> float:
+        """Sum of free USDT across active exchanges (sizing basis)."""
+        total = 0.0
+        for _name, ex in (self.active_exchanges or {}).items():
+            try:
+                bal = ex.fetch_balance("futures")
+                total += float((bal.get("free") or {}).get("USDT") or 0.0)
+            except Exception:
+                pass
+        return total
+
+    def _shadow_symbols(self) -> list:
+        """Universe for shadow eval — first 5 futures pairs (cap so OHLCV
+        fetch budget stays bounded)."""
+        out: list[str] = []
+        for _ename, pairs in (self.current_pairs or {}).items():
+            for sym in (pairs.get("futures") or [])[:2]:
+                if sym not in out:
+                    out.append(sym)
+            if len(out) >= 5:
+                break
+        return out[:5]
+
+    def _shadow_ctx_for_symbol(self, symbol: str) -> dict | None:
+        """Best-effort OHLCV pull for the multi-timeframe agent context.
+        Cached at the exchange-client level — no extra API hit beyond what
+        live already does. Returns None if data is unavailable."""
+        if not self.active_exchanges:
+            return None
+        ex = next(iter(self.active_exchanges.values()))
+        try:
+            import pandas as pd
+            ctx: dict = {"symbol": symbol}
+            for tf, key, lim in (
+                ("5m", "ohlcv_5m", 80),
+                ("15m", "ohlcv_15m", 60),
+                ("1h", "ohlcv_1h", 100),
+                ("4h", "ohlcv_4h", 60),
+            ):
+                try:
+                    bars = ex.fetch_ohlcv(symbol, timeframe=tf, limit=lim)
+                    if not bars or len(bars) < 30:
+                        return None
+                    df = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    ctx[key] = df
+                except Exception:
+                    return None
+            return ctx
+        except Exception:
+            return None
+
+    def _shadow_loop(self, stop_event) -> None:
+        """Daemon loop — invokes ShadowRunner.tick() on the configured cadence."""
+        from config import SHADOW_MODE
+        interval = max(60, int(SHADOW_MODE.get("tick_interval_s", 300)))
+        while not stop_event.is_set():
+            try:
+                if self._shadow_runner is not None:
+                    self._shadow_runner.tick()
+            except Exception as e:
+                logger.debug(f"[Shadow] tick error: {e}")
+            stop_event.wait(interval)
+
     def _gate_health_check(self) -> None:
         """Surface wired-but-misconfigured gates at startup.
 
@@ -2856,6 +2964,18 @@ class BotEngine:
                 logger.info("[Engine] daily orphan stop-order cleanup: no orphans")
         except Exception as e:
             logger.debug(f"[Engine] orphan stop-order cleanup skipped: {e}")
+        # 2026-05-02: shadow vs live daily compare report (Phase A.13)
+        try:
+            import subprocess
+            subprocess.run(
+                [sys.executable, "scripts/shadow_vs_live_report.py",
+                 "--window-hours", "24"],
+                cwd=str(Path(__file__).resolve().parents[1]),
+                timeout=60, capture_output=True, check=False,
+            )
+            logger.info("[Engine] daily shadow-vs-live report generated")
+        except Exception as e:
+            logger.debug(f"[Engine] shadow compare report skipped: {e}")
 
     def _execute_fund_ops(self, fund_ops: list):
         """Execute MCP Brain fund management operations: TRANSFER, SELL_PORTFOLIO, BUY_PORTFOLIO."""
@@ -3548,6 +3668,22 @@ class BotEngine:
             daemon=True, name="sltp-monitor")
         self._sltp_thread.start()
         logger.info("[Engine] SL/TP monitor thread started (10s interval)")
+
+        # Phase A multi-agent shadow runner — daemon thread, daemon=True so
+        # bot exits cleanly even if shadow loop hangs. Live trading is never
+        # blocked by shadow work.
+        if self._shadow_runner is not None:
+            self._shadow_thread = threading.Thread(
+                target=self._shadow_loop,
+                args=(self._stop_event,),
+                daemon=True, name="shadow-runner")
+            self._shadow_thread.start()
+            try:
+                from config import SHADOW_MODE
+                _interval = SHADOW_MODE.get("tick_interval_s", 300)
+            except Exception:
+                _interval = 300
+            logger.info(f"[Engine] Shadow runner thread started ({_interval}s interval)")
 
         # Register signal handlers for clean shutdown
         def _signal_handler(signum, frame):
