@@ -164,6 +164,14 @@ CLAUDE_PORTFOLIO = {
 #
 # To disable per-pair calibration entirely, set PAIR_OVERRIDES = {}.
 PAIR_OVERRIDES = {
+    # Two schemas supported (per Phase 15.3, 2026-05-03):
+    #   FLAT  : {"sl_pct": X, "tp_pct": Y}          — applies symmetrically
+    #   SIDED : {"long":  {"sl_pct": X, "tp_pct": Y},
+    #            "short": {"sl_pct": X, "tp_pct": Y}}
+    # Memory feedback_short_side_filter / 2026-04-30 attribution: 126 shorts
+    # net -$54 vs 210 longs net -$4 — shorts harder to capture at this fee
+    # tier. Per-side schema lets us tighten short TPs without touching longs.
+    #
     # Proven winners — push R:R higher
     "ARB/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 3.5},  # R:R 2.33, ARB is STAR
     "ORDI/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 4.5},  # R:R 3.00, fastest pair
@@ -173,12 +181,16 @@ PAIR_OVERRIDES = {
     "ETH/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 75% WR, fast capture
     "FET/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 57% WR
     "ALGO/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.0},  # 56% WR
-    # Asymmetric R:R fixers — tighten TP to balance high WR
-    "BNB/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.0},  # 41% WR, STALE-prone
-    "DOGE/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.0},  # 62% WR but R:R 0.82
+    # Asymmetric R:R + per-side tuning: shorts tighter than longs
+    "BNB/USDT:USDT":  {
+        "long":  {"sl_pct": 1.5, "tp_pct": 2.0},
+        "short": {"sl_pct": 1.5, "tp_pct": 1.6},  # tighter R:R for the harder side
+    },
+    "DOGE/USDT:USDT": {
+        "long":  {"sl_pct": 1.5, "tp_pct": 2.0},
+        "short": {"sl_pct": 1.5, "tp_pct": 1.6},
+    },
     # Note: SOL/XRP/AAVE/AVAX/LINK left to fall through to ATR defaults.
-    # User UNBLOCK_ALL directive — let the model gate filter their entries
-    # rather than tilting their SL/TP from limited-sample data.
 }
 
 # ==============================================================

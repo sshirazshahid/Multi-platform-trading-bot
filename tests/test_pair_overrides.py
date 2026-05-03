@@ -20,27 +20,44 @@ def test_config_has_pair_overrides_dict():
         assert sym in PAIR_OVERRIDES, f"missing override for {sym}"
 
 
+def _flatten(ov: dict) -> list:
+    """Phase 15.3: PAIR_OVERRIDES values may be flat {sl,tp} or sided
+    {long: {sl,tp}, short: {sl,tp}}. Yield every leaf for invariants."""
+    if "sl_pct" in ov:
+        return [("flat", ov)]
+    out = []
+    for side in ("long", "short"):
+        if side in ov:
+            out.append((side, ov[side]))
+    return out
+
+
 def test_overrides_have_sl_and_tp():
     from config import PAIR_OVERRIDES
     for sym, ov in PAIR_OVERRIDES.items():
-        assert "sl_pct" in ov, f"{sym} missing sl_pct"
-        assert "tp_pct" in ov, f"{sym} missing tp_pct"
+        leaves = _flatten(ov)
+        assert leaves, f"{sym} has neither flat nor sided schema"
+        for tag, leaf in leaves:
+            assert "sl_pct" in leaf, f"{sym}.{tag} missing sl_pct"
+            assert "tp_pct" in leaf, f"{sym}.{tag} missing tp_pct"
 
 
 def test_overrides_honor_sl_floor():
-    """All overrides must keep SL >= 1.5% (zone-tightening invariant)."""
+    """Every leaf must keep SL >= 1.5% (zone-tightening invariant)."""
     from config import PAIR_OVERRIDES
     for sym, ov in PAIR_OVERRIDES.items():
-        assert ov["sl_pct"] >= 1.5, \
-            f"{sym} sl_pct {ov['sl_pct']} below 1.5% floor"
+        for tag, leaf in _flatten(ov):
+            assert leaf["sl_pct"] >= 1.5, \
+                f"{sym}.{tag} sl_pct {leaf['sl_pct']} below 1.5% floor"
 
 
 def test_overrides_have_positive_rr():
-    """TP must be larger than SL (positive R:R)."""
+    """TP must be larger than SL (positive R:R) on every leaf."""
     from config import PAIR_OVERRIDES
     for sym, ov in PAIR_OVERRIDES.items():
-        assert ov["tp_pct"] > ov["sl_pct"], \
-            f"{sym} TP {ov['tp_pct']} <= SL {ov['sl_pct']} — negative R:R"
+        for tag, leaf in _flatten(ov):
+            assert leaf["tp_pct"] > leaf["sl_pct"], \
+                f"{sym}.{tag} TP {leaf['tp_pct']} <= SL {leaf['sl_pct']}"
 
 
 def test_arb_has_high_rr():
@@ -60,13 +77,19 @@ def test_ordi_has_highest_rr():
 
 
 def test_doge_tp_tightened_for_asymmetric_rr():
-    """DOGE has 62% WR but realized R:R 0.82 — TP must be reasonable
-    (not extreme either way)."""
+    """DOGE has 62% WR but realized R:R 0.82. Phase 15.3 split into
+    per-side: long R:R kept moderate, short R:R tightened further."""
     from config import PAIR_OVERRIDES
     doge = PAIR_OVERRIDES["DOGE/USDT:USDT"]
-    rr = doge["tp_pct"] / doge["sl_pct"]
-    # Tighter than the proven winners; not absurdly tight either
-    assert 1.2 <= rr <= 2.0
+    # Sided schema — both leaves must have moderate R:R
+    for side in ("long", "short"):
+        leaf = doge[side]
+        rr = leaf["tp_pct"] / leaf["sl_pct"]
+        assert 1.0 <= rr <= 2.0, f"DOGE.{side} R:R {rr} out of band"
+    # Short MUST be tighter than long per attribution finding
+    long_rr = doge["long"]["tp_pct"] / doge["long"]["sl_pct"]
+    short_rr = doge["short"]["tp_pct"] / doge["short"]["sl_pct"]
+    assert short_rr <= long_rr
 
 
 def test_mcp_brain_consults_overrides_before_dist_fit():

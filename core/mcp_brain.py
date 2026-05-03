@@ -2415,7 +2415,17 @@ class MCPBrain:
         try:
             from config import PAIR_OVERRIDES as _PAIR_OV
             _sym_full = coin if "/" in coin else f"{coin}/USDT:USDT"
-            _ov = _PAIR_OV.get(_sym_full) or _PAIR_OV.get(coin)
+            _ov_raw = _PAIR_OV.get(_sym_full) or _PAIR_OV.get(coin)
+            # Phase 15.3: per-side schema. {"long": {sl,tp}, "short": {sl,tp}}
+            # takes precedence over flat schema. Side key normalised to lower.
+            if isinstance(_ov_raw, dict):
+                _side_key = (side or "").lower()
+                if _side_key in ("buy", "long") and "long" in _ov_raw:
+                    _ov = _ov_raw["long"]
+                elif _side_key in ("sell", "short") and "short" in _ov_raw:
+                    _ov = _ov_raw["short"]
+                elif "sl_pct" in _ov_raw:  # flat schema
+                    _ov = _ov_raw
         except Exception:
             _ov = None
         _pair_override_applied = False
@@ -2436,6 +2446,49 @@ class MCPBrain:
             except Exception:
                 sl_pct = max(1.5, min(3.5, atr_1h_pct * 1.5))
                 tp_pct = sl_pct * 2.0
+
+        # ── Phase 15.3 Layer C: volatility-adaptive SL multiplier ──
+        # ATR magnitude → SL scale: low-vol regimes use tighter SL,
+        # high-vol regimes use wider SL to survive normal noise.
+        # Floor: never go below 1.5% (zone-tightening invariant).
+        if atr_1h_pct < 1.0:
+            _vol_mult = 0.7   # low-vol regime — tighter SL
+            _vol_label = "low_vol"
+        elif atr_1h_pct > 2.5:
+            _vol_mult = 1.4   # high-vol regime — wider SL
+            _vol_label = "high_vol"
+        else:
+            _vol_mult = 1.0
+            _vol_label = "normal_vol"
+        sl_pct_pre_vol = sl_pct
+        sl_pct = max(1.5, sl_pct * _vol_mult)
+        # Preserve R:R ratio when scaling SL
+        if sl_pct_pre_vol > 0:
+            tp_pct = tp_pct * (sl_pct / sl_pct_pre_vol)
+
+        # ── Phase 15.3 Layer D: confidence-scaled SL ──────────────
+        # High-conviction entries get wider SL (more room to breathe);
+        # low-conviction entries get tighter SL (cut losses fast).
+        # `score` accumulates 50 (base) → ~101 in _score_coin; entry
+        # gate is score >= 65, so the live distribution sits 65-101.
+        # Thresholds calibrated to that range:
+        #   score >= 85: high conviction → SL × 1.2, breathing room
+        #   score 70-84: normal             → SL × 1.0
+        #   score < 70:  marginal-quality    → SL × 0.8, cut losses fast
+        try:
+            _score_val = float(score) if score is not None else 70.0
+        except Exception:
+            _score_val = 70.0
+        if _score_val >= 85:
+            _conf_mult = 1.2
+        elif _score_val < 70:
+            _conf_mult = 0.8
+        else:
+            _conf_mult = 1.0
+        sl_pct_pre_conf = sl_pct
+        sl_pct = max(1.5, sl_pct * _conf_mult)
+        if sl_pct_pre_conf > 0:
+            tp_pct = tp_pct * (sl_pct / sl_pct_pre_conf)
 
         # ── Smart Money SL/TP refinement ──────────────────────────
         # If strong S/D or OB zone provides a tighter SL reference, use it.
