@@ -144,6 +144,44 @@ CLAUDE_PORTFOLIO = {
 }
 
 # ==============================================================
+# PER-PAIR SL/TP OVERRIDES (Phase 15, 2026-05-03)
+# ==============================================================
+# Empirically-calibrated SL/TP per symbol from 30-day realized warehouse
+# data. Overrides the default ATR×1.5 SL + 2:1 R:R for symbols where the
+# realized R:R distribution clearly favors a different ratio.
+#
+# Methodology: per-symbol futures stats (n>=8 trades, 30d):
+#   ARB:  WR 44%, R:R 2.23 → push TP to 3.5x SL (proven follow-through)
+#   ORDI: WR 50%, R:R 3.67 → push TP to 4.5x SL (fastest pair, 8min holds)
+#   ATOM: WR 42%, R:R 1.76 → tighten TP to 2.5x SL to fit Phase 15 (75min)
+#   ETH:  WR 75%, R:R 1.69 → tighten TP to 1.5x SL to capture in 75min
+#   DOT:  WR 29%, R:R 2.51 → keep wider R:R, low WR
+#   DOGE: WR 62%, R:R 0.82 → tighten TP to fix R:R asymmetry
+#
+# Floor: SL minimum 1.5% per RISK clamp (zone-tightening invariant).
+# Symbols not in this map fall through to default ATR-based + STAR
+# extender + S/D zone tightening.
+#
+# To disable per-pair calibration entirely, set PAIR_OVERRIDES = {}.
+PAIR_OVERRIDES = {
+    # Proven winners — push R:R higher
+    "ARB/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 3.5},  # R:R 2.33, ARB is STAR
+    "ORDI/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 4.5},  # R:R 3.00, fastest pair
+    "ATOM/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.5},  # R:R 1.67, ATOM is STAR
+    "DOT/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 3.0},  # R:R 2.00
+    # High-WR pairs — tighten TP to reach within Phase 15 horizon
+    "ETH/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 75% WR, fast capture
+    "FET/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 57% WR
+    "ALGO/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.0},  # 56% WR
+    # Asymmetric R:R fixers — tighten TP to balance high WR
+    "BNB/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.0},  # 41% WR, STALE-prone
+    "DOGE/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.0},  # 62% WR but R:R 0.82
+    # Note: SOL/XRP/AAVE/AVAX/LINK left to fall through to ATR defaults.
+    # User UNBLOCK_ALL directive — let the model gate filter their entries
+    # rather than tilting their SL/TP from limited-sample data.
+}
+
+# ==============================================================
 # MAKER-ONLY EXECUTION (Phase 15, 2026-05-03)
 # ==============================================================
 # Bybit futures maker fee = 0.01% (vs 0.06% taker). Round-trip drops from

@@ -2408,18 +2408,34 @@ class MCPBrain:
         # is a single source of truth (the previous split between this
         # block and risk_manager.get_sl_tp produced inconsistent stops).
         atr_1h_pct = ei_1h.get("atr_pct", 2.0) or 2.0
+        # 2026-05-03 (Phase 15): per-pair empirical overrides take precedence
+        # over the ATR/DistFit path. PAIR_OVERRIDES is a thin operator-tuned
+        # table from 30d realized R:R data — see config.py for methodology.
+        _ov = None
         try:
-            from core.dist_fit_sl import DistFitSL
-            _entry_px = ei_1h.get("price", 0) or 0
-            _fit = DistFitSL().compute(
-                symbol=coin if "/" in coin else f"{coin}/USDT:USDT",
-                side=side, atr_pct=atr_1h_pct / 100.0,
-            )
-            sl_pct = max(1.5, _fit.sl_pct * 100.0)  # convert back to percent + floor
-            tp_pct = _fit.tp_pct * 100.0
+            from config import PAIR_OVERRIDES as _PAIR_OV
+            _sym_full = coin if "/" in coin else f"{coin}/USDT:USDT"
+            _ov = _PAIR_OV.get(_sym_full) or _PAIR_OV.get(coin)
         except Exception:
-            sl_pct = max(1.5, min(3.5, atr_1h_pct * 1.5))
-            tp_pct = sl_pct * 2.0
+            _ov = None
+        _pair_override_applied = False
+        if _ov is not None:
+            sl_pct = max(1.5, float(_ov.get("sl_pct", 1.5)))
+            tp_pct = max(sl_pct + 0.1, float(_ov.get("tp_pct", sl_pct * 2.0)))
+            _pair_override_applied = True  # blocks STAR ×1.25 stacking
+        else:
+            try:
+                from core.dist_fit_sl import DistFitSL
+                _entry_px = ei_1h.get("price", 0) or 0
+                _fit = DistFitSL().compute(
+                    symbol=coin if "/" in coin else f"{coin}/USDT:USDT",
+                    side=side, atr_pct=atr_1h_pct / 100.0,
+                )
+                sl_pct = max(1.5, _fit.sl_pct * 100.0)  # convert back to percent + floor
+                tp_pct = _fit.tp_pct * 100.0
+            except Exception:
+                sl_pct = max(1.5, min(3.5, atr_1h_pct * 1.5))
+                tp_pct = sl_pct * 2.0
 
         # ── Smart Money SL/TP refinement ──────────────────────────
         # If strong S/D or OB zone provides a tighter SL reference, use it.
@@ -2466,7 +2482,9 @@ class MCPBrain:
         try:
             from config import STAR_SYMBOLS as _STAR
             _coin = coin if "/" in coin else f"{coin}/USDT:USDT"
-            if _coin in _STAR:
+            # Phase 15: PAIR_OVERRIDES is the final word; don't stack ×1.25
+            # on top of an operator-set tp_pct.
+            if _coin in _STAR and not _pair_override_applied:
                 tp_pct *= 1.25
         except Exception:
             pass
