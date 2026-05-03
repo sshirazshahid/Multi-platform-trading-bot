@@ -2178,6 +2178,20 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size ×{_lr_size_multiplier:.2f} "
                 f"(LR model p_win)")
+        # 2026-05-03 (Phase 17 fix): Phase 16 adaptive sizing was wired
+        # into RiskManager.calculate_position_size, which the live Claude
+        # portfolio path NEVER calls — Ruflo reviewer flagged this as
+        # dead code. Apply the rolling-EV multiplier directly here so
+        # the closed feedback loop actually fires on live trades.
+        try:
+            _ev_mult = self.risk._adaptive_size_multiplier()
+        except Exception:
+            _ev_mult = 1.0
+        if _ev_mult != 1.0:
+            size_fraction *= _ev_mult
+            logger.info(
+                f"[Claude] {symbol} size ×{_ev_mult:.2f} "
+                f"(adaptive sizing — rolling-50 EV)")
         notional = mtype_bal * size_fraction
         # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
         # min-notional floor reduced to the exchange-side minimum ($5).
@@ -2770,6 +2784,13 @@ class BotEngine:
                         continue
                 try:
                     dca.run(exchange, symbol)
+                    # 2026-05-03: track today's DCA buys so SpotPortfolioManager
+                    # can avoid SELLing the same asset DCA just bought.
+                    # Same-day opposing-order risk surfaced by Ruflo strategy review.
+                    if not hasattr(self, "_dca_buys_today"):
+                        self._dca_buys_today: dict = {}
+                    base = symbol.split("/")[0]  # "BTC/USDT" → "BTC"
+                    self._dca_buys_today[base] = time.time()
                 except Exception as e:
                     logger.debug(f"[DCA] {symbol} on {ex_name}: {e}")
 
@@ -2809,6 +2830,22 @@ class BotEngine:
                 return
 
             for a in actions:
+                # 2026-05-03: Multi-strategy coordination gate.
+                # If DCA bought this asset within the last 24h, skip
+                # SELL/SCALE_OUT — opposing-order risk surfaced by
+                # the Ruflo strategy review.
+                act = a.get("action", "")
+                sym = a.get("symbol", "")
+                base = sym.split("/")[0] if sym else ""
+                dca_buys = getattr(self, "_dca_buys_today", {}) or {}
+                last_dca = dca_buys.get(base, 0)
+                if act in ("SELL", "SCALE_OUT") and last_dca > 0:
+                    age_h = (time.time() - last_dca) / 3600
+                    if age_h < 24:
+                        logger.warning(
+                            f"[SpotMgr] BLOCKED {act} {sym}: DCA bought "
+                            f"{base} {age_h:.1f}h ago — opposing-order skip")
+                        continue
                 self._execute_spot_action(a)
         except Exception as e:
             logger.error(f"[SpotMgr] Cycle error: {e}")

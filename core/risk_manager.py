@@ -70,6 +70,21 @@ _SPEC12_SCRATCH_PCT = 0.5
 
 class RiskManager:
 
+    def _notify_halt(self, subject: str, body: str) -> None:
+        """Lazy-load the notifier and emit a halt alert (2026-05-03).
+
+        Bug fix: prior code logged halt events but never sent the user
+        a notification. Now operator gets an email/Telegram alert when
+        the bot enters any halted state (daily loss / drawdown / Spec §12).
+        Failures are swallowed — notifier outage must NEVER block halt
+        propagation.
+        """
+        try:
+            from utils.notifier import TelegramNotifier
+            TelegramNotifier().error(f"{subject}\n\n{body}")
+        except Exception:
+            pass
+
     def __init__(self):
         self.max_position_pct   = RISK["max_position_pct"]
         self.max_open_positions = RISK["max_open_positions"]
@@ -742,9 +757,10 @@ class RiskManager:
             self._halted      = True
             self._halt_reason = f"daily loss ({self._daily_pnl:+.4f} USDT)"
             self._halt_time   = _time.time()
-            logger.warning(
-                f"[Risk] DAILY LOSS LIMIT: {self._daily_pnl:.4f} USDT. "
-                "Paused — will auto-resume when PnL recovers.")
+            msg = (f"[Risk] DAILY LOSS LIMIT: {self._daily_pnl:.4f} USDT. "
+                   "Paused — will auto-resume when PnL recovers.")
+            logger.warning(msg)
+            self._notify_halt("DAILY LOSS HALT", msg)
             self._save_state()
             return
 
@@ -757,11 +773,12 @@ class RiskManager:
                     f"drawdown {drawdown*100:.1f}% "
                     f"(peak ${self._peak_balance:.2f})")
                 self._halt_time = _time.time()
-                logger.warning(
-                    f"[Risk] DRAWDOWN {drawdown*100:.1f}% from peak "
-                    f"${self._peak_balance:.2f}. Paused — "
-                    f"will auto-resume when WR>={RECOVERY_WR_MIN:.0f}% "
-                    f"or PnL positive.")
+                msg = (f"[Risk] DRAWDOWN {drawdown*100:.1f}% from peak "
+                       f"${self._peak_balance:.2f}. Paused — "
+                       f"will auto-resume when WR>={RECOVERY_WR_MIN:.0f}% "
+                       f"or PnL positive.")
+                logger.warning(msg)
+                self._notify_halt("DRAWDOWN HALT", msg)
 
         self._save_state()
 
@@ -951,14 +968,19 @@ class RiskManager:
                 reason=f"{SPEC_GLOBAL_LOSSES_TO_REVIEW} consecutive global losses",
                 action="force_observation_mode",
             )
-            logger.error(
+            err_msg = (
                 f"[Risk/Spec12] {SPEC_GLOBAL_LOSSES_TO_REVIEW} consecutive losses — "
                 f"review flag written; bot_engine will refuse to open new trades "
                 f"until OPERATING_MODE is manually cleared"
             )
+            logger.error(err_msg)
             self._halted = True
             self._halt_reason = f"spec12:{SPEC_GLOBAL_LOSSES_TO_REVIEW}_consec_global_losses"
             self._halt_time = now
+            self._notify_halt(
+                f"SPEC §12 HALT: {SPEC_GLOBAL_LOSSES_TO_REVIEW} CONSECUTIVE LOSSES",
+                err_msg,
+            )
 
         # Outlier loss
         try:

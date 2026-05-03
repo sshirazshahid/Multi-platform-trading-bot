@@ -340,3 +340,108 @@ All skill outputs saved to `reports/` directory. Filename: `<skill>_<analysis-ty
 ### Language
 
 Code and analysis outputs in English. README available in English and Japanese. User interactions may be in Japanese.
+
+---
+
+# Ruflo Multi-Agent Integration
+
+When to lean on Ruflo's coordination layer (added 2026-05-03 after `ruflo init`).
+
+## Agent Comms (SendMessage-First Coordination)
+
+Named agents coordinate via `SendMessage`, not polling or shared state.
+
+```
+Lead (you) ←→ architect ←→ developer ←→ tester ←→ reviewer
+              (named agents message each other directly)
+```
+
+### Spawning a Coordinated Team
+
+```javascript
+// ALL agents in ONE message, each knows WHO to message next
+Agent({ prompt: "Research the codebase. SendMessage findings to 'architect'.",
+  subagent_type: "researcher", name: "researcher", run_in_background: true })
+Agent({ prompt: "Wait for 'researcher'. Design solution. SendMessage to 'coder'.",
+  subagent_type: "system-architect", name: "architect", run_in_background: true })
+Agent({ prompt: "Wait for 'architect'. Implement it. SendMessage to 'tester'.",
+  subagent_type: "coder", name: "coder", run_in_background: true })
+Agent({ prompt: "Wait for 'coder'. Write tests. SendMessage results to 'reviewer'.",
+  subagent_type: "tester", name: "tester", run_in_background: true })
+Agent({ prompt: "Wait for 'tester'. Review code quality and security.",
+  subagent_type: "reviewer", name: "reviewer", run_in_background: true })
+
+// Kick off the pipeline
+SendMessage({ to: "researcher", summary: "Start", message: "[task context]" })
+```
+
+### Patterns
+
+| Pattern | Flow | Use When |
+|---------|------|----------|
+| **Pipeline** | A → B → C → D | Sequential dependencies (feature dev) |
+| **Fan-out** | Lead → A, B, C → Lead | Independent parallel work (research) |
+| **Supervisor** | Lead ↔ workers | Ongoing coordination (complex refactor) |
+
+### Rules
+
+- ALWAYS name agents — `name: "role"` makes them addressable
+- ALWAYS include comms instructions in prompts — who to message, what to send
+- Spawn ALL agents in ONE message with `run_in_background: true`
+- After spawning: STOP, tell user what's running, wait for results
+- NEVER poll status — agents message back or complete automatically
+
+## When to Swarm
+
+- **YES**: 3+ files, new features, cross-module refactoring, API changes, security review, performance work
+- **NO**: single file edits, 1-2 line fixes, docs updates, config changes, simple questions
+
+For trading-bot work specifically: most fixes are single-file or 2-3 file. Reach for swarm only on bigger initiatives like the Phase A multi-agent shadow build (which spans 12+ files).
+
+## Agent Routing
+
+| Task | Agents | Topology |
+|------|--------|----------|
+| Bug Fix | researcher, coder, tester | hierarchical |
+| Feature | architect, coder, tester, reviewer | hierarchical |
+| Refactor | architect, coder, reviewer | hierarchical |
+| Performance | perf-engineer, coder | hierarchical |
+| Security | security-architect, auditor | hierarchical |
+
+## Memory & Learning (optional, daemon-required)
+
+When the Ruflo daemon is running, MCP tools become available for cross-session memory:
+
+```bash
+# Before any task
+npx @claude-flow/cli@latest memory search --query "[task keywords]" --namespace patterns
+npx @claude-flow/cli@latest hooks route --task "[task description]"
+
+# After success
+npx @claude-flow/cli@latest memory store --namespace patterns --key "[name]" --value "[what worked]"
+npx @claude-flow/cli@latest hooks post-task --task-id "[id]" --success true --store-results true
+```
+
+## Background Workers
+
+| Worker | When |
+|--------|------|
+| `audit` | After security changes |
+| `optimize` | After performance work |
+| `testgaps` | After adding features |
+| `map` | Every 5+ file changes |
+| `document` | After API changes |
+
+```bash
+npx @claude-flow/cli@latest hooks worker dispatch --trigger audit
+```
+
+## Setup (already done; commands here for reference)
+
+```bash
+ruflo init --start-all                       # already run; populated .claude/ + .claude-flow/
+npx @claude-flow/cli@latest doctor           # health check
+npx @claude-flow/cli@latest daemon start     # for hooks/memory features (run in own terminal)
+```
+
+The trading bot itself does NOT use Ruflo — Ruflo is purely for me (Claude Code) to coordinate development work on the bot. Bot runtime is independent.
