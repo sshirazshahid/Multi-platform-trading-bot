@@ -720,6 +720,13 @@ class OrderManager:
 
         # Build Position first so __post_init__ calculates entry_fee
         order_id = f"DRY-{uuid.uuid4().hex[:8]}" if self.dry_run else None
+        # Phase 18 (2026-05-04): persist mcp_score / 100 as `confidence`
+        # so calibrator.record() at close has data to learn from. Was the
+        # second leg of the dead-code pattern (first: Phase 17 adaptive
+        # sizing wired into a never-called method; second: calibrator
+        # never received predicted_conf because positions.json never
+        # stored it).
+        _conf_in = mcp_score / 100.0 if mcp_score and mcp_score > 0 else 0.0
         pos = Position(
             id=order_id or uuid.uuid4().hex,
             exchange=exchange.name, symbol=symbol, side=side,
@@ -728,6 +735,7 @@ class OrderManager:
             stop_loss=sl, take_profit=tp,
             leverage=leverage, order_id=order_id,
             entry_mid=entry_mid,
+            confidence=_conf_in,
         )
 
         if self.dry_run:
@@ -1420,6 +1428,25 @@ class OrderManager:
             return None
         return closed
 
+    @property
+    def calibrator(self):
+        """Lazy-load ProbabilityCalibrator singleton (Phase 18, 2026-05-04).
+
+        Used by _finalize_close to feed (predicted_conf, actual_win) outcomes
+        so the isotonic calibration can fit on real data. Was previously
+        instantiated only in LearningEngine but never received valid input
+        because positions.json never persisted `confidence`.
+        """
+        cached = getattr(self, "_calibrator_instance", None)
+        if cached is not None:
+            return cached
+        try:
+            from core.probability_calibrator import ProbabilityCalibrator
+            self._calibrator_instance = ProbabilityCalibrator()
+        except Exception:
+            self._calibrator_instance = None
+        return self._calibrator_instance
+
     def _finalize_close(self, pos: Position, price: float, reason: str) -> None:
         """Post-close hooks fired by PositionTracker.on_close after EVERY
         close (normal exit, ghost-sync, ghost-reconciled, ghost_force_close,
@@ -1525,6 +1552,24 @@ class OrderManager:
                     exit_reason=reason,
                     fee=float(getattr(pos, "total_fees", 0.0)),
                 )
+
+                # Phase 18 (2026-05-04): feed the ProbabilityCalibrator with
+                # this trade's (predicted_conf, actual_win) so the isotonic
+                # regression can fit on real data. Was dead until now —
+                # calibrator's record() received no input because position
+                # confidence was never persisted. Sister fix to Phase 17
+                # adaptive sizing wire-fix. Skip rows with no confidence
+                # (legacy / non-Claude-portfolio strategies).
+                _conf = float(getattr(pos, "confidence", 0.0) or 0.0)
+                if _conf > 0 and self.calibrator is not None:
+                    try:
+                        self.calibrator.record(
+                            predicted_conf=_conf,
+                            actual_win=is_win,
+                            strategy=str(pos.strategy or "all"),
+                        )
+                    except Exception as _ce:
+                        logger.debug(f"[Calibrator] record skipped: {_ce}")
 
                 # ── Forward attribution (Phase 2 / Task A) ────────────
                 # Decompose realized_pnl into alpha/spread/slippage/funding/fees

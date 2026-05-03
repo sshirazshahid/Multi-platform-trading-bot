@@ -140,6 +140,11 @@ class Position:
     # so a restart doesn't try to re-place an SL that's already live.
     # 2026-05-01: added so manual-position SL recovery is idempotent.
     _exchange_sl: bool            = False
+    # ── Predicted confidence at entry (Phase 18, 2026-05-04) ──────────
+    # MCP score / 100, recorded for the ProbabilityCalibrator feed.
+    # Defaults to 0.0 so old positions in JSON load fine; calibrator
+    # skips trades with confidence == 0.
+    confidence:   float           = 0.0
 
     def __post_init__(self):
         rate = _fee_rate(self.market_type)

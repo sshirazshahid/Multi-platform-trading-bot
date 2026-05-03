@@ -2221,6 +2221,29 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size ×{_ev_mult:.2f} "
                 f"(adaptive sizing — rolling-50 EV)")
+        # 2026-05-04 (Phase 18): ProbabilityCalibrator soft size multiplier.
+        # Sister fix to Phase 17 — second instance of dead-code wiring
+        # found by Ruflo audit. The calibrator was never called from the
+        # entry path; now we feed predicted_conf at close (in
+        # order_manager._finalize_close) and use the calibrated value
+        # here as a [0.7, 1.3] symmetric size multiplier. Per UNBLOCK_ALL
+        # directive: never gates, never zeroes — only adjusts size.
+        try:
+            _raw_score = float(
+                action.get("mcp_score") or action.get("score") or 0.0)
+            _raw_conf = _raw_score / 100.0 if _raw_score > 0 else 0.0
+            if _raw_conf > 0:
+                _calibrated = self.order_mgr.calibrator.calibrate(
+                    _raw_conf, "claude_portfolio")
+                if _calibrated > 0 and abs(_calibrated - _raw_conf) > 0.02:
+                    _cal_mult = max(0.7, min(1.3, _calibrated / _raw_conf))
+                    size_fraction *= _cal_mult
+                    logger.info(
+                        f"[Claude] {symbol} size ×{_cal_mult:.2f} "
+                        f"(calibrator: raw={_raw_conf:.2f} -> "
+                        f"calibrated={_calibrated:.2f})")
+        except Exception:
+            pass
         notional = mtype_bal * size_fraction
         # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
         # min-notional floor reduced to the exchange-side minimum ($5).
