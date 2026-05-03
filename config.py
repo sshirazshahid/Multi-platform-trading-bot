@@ -144,6 +144,26 @@ CLAUDE_PORTFOLIO = {
 }
 
 # ==============================================================
+# MAKER-ONLY EXECUTION (Phase 15, 2026-05-03)
+# ==============================================================
+# Bybit futures maker fee = 0.01% (vs 0.06% taker). Round-trip drops from
+# 0.12% to 0.02% — making 5m strategies that were marginal at taker fees
+# (60% fee burden vs typical move) viable (10% fee burden).
+#
+# Trade-off: postOnly limit orders can be REJECTED if they would cross
+# the spread, and may NOT fill on fast-moving setups. When enabled, the
+# bot skips the trade after `max_wait_sec` instead of falling back to
+# market — preserving fee savings at the cost of missed entries.
+#
+# Default OFF for safety. Flip to True (or set MAKER_ONLY_ENABLED=true)
+# to take the fee saving once convinced the missed-fill cost is less
+# than the fee saving on the trades that DO fill.
+MAKER_ONLY = {
+    "enabled":      os.getenv("MAKER_ONLY_ENABLED", "false").lower() == "true",
+    "max_wait_sec": int(os.getenv("MAKER_ONLY_MAX_WAIT_SEC", "120")),
+}
+
+# ==============================================================
 # MODEL GATE — calibrated LR+GBM ensemble blended with the MCP rule score
 # Loads data/models/ensemble_{market}_latest.json on startup.
 # When `enabled=False` or no latest pointer exists, the gate is bypassed
@@ -339,18 +359,14 @@ RISK = {
     "default_leverage":     2,
     "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop":        True,
-    # 2026-04-28 retune (Phase 11) — converge trailing on the empirical
-    # mcp_take_profit distribution:
-    #   trailing_stop:    n=25, mean +1.00% gross, +0.4-0.5% net (sub-cost-floor)
-    #   mcp_take_profit:  n=13, mean +1.47% gross, +1.2-1.4% net  (clears costs)
-    # The 47% performance gap is NOT Claude AI wisdom — it's the 0.5% net-PnL
-    # filter at bot_engine.py:2535-2557. Raising activation 1.5%→2.0% delays
-    # engagement until peaks are real; lock_fraction small-win tier 0.40→0.55
-    # (in trailing_stop_manager._lock_fraction_default) tightens the lock so
-    # exits land at +1.1% gross / +0.9% net at peak 2.0% — above the cost
-    # floor and matching mcp_take_profit's empirical capture.
-    "trailing_activation":  0.020,    # 2.0% — clear cost floor (was 1.5%)
-    "trailing_distance":    0.010,    # 1.0% — wider trail past activation
+    # 2026-04-28 retune (Phase 11) — converged trailing on mcp_take_profit
+    # distribution; activation 1.5→2.0%, lock_fraction tier 0.40→0.55.
+    # 2026-05-03 (Phase 15) — combined with the 4h→1.25h AGE_LIMIT cut,
+    # trailing must engage faster or AGE_LIMIT fires before trailing locks.
+    # Activation 2.0%→1.2% and lock_fraction (small-win tier) 0.55→0.65
+    # to capture the 30-60min profitable cell before its 75min expiry.
+    "trailing_activation":  0.012,    # 1.2% — engage earlier under tighter age cap
+    "trailing_distance":    0.008,    # 0.8% — tighter trail to lock faster
     # 2026-04-28 (L99): KEPT at 0.12. Drawdown halt is the from-peak
     # circuit breaker; at 99x leverage it's the only thing standing
     # between a few bad trades and a wiped account. Removal would
@@ -361,21 +377,25 @@ RISK = {
     # operator-cleared peak (or 4h auto-cooldown for consec_global halts).
     "max_drawdown_pct":     0.08,
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
-    # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h after
-    # warehouse retrenchment showed the bot's edge expires past 60min:
-    #   <10min:    -$22.26 / 0% WR  (the L99 disaster, post-revert mostly clean)
-    #   10-30min:  +$1.28  / 38% WR / R:R 3:1  ← FAST WINNERS, the edge zone
-    #   30-60min:  +$0.31  / 55% WR / R:R 1:1  ← slow winners, breakeven-ish
-    #   1-2h:      -$1.89  / 40% WR / avg_win=avg_loss (no edge)
-    #   >2h:       -$4.34  / 39% WR over 56 trades (slow bleed cluster)
-    # The 1-2h and >2h buckets together account for -$6.23 / 94 trades.
-    # Cutting losers earlier doesn't hurt winners (winners exit via
-    # mcp_take_profit / trailing well before AGE_LOSS fires) but does
-    # save the slow-bleed losers from sliding deeper.
-    "max_position_age_hours": 4,      # was 6 — hard expiry tightened
-    "max_stale_hours":       2.0,     # was 4.0 — stale (flat) exit at 2h
-    "max_loss_age_hours":    1.5,     # was 3.0 — losing position cut at 1.5h
-    "max_loss_age_pct":      0.3,     # was 0.5 — looser threshold complements earlier cutoff
+    # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h.
+    # 2026-05-03 (Phase 15) — fresh 30d hold-time analysis on 186 futures
+    # trades shows even sharper edge collapse than Phase 14 saw:
+    #   <60min:   +$5.10 / 56 trades / WR ~70%   ← profitable
+    #   1-2h:     -$1.85 / 52 trades / WR 40%    ← marginal bleed
+    #   2-4h:    -$24.88 / 47 trades / WR 28%    ← HEAVY BLEED
+    #   4-8h:    -$11.46 / 27 trades / WR 37%
+    #   >8h:     -$13.56 /  4 trades / WR  0%
+    # >60min cohort sums to -$51.75 across 130 trades. Cutting hard at
+    # 75min preserves ALL profitable cells (the 30-60min sweet spot
+    # at +$3.71 / 23 trades / 70% WR / R:R 1.8 is intact) while
+    # eliminating the 2-4h bleed entirely.
+    # Winners still exit naturally via mcp_take_profit / trailing.
+    # Age cutoffs only fire on flat or losing positions that haven't
+    # resolved within the empirical edge window.
+    "max_position_age_hours": 1.25,   # was 4 — empirical edge expires at 60min, 15min buffer
+    "max_stale_hours":       1.0,     # was 2.0 — flat positions cut at 60min
+    "max_loss_age_hours":    0.75,    # was 1.5 — losing positions cut at 45min
+    "max_loss_age_pct":      0.3,     # threshold for what counts as "losing" (unchanged)
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
     # bleed regardless of per-trade SL discipline.
@@ -617,6 +637,15 @@ EXPECTANCY_FILTER = {
     "min_expected_star":    0.00,   # STAR floor: just must not be net-negative
     "lookback_days":        30,
     "min_sample_size":      5,
+    # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —
+    # a symbol on this list trades regardless of recent expectancy. Per-trade
+    # SL, MODEL_GATE, and Spec §12 streak halt still apply.
+    # 2026-05-03: DOGE whitelisted per user directive after 30d mean=-$0.013
+    # (62% WR, asymmetric R:R) blocked an OPEN signal.
+    "whitelist": {
+        "DOGE/USDT:USDT",
+        "DOGE/USDT",
+    },
 }
 
 # 2026-05-01 — Entry-Staleness Exit (Tier 1.1 from predictive-strategy stack).

@@ -129,11 +129,12 @@ def test_star_tp_extender_compounds_correctly_with_default_path():
 
 
 @pytest.mark.parametrize("age_h,net_pct,should_fire_age_loss", [
-    (1.0, -0.4, False),  # under 1.5h: not yet age-loss
-    (1.6, -0.4, True),   # past 1.5h, below -0.3% → fire
-    (1.6, -0.2, False),  # past 1.5h, but only -0.2% → no fire
-    (1.6, +0.4, False),  # past 1.5h but green → no fire
-    (3.0, -0.5, True),   # well past, well underwater
+    # Phase 15 (2026-05-03): max_loss_age_hours cut to 0.75h
+    (0.5, -0.4, False),  # under 0.75h: not yet age-loss
+    (0.8, -0.4, True),   # past 0.75h, below -0.3% → fire
+    (0.8, -0.2, False),  # past 0.75h, but only -0.2% → no fire
+    (0.8, +0.4, False),  # past 0.75h but green → no fire
+    (1.5, -0.5, True),   # well past, well underwater
 ])
 def test_age_loss_rule_logic(age_h, net_pct, should_fire_age_loss):
     """Replicate the order_manager AGE_LOSS condition with new thresholds."""

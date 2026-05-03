@@ -211,14 +211,20 @@ class TrailingStopManager:
             At peak 3.0%, lock 0.55 → SL = +1.65% gross = +1.45% net
                                        (matches mcp_take_profit median 1.47%)
 
-        Low profit  (< 3%):  lock 55% — clears 0.5% net-PnL cost floor
-        Medium      (3-5%):  lock 55% — moderate protection
+        2026-05-03 (Phase 15): with AGE_LIMIT cut to 75min, trailing must
+        lock faster or positions force-close before lock takes hold.
+        Small-win tier 0.55 → 0.65 (lock more under shorter horizon).
+        Medium tier 0.55 → 0.65 to match.
+        Good/Exceptional left alone — those rare events still need room.
+
+        Low profit  (< 3%):  lock 65% — clears cost floor + faster lock-in
+        Medium      (3-5%):  lock 65% — match small-win for consistency
         Good        (5-8%):  lock 70% — tighter lock
         Exceptional (> 8%):  lock 80% — protect the big win"""
         if peak_pnl < 0.03:
-            return 0.55
+            return 0.65
         elif peak_pnl < 0.05:
-            return 0.55
+            return 0.65
         elif peak_pnl < 0.08:
             return 0.70
         else:

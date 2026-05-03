@@ -112,6 +112,11 @@ class SmartExecutor:
         Place a limit order at an aggressive price. If not filled within
         timeout, cancel and execute at market.
 
+        2026-05-03 (Phase 15): when config.MAKER_ONLY.enabled is True,
+        adds postOnly to the limit order and on timeout cancels + returns
+        a skip dict instead of falling back to market — preserving the
+        maker fee at the cost of a missed entry.
+
         Returns the fill result dict, or None on failure.
         """
         # Copy caller's params and strip any clientOrderId/newClientOrderId.
@@ -123,6 +128,16 @@ class SmartExecutor:
         params = dict(params) if params else {}
         params.pop("clientOrderId", None)
         params.pop("newClientOrderId", None)
+
+        # Maker-only mode: tag the limit as postOnly + extend wait window
+        try:
+            from config import MAKER_ONLY as _MO
+        except ImportError:
+            _MO = {"enabled": False, "max_wait_sec": 120}
+        _maker_only = bool(_MO.get("enabled"))
+        if _maker_only:
+            params["postOnly"] = True
+            params["timeInForce"] = "PostOnly"
 
         entry_price = self.get_entry_price(exchange, symbol, side, market_type)
         if entry_price <= 0:
@@ -152,9 +167,13 @@ class SmartExecutor:
                 return self._market_order(exchange, symbol, side, amount,
                                            market_type, params)
 
-            # Wait for fill
+            # Wait for fill — extended window in MAKER_ONLY mode
+            wait_window = (
+                int(_MO.get("max_wait_sec", 120)) if _maker_only
+                else self.limit_timeout_sec
+            )
             start = time.time()
-            while time.time() - start < self.limit_timeout_sec:
+            while time.time() - start < wait_window:
                 time.sleep(1)
                 try:
                     status = exchange.exchange.fetch_order(order_id, symbol)
@@ -221,6 +240,14 @@ class SmartExecutor:
                             "symbol": symbol, "amount": amount,
                             "_executor_warning": "cancel+verify both failed"}
 
+            if _maker_only:
+                logger.info(
+                    f"[Executor] {symbol}: maker-only timeout, cancelled "
+                    f"— SKIP entry (no market fallback per MAKER_ONLY)")
+                self._record_stat("maker_only_skipped")
+                return {"status": "skipped_maker_only", "id": order_id,
+                        "symbol": symbol, "amount": amount,
+                        "_executor_warning": "maker_only_timeout"}
             logger.info(
                 f"[Executor] {symbol}: limit timeout, cancelled → market order")
             return self._market_order(exchange, symbol, side, amount,
@@ -228,6 +255,14 @@ class SmartExecutor:
 
         except Exception as e:
             logger.debug(f"[Executor] Limit order failed {symbol}: {e}")
+            if _maker_only:
+                logger.info(
+                    f"[Executor] {symbol}: limit-place failed under MAKER_ONLY "
+                    f"— SKIP entry (no market fallback)")
+                self._record_stat("maker_only_skipped")
+                return {"status": "skipped_maker_only", "id": None,
+                        "symbol": symbol, "amount": amount,
+                        "_executor_warning": "maker_only_place_failed"}
             return self._market_order(exchange, symbol, side, amount,
                                        market_type, params)
 
