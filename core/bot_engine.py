@@ -1740,12 +1740,20 @@ class BotEngine:
                 from core.warehouse import get_warehouse as _gw
                 from config import STAR_SYMBOLS as _STAR_FOR_EF
                 _sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
-                _exp = _gw().recent_expectancy(
-                    _sym_key,
-                    side=side,
-                    days=int(_EF.get("lookback_days", 30)),
-                    min_n=int(_EF.get("min_sample_size", 5)),
-                )
+                # Operator whitelist — bypass the floor entirely.
+                _whitelist = _EF.get("whitelist") or set()
+                if symbol in _whitelist or _sym_key in _whitelist:
+                    logger.info(
+                        f"[Expectancy] WHITELISTED {symbol} {side} — bypass floor"
+                    )
+                    _exp = None  # short-circuit; treat as insufficient-data path
+                else:
+                    _exp = _gw().recent_expectancy(
+                        _sym_key,
+                        side=side,
+                        days=int(_EF.get("lookback_days", 30)),
+                        min_n=int(_EF.get("min_sample_size", 5)),
+                    )
                 # STAR symbols use a relaxed floor (just must not be
                 # net-negative). Cell-filter has already validated them
                 # as proven-edge; the expectancy filter's role here is
@@ -2249,6 +2257,27 @@ class BotEngine:
         except Exception:
             pass
 
+    def _try_reconnect(self, ex_name: str, exchange) -> None:
+        """Rebuild ccxt client + clear halt if rebuild succeeds.
+        Used both at first-halt transition and during periodic retries."""
+        try:
+            exchange._init_exchange()
+            if getattr(exchange, '_connected', False):
+                logger.info(f"[Health] {ex_name} reconnected")
+                self._consecutive_api_fails[ex_name] = 0
+                self._exchange_halted.discard(ex_name)
+                if ex_name not in self.active_exchanges:
+                    self.active_exchanges[ex_name] = exchange
+                    logger.info(
+                        f"[Health] {ex_name} re-added to active_exchanges")
+                try:
+                    self.notifier.alert(
+                        f"{ex_name.upper()} reconnected successfully after outage.")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"[Health] {ex_name} reconnect attempt failed: {e}")
+
     def _check_exchange_health(self):
         """Verify exchanges are reachable + measure latency.
         Auto-halt trading on exchange after 3 consecutive failures.
@@ -2317,26 +2346,21 @@ class BotEngine:
                         f"Trading HALTED on this exchange. "
                         f"Will auto-resume when API recovers.\n"
                         f"Attempting auto-reconnect...")
-                    # Non-blocking reconnect attempt
-                    try:
-                        exchange._init_exchange()
-                        if getattr(exchange, '_connected', False):
-                            logger.info(f"[Health] {ex_name} reconnected")
-                            self._consecutive_api_fails[ex_name] = 0
-                            self._exchange_halted.discard(ex_name)
-                            # 2026-04-16 (post-audit): If the exchange was
-                            # down at startup and excluded from active_exchanges,
-                            # the reconnect fixed _connected but left the
-                            # routing dict stale — no trades would ever route
-                            # here. Re-register now.
-                            if ex_name not in self.active_exchanges:
-                                self.active_exchanges[ex_name] = exchange
-                                logger.info(
-                                    f"[Health] {ex_name} re-added to active_exchanges")
-                            self.notifier.alert(
-                                f"{ex_name.upper()} reconnected successfully after outage.")
-                    except Exception:
-                        pass
+                    self._try_reconnect(ex_name, exchange)
+                # 2026-05-03: prior code only retried once at fails==3.
+                # If a stale ccxt session keeps returning empty tickers,
+                # the bot would stay halted forever (observed: 519+ fails
+                # over 8.5h on a stuck process). Retry every 5 fails so
+                # the client gets recycled periodically without a full
+                # bot restart.
+                elif (
+                    ex_name in self._exchange_halted
+                    and fails % 5 == 0
+                ):
+                    logger.info(
+                        f"[Health] {ex_name} stale-halt retry "
+                        f"(fail #{fails}, every 5 attempts)")
+                    self._try_reconnect(ex_name, exchange)
                 # 5+ fails: close losing positions to protect capital
                 if fails >= 5:
                     try:
