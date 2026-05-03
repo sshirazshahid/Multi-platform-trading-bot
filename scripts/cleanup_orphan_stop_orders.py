@@ -47,8 +47,8 @@ from loguru import logger  # noqa: E402
 def _build_exchanges(filter_name: str | None = None):
     """Connect to selected exchanges. Returns dict[name → client]."""
     from exchanges.binance_client import BinanceClient
-    from exchanges.bybit_client import BybitClient
     from exchanges.bitget_client import BitgetClient
+    from exchanges.bybit_client import BybitClient
 
     out: dict = {}
     candidates = (
@@ -119,7 +119,7 @@ def _cleanup_bybit(ex, commit: bool):
     symbols_with_orders = list({o.get("symbol", "") for o in orders if o.get("symbol")})
     positions = _bybit_open_positions_by_symbol(ex, symbols_with_orders)
 
-    print(f"\n=== Bybit orphan-stop scan ===")
+    print("\n=== Bybit orphan-stop scan ===")
     print(f"  Total stop orders open: {len(orders)}")
     open_syms = [s for s, sz in positions.items() if sz > 0]
     unverified = [s for s, sz in positions.items() if sz == -1.0]
@@ -209,12 +209,12 @@ def main():
 
     # binance/bitget cleanup TODO if needed — not the immediate problem.
 
-    print(f"\n=== SUMMARY ===")
+    print("\n=== SUMMARY ===")
     print(f"  Total orphans found: {total_orphans}")
     if args.commit:
         print(f"  Cancelled:           {total_cancelled}")
     else:
-        print(f"  (dry-run — no cancellations performed)")
+        print("  (dry-run — no cancellations performed)")
 
 
 if __name__ == "__main__":

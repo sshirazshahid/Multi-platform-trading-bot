@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def _ohlcv(n: int, slope: float, noise: float = 1.5, base: float = 100.0):

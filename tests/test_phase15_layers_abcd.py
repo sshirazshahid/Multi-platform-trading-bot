@@ -10,9 +10,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
-
 # ─── Layer A — pre-AGE_LIMIT trailing activation ────────────────
 
 

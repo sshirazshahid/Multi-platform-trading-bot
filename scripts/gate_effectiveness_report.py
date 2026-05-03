@@ -270,7 +270,8 @@ def report_per_symbol(c, since_ts: int) -> str:
         return out + "_no data in window_\n"
     # Read live floor values from config so report stays in sync.
     try:
-        from config import EXPECTANCY_FILTER as _EF, STAR_SYMBOLS as _STAR
+        from config import EXPECTANCY_FILTER as _EF
+        from config import STAR_SYMBOLS as _STAR
         nonstar_floor = float(_EF.get("min_expected_dollar", 0.05))
         star_floor    = float(_EF.get("min_expected_star", 0.00))
         min_n         = int(_EF.get("min_sample_size", 5))

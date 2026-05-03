@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from core.live_gate import (
-    is_checklist_signed,
     enforce_controlled_live_gate,
+    is_checklist_signed,
 )
 
 

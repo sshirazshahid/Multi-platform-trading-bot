@@ -25,14 +25,13 @@ import json
 import time as _time
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from core.risk_manager import (
+    _REVIEW_FLAG_PATH,
     SPEC12_AUTO_RESUME_COOLDOWN_MIN,
     RiskManager,
-    _REVIEW_FLAG_PATH,
 )
 
 

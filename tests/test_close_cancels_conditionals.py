@@ -24,9 +24,7 @@ Test plan
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 
 def _make_position(paper=False, symbol="DOGE/USDT:USDT"):
@@ -95,7 +93,7 @@ def test_close_cancel_failure_does_NOT_break_close():
     pos = _make_position(paper=False)
 
     # Must not raise
-    result = om.close_position(ex, pos, "trailing_stop", price=0.10)
+    om.close_position(ex, pos, "trailing_stop", price=0.10)
 
     # Tracker close still happened
     assert om.tracker.close.called

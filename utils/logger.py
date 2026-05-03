@@ -5,7 +5,9 @@ utils/logger.py — Centralized logging using Loguru.
 import os
 import sys
 from pathlib import Path
+
 from loguru import logger
+
 from config import LOG_LEVEL
 
 _LOG_DIR = Path(__file__).parent.parent / "logs"

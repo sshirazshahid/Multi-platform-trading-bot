@@ -3,15 +3,14 @@ strategies/scalping.py — Scalping Strategy
 1m EMA crossover + Bollinger Bands + order book imbalance confirmation.
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from loguru import logger
 
+from config import RISK
+from config import SCALPING as CFG
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import SCALPING as CFG, RISK
 
 
 def _ema(s, p): return s.ewm(span=p, adjust=False).mean()

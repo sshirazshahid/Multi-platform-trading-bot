@@ -5,8 +5,6 @@ alt     = the candidate sizing config (default $200 fixed)
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from .base_agent import Proposal
 
 

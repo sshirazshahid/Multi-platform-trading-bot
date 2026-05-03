@@ -34,7 +34,6 @@ from typing import NamedTuple
 
 import pytest
 
-
 # ─── Self-contained replica of the per-coin subline rendering ──────────
 
 
@@ -58,11 +57,11 @@ def render_coin_token(asset: str, total: float, free: float) -> _CoinRow:
     if asset in _STABLES:
         locked = max(0.0, total - free)
         if free > 0 and locked > 0.5:
-            display = "{} {:.2f} (+{:.2f} locked)".format(asset, free, locked)
+            display = f"{asset} {free:.2f} (+{locked:.2f} locked)"
         elif free > 0:
-            display = "{} {:.2f}".format(asset, free)
+            display = f"{asset} {free:.2f}"
         else:
-            display = "{} {:.2f}".format(asset, total)
+            display = f"{asset} {total:.2f}"
         return _CoinRow(asset, total, free, locked, display)
     # Non-stable: shows total + USD-equivalent (price omitted in this
     # replica — irrelevant to the bug under test).

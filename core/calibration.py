@@ -50,7 +50,7 @@ class IsotonicCalibrator:
         self,
         raw_probas: np.ndarray,
         realized: np.ndarray,
-    ) -> "IsotonicCalibrator":
+    ) -> IsotonicCalibrator:
         """Fit isotonic regression on raw probabilities and realized 0/1 outcomes.
 
         Parameters
@@ -124,7 +124,7 @@ class IsotonicCalibrator:
         joblib.dump(payload, path)
 
     @classmethod
-    def load(cls, path: str | Path) -> "IsotonicCalibrator":
+    def load(cls, path: str | Path) -> IsotonicCalibrator:
         """Load a calibrator previously written via `save`."""
         payload = joblib.load(Path(path))
         obj = cls(min_samples=int(payload["min_samples"]))

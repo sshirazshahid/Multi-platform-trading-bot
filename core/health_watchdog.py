@@ -50,7 +50,6 @@ from typing import Optional
 
 from loguru import logger
 
-
 HEARTBEAT_PATH        = Path("data/heartbeat.json")
 REVIEW_FLAG_PATH      = Path("data/review_required.json")
 POST_MORTEM_PATH      = Path("data/post_mortem.json")

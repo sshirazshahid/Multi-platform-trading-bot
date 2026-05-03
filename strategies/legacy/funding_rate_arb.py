@@ -18,16 +18,15 @@ Win rate: ~70-80%  |  R:R: ~1:1.5  |  Avg hold: 4-12h
 from __future__ import annotations
 
 import time
+
 import pandas as pd
-import numpy as np
 from loguru import logger
 
-from strategies.base_strategy import BaseStrategy
-from exchanges.base import BaseExchange
+from config import RISK
 from core.order_manager import OrderManager
 from core.risk_manager import RiskManager
-from config import RISK
-
+from exchanges.base import BaseExchange
+from strategies.base_strategy import BaseStrategy
 
 # ── Funding rate thresholds ──────────────────────────────────────────
 

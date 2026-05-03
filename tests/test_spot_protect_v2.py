@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import time
-from types import SimpleNamespace
 
-import pytest
-
-from core.spot_manager import SpotPortfolioManager, HoldingInfo
+from core.spot_manager import HoldingInfo, SpotPortfolioManager
 
 
 class _FakeBrainPwin:

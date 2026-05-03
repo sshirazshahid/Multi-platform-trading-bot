@@ -20,18 +20,17 @@ and accepts optional keyword extras that render additional sections:
                   halt_status=, paper_trades=, live_trades=, ...)
 """
 
+import re
 import smtplib
 import ssl
-import re
 import time
-from email.mime.text      import MIMEText
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
-from datetime             import datetime, timedelta
-from loguru               import logger
-from config import (
-    GMAIL_SENDER, GMAIL_APP_PASSWORD, GMAIL_RECIPIENT,
-    EMAIL_SUBJECT_PREFIX, DRY_RUN
-)
+from email.mime.text import MIMEText
+
+from loguru import logger
+
+from config import DRY_RUN, EMAIL_SUBJECT_PREFIX, GMAIL_APP_PASSWORD, GMAIL_RECIPIENT, GMAIL_SENDER
 
 
 def _fmt_duration(seconds: float) -> str:

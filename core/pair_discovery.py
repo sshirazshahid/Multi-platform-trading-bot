@@ -13,7 +13,6 @@ Includes UniverseFilter for runtime filtering:
 
 from loguru import logger
 
-
 # Minimum 24h volume in USDT to include a pair
 MIN_VOLUME_SPOT    = 5_000_000    # $5M — filters out obscure tokens
 MIN_VOLUME_FUTURES = 10_000_000   # $10M — futures need strong liquidity
@@ -187,14 +186,12 @@ def discover_all(active_exchanges: dict) -> dict:
                 logger.info(f"[Discovery] {name}: futures disabled (geo-blocked)")
 
             # Fallback: if discovery found nothing, use hardcoded config
-            fallback_used = False
             if not pairs["spot"] and not pairs["futures"]:
                 config_pairs = TRADING_PAIRS.get(name, {})
                 pairs = {
                     "spot":    config_pairs.get("spot", []),
                     "futures": config_pairs.get("futures", []),
                 }
-                fallback_used = True
                 logger.warning(
                     f"[Discovery] {name}: discovery returned nothing — "
                     f"using hardcoded config ({len(pairs['spot'])} spot, "

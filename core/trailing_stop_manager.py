@@ -11,7 +11,9 @@ Result: After activation, every trailing stop close is guaranteed net-positive.
 """
 import json
 from pathlib import Path
+
 from loguru import logger
+
 from config import RISK
 
 PEAKS_FILE = Path("data/trailing_peaks.json")

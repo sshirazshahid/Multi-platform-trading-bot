@@ -14,8 +14,8 @@ We use FRACTIONAL Kelly (25-50% of full Kelly) for safety.
 """
 
 import json
-import math
 from pathlib import Path
+
 from loguru import logger
 
 

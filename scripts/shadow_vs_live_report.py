@@ -65,13 +65,13 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
     lines: list[str] = []
     lines.append(f"# Shadow vs Live — last {window_hours}h\n")
     lines.append(f"_generated {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}_\n")
-    lines.append(f"\n## Live (current notional)\n")
+    lines.append("\n## Live (current notional)\n")
     lines.append(f"- n={l_stats['n']} sum=${l_stats['sum']:.2f} mean=${l_stats['mean']:.3f} WR={l_stats['wr']:.1%}")
-    lines.append(f"\n## Shadow (current notional, sim_pnl)\n")
+    lines.append("\n## Shadow (current notional, sim_pnl)\n")
     lines.append(f"- n={s_stats['n']} sum=${s_stats['sum']:.2f} mean=${s_stats['mean']:.3f} WR={s_stats['wr']:.1%}")
-    lines.append(f"\n## Shadow (alt notional $200, projected_pnl)\n")
+    lines.append("\n## Shadow (alt notional $200, projected_pnl)\n")
     lines.append(f"- n={s_stats_alt['n']} sum=${s_stats_alt['sum']:.2f} mean=${s_stats_alt['mean']:.3f}")
-    lines.append(f"\n## Per-agent shadow breakdown\n")
+    lines.append("\n## Per-agent shadow breakdown\n")
     if by_agent:
         for agent, rows in sorted(by_agent.items()):
             st = _stats(rows, "sim_pnl")

@@ -1,8 +1,9 @@
 """AgentCoordinator — parallel proposals, serial veto + execution."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Iterable, Optional
+from typing import Callable, Optional
 
 from .base_agent import BaseAgent, Proposal
 from .execution_agent import ExecutionAgent

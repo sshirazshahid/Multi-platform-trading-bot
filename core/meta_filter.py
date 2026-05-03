@@ -26,7 +26,6 @@ from typing import Literal
 
 from core.features import FeatureVector
 
-
 Decision = Literal["ALLOW", "SKIP", "REVIEW"]
 
 

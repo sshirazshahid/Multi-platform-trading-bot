@@ -35,7 +35,6 @@ from pathlib import Path
 
 import pytest
 
-import core.risk_manager as rm_mod
 from core.risk_manager import RiskManager
 
 

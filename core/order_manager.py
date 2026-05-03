@@ -11,20 +11,22 @@ import json
 import time
 import uuid
 from pathlib import Path
+
 from loguru import logger
+
 from config import DRY_RUN, RISK
-from exchanges.base             import BaseExchange
-from core.position_tracker      import Position, PositionTracker
-from core.risk_manager          import RiskManager
+from core.blacklist_manager import BlacklistManager
+from core.compliance_logger import ComplianceLogger
+from core.kelly_sizer import KellySizer
+from core.position_tracker import Position, PositionTracker
+from core.post_mortem import PostMortem
+from core.risk_manager import RiskManager
+from core.sim_execution import SimExecutionModel
+from core.smart_executor import SmartExecutor
 from core.trailing_stop_manager import TrailingStopManager
-from core.blacklist_manager     import BlacklistManager
-from core.compliance_logger     import ComplianceLogger
-from core.virtual_wallet        import VirtualWallet
-from utils.notifier             import TelegramNotifier
-from core.post_mortem           import PostMortem
-from core.kelly_sizer           import KellySizer
-from core.smart_executor        import SmartExecutor
-from core.sim_execution         import SimExecutionModel
+from core.virtual_wallet import VirtualWallet
+from exchanges.base import BaseExchange
+from utils.notifier import TelegramNotifier
 
 # Permission-denied error patterns
 _PERM_ERRORS = (
@@ -882,8 +884,8 @@ class OrderManager:
         # lived in bot_engine._execute_open AFTER open_position returned,
         # so every SL-placement failure silently lost its trade row.
         try:
-            from core.warehouse import get_warehouse
             from config import OPERATING_MODE as _mode
+            from core.warehouse import get_warehouse
             get_warehouse().record_trade_open(
                 exchange=exchange.name.lower(),
                 symbol=symbol,
@@ -1532,7 +1534,8 @@ class OrderManager:
                 try:
                     if (float(getattr(pos, "entry_mid", 0.0) or 0.0) > 0.0
                             and float(getattr(pos, "exit_mid", 0.0) or 0.0) > 0.0):
-                        from core.attribution import Trade as _AttrTrade, record as _attr_record
+                        from core.attribution import Trade as _AttrTrade
+                        from core.attribution import record as _attr_record
 
                         # LIVE funding accrual: query exchange for funding
                         # payments over the hold window. Paper positions

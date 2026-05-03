@@ -49,7 +49,7 @@ def shadow_panel_data(db_path: Path, window_hours: int = 24) -> dict:
     by_agent: dict[str, list] = {}
     for r in s_rows:
         agent = r["agent_id"] or "unknown"
-        by_agent.setdefault(agent, []).append((r["sim_pnl"] or 0.0))
+        by_agent.setdefault(agent, []).append(r["sim_pnl"] or 0.0)
 
     return {
         "window_hours": window_hours,

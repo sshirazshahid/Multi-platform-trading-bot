@@ -17,10 +17,10 @@ import math
 import signal
 import time
 from dataclasses import dataclass
-from datetime    import datetime
-from pathlib     import Path
-from loguru      import logger
+from datetime import datetime
+from pathlib import Path
 
+from loguru import logger
 
 # ── Profile definitions ───────────────────────────────────────────────
 
@@ -113,8 +113,7 @@ class ProfileRiskManager:
                 recent_wr = (sum(1 for r in recent if r) / len(recent) * 100) if recent else 0
                 if recent_wr >= 60 or self._daily_pnl > 0:
                     from loguru import logger
-                    logger.info("[{}] AUTO-RESUMED: WR={:.0f}% dailyPnL={:+.4f}".format(
-                        self.profile_name, recent_wr, self._daily_pnl))
+                    logger.info(f"[{self.profile_name}] AUTO-RESUMED: WR={recent_wr:.0f}% dailyPnL={self._daily_pnl:+.4f}")
                     self._halted = False; self._halt_reason = ""
             if self._halted:
                 return False
@@ -158,14 +157,14 @@ class ProfileRiskManager:
         limit = self._start_balance * self.max_daily_loss_pct
         if self._daily_pnl < -limit and not self._halted:
             self._halted = True
-            self._halt_reason = "daily loss limit ({:+.4f})".format(self._daily_pnl)
+            self._halt_reason = f"daily loss limit ({self._daily_pnl:+.4f})"
             if not hasattr(self, '_halt_time'): self._halt_time = 0.0
             self._halt_time = __import__('time').time()
         if self._peak_balance > 0:
             dd = (self._peak_balance - wallet_balance) / self._peak_balance
             if dd >= self.max_drawdown_pct and not self._halted:
                 self._halted = True
-                self._halt_reason = "drawdown {:.1f}% — will auto-resume".format(dd * 100)
+                self._halt_reason = f"drawdown {dd * 100:.1f}% — will auto-resume"
                 if not hasattr(self, '_halt_time'): self._halt_time = 0.0
                 self._halt_time = __import__('time').time()
 
@@ -189,7 +188,7 @@ class ProfileWallet:
 
     def __init__(self, name: str):
         self.name  = name
-        self._path = Path("data/profiles/{}/wallet.json".format(name))
+        self._path = Path(f"data/profiles/{name}/wallet.json")
         self._balances: dict[str, float] = {}
         self._load()
 
@@ -231,7 +230,7 @@ class ProfileWallet:
                             "saved_at": time.time()}, indent=2),
                 encoding="utf-8")
         except Exception as e:
-            logger.debug("[{}] wallet save: {}".format(self.name, e))
+            logger.debug(f"[{self.name}] wallet save: {e}")
 
     def _load(self):
         try:
@@ -247,7 +246,7 @@ class ProfileTracker:
 
     def __init__(self, name: str):
         from core.position_tracker import PositionTracker
-        self._path    = Path("data/profiles/{}/positions.json".format(name))
+        self._path    = Path(f"data/profiles/{name}/positions.json")
         self._tracker = PositionTracker.__new__(PositionTracker)
         self._tracker.SAVE_PATH = self._path
         self._tracker._open   = {}
@@ -286,15 +285,16 @@ class MultiProfileRunner:
     ARB_INTERVAL  = 60 * 2
 
     def __init__(self):
+        from config import DRY_RUN, TRADING_PAIRS
+        from core.claude_analyst import ClaudeAnalyst
+        from core.news_scanner import NewsScanner
+        from core.report_emailer import ReportEmailer
+        from core.strategy_selector import StrategySelector, build_futures_map
         from exchanges import (
             BinanceClient,
-            BybitClient,   BitgetClient,
+            BitgetClient,
+            BybitClient,
         )
-        from core.strategy_selector import StrategySelector, build_futures_map
-        from core.news_scanner      import NewsScanner
-        from core.claude_analyst    import ClaudeAnalyst
-        from core.report_emailer    import ReportEmailer
-        from config                 import TRADING_PAIRS, DRY_RUN
 
         logger.info("=" * 66)
         logger.info("  MULTI-PROFILE + CLAUDE AI + ARBITRAGE + EMAIL")
@@ -323,8 +323,7 @@ class MultiProfileRunner:
             raise RuntimeError(
                 "No exchanges connected. "
                 "Add at least one exchange's API keys to .env")
-        logger.info("[MultiProfile] Connected: {}".format(
-            list(self.active_exchanges.keys())))
+        logger.info(f"[MultiProfile] Connected: {list(self.active_exchanges.keys())}")
 
         self.selector      = StrategySelector()
         self.news          = NewsScanner()
@@ -342,8 +341,7 @@ class MultiProfileRunner:
         _total_start = START_BALANCE * _num_ex
         for _inst in self.profiles.values():
             _inst.risk.set_start_balance(_total_start)
-        logger.info("[MultiProfile] Start: ${:.0f}/ex × {} = ${:.0f} per profile".format(
-            START_BALANCE, _num_ex, _total_start))
+        logger.info(f"[MultiProfile] Start: ${START_BALANCE:.0f}/ex × {_num_ex} = ${_total_start:.0f} per profile")
 
         from core.arbitrage_engine import ArbitrageEngine
         self.arb_engine = ArbitrageEngine(
@@ -365,7 +363,7 @@ class MultiProfileRunner:
         if self.emailer.is_configured():
             import os
             hour = int(os.getenv("REPORT_EMAIL_HOUR", "8"))
-            logger.info("[MultiProfile] Email active -- daily {:02d}:00 UTC + session end".format(hour))
+            logger.info(f"[MultiProfile] Email active -- daily {hour:02d}:00 UTC + session end")
         else:
             logger.info("[MultiProfile] Email disabled (GMAIL_* not set in .env)")
 
@@ -379,9 +377,9 @@ class MultiProfileRunner:
     # ── Build one profile ─────────────────────────────────────────────
 
     def _build_profile(self, name: str, settings: dict) -> ProfileInstance:
+        from core.blacklist_manager import BlacklistManager
+        from core.direct_executor import DirectExecutor
         from core.trailing_stop_manager import TrailingStopManager
-        from core.blacklist_manager     import BlacklistManager
-        from core.direct_executor       import DirectExecutor
 
         risk      = ProfileRiskManager(name, settings)
         wallet    = ProfileWallet(name)
@@ -406,11 +404,11 @@ class MultiProfileRunner:
             if market_type == "futures" and leverage > 1:
                 leverage = risk.validate_leverage(leverage)
             from core.position_tracker import Position
-            oid = "DRY-{}-{}".format(name[:3].upper(), uuid.uuid4().hex[:6])
+            oid = f"DRY-{name[:3].upper()}-{uuid.uuid4().hex[:6]}"
             pos = Position(
                 id=oid, exchange=exchange.name, symbol=symbol,
                 side=side, market_type=market_type,
-                strategy="{}|{}".format(strategy, name),
+                strategy=f"{strategy}|{name}",
                 entry_price=fill_price, size=size,
                 stop_loss=sl, take_profit=tp,
                 leverage=leverage, order_id=oid, paper_trade=self.dry_run,
@@ -504,7 +502,7 @@ class MultiProfileRunner:
                 logger.info("[MultiProfile] Sending session-end email report...")
                 self.emailer.send_daily(force=True)
         except Exception as e:
-            logger.debug("[MultiProfile] Session-end email: {}".format(e))
+            logger.debug(f"[MultiProfile] Session-end email: {e}")
 
     def _check_email_schedule(self):
         try:
@@ -514,15 +512,14 @@ class MultiProfileRunner:
                 if inst.risk.is_halted and name not in self._halted_alerted:
                     self._halted_alerted.add(name)
                     self.emailer.send_alert(
-                        "{} Profile HALTED".format(name.upper()),
-                        "The {} profile has been halted.\nReason: {}\n\n"
+                        f"{name.upper()} Profile HALTED",
+                        f"The {name.upper()} profile has been halted.\nReason: {inst.risk.halt_reason}\n\n"
                         "No new trades will be opened for this profile.\n"
-                        "Auto-resets at midnight UTC if daily loss limit.".format(
-                            name.upper(), inst.risk.halt_reason))
+                        "Auto-resets at midnight UTC if daily loss limit.")
                 elif not inst.risk.is_halted:
                     self._halted_alerted.discard(name)
         except Exception as e:
-            logger.debug("[MultiProfile] Email check: {}".format(e))
+            logger.debug(f"[MultiProfile] Email check: {e}")
 
     # ── Arbitrage scan ────────────────────────────────────────────────
 
@@ -531,8 +528,7 @@ class MultiProfileRunner:
             return
 
         self._arb_scan_count += 1
-        logger.info("[Arb] Scan #{} across {} exchanges".format(
-            self._arb_scan_count, len(self.active_exchanges)))
+        logger.info(f"[Arb] Scan #{self._arb_scan_count} across {len(self.active_exchanges)} exchanges")
 
         all_symbols = set()
         for ex_name in self.active_exchanges:
@@ -555,7 +551,7 @@ class MultiProfileRunner:
                 logger.info("[Arb] {} opportunities | open={} pnl={:+.4f}".format(
                     len(opps), summary["open"], summary["total_pnl"]))
         except Exception as e:
-            logger.warning("[Arb] Scan failed: {}".format(e))
+            logger.warning(f"[Arb] Scan failed: {e}")
 
     # ── Strategy scan ─────────────────────────────────────────────────
 
@@ -566,8 +562,7 @@ class MultiProfileRunner:
             fg = self.news.fear_greed_value()
         except Exception:
             pass
-        logger.info("[MultiProfile] ═══ Scan #{} | F&G={} | ${} per profile/exchange ═══".format(
-            self._scan_count, fg, int(START_BALANCE)))
+        logger.info(f"[MultiProfile] ═══ Scan #{self._scan_count} | F&G={fg} | ${int(START_BALANCE)} per profile/exchange ═══")
 
         for ex_name, exchange in self.active_exchanges.items():
             pairs    = self.trading_pairs.get(ex_name, {})
@@ -575,17 +570,15 @@ class MultiProfileRunner:
             if not all_base:
                 continue
 
-            logger.info("[MultiProfile] {} — {} coins (3 profiles simultaneous)".format(
-                ex_name, len(all_base)))
+            logger.info(f"[MultiProfile] {ex_name} — {len(all_base)} coins (3 profiles simultaneous)")
 
             all_opps = self.selector.analyze_batch(
                 exchange, all_base, self.futures_map)
             if not all_opps:
-                logger.info("[MultiProfile] {} — no signals".format(ex_name))
+                logger.info(f"[MultiProfile] {ex_name} — no signals")
                 continue
 
-            logger.info("[MultiProfile] Signals ({}):\n{}".format(
-                ex_name, self.selector.summary_table(all_opps)))
+            logger.info(f"[MultiProfile] Signals ({ex_name}):\n{self.selector.summary_table(all_opps)}")
 
             snapshots  = self._collect_snapshots(exchange.name, all_base)
             news_data  = self._load_news_cache()
@@ -598,8 +591,7 @@ class MultiProfileRunner:
             rm      = self.claude.risk_multiplier()
             eff_min = BASE_MIN_CONF * rm
 
-            logger.info("[MultiProfile] Claude: bias={} rm={:.2f}x eff_min={:.2f}".format(
-                bias, rm, eff_min))
+            logger.info(f"[MultiProfile] Claude: bias={bias} rm={rm:.2f}x eff_min={eff_min:.2f}")
 
             flat_opps = sorted(
                 [opp for opps in all_opps.values() for opp in opps],
@@ -607,8 +599,7 @@ class MultiProfileRunner:
 
             for prof_name, inst in self.profiles.items():
                 if inst.risk.is_halted:
-                    logger.debug("[{}][{}] PAUSED — {}".format(
-                        ex_name.upper(), prof_name, inst.risk.halt_reason))
+                    logger.debug(f"[{ex_name.upper()}][{prof_name}] PAUSED — {inst.risk.halt_reason}")
                     continue
 
                 inst.executor.check_exits(exchange)
@@ -796,10 +787,8 @@ class MultiProfileRunner:
         wr = data.get("win_rate", 0); ret = data.get("return_pct", 0)
         dd = data.get("max_drawdown", 0)
         if wr >= 55 and ret > 0 and dd < 15:
-            return "READY FOR LIVE: '{}' WR={:.1f}% Return={:.2f}% DD={:.1f}%".format(
-                leader, wr, ret, dd)
-        return "'{}' leads WR={:.1f}% Return={:.2f}% DD={:.1f}%. Keep running.".format(
-            leader, wr, ret, dd)
+            return f"READY FOR LIVE: '{leader}' WR={wr:.1f}% Return={ret:.2f}% DD={dd:.1f}%"
+        return f"'{leader}' leads WR={wr:.1f}% Return={ret:.2f}% DD={dd:.1f}%. Keep running."
 
     def _save_comparison(self):
         try:
@@ -809,32 +798,34 @@ class MultiProfileRunner:
                 json.dumps(comp, indent=2, default=str), encoding="utf-8")
             self._feed_knowledge()
         except Exception as e:
-            logger.debug("[MultiProfile] Save: {}".format(e))
+            logger.debug(f"[MultiProfile] Save: {e}")
 
     def _feed_knowledge(self):
         try:
-            from core.knowledge_model import KnowledgeModel
             from dataclasses import asdict
+
+            from core.knowledge_model import KnowledgeModel
             km     = KnowledgeModel()
             trades = []
             for name, inst in self.profiles.items():
                 for pos in inst.tracker._closed:
-                    try:    d = asdict(pos)
-                    except: d = {}
+                    try:
+                        d = asdict(pos)
+                    except Exception:
+                        d = {}
                     d["profile"] = name
                     trades.append(d)
             if trades:
                 km.update_from_trades(trades, mode="dry" if self.dry_run else "live")
         except Exception as e:
-            logger.debug("[MultiProfile] Knowledge: {}".format(e))
+            logger.debug(f"[MultiProfile] Knowledge: {e}")
 
     def _log_comparison(self):
         try:
             comp   = self._compute_comparison()
             leader = comp.get("leader","?")
             arb    = comp.get("arbitrage", {})
-            logger.info("[MultiProfile] ── COMPARISON (Scan #{}) ──".format(
-                self._scan_count))
+            logger.info(f"[MultiProfile] ── COMPARISON (Scan #{self._scan_count}) ──")
             for name in comp.get("ranked",[]):
                 d = comp["profiles"][name]
                 logger.info(
@@ -849,4 +840,4 @@ class MultiProfileRunner:
                     arb["total_arbs"], arb["wins"], arb["total_pnl"]))
             logger.info("[MultiProfile] {}".format(comp.get("recommendation","")))
         except Exception as e:
-            logger.debug("[MultiProfile] Log: {}".format(e))
+            logger.debug(f"[MultiProfile] Log: {e}")

@@ -1,9 +1,6 @@
 """Task C.1 — A/B traffic-split controller."""
 from __future__ import annotations
 
-import json
-import random
-
 
 def test_route_returns_live_when_no_split_file(tmp_path):
     from core.agents.ab_controller import route
@@ -12,7 +9,7 @@ def test_route_returns_live_when_no_split_file(tmp_path):
 
 
 def test_route_returns_live_when_pct_zero(tmp_path):
-    from core.agents.ab_controller import route, save_split, SplitState
+    from core.agents.ab_controller import SplitState, route, save_split
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.0, set_at=0), path=p)
     for cid in range(50):
@@ -20,7 +17,7 @@ def test_route_returns_live_when_pct_zero(tmp_path):
 
 
 def test_route_distributes_by_pct(tmp_path):
-    from core.agents.ab_controller import route, save_split, SplitState
+    from core.agents.ab_controller import SplitState, route, save_split
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.50, set_at=0), path=p)
     n_shadow = sum(1 for cid in range(1000) if route(cid, path=p) == "shadow")
@@ -29,7 +26,7 @@ def test_route_distributes_by_pct(tmp_path):
 
 
 def test_route_deterministic_per_candidate(tmp_path):
-    from core.agents.ab_controller import route, save_split, SplitState
+    from core.agents.ab_controller import SplitState, route, save_split
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.30, set_at=0), path=p)
     for cid in [1, 7, 42, 100]:
@@ -40,7 +37,10 @@ def test_route_deterministic_per_candidate(tmp_path):
 
 def test_auto_ramp_advances_on_continuous_promote(tmp_path):
     from core.agents.ab_controller import (
-        auto_ramp, save_split, SplitState, RAMP_STAGES,
+        RAMP_STAGES,
+        SplitState,
+        auto_ramp,
+        save_split,
     )
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.0, set_at=0), path=p)
@@ -49,7 +49,7 @@ def test_auto_ramp_advances_on_continuous_promote(tmp_path):
 
 
 def test_auto_ramp_no_advance_on_mixed_verdict(tmp_path):
-    from core.agents.ab_controller import auto_ramp, save_split, SplitState
+    from core.agents.ab_controller import SplitState, auto_ramp, save_split
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.0, set_at=0), path=p)
     state = auto_ramp(["PROMOTE", "HOLD", "PROMOTE"], path=p, now_ts=10**9)
@@ -58,7 +58,10 @@ def test_auto_ramp_no_advance_on_mixed_verdict(tmp_path):
 
 def test_auto_ramp_respects_dwell(tmp_path):
     from core.agents.ab_controller import (
-        auto_ramp, save_split, SplitState, RAMP_DWELL_DAYS,
+        RAMP_DWELL_DAYS,
+        SplitState,
+        auto_ramp,
+        save_split,
     )
     p = tmp_path / "ab.json"
     now = 10**9
@@ -75,7 +78,9 @@ def test_auto_ramp_respects_dwell(tmp_path):
 
 def test_rollback_drops_to_zero_on_bad_wr(tmp_path):
     from core.agents.ab_controller import (
-        rollback_if_unhealthy, save_split, SplitState,
+        SplitState,
+        rollback_if_unhealthy,
+        save_split,
     )
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.50, set_at=0), path=p)
@@ -86,7 +91,9 @@ def test_rollback_drops_to_zero_on_bad_wr(tmp_path):
 
 def test_rollback_no_op_when_healthy(tmp_path):
     from core.agents.ab_controller import (
-        rollback_if_unhealthy, save_split, SplitState,
+        SplitState,
+        rollback_if_unhealthy,
+        save_split,
     )
     p = tmp_path / "ab.json"
     save_split(SplitState(pct_to_shadow=0.50, set_at=0), path=p)

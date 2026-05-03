@@ -27,16 +27,13 @@ from __future__ import annotations
 import json
 import time
 import uuid
-import math
-import traceback
-from datetime  import datetime
-from pathlib   import Path
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
 from loguru import logger
-
 
 # ── Output paths ─────────────────────────────────────────────────────
 ANALYSIS_DIR = Path("data/claude_analysis")
@@ -186,7 +183,7 @@ def build_coin_snapshot(exchange, symbol: str, market_type: str = "spot") -> dic
             "bias":        bias,
         }
     except Exception as e:
-        logger.debug("[ClaudeTrader] Snapshot error for {}: {}".format(symbol, e))
+        logger.debug(f"[ClaudeTrader] Snapshot error for {symbol}: {e}")
         return None
 
 
@@ -217,7 +214,7 @@ class ClaudeTrader:
     """
 
     def __init__(self, dry_run: bool = True):
-        from config import TRADING_PAIRS, DRY_RUN
+        from config import DRY_RUN, TRADING_PAIRS
         self.dry_run      = dry_run if dry_run is not None else DRY_RUN
         self.trading_pairs= TRADING_PAIRS
         self._trades: list = self._load_trades()
@@ -239,7 +236,7 @@ class ClaudeTrader:
         started_at = datetime.now()
 
         # ── 1. Connect exchanges ──────────────────────────────────────
-        from exchanges import BinanceClient, BybitClient, BitgetClient
+        from exchanges import BinanceClient, BitgetClient, BybitClient
         exchanges = {
             "binance": BinanceClient(),
             "bybit":   BybitClient(),
@@ -250,7 +247,7 @@ class ClaudeTrader:
         if not active:
             logger.error("[ClaudeTrader] No exchanges connected.")
             return {}
-        logger.info("[ClaudeTrader] Connected: {}".format(list(active.keys())))
+        logger.info(f"[ClaudeTrader] Connected: {list(active.keys())}")
 
         # ── 2. Build market snapshots ─────────────────────────────────
         snapshots = {}
@@ -293,13 +290,12 @@ class ClaudeTrader:
             logger.error("[ClaudeTrader] No response from Claude API.")
             return {}
 
-        logger.info("[ClaudeTrader] Claude responded ({} chars)".format(
-            len(response_text)))
+        logger.info(f"[ClaudeTrader] Claude responded ({len(response_text)} chars)")
 
         # ── 7. Parse decisions ────────────────────────────────────────
         decisions = self._parse_decisions(response_text)
         logger.info(
-            "[ClaudeTrader] Parsed {} trade decisions".format(len(decisions))
+            f"[ClaudeTrader] Parsed {len(decisions)} trade decisions"
         )
 
         # ── 8. Execute trades ─────────────────────────────────────────
@@ -327,9 +323,7 @@ class ClaudeTrader:
         self._export_html_report(result, snapshots)
 
         logger.info(
-            "[ClaudeTrader] Done | {} symbols | {} decisions | {} executed".format(
-                len(snapshots), len(decisions), len(executed_trades)
-            )
+            f"[ClaudeTrader] Done | {len(snapshots)} symbols | {len(decisions)} decisions | {len(executed_trades)} executed"
         )
         return result
 
@@ -395,12 +389,12 @@ ONLY return the JSON object. No other text."""
 
         lines = [
             "CRYPTO MARKET ANALYSIS REQUEST",
-            "Time: {}".format(now),
+            f"Time: {now}",
             "",
             "MARKET SENTIMENT:",
-            "  Fear & Greed Index: {} ({})".format(fg, fg_l),
-            "  Market Cap Change 24h: {:+.2f}%".format(chg),
-            "  BTC Dominance: {:.1f}%".format(btc_d),
+            f"  Fear & Greed Index: {fg} ({fg_l})",
+            f"  Market Cap Change 24h: {chg:+.2f}%",
+            f"  BTC Dominance: {btc_d:.1f}%",
         ]
         if trend:
             lines.append("  Trending Coins: {}".format(
@@ -498,14 +492,12 @@ ONLY return the JSON object. No other text."""
             trades     = data.get("trades", [])
 
             logger.info(
-                "[ClaudeTrader] Market: {} | Bias: {} | Risk: {}".format(
-                    assessment[:80], bias, risk_level
-                )
+                f"[ClaudeTrader] Market: {assessment[:80]} | Bias: {bias} | Risk: {risk_level}"
             )
             if advice:
-                logger.info("[ClaudeTrader] Advice: {}".format(advice[:100]))
+                logger.info(f"[ClaudeTrader] Advice: {advice[:100]}")
             for w in warnings:
-                logger.warning("[ClaudeTrader] WARNING: {}".format(w))
+                logger.warning(f"[ClaudeTrader] WARNING: {w}")
 
             validated = []
             for t in trades:
@@ -526,12 +518,12 @@ ONLY return the JSON object. No other text."""
 
         except json.JSONDecodeError as e:
             logger.error(
-                "[ClaudeTrader] JSON parse error: {} | "
-                "Response preview: {}...".format(e, response_text[:200])
+                f"[ClaudeTrader] JSON parse error: {e} | "
+                f"Response preview: {response_text[:200]}..."
             )
             return []
         except Exception as e:
-            logger.error("[ClaudeTrader] Parse error: {}".format(e))
+            logger.error(f"[ClaudeTrader] Parse error: {e}")
             return []
 
     # ── Trade executor ────────────────────────────────────────────────
@@ -554,45 +546,39 @@ ONLY return the JSON object. No other text."""
         # Validate: spot cannot short
         if market_type == "spot" and direction == "short":
             logger.warning(
-                "[ClaudeTrader] Skipping {} — cannot short on spot".format(symbol)
+                f"[ClaudeTrader] Skipping {symbol} — cannot short on spot"
             )
             return None
 
         # Validate SL is set and R:R is acceptable
         if sl <= 0:
-            logger.warning("[ClaudeTrader] {} SL=0 — invalid, skipped".format(symbol))
+            logger.warning(f"[ClaudeTrader] {symbol} SL=0 — invalid, skipped")
             return None
         if action == "BUY" and entry <= sl:
-            logger.warning("[ClaudeTrader] {} BUY SL={:.4f} >= entry={:.4f} — invalid".format(
-                symbol, sl, entry))
+            logger.warning(f"[ClaudeTrader] {symbol} BUY SL={sl:.4f} >= entry={entry:.4f} — invalid")
             return None
         if action == "BUY" and (entry - sl) > 0:
             rr = (tp - entry) / (entry - sl)
             if rr < 1.5:
                 logger.warning(
-                    "[ClaudeTrader] {} R:R={:.1f} too low — skipped".format(
-                        symbol, rr
-                    )
+                    f"[ClaudeTrader] {symbol} R:R={rr:.1f} too low — skipped"
                 )
                 return None
         elif action == "SELL" and sl <= entry:
-            logger.warning("[ClaudeTrader] {} SELL SL={:.4f} <= entry={:.4f} — invalid".format(
-                symbol, sl, entry))
+            logger.warning(f"[ClaudeTrader] {symbol} SELL SL={sl:.4f} <= entry={entry:.4f} — invalid")
             return None
         elif action == "SELL" and (sl - entry) > 0:
             rr = (entry - tp) / (sl - entry)
             if rr < 1.5:
                 logger.warning(
-                    "[ClaudeTrader] {} SHORT R:R={:.1f} too low — skipped".format(
-                        symbol, rr
-                    )
+                    f"[ClaudeTrader] {symbol} SHORT R:R={rr:.1f} too low — skipped"
                 )
                 return None
 
         side = "buy" if action == "BUY" else "sell"
 
         # Paper trade execution
-        trade_id    = "CLAUDE-{}".format(uuid.uuid4().hex[:8].upper())
+        trade_id    = f"CLAUDE-{uuid.uuid4().hex[:8].upper()}"
         from config import DRY_RUN_BALANCE
         start_bal   = DRY_RUN_BALANCE   # use configured paper balance
         pos_size_pct= 0.05              # 5% of balance per Claude trade
@@ -625,15 +611,11 @@ ONLY return the JSON object. No other text."""
 
         mode = "[DRY RUN]" if self.dry_run else "[LIVE]"
         logger.info(
-            "{} CLAUDE TRADE {} | {} {} {} @ {:.4f} | "
-            "SL={:.4f} TP={:.4f} qty={:.6f} conf={:.0%}".format(
-                mode, trade_id,
-                side.upper(), market_type.upper(), symbol,
-                entry, sl, tp, qty, conf
-            )
+            f"{mode} CLAUDE TRADE {trade_id} | {side.upper()} {market_type.upper()} {symbol} @ {entry:.4f} | "
+            f"SL={sl:.4f} TP={tp:.4f} qty={qty:.6f} conf={conf:.0%}"
         )
         logger.info(
-            "  Reasoning: {}".format(reasoning[:120])
+            f"  Reasoning: {reasoning[:120]}"
         )
 
         return trade_record
@@ -714,11 +696,11 @@ ONLY return the JSON object. No other text."""
     def _save_result(self, result: dict, snapshots: dict):
         ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
         ts   = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        path = ANALYSIS_DIR / "analysis_{}.json".format(ts)
+        path = ANALYSIS_DIR / f"analysis_{ts}.json"
         out  = dict(result)
         out["snapshots"] = snapshots
         path.write_text(json.dumps(out, indent=2), encoding="utf-8")
-        logger.info("[ClaudeTrader] Saved: {}".format(path))
+        logger.info(f"[ClaudeTrader] Saved: {path}")
 
     def _export_html_report(self, result: dict, snapshots: dict):
         """Write a styled HTML report of Claude's analysis."""
@@ -729,7 +711,6 @@ ONLY return the JSON object. No other text."""
             assessment = ""
             bias       = "NEUTRAL"
             risk_lev   = "MEDIUM"
-            advice     = ""
             if decisions:
                 assessment = decisions[0].get("assessment", "")
                 bias       = decisions[0].get("bias", "NEUTRAL")
@@ -774,20 +755,16 @@ ONLY return the JSON object. No other text."""
                 )
                 trade_rows += (
                     "<tr>"
-                    "<td>{}</td>"
-                    "<td style='color:{}'>{}</td>"
-                    "<td>{}</td>"
-                    "<td>{:.4f}</td>"
-                    "<td>{:.4f}</td>"
-                    "<td>{:.4f}</td>"
-                    "<td>{:.0%}</td>"
-                    "<td>{}</td>"
-                    "<td style='color:#94a3b8;font-size:0.8em'>{}</td>"
-                    "</tr>".format(
-                        sym, a_col, action, mt,
-                        entry, sl_p, tp_p, conf,
-                        exec_badge, reason
-                    )
+                    f"<td>{sym}</td>"
+                    f"<td style='color:{a_col}'>{action}</td>"
+                    f"<td>{mt}</td>"
+                    f"<td>{entry:.4f}</td>"
+                    f"<td>{sl_p:.4f}</td>"
+                    f"<td>{tp_p:.4f}</td>"
+                    f"<td>{conf:.0%}</td>"
+                    f"<td>{exec_badge}</td>"
+                    f"<td style='color:#94a3b8;font-size:0.8em'>{reason}</td>"
+                    "</tr>"
                 )
 
             # Snapshot table
@@ -826,6 +803,10 @@ ONLY return the JSON object. No other text."""
 
             run_time = result.get("run_at", "")[:16]
             mode     = result.get("mode", "DRY RUN")
+            # Precompute conditional CSS classes/colors that .format() can't
+            # evaluate inline (F524 lint fix 2026-05-04).
+            mode_badge_cls = "badge-dry" if "DRY" in mode else "badge-live"
+            chg_color = "#4ade80" if chg >= 0 else "#f87171"
 
             html = """<!DOCTYPE html>
 <html lang="en">
@@ -852,7 +833,7 @@ ONLY return the JSON object. No other text."""
 <h1>Claude AI Trading Analysis</h1>
 <div class="meta">
   Run: {run_time} &nbsp;|&nbsp;
-  Mode: <span class="{'badge-dry' if 'DRY' in mode else 'badge-live'}">{mode}</span> &nbsp;|&nbsp;
+  Mode: <span class="{mode_badge_cls}">{mode}</span> &nbsp;|&nbsp;
   Model: {model}
 </div>
 
@@ -863,7 +844,7 @@ ONLY return the JSON object. No other text."""
     Overall Bias: <span style="color:{bias_color}">{bias}</span>
     &nbsp;|&nbsp; Risk Level: <span style="color:{risk_color}">{risk_lev}</span>
     &nbsp;|&nbsp; Fear & Greed: <span style="color:{fg_color}">{fg} ({fg_l})</span>
-    &nbsp;|&nbsp; Mkt 24h: <span style="color:{'#4ade80' if chg >= 0 else '#f87171'}">{chg:+.2f}%</span>
+    &nbsp;|&nbsp; Mkt 24h: <span style="color:{chg_color}">{chg:+.2f}%</span>
     &nbsp;|&nbsp; BTC Dom: {btc_d:.1f}%
   </div>
 </div>
@@ -892,10 +873,12 @@ ONLY return the JSON object. No other text."""
 </p>
 </body>
 </html>""".format(
-                run_time=run_time, mode=mode, model=CLAUDE_MODEL,
+                run_time=run_time, mode=mode, mode_badge_cls=mode_badge_cls,
+                model=CLAUDE_MODEL,
                 bias_color=bias_color, assessment=assessment or "No assessment.",
                 bias=bias, risk_color=risk_color, risk_lev=risk_lev,
-                fg_color=fg_color, fg=fg, fg_l=fg_l, chg=chg, btc_d=btc_d,
+                fg_color=fg_color, fg=fg, fg_l=fg_l, chg=chg, chg_color=chg_color,
+                btc_d=btc_d,
                 n_trades=len(decisions), n_exec=len(executed),
                 trade_rows=trade_rows or "<tr><td colspan='9'>No trades recommended</td></tr>",
                 snap_rows=snap_rows,
@@ -903,6 +886,6 @@ ONLY return the JSON object. No other text."""
 
             REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
             REPORT_FILE.write_text(html, encoding="utf-8")
-            logger.info("[ClaudeTrader] HTML report: {}".format(REPORT_FILE.resolve()))
+            logger.info(f"[ClaudeTrader] HTML report: {REPORT_FILE.resolve()}")
         except Exception as e:
-            logger.debug("[ClaudeTrader] HTML export error: {}".format(e))
+            logger.debug(f"[ClaudeTrader] HTML export error: {e}")

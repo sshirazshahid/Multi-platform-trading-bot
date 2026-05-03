@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import pytest
 
 
 def test_kill_insufficient_decisions_no_trigger():

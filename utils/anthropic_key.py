@@ -8,6 +8,7 @@ This is already integrated in claude_analyst.py via the helper below.
 import os
 from pathlib import Path
 
+
 def get_anthropic_key() -> str:
     """Read key from env or .env file."""
     # Already in environment

@@ -197,8 +197,8 @@ def main() -> int:
         sys.path.insert(0, str(ROOT))
         from config import OPERATING_MODE
         from exchanges.binance_client import BinanceClient
-        from exchanges.bybit_client import BybitClient
         from exchanges.bitget_client import BitgetClient
+        from exchanges.bybit_client import BybitClient
     except Exception as e:
         print(f"Could not import exchange clients: {e}", file=sys.stderr)
         return 1

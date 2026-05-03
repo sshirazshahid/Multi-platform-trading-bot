@@ -423,7 +423,7 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
         },
     }
     ens_path.write_text(json.dumps(payload, indent=2, default=float))
-    print(f"\nsaved artifacts:")
+    print("\nsaved artifacts:")
     print(f"  {lr_path}")
     print(f"  {gbm_path}")
     print(f"  {iso_lr_path}")

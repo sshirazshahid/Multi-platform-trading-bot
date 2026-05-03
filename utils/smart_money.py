@@ -19,7 +19,6 @@ No strategy logic, no exchange I/O -- just math on price series.
 import numpy as np
 import pandas as pd
 
-
 # ---- internal helpers ----
 
 def _safe_float(val) -> float:
@@ -106,7 +105,7 @@ def fibonacci_retracement(high: pd.Series, low: pd.Series, close: pd.Series,
     lb = min(lookback, n)
     h_slice = high.iloc[-lb:]
     l_slice = low.iloc[-lb:]
-    c_slice = close.iloc[-lb:]
+    close.iloc[-lb:]
 
     # 2026-04-16 (post-audit): anchor the fib grid on confirmed pivot highs/lows,
     # not raw argmax/argmin. A single news-spike wick was defining the grid
@@ -746,7 +745,7 @@ def market_structure(high: pd.Series, low: pd.Series, close: pd.Series,
             continue
         bar_high = float(h_slice.iloc[idx])
         bar_low = float(l_slice.iloc[idx])
-        bar_close = float(close.iloc[-lb + idx]) if (-lb + idx) < n else price
+        float(close.iloc[-lb + idx]) if (-lb + idx) < n else price
 
         # Bullish BOS: break above last swing high in bullish trend
         if trend in ("bullish", "ranging") and bar_high > last_sh:
@@ -971,7 +970,6 @@ def ict_optimal_trade_entry(high: pd.Series, low: pd.Series, close: pd.Series,
     best_impulse_start = -1
     best_impulse_end = -1
     best_impulse_dir = 0  # +1 up, -1 down
-    best_impulse_size = 0.0
 
     start = max(0, n - lb)
     found = False
@@ -993,7 +991,6 @@ def ict_optimal_trade_entry(high: pd.Series, low: pd.Series, close: pd.Series,
 
             net = cum_up - cum_down
             if net > 1.5 * atr_val:
-                best_impulse_size = net
                 best_impulse_start = i
                 best_impulse_end = j
                 best_impulse_dir = 1
@@ -1002,7 +999,6 @@ def ict_optimal_trade_entry(high: pd.Series, low: pd.Series, close: pd.Series,
 
             net_down = cum_down - cum_up
             if net_down > 1.5 * atr_val:
-                best_impulse_size = net_down
                 best_impulse_start = i
                 best_impulse_end = j
                 best_impulse_dir = -1
@@ -1178,8 +1174,8 @@ def price_action_patterns(open_s: pd.Series, high: pd.Series,
     # --- Three-candle patterns (last 3 bars) ---
     if n >= 3:
         o2 = float(open_s.iloc[-3])
-        h2 = float(high.iloc[-3])
-        l2 = float(low.iloc[-3])
+        float(high.iloc[-3])
+        float(low.iloc[-3])
         c2 = float(close.iloc[-3])
         body2 = abs(c2 - o2)
 

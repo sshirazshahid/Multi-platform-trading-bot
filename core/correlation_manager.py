@@ -12,11 +12,9 @@ Features:
   4. Position size reduction for correlated additions
 """
 
-import time
 import numpy as np
 import pandas as pd
 from loguru import logger
-
 
 # ── Predefined correlation groups ────────────────────────────────────
 # Assets within the same group tend to move together (corr > 0.7)

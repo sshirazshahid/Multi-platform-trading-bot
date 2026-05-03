@@ -28,7 +28,7 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    h, l, c = df["high"], df["low"], df["close"]
+    h, l, _c = df["high"], df["low"], df["close"]
     plus_dm = (h.diff()).where(lambda x: (x > 0) & (x > -l.diff()), 0.0)
     minus_dm = (-l.diff()).where(lambda x: (x > 0) & (x > h.diff()), 0.0)
     tr = atr(df, period)

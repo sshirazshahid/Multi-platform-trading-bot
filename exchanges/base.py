@@ -7,13 +7,13 @@ Key behaviours:
 - Symbol-not-found errors are silenced (return empty, not an error log)
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional
 import random
 import time as _time
+from abc import ABC, abstractmethod
+from typing import Optional
+
 import ccxt
 from loguru import logger
-
 
 # ── Retry configuration ────────────────────────────────────────────────
 MAX_RETRIES       = 3       # total attempts (1 original + 2 retries)

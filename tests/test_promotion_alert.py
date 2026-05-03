@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _ev(verdict_str, shadow_n=120):
     from core.multi_agent_promotion_gate import MAEvaluation, MAVerdict

@@ -14,11 +14,8 @@ Fix:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
-import pytest
-
-from core.correlation_manager import CorrelationManager, CORRELATION_GROUPS
+from core.correlation_manager import CORRELATION_GROUPS, CorrelationManager
 
 
 @dataclass

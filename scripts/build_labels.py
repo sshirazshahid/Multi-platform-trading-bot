@@ -33,7 +33,6 @@ from core.feature_store import _TF_TO_SECONDS, load_ohlcv_window  # noqa: E402
 from core.labeler import triple_barrier  # noqa: E402
 from core.warehouse import get_warehouse  # noqa: E402
 
-
 # Defaults: 24h horizon on 15m for futures, 4d on 1h for spot. The labeler
 # horizon should be long enough that barriers RESOLVE rather than time-out;
 # real positions are typically held much shorter than this.

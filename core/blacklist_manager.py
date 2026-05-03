@@ -11,8 +11,8 @@ FIX: Blacklist only tracks direction-relevant SLs — 3 LONG SLs blacklists LONG
 import json
 import time
 from pathlib import Path
-from loguru  import logger
 
+from loguru import logger
 
 # Default global blacklist path (single-bot / order_manager)
 DEFAULT_BLACKLIST_FILE = Path("data/blacklist.json")
@@ -39,7 +39,7 @@ class BlacklistManager:
             self.cfg = DEFAULTS.copy()
 
         if profile_name:
-            self._file = Path("data/profiles/{}/blacklist.json".format(profile_name))
+            self._file = Path(f"data/profiles/{profile_name}/blacklist.json")
         else:
             self._file = DEFAULT_BLACKLIST_FILE
 
@@ -60,7 +60,7 @@ class BlacklistManager:
     def add(self, symbol: str, reason: str, permanent: bool = False):
         expiry_hours = self.cfg["auto_expiry_hours"]
         expiry       = 0.0 if permanent else (time.time() + expiry_hours * 3600)
-        duration     = "permanent" if permanent else "expires in {}h".format(expiry_hours)
+        duration     = "permanent" if permanent else f"expires in {expiry_hours}h"
         self._list[symbol] = {
             "reason":   reason,
             "expires":  expiry,
@@ -68,14 +68,14 @@ class BlacklistManager:
         }
         self._save()
         logger.warning(
-            "[Blacklist] {} BLACKLISTED — {} ({})".format(symbol, reason, duration))
+            f"[Blacklist] {symbol} BLACKLISTED — {reason} ({duration})")
 
     def remove(self, symbol: str):
         if symbol in self._list:
             del self._list[symbol]
             self._sl_counts.pop(symbol, None)
             self._save()
-            logger.info("[Blacklist] {} removed.".format(symbol))
+            logger.info(f"[Blacklist] {symbol} removed.")
 
     def record_stop_loss(self, symbol: str, direction: str = ""):
         """Record a stop-loss hit. Direction-aware: 3 LONG SLs only blacklists LONGs."""
@@ -83,7 +83,7 @@ class BlacklistManager:
         self._sl_counts[key] = self._sl_counts.get(key, 0) + 1
         count = self._sl_counts[key]
         limit = self.cfg["consecutive_sl_limit"]
-        logger.debug("[Blacklist] {} SL count: {}/{}".format(key, count, limit))
+        logger.debug(f"[Blacklist] {key} SL count: {count}/{limit}")
         if count >= limit:
             self.add(key, "{} consecutive stop losses ({})".format(count, direction or "all"))
             self._sl_counts[key] = 0   # reset counter after blacklisting
@@ -93,8 +93,7 @@ class BlacklistManager:
         key = f"{symbol}:{direction}" if direction else symbol
         if self._sl_counts.get(key, 0) > 0:
             logger.debug(
-                "[Blacklist] {} WIN — resetting SL counter (was {})".format(
-                    key, self._sl_counts[key]))
+                f"[Blacklist] {key} WIN — resetting SL counter (was {self._sl_counts[key]})")
         self._sl_counts[key] = 0
 
     def check_volatility(self, symbol: str, candle: list):
@@ -107,10 +106,9 @@ class BlacklistManager:
             if spike >= limit:
                 self.add(
                     symbol,
-                    "volatility spike {:.1f}% (limit {:.0f}%)".format(
-                        spike * 100, limit * 100))
+                    f"volatility spike {spike * 100:.1f}% (limit {limit * 100:.0f}%)")
         except Exception as e:
-            logger.debug("[Blacklist] volatility check error: {}".format(e))
+            logger.debug(f"[Blacklist] volatility check error: {e}")
 
     def get_all(self) -> dict:
         self._purge_expired()
@@ -124,7 +122,7 @@ class BlacklistManager:
         self._sl_counts.clear()
         self._save()
         if non_perm:
-            logger.info("[Blacklist] Cleared {} entries.".format(len(non_perm)))
+            logger.info(f"[Blacklist] Cleared {len(non_perm)} entries.")
 
     # ── Internal ──────────────────────────────────────────────────────
 
@@ -135,7 +133,7 @@ class BlacklistManager:
             if e["expires"] > 0 and now > e["expires"]
         ]
         for s in expired:
-            logger.info("[Blacklist] {} expired — removed.".format(s))
+            logger.info(f"[Blacklist] {s} expired — removed.")
             del self._list[s]
             self._sl_counts.pop(s, None)   # FIX: reset SL count when expiry clears
         if expired:
@@ -147,7 +145,7 @@ class BlacklistManager:
             self._file.write_text(
                 json.dumps(self._list, indent=2), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Blacklist] Save error: {}".format(e))
+            logger.debug(f"[Blacklist] Save error: {e}")
 
     def _load(self):
         try:
@@ -157,8 +155,7 @@ class BlacklistManager:
                 self._purge_expired()
                 if self._list:
                     logger.info(
-                        "[Blacklist] Loaded {} blocked symbols: {}".format(
-                            len(self._list), list(self._list.keys())))
+                        f"[Blacklist] Loaded {len(self._list)} blocked symbols: {list(self._list.keys())}")
         except Exception as e:
-            logger.debug("[Blacklist] Load error: {}".format(e))
+            logger.debug(f"[Blacklist] Load error: {e}")
             self._list = {}

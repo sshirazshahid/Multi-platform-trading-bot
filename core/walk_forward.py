@@ -21,7 +21,7 @@ Reference: López de Prado, "Advances in Financial Machine Learning" Ch.7.
 """
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import numpy as np
 from sklearn.model_selection import TimeSeriesSplit

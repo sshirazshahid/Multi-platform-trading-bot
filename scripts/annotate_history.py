@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 # Load warehouse without triggering core/__init__ (which imports the full bot)
 import importlib.util as _il  # noqa: E402
+
 _spec = _il.spec_from_file_location("warehouse", ROOT / "core" / "warehouse.py")
 _mod = _il.module_from_spec(_spec)
 sys.modules["warehouse"] = _mod

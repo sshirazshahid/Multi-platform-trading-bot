@@ -6,7 +6,6 @@ persistence, order-rejection rolling window, and stale-data detection.
 from __future__ import annotations
 
 import json
-import time as _time
 from pathlib import Path
 
 import pytest

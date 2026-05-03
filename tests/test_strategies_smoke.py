@@ -26,7 +26,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
 
@@ -185,7 +184,7 @@ def test_kill_criteria_monitor_importable():
 
 
 def test_projected_sizer_importable():
-    from core.agents.projected_sizer import project, make_sizer
+    from core.agents.projected_sizer import make_sizer, project
     assert project is not None and make_sizer is not None
 
 

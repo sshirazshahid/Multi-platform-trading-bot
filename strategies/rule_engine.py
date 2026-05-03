@@ -37,11 +37,10 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-
 
 # ── Pure-pandas indicator library ────────────────────────────────────
 

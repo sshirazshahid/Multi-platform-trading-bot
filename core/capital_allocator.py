@@ -13,11 +13,15 @@ Max 20% of any wallet transferred per cycle. 15-minute cycle.
 import json
 import time
 from pathlib import Path
+
 from loguru import logger
 
 try:
     from config import (
-        DRY_RUN, CAPITAL_ALLOCATION as CFG,
+        CAPITAL_ALLOCATION as CFG,
+    )
+    from config import (
+        DRY_RUN,
     )
 except ImportError:
     DRY_RUN = True
@@ -133,7 +137,7 @@ class CapitalAllocator:
                         "to": "futures",
                         "coin": coin,
                         "amount_usdt": round(deploy_amt, 2),
-                        "reason": f"structure_break → deploy to futures",
+                        "reason": "structure_break → deploy to futures",
                     })
         return actions
 
@@ -143,7 +147,7 @@ class CapitalAllocator:
         if not self._spot_mgr:
             return actions
 
-        hedge_dd = CFG.get("hedge_drawdown_pct", 0.10)
+        CFG.get("hedge_drawdown_pct", 0.10)
 
         for ex_name, holdings in getattr(self._spot_mgr, "_holdings", {}).items():
             for coin, holding in holdings.items():
@@ -250,7 +254,7 @@ class CapitalAllocator:
                 exchange = self._exchanges.get(action["exchange"])
                 if not exchange:
                     return False
-                symbol = f"{action['coin']}/USDT"
+                f"{action['coin']}/USDT"
                 # Sell spot coin
                 if self._order_mgr:
                     logger.info(
@@ -273,8 +277,8 @@ class CapitalAllocator:
 
             elif action_type == "REBALANCE":
                 logger.info(
-                    f"[CapAlloc] Cross-exchange rebalance not yet supported "
-                    f"(requires withdrawal API)")
+                    "[CapAlloc] Cross-exchange rebalance not yet supported "
+                    "(requires withdrawal API)")
                 return False
 
         except Exception as e:

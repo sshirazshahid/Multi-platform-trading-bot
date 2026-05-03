@@ -28,8 +28,6 @@ Stateless except for a small slippage counter used for diagnostics.
 """
 from typing import Optional, Tuple
 
-from loguru import logger
-
 try:
     from config import SLIPPAGE as _SLIP_CFG
 except Exception:  # pragma: no cover — config should always import

@@ -52,7 +52,7 @@ class LRModel:
         self.n_features_: Optional[int] = None
         self.classes_: Optional[np.ndarray] = None
 
-    def fit(self, X, y) -> "LRModel":
+    def fit(self, X, y) -> LRModel:
         X = np.asarray(X, dtype=float)
         y = np.asarray(y).ravel()
         if X.ndim != 2:
@@ -129,7 +129,7 @@ class LRModel:
         joblib.dump(payload, path)
 
     @classmethod
-    def load(cls, path) -> "LRModel":
+    def load(cls, path) -> LRModel:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"model artifact not found: {path}")
@@ -180,7 +180,7 @@ class GBMModel:
         self.n_features_: Optional[int] = None
         self.classes_: Optional[np.ndarray] = None
 
-    def fit(self, X, y) -> "GBMModel":
+    def fit(self, X, y) -> GBMModel:
         X = np.asarray(X, dtype=float)
         y = np.asarray(y).ravel()
         if X.ndim != 2:
@@ -252,7 +252,7 @@ class GBMModel:
         joblib.dump(payload, path)
 
     @classmethod
-    def load(cls, path) -> "GBMModel":
+    def load(cls, path) -> GBMModel:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"model artifact not found: {path}")

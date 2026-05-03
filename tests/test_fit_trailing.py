@@ -108,6 +108,7 @@ def test_trailing_stop_manager_loads_fitted_params(monkeypatch, tmp_path):
 
     # Fresh import so module-level constants pick up the new cwd
     from importlib import reload
+
     import core.trailing_stop_manager as tsm
     reload(tsm)
     mgr = tsm.TrailingStopManager()
@@ -123,6 +124,7 @@ def test_trailing_stop_manager_falls_back_without_params(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir()
     from importlib import reload
+
     import core.trailing_stop_manager as tsm
     reload(tsm)
     mgr = tsm.TrailingStopManager()

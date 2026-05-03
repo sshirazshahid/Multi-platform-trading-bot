@@ -10,7 +10,7 @@ tiers). The clamp path must:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

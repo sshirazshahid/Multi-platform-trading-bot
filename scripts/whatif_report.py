@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import importlib.util as _il
+
 _spec = _il.spec_from_file_location("warehouse", ROOT / "core" / "warehouse.py")
 _mod = _il.module_from_spec(_spec)
 sys.modules["warehouse"] = _mod

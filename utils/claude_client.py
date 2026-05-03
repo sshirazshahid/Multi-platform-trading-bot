@@ -15,6 +15,7 @@ import subprocess
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
+
 from loguru import logger
 
 _CLAUDE_BIN = shutil.which("claude") or "claude"
@@ -54,10 +55,10 @@ def _check_claude_code() -> bool:
         )
         if r.returncode == 0 and r.stdout.strip():
             _claude_code_available = True
-            logger.debug("[ClaudeClient] CLI found: {}".format(r.stdout.strip()))
+            logger.debug(f"[ClaudeClient] CLI found: {r.stdout.strip()}")
             return True
     except Exception as e:
-        logger.debug("[ClaudeClient] CLI check failed: {}".format(e))
+        logger.debug(f"[ClaudeClient] CLI check failed: {e}")
     _claude_code_available = False
     return False
 
@@ -120,16 +121,16 @@ def call_claude_cli(
             audit["returncode"] = r.returncode
 
             if not r.stdout.strip():
-                _last_error = "empty output (rc={})".format(r.returncode)
+                _last_error = f"empty output (rc={r.returncode})"
                 if r.stderr:
-                    _last_error += " stderr: {}".format(r.stderr[:200])
-                logger.debug("[ClaudeClient] CLI {}".format(_last_error))
+                    _last_error += f" stderr: {r.stderr[:200]}"
+                logger.debug(f"[ClaudeClient] CLI {_last_error}")
                 audit["status"] = "empty_output"
                 audit["error"] = _last_error
                 _audit_log(audit)
                 if attempt < MAX_CLI_RETRIES - 1:
                     delay = CLI_BACKOFF_BASE * (2 ** attempt) + random.random()
-                    logger.debug("[ClaudeClient] Retrying in {:.1f}s...".format(delay))
+                    logger.debug(f"[ClaudeClient] Retrying in {delay:.1f}s...")
                     _time.sleep(delay)
                     continue
                 return None
@@ -144,8 +145,7 @@ def call_claude_cli(
                     envelope = json.loads(r.stdout[start:end])
                 else:
                     logger.debug(
-                        "[ClaudeClient] Cannot parse output: {}".format(
-                            r.stdout[:200]))
+                        f"[ClaudeClient] Cannot parse output: {r.stdout[:200]}")
                     audit["status"] = "parse_error"
                     _audit_log(audit)
                     return None
@@ -154,8 +154,8 @@ def call_claude_cli(
                 err = (envelope.get("error")
                        or " | ".join(envelope.get("errors", []))
                        or envelope.get("result", "unknown error"))
-                _last_error = "CLI error: {}".format(err[:200])
-                logger.debug("[ClaudeClient] {}".format(_last_error))
+                _last_error = f"CLI error: {err[:200]}"
+                logger.debug(f"[ClaudeClient] {_last_error}")
                 audit["status"] = "cli_error"
                 audit["error"] = err[:200]
                 _audit_log(audit)
@@ -168,14 +168,14 @@ def call_claude_cli(
             text = envelope.get("result", "").strip()
             if not text:
                 _last_error = "CLI returned no result text"
-                logger.debug("[ClaudeClient] {}".format(_last_error))
+                logger.debug(f"[ClaudeClient] {_last_error}")
                 audit["status"] = "empty_result"
                 _audit_log(audit)
                 return None
 
             cost = envelope.get("total_cost_usd", 0)
             if cost > 0:
-                logger.debug("[ClaudeClient] Cost: ${:.4f}".format(cost))
+                logger.debug(f"[ClaudeClient] Cost: ${cost:.4f}")
             audit["status"] = "success"
             audit["cost_usd"] = cost
             audit["response_len"] = len(text)
@@ -183,27 +183,27 @@ def call_claude_cli(
             return text
 
         except subprocess.TimeoutExpired:
-            _last_error = "timed out ({}s)".format(timeout)
-            logger.debug("[ClaudeClient] CLI {}".format(_last_error))
+            _last_error = f"timed out ({timeout}s)"
+            logger.debug(f"[ClaudeClient] CLI {_last_error}")
             audit["status"] = "timeout"
             audit["latency_sec"] = round(_time.time() - t0, 2)
             _audit_log(audit)
             if attempt < MAX_CLI_RETRIES - 1:
                 delay = CLI_BACKOFF_BASE * (2 ** attempt) + random.random()
-                logger.debug("[ClaudeClient] Retrying in {:.1f}s...".format(delay))
+                logger.debug(f"[ClaudeClient] Retrying in {delay:.1f}s...")
                 _time.sleep(delay)
                 continue
             return None
         except FileNotFoundError:
             _claude_code_available = False
             _last_error = "CLI binary not found"
-            logger.debug("[ClaudeClient] {}".format(_last_error))
+            logger.debug(f"[ClaudeClient] {_last_error}")
             audit["status"] = "not_found"
             _audit_log(audit)
             return None  # no point retrying
         except Exception as e:
-            _last_error = "invocation failed: {}".format(e)
-            logger.debug("[ClaudeClient] CLI {}".format(_last_error))
+            _last_error = f"invocation failed: {e}"
+            logger.debug(f"[ClaudeClient] CLI {_last_error}")
             audit["status"] = "exception"
             audit["error"] = str(e)[:200]
             _audit_log(audit)
@@ -272,14 +272,13 @@ def validate_json_response(text: str, required_fields: list[str] = None,
         cleaned = strip_markdown_fences(text)
         data = json.loads(cleaned)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("[ClaudeClient] JSON parse failed: {} — text: {}".format(
-            e, text[:200]))
+        logger.error(f"[ClaudeClient] JSON parse failed: {e} — text: {text[:200]}")
         _audit_log({"status": "validation_fail", "reason": "json_parse",
                      "error": str(e)[:200]})
         return None
 
     if not isinstance(data, dict):
-        logger.error("[ClaudeClient] Expected JSON object, got {}".format(type(data).__name__))
+        logger.error(f"[ClaudeClient] Expected JSON object, got {type(data).__name__}")
         return None
 
     # Check required fields
@@ -287,8 +286,8 @@ def validate_json_response(text: str, required_fields: list[str] = None,
         missing = [f for f in required_fields if f not in data]
         if missing:
             logger.warning(
-                "[ClaudeClient] Missing required fields: {} — "
-                "got keys: {}".format(missing, list(data.keys())[:10]))
+                f"[ClaudeClient] Missing required fields: {missing} — "
+                f"got keys: {list(data.keys())[:10]}")
             _audit_log({"status": "validation_fail", "reason": "missing_fields",
                          "missing": missing})
             return None
@@ -303,8 +302,7 @@ def validate_json_response(text: str, required_fields: list[str] = None,
                         data[field] = expected_type(val)
                     except (ValueError, TypeError):
                         logger.warning(
-                            "[ClaudeClient] Field '{}' cannot convert to {}: {}".format(
-                                field, expected_type.__name__, val))
+                            f"[ClaudeClient] Field '{field}' cannot convert to {expected_type.__name__}: {val}")
 
     return data
 

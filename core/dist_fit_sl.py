@@ -291,7 +291,7 @@ def compute_sl_tp(
         Both fractions of entry price.
     """
     mae_arr = np.asarray(mae_history, dtype=float).ravel()
-    mfe_arr = np.asarray(mfe_history, dtype=float).ravel()
+    np.asarray(mfe_history, dtype=float).ravel()
     atr_pct = float(atr_pct or 0.0)
 
     fallback_sl = atr_pct * ATR_FALLBACK_SL_MULT

@@ -116,22 +116,22 @@ def _md_report(data: dict) -> str:
     today = datetime.now().strftime("%Y-%m-%d")
     lines = [
         f"# STAR review - {today}",
-        f"",
+        "",
         f"Window: last **{data['window_days']} days**, claude_portfolio strategy only.",
-        f"",
-        f"## Current STARs",
-        f"",
+        "",
+        "## Current STARs",
+        "",
     ]
     for s in data["current_stars"]:
         lines.append(f"- `{s}`")
 
     lines += [
-        f"",
-        f"## Promotion candidates (would add)",
-        f"",
+        "",
+        "## Promotion candidates (would add)",
+        "",
         f"_Criteria: n&gt;={PROMOTE_MIN_N}, mean>$%.2f, WR&gt;=%d%%, no trade worse than $%.2f_"
         % (PROMOTE_MIN_MEAN, int(PROMOTE_MIN_WR*100), PROMOTE_MAX_WORST),
-        f"",
+        "",
     ]
     if data["promote"]:
         lines.append("| symbol | n | total | mean | worst | best | WR |")
@@ -147,12 +147,12 @@ def _md_report(data: dict) -> str:
         lines.append("_(none — current STARs are still the best edge)_")
 
     lines += [
-        f"",
-        f"## Demotion candidates (would remove)",
-        f"",
+        "",
+        "## Demotion candidates (would remove)",
+        "",
         f"_Criteria: STAR with n&gt;={DEMOTE_MIN_N} AND mean<${DEMOTE_MEAN_FLOOR:.2f} "
         f"(net-negative expected value — profitable symbols stay STAR even at low WR)_",
-        f"",
+        "",
     ]
     if data["demote"]:
         lines.append("| symbol | n | total | mean | WR |")
@@ -167,11 +167,11 @@ def _md_report(data: dict) -> str:
         lines.append("_(none — current STARs all healthy)_")
 
     lines += [
-        f"",
-        f"## Watch list (borderline — close to promotion threshold)",
-        f"",
-        f"_n&gt;=8, mean&gt;=$0 — gather more data before deciding_",
-        f"",
+        "",
+        "## Watch list (borderline — close to promotion threshold)",
+        "",
+        "_n&gt;=8, mean&gt;=$0 — gather more data before deciding_",
+        "",
     ]
     if data["watch"]:
         lines.append("| symbol | n | total | mean | WR |")
@@ -186,19 +186,19 @@ def _md_report(data: dict) -> str:
         lines.append("_(none)_")
 
     lines += [
-        f"",
-        f"## How to apply",
-        f"",
-        f"To promote a symbol, edit `config.py` STAR_SYMBOLS set:",
-        f"```python",
-        f"STAR_SYMBOLS = {{",
-        f'    "ATOM/USDT:USDT", "ARB/USDT:USDT", "DOGE/USDT:USDT",',
-        f'    # "<NEW>/USDT:USDT",  # added <date> per star_review',
-        f"}}",
-        f"```",
-        f"",
-        f"To demote, simply remove the symbol from the set. The expectancy",
-        f"filter will then check it against the non-STAR floor ($0.05 mean).",
+        "",
+        "## How to apply",
+        "",
+        "To promote a symbol, edit `config.py` STAR_SYMBOLS set:",
+        "```python",
+        "STAR_SYMBOLS = {",
+        '    "ATOM/USDT:USDT", "ARB/USDT:USDT", "DOGE/USDT:USDT",',
+        '    # "<NEW>/USDT:USDT",  # added <date> per star_review',
+        "}",
+        "```",
+        "",
+        "To demote, simply remove the symbol from the set. The expectancy",
+        "filter will then check it against the non-STAR floor ($0.05 mean).",
     ]
     return "\n".join(lines)
 

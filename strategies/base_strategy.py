@@ -11,11 +11,13 @@ FIX: get_dataframe() now requires >= 30 candles (was 2 — useless for indicator
 """
 
 from abc import ABC, abstractmethod
+
 import pandas as pd
 from loguru import logger
-from exchanges.base  import BaseExchange
+
 from core.order_manager import OrderManager
-from core.risk_manager  import RiskManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 
 # Minimum candles needed to compute any indicator reliably
 MIN_CANDLES = 30

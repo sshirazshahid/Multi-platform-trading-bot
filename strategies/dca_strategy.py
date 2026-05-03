@@ -22,13 +22,15 @@ Configuration (config.py DCA section):
 import time
 from collections import defaultdict
 from datetime import date
+
 from loguru import logger
 
+from config import DCA as CFG
+from config import DRY_RUN
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import DCA as CFG, DRY_RUN
 
 
 class DCAStrategy(BaseStrategy):
@@ -193,7 +195,7 @@ class DCAStrategy(BaseStrategy):
 
         # Regular interval buy
         if (now - last) >= interval_secs:
-            return True, f"scheduled interval", amount
+            return True, "scheduled interval", amount
 
         return False, "", 0.0
 

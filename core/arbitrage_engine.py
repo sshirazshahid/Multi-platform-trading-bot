@@ -20,9 +20,10 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime    import datetime
-from pathlib     import Path
-from loguru      import logger
+from datetime import datetime
+from pathlib import Path
+
+from loguru import logger
 
 MIN_SPREAD_PCT  = 0.004    # 0.40% minimum net spread
 MAX_SPREAD_PCT  = 0.08     # 8% cap (wider likely = stale price data)
@@ -78,12 +79,7 @@ class ArbOpportunity:
 
     @property
     def label(self) -> str:
-        return "ARB {}: {} @{:.4f} → {} @{:.4f} spread={:.3f}%".format(
-            self.symbol,
-            self.buy_exchange,  self.buy_price,
-            self.sell_exchange, self.sell_price,
-            self.net_spread * 100,
-        )
+        return f"ARB {self.symbol}: {self.buy_exchange} @{self.buy_price:.4f} → {self.sell_exchange} @{self.sell_price:.4f} spread={self.net_spread * 100:.3f}%"
 
 
 @dataclass
@@ -156,9 +152,7 @@ class ArbitrageEngine:
         self._research   = self._load_research()
         self._news_cache = self._load_news_cache()
 
-        logger.info("[Arb] Scan #{} — {} symbols × {} exchange pairs".format(
-            self._scan_count, len(symbols),
-            len(self.exchanges) * (len(self.exchanges) - 1) // 2))
+        logger.info(f"[Arb] Scan #{self._scan_count} — {len(symbols)} symbols × {len(self.exchanges) * (len(self.exchanges) - 1) // 2} exchange pairs")
 
         found    = []
         ex_names = list(self.exchanges.keys())
@@ -173,8 +167,7 @@ class ArbitrageEngine:
                         if opp:
                             found.append(opp)
                     except Exception as e:
-                        logger.debug("[Arb] {}/{} {}: {}".format(
-                            ex_a, ex_b, symbol, e))
+                        logger.debug(f"[Arb] {ex_a}/{ex_b} {symbol}: {e}")
                     time.sleep(0.1)
 
         found.sort(key=lambda o: o.net_spread, reverse=True)
@@ -244,8 +237,7 @@ class ArbitrageEngine:
         gross_spread = (sell_price - buy_price) / buy_price
         net_spread   = gross_spread - buy_fee - sell_fee
 
-        hist_key = "{}-{}-{}".format(
-            min(buy_ex, sell_ex), max(buy_ex, sell_ex), symbol)
+        hist_key = f"{min(buy_ex, sell_ex)}-{max(buy_ex, sell_ex)}-{symbol}"
         self._spread_history.push(hist_key, gross_spread)
         zscore = self._spread_history.zscore(hist_key, gross_spread)
 
@@ -256,8 +248,7 @@ class ArbitrageEngine:
             symbol, net_spread, gross_spread, zscore, vol_buy, vol_sell)
 
         if reject_reason:
-            logger.debug("[Arb] {} {}/{}: REJECTED — {}".format(
-                symbol, buy_ex, sell_ex, reject_reason))
+            logger.debug(f"[Arb] {symbol} {buy_ex}/{sell_ex}: REJECTED — {reject_reason}")
             return None
 
         if net_spread < MIN_SPREAD_PCT:
@@ -278,8 +269,7 @@ class ArbitrageEngine:
             confidence=round(confidence, 3),
             dry_run=self.dry_run,
         )
-        logger.info("[Arb] OPPORTUNITY: {}  conf={:.0%}  z={:.1f}".format(
-            opp.label, confidence, zscore))
+        logger.info(f"[Arb] OPPORTUNITY: {opp.label}  conf={confidence:.0%}  z={zscore:.1f}")
         return opp
 
     def _institutional_filters(
@@ -313,8 +303,7 @@ class ArbitrageEngine:
         bridge = min(1.0, net_spread / MIN_SPREAD_PCT * 0.5 + 0.5)
         if gross_spread > 0.03:
             bridge *= 0.5
-            rejects.append("Bridgewater: spread {:.2f}% suspiciously large".format(
-                gross_spread * 100))
+            rejects.append(f"Bridgewater: spread {gross_spread * 100:.2f}% suspiciously large")
         scores["bridgewater"] = round(bridge, 3)
 
         # 4. JPMorgan — Fear & Greed gate
@@ -326,7 +315,7 @@ class ArbitrageEngine:
             pass
         if fg < 10:
             jpm = 0.4
-            rejects.append("JPMorgan: Extreme Fear F&G={}".format(fg))
+            rejects.append(f"JPMorgan: Extreme Fear F&G={fg}")
         elif fg > 85:
             jpm = 0.6
         else:
@@ -338,7 +327,7 @@ class ArbitrageEngine:
         regime = (research.get("blackrock") or {}).get("regime","GROWTH")
         if "VOLATILE" in regime or "CRASH" in regime:
             br = 0.3
-            rejects.append("BlackRock: regime '{}' too volatile".format(regime))
+            rejects.append(f"BlackRock: regime '{regime}' too volatile")
         elif "ACCUMULATION" in regime or "GROWTH" in regime:
             br = 0.85
         scores["blackrock"] = br
@@ -348,15 +337,14 @@ class ArbitrageEngine:
         if zscore == 0.0:
             citadel = 0.5  # neutral — not enough history to judge
         elif zscore < ZSCORE_THRESHOLD:
-            rejects.append("Citadel: z={:.1f} < {:.1f}".format(
-                zscore, ZSCORE_THRESHOLD))
+            rejects.append(f"Citadel: z={zscore:.1f} < {ZSCORE_THRESHOLD:.1f}")
         scores["citadel"] = round(citadel, 3)
 
         # 7. Harvard — liquidity
         min_vol    = min(vol_buy, vol_sell)
         harv_score = min(1.0, min_vol / (LIQUIDITY_MIN * 10))
         if min_vol < LIQUIDITY_MIN:
-            rejects.append("Harvard: volume ${:,.0f} < min".format(min_vol))
+            rejects.append(f"Harvard: volume ${min_vol:,.0f} < min")
         scores["harvard"] = round(harv_score, 3)
 
         # 8. Bain Capital — coin tier
@@ -393,12 +381,8 @@ class ArbitrageEngine:
         except Exception:
             return False
 
-        arb_id = "ARB-{}-{}-{}".format(
-            opp.buy_exchange[:3].upper(),
-            opp.sell_exchange[:3].upper(),
-            str(uuid.uuid4())[:6],
-        )
-        strategy_tag = "arbitrage|{}".format(self.profile_name)
+        arb_id = f"ARB-{opp.buy_exchange[:3].upper()}-{opp.sell_exchange[:3].upper()}-{str(uuid.uuid4())[:6]}"
+        strategy_tag = f"arbitrage|{self.profile_name}"
 
         if self.dry_run:
             buy_pos = sell_pos = None
@@ -425,11 +409,8 @@ class ArbitrageEngine:
             )
             self._open_arbs.append(arb_pos)
             logger.info(
-                "[Arb][DRY] OPENED {} | size={:.6f} | "
-                "exp_net={:.4f} USDT | conf={:.0%}".format(
-                    opp.label, size,
-                    opp.net_spread * size * opp.buy_price,
-                    opp.confidence))
+                f"[Arb][DRY] OPENED {opp.label} | size={size:.6f} | "
+                f"exp_net={opp.net_spread * size * opp.buy_price:.4f} USDT | conf={opp.confidence:.0%}")
             return True
 
         else:
@@ -437,7 +418,7 @@ class ArbitrageEngine:
                 buy_order = buy_ex.create_order(
                     opp.symbol, "market", "buy", size, market_type="spot")
             except Exception as e:
-                logger.error("[Arb][LIVE] Buy leg failed: {}".format(e))
+                logger.error(f"[Arb][LIVE] Buy leg failed: {e}")
                 return False
             try:
                 sell_order = sell_ex.create_order(
@@ -446,17 +427,15 @@ class ArbitrageEngine:
                 # Buy succeeded but sell failed — unhedged! Rollback buy leg
                 logger.error(
                     "[Arb][LIVE] Sell leg failed after buy filled — "
-                    "rolling back buy with market sell: {}".format(e))
+                    f"rolling back buy with market sell: {e}")
                 try:
                     buy_ex.create_order(
                         opp.symbol, "market", "sell", size, market_type="spot")
-                    logger.info("[Arb][LIVE] Rollback sell executed on {}".format(
-                        opp.buy_exchange))
+                    logger.info(f"[Arb][LIVE] Rollback sell executed on {opp.buy_exchange}")
                 except Exception as e2:
                     logger.critical(
                         "[Arb][LIVE] ROLLBACK FAILED — manual intervention needed! "
-                        "{} {} bought on {} but unsold: {}".format(
-                            size, opp.symbol, opp.buy_exchange, e2))
+                        f"{size} {opp.symbol} bought on {opp.buy_exchange} but unsold: {e2}")
                 return False
             arb_pos = ArbPosition(
                 id=arb_id, opportunity=opp, size=size,
@@ -464,8 +443,7 @@ class ArbitrageEngine:
                 sell_order_id=sell_order.get("id","?"),
             )
             self._open_arbs.append(arb_pos)
-            logger.info("[Arb][LIVE] Orders placed — buy:{} sell:{}".format(
-                arb_pos.buy_order_id, arb_pos.sell_order_id))
+            logger.info(f"[Arb][LIVE] Orders placed — buy:{arb_pos.buy_order_id} sell:{arb_pos.sell_order_id}")
             return True
 
     def _check_exits(self):
@@ -485,13 +463,12 @@ class ArbitrageEngine:
         self._closed_arbs.append(arb)
         if len(self._closed_arbs) > 200:
             self._closed_arbs = self._closed_arbs[-200:]
-        logger.info("[Arb] CLOSED {} reason={} est_pnl={:+.4f} USDT".format(
-            opp.label, reason, arb.pnl))
+        logger.info(f"[Arb] CLOSED {opp.label} reason={reason} est_pnl={arb.pnl:+.4f} USDT")
 
     def _fee(self, exchange_name: str, fee_type: str) -> float:
         try:
             from config import FEE
-            key = "{}_{}".format(exchange_name.lower(), fee_type)
+            key = f"{exchange_name.lower()}_{fee_type}"
             if key in FEE:
                 return FEE[key]
             return FEE.get(fee_type, 0.001)
@@ -603,4 +580,4 @@ class ArbitrageEngine:
             ARB_DATA_FILE.write_text(
                 json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Arb] Save log: {}".format(e))
+            logger.debug(f"[Arb] Save log: {e}")

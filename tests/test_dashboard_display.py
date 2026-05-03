@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ─── Bug 1: daily-loss / drawdown limit format ─────────────────────────
 
 
@@ -35,14 +34,14 @@ import pytest
 ])
 def test_daily_loss_limit_renders_one_decimal(limit_pct, expected):
     """Match the production format string used in the RISK panel."""
-    out = "{:.1f}".format(limit_pct)
+    out = f"{limit_pct:.1f}"
     assert out == expected
 
 
 def test_old_zero_decimal_format_misleads_at_one_point_five():
     """Document the original buggy behavior so a regression is visible
     without re-running the dashboard against live state."""
-    bug_render = "{:.0f}".format(1.5)
+    bug_render = f"{1.5:.0f}"
     assert bug_render == "2", (
         "Confirms the original :.0f bug premise — 1.5 silently rounds to 2. "
         "This test exists to anchor the regression: if format ever returns "
@@ -90,7 +89,7 @@ def _mem_str(mb: float | None) -> str:
     """Replica of the production fallback chain."""
     if not mb or mb == 0:
         return "n/a"
-    return "{:.0f}MB".format(mb)
+    return f"{mb:.0f}MB"
 
 
 @pytest.mark.parametrize("mb,expected", [

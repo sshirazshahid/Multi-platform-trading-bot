@@ -16,11 +16,10 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -148,7 +147,7 @@ def backtest_symbol(
             if p is None:
                 continue
             pnl_pct, reason = _simulate_exit(p, future)
-            size = notional_usdt / max(p.entry, 1e-9)
+            notional_usdt / max(p.entry, 1e-9)
             gross = pnl_pct * notional_usdt
             fees = 2 * notional_usdt * fee_bps_per_side / 10_000.0
             net = gross - fees

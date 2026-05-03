@@ -10,8 +10,10 @@ Handles:
 
 import ccxt
 from loguru import logger
-from .base  import BaseExchange
-from config import BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE
+
+from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY
+
+from .base import BaseExchange
 
 _PLACEHOLDERS = {
     "", "none", "null",
@@ -140,10 +142,10 @@ class BitgetClient(BaseExchange):
         base = f"{type(e).__name__}: {e}"
         try:
             last_body   = getattr(self.exchange, "last_http_response", None)
-            last_code   = getattr(self.exchange, "last_response_headers", None)
+            getattr(self.exchange, "last_response_headers", None)
             last_req    = getattr(self.exchange, "last_request_url", None)
         except Exception:
-            last_body = last_code = last_req = None
+            last_body = last_req = None
         extras = []
         if last_body:
             body_str = str(last_body)
@@ -347,7 +349,7 @@ class BitgetClient(BaseExchange):
                         f"[Bitget] ORDER {side.upper()} {amount} {symbol} "
                         f"@ {price or 'MARKET'} | id={order.get('id')} (one-way retry)")
                     return order
-                except Exception as e2:
+                except Exception:
                     raise
             raise
         finally:

@@ -82,7 +82,7 @@ def test_backfill_dry_run_writes_nothing(env):
 def test_backfill_skips_already_attributed(env):
     """Re-running backfill must skip trades already in `attribution`."""
     wh, attr, bf = env
-    tid = _seed_trade(wh, entry_px=100.0, exit_px=101.0, size=1.0,
+    _seed_trade(wh, entry_px=100.0, exit_px=101.0, size=1.0,
                       side="buy", fee=0.02)
     n1 = bf.backfill(warehouse=wh, commit=True)
     assert n1 == 1

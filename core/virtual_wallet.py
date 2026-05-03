@@ -20,10 +20,11 @@ Only active in DRY_RUN mode. In LIVE mode this class is a no-op.
 
 import json
 import time
-from pathlib  import Path
-from loguru   import logger
-from config   import DRY_RUN
+from pathlib import Path
 
+from loguru import logger
+
+from config import DRY_RUN
 
 WALLET_FILE         = Path("data/virtual_wallet.json")
 DEFAULT_START_USDT  = 1000.0   # overridden by config.py DRY_RUN_BALANCE
@@ -217,7 +218,7 @@ class VirtualWallet:
                 else:
                     self._balances = data.get("balances", {})
                     logger.info(
-                        f"[VirtualWallet] Loaded balances: "
+                        "[VirtualWallet] Loaded balances: "
                         + ", ".join(
                             f"{k.upper()}={v:.4f}" for k, v in self._balances.items()
                         )

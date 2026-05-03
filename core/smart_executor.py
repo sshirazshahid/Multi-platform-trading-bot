@@ -21,8 +21,8 @@ On 100 trades/month, that's 10-30% additional annual return.
 
 import json
 import time
-import threading
 from pathlib import Path
+
 from loguru import logger
 
 EXEC_STATS_FILE = Path("data/execution_stats.json")

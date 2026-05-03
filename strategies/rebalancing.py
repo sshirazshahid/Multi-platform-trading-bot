@@ -20,13 +20,15 @@ Configuration (config.py REBALANCING section):
 """
 
 import time
+
 from loguru import logger
 
+from config import DRY_RUN
+from config import REBALANCING as CFG
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import REBALANCING as CFG, DRY_RUN
 
 
 class RebalancingStrategy(BaseStrategy):

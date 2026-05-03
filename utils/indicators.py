@@ -110,7 +110,7 @@ def momentum_exhaustion(close: pd.Series, high: pd.Series, low: pd.Series,
         return {"bull_exhaustion": False, "bear_exhaustion": False}
 
     rsi_vals = rsi(close, rsi_period)
-    recent = slice(-lookback, None)
+    slice(-lookback, None)
 
     # Bearish divergence: price higher high but RSI lower high → bull exhaustion
     price_hh = high.iloc[-1] >= high.iloc[-lookback:-1].max()

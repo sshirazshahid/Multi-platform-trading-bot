@@ -6,7 +6,6 @@ extender from compounding on operator-set values.
 """
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 

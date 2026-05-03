@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def _df_from_close(close: list[float], freq="1h"):
@@ -126,7 +125,7 @@ def test_pivot_detection_finds_known_extrema():
 
 
 def test_pattern_agent_inherits_baseagent():
-    from core.agents.pattern_agent import PatternAgent
     from core.agents.base_agent import BaseAgent
+    from core.agents.pattern_agent import PatternAgent
     assert issubclass(PatternAgent, BaseAgent)
     assert PatternAgent().name == "PatternAgent"

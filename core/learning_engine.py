@@ -15,9 +15,10 @@ The LearningEngine is the analysis layer — it runs the numbers.
 import json
 import time
 from collections import defaultdict
-from pathlib     import Path
-from datetime    import datetime, timezone
-from loguru      import logger
+from datetime import datetime, timezone
+from pathlib import Path
+
+from loguru import logger
 
 from core.knowledge_model import KnowledgeModel
 
@@ -64,16 +65,14 @@ class LearningEngine:
         total = len(all_trades)
         if total < MIN_SAMPLE_SIZE:
             logger.info(
-                "[Learning] {} closed trades — need {}. "
-                "Keep running in DRY RUN mode to build the model.".format(
-                    total, MIN_SAMPLE_SIZE))
+                f"[Learning] {total} closed trades — need {MIN_SAMPLE_SIZE}. "
+                "Keep running in DRY RUN mode to build the model.")
             if dry_trades:
                 self.knowledge.update_from_trades(dry_trades, mode="dry")
             return {}
 
         logger.info(
-            "[Learning] Analyzing {} trades ({} paper + {} live)...".format(
-                total, len(dry_trades), len(live_trades)))
+            f"[Learning] Analyzing {total} trades ({len(dry_trades)} paper + {len(live_trades)} live)...")
 
         if dry_trades:
             self.knowledge.update_from_trades(dry_trades, mode="dry")
@@ -97,7 +96,7 @@ class LearningEngine:
                             "[Kelly] {} has NEGATIVE edge: WR={:.0f}% R={:.2f}"
                             .format(strat, ks["win_rate"], ks["r_multiple"]))
             except Exception as e:
-                logger.debug("[Learning] Kelly update: {}".format(e))
+                logger.debug(f"[Learning] Kelly update: {e}")
 
         if self.calibrator:
             try:
@@ -114,7 +113,7 @@ class LearningEngine:
                         .format(cal_summary["avg_calibration_error"],
                                 cal_summary["total_recorded"]))
             except Exception as e:
-                logger.debug("[Learning] Calibrator update: {}".format(e))
+                logger.debug(f"[Learning] Calibrator update: {e}")
 
         return insights
 
@@ -149,11 +148,11 @@ class LearningEngine:
                         seen_ids.add(pid)
                     result.append(t)
             except Exception as e:
-                logger.debug("[Learning] Load {}: {}".format(path, e))
+                logger.debug(f"[Learning] Load {path}: {e}")
 
         _ingest(POSITIONS_FILE)
         for prof in PROFILE_NAMES:
-            _ingest(Path("data/profiles/{}/positions.json".format(prof)))
+            _ingest(Path(f"data/profiles/{prof}/positions.json"))
 
         return result
 
@@ -241,9 +240,8 @@ class LearningEngine:
                 if gross_pnl > 0 and total_fees / gross_pnl > 0.20:
                     fee_ratio = total_fees / gross_pnl
                     suggestions.append(
-                        "FEE_ALERT: '{}' fees consume {:.0%} of gross profit "
-                        "(${:.2f} / ${:.2f}). Auto-flagging.".format(
-                            s, fee_ratio, total_fees, gross_pnl))
+                        f"FEE_ALERT: '{s}' fees consume {fee_ratio:.0%} of gross profit "
+                        f"(${total_fees:.2f} / ${gross_pnl:.2f}). Auto-flagging.")
                     if hasattr(self, 'knowledge'):
                         self.knowledge.flag_fee_heavy(s, fee_ratio)
                 if d["avg_fee"] > 0.50:
@@ -266,17 +264,16 @@ class LearningEngine:
                 if abs(diff) >= 15:
                     direction = "improved" if diff > 0 else "declined"
                     suggestions.append(
-                        "LIVE VS DRY: '{}' WR {} from {:.0f}% (paper) "
-                        "to {:.0f}% (live) ({:+.0f}pp)".format(
-                            s, direction, dry_wr, live_wr, diff))
+                        f"LIVE VS DRY: '{s}' WR {direction} from {dry_wr:.0f}% (paper) "
+                        f"to {live_wr:.0f}% (live) ({diff:+.0f}pp)")
 
         best_hours = sorted(
             [(h, d) for h, d in all_hour.items() if d["trades"] >= 3],
             key=lambda x: x[1]["win_rate"], reverse=True
         )[:3]
         if best_hours:
-            hrs = ", ".join("{:02d}:00 UTC".format(h) for h, _ in best_hours)
-            suggestions.append("BEST HOURS: Most profitable trades at {}.".format(hrs))
+            hrs = ", ".join(f"{h:02d}:00 UTC" for h, _ in best_hours)
+            suggestions.append(f"BEST HOURS: Most profitable trades at {hrs}.")
 
         km = self.knowledge.export_status()
         if km["dry_run_trades"] > 0 and km["live_trades"] == 0:
@@ -343,17 +340,17 @@ class LearningEngine:
                             s, d.get("trades",0), d.get("win_rate",0),
                             c, d.get("net_pnl",0),
                             d.get("total_fees",0), d.get("avg_pnl",0)))
-                return rows or "<tr><td colspan='6'>No {} data yet</td></tr>".format(label)
+                return rows or f"<tr><td colspan='6'>No {label} data yet</td></tr>"
 
             suggestions_html = "".join(
-                "<li>{}</li>".format(s)
+                f"<li>{s}</li>"
                 for s in insights.get("suggestions", ["No suggestions yet!"]))
 
             status_color = "#4ade80" if graded else "#fbbf24"
             status_label = (
                 "GRADUATED — Live data drives all decisions" if graded
-                else "Blending: {:.0f}% graduated to live".format(blend) if live_n > 0
-                else "DRY RUN — {} paper trades ready for live".format(dry_n))
+                else f"Blending: {blend:.0f}% graduated to live" if live_n > 0
+                else f"DRY RUN — {dry_n} paper trades ready for live")
 
             pnl_color = "#4ade80" if pnl >= 0 else "#f87171"
             wr_color  = "#4ade80" if wr >= 50 else "#f87171"
@@ -443,9 +440,9 @@ function showTab(name){{
 
             REPORT_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
             REPORT_HTML_FILE.write_text(html, encoding="utf-8")
-            logger.info("[Learning] Report: {}".format(REPORT_HTML_FILE.resolve()))
+            logger.info(f"[Learning] Report: {REPORT_HTML_FILE.resolve()}")
         except Exception as e:
-            logger.debug("[Learning] HTML error: {}".format(e))
+            logger.debug(f"[Learning] HTML error: {e}")
 
     # ── Helpers ───────────────────────────────────────────────────────
 
@@ -455,7 +452,7 @@ function showTab(name){{
             LEARNING_FILE.write_text(
                 json.dumps(insights, indent=2, default=str), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Learning] Save error: {}".format(e))
+            logger.debug(f"[Learning] Save error: {e}")
 
     def _log_summary(self, insights):
         total  = insights.get("total_trades", 0)
@@ -465,13 +462,12 @@ function showTab(name){{
         pnl    = insights.get("total_net_pnl", 0)
         fees   = insights.get("total_fees_paid", 0)
         logger.info(
-            "[Learning] {} trades ({} paper / {} live) | "
-            "WR={:.1f}% | Net PnL={:+.4f} USDT | Fees={:.4f} USDT".format(
-                total, dry_n, live_n, wr, pnl, fees))
+            f"[Learning] {total} trades ({dry_n} paper / {live_n} live) | "
+            f"WR={wr:.1f}% | Net PnL={pnl:+.4f} USDT | Fees={fees:.4f} USDT")
         for s in insights.get("suggestions", [])[:5]:
             # FIX: UNDERPERFORMING warnings need 15+ trades to be meaningful.
             # Show at DEBUG level only — don't spam INFO logs with small-sample noise.
             if "UNDERPERFORMING" in s:
-                logger.debug("[Learning] (low sample) {}".format(s))
+                logger.debug(f"[Learning] (low sample) {s}")
             else:
-                logger.info("[Learning] INSIGHT: {}".format(s))
+                logger.info(f"[Learning] INSIGHT: {s}")

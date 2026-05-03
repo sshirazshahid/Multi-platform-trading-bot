@@ -64,7 +64,7 @@ class RegimeHMM:
 
     # -------------------------------------------------------------------- fit
 
-    def fit(self, returns: np.ndarray, vol: np.ndarray) -> "RegimeHMM":
+    def fit(self, returns: np.ndarray, vol: np.ndarray) -> RegimeHMM:
         """Fit on (returns, vol) feature pairs. Stacks into N×2 matrix.
 
         Raises
@@ -117,7 +117,7 @@ class RegimeHMM:
         joblib.dump(self, p)
 
     @classmethod
-    def load(cls, path: PathLike) -> "RegimeHMM":
+    def load(cls, path: PathLike) -> RegimeHMM:
         """Load a previously-saved RegimeHMM via joblib."""
         obj = joblib.load(Path(path))
         if not isinstance(obj, cls):

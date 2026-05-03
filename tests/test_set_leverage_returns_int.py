@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _make_stub(client_cls):
     """Build a client without running __init__ (no real ccxt)."""
@@ -98,8 +96,8 @@ def test_bitget_returns_zero_on_real_error():
 
 def test_clients_return_zero_when_not_ready():
     from exchanges.binance_client import BinanceClient
-    from exchanges.bybit_client import BybitClient
     from exchanges.bitget_client import BitgetClient
+    from exchanges.bybit_client import BybitClient
     for cls in (BinanceClient, BybitClient, BitgetClient):
         c = _make_stub(cls)
         c._ok = lambda: False

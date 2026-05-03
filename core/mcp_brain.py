@@ -36,14 +36,16 @@ import json
 import math
 import os
 import time
-import urllib.request
 import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
 from loguru import logger
-from concurrent.futures import ThreadPoolExecutor
-from utils.claude_client import call_claude_cli, _check_claude_code
+
 import utils.claude_client as _claude_mod
+from utils.claude_client import _check_claude_code, call_claude_cli
 
 try:
     from core.warehouse import get_warehouse
@@ -1157,7 +1159,8 @@ class MCPBrain:
             return {}
 
         import pandas as pd
-        from utils.indicators import ema, rsi, atr, adx, macd, bbands, rolling_vwap
+
+        from utils.indicators import adx, atr, bbands, ema, macd, rolling_vwap, rsi
         from utils.smart_money import compute_smart_money_signals
 
         # Build ordered list of exchanges to try per coin
@@ -2703,6 +2706,7 @@ class MCPBrain:
                     if gate_pass:  # only log for trades we're actually about to take
                         try:
                             import time as _time
+
                             from core.shadow_predictor import ShadowPredictor
                             ShadowPredictor.get().log_entry(
                                 ts=_time.time(),
@@ -2737,6 +2741,8 @@ class MCPBrain:
             try:
                 from core.short_side_filter import (
                     evaluate as _ssf_eval,
+                )
+                from core.short_side_filter import (
                     extract_btc_trends as _ssf_btc,
                 )
                 btc_4h_up, btc_1h_up = _ssf_btc(exchange_indicators)
@@ -2870,7 +2876,7 @@ class MCPBrain:
         # Also generate CLOSE actions for losing positions
         for p in open_positions:
             pnl_pct = p.get("pnl_pct", 0) or 0
-            age_min = p.get("age_min", 0) or 0
+            p.get("age_min", 0) or 0
             coin = p.get("symbol", "").split("/")[0].split(":")[0]
             ei = exchange_indicators.get(coin, {})
             ei_4h = ei.get("4h", {})
@@ -2879,11 +2885,10 @@ class MCPBrain:
 
             # 2026-04-12: Hard exit rules. Trend reversal = 1h EMA 20 crosses
             # below EMA 50 (not just ema_dir which uses 9/21/50 alignment).
-            trend_against = False
             if side == "buy" and not ei_1h.get("ema20_above_50", True):
-                trend_against = True
+                pass
             elif side == "sell" and ei_1h.get("ema20_above_50", False):
-                trend_against = True
+                pass
 
             should_close = False
             reason = ""
@@ -2959,7 +2964,7 @@ class MCPBrain:
         for p in positions:
             pid = p.get("id", "")
             pnl_pct = p.get("pnl_pct", 0) or 0
-            age_min = p.get("age_min", 0) or 0
+            p.get("age_min", 0) or 0
             side = p.get("side", "buy")
             coin = p.get("symbol", "?").split("/")[0].split(":")[0]
 
@@ -2983,11 +2988,9 @@ class MCPBrain:
             if side == "buy":
                 macd_with = macd_hist > 0
                 macd_fading = macd_hist > 0 and not macd_rising  # positive but shrinking
-                macd_flipped = macd_hist < 0  # crossed below zero
             else:
                 macd_with = macd_hist < 0
                 macd_fading = macd_hist < 0 and macd_rising  # negative but shrinking
-                macd_flipped = macd_hist > 0  # crossed above zero
 
             action = "HOLD"
             conf = 0.5

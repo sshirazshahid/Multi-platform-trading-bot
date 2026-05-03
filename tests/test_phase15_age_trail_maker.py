@@ -9,7 +9,6 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-
 # ── 1. AGE cuts ────────────────────────────────────────────────────
 
 
@@ -91,7 +90,7 @@ def test_smart_executor_maker_only_branch_lives_before_market_fallback():
 
 def test_phase15_full_set_summary():
     """Sanity: every Phase 15 knob is present with the expected value."""
-    from config import RISK, MAKER_ONLY
+    from config import MAKER_ONLY, RISK
     expected = {
         "max_position_age_hours": 1.25,
         "max_stale_hours": 1.0,

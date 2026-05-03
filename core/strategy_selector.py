@@ -35,11 +35,10 @@ FIX: supertrend_spot now only fires when:
 from __future__ import annotations
 
 import time
-import numpy as np
-import pandas as pd
 from dataclasses import dataclass, field
-from loguru      import logger
 
+import pandas as pd
+from loguru import logger
 
 # ── Timeframe weights ─────────────────────────────────────────────────
 TF_WEIGHTS = {"1d": 5, "4h": 4, "1h": 3, "15m": 2, "1m": 1}
@@ -63,9 +62,11 @@ SPOT_ADX_MIN    = 25   # Lowered from 33 — more spot entries (strategies handl
 
 
 # ── Pure-pandas indicators (imported from shared module) ──────────────
-from utils.indicators import ema as _ema, sma as _sma, rsi as _rsi
-from utils.indicators import atr as _atr, adx as _adx, bbands as _bbands
-
+from utils.indicators import adx as _adx
+from utils.indicators import atr as _atr
+from utils.indicators import bbands as _bbands
+from utils.indicators import ema as _ema
+from utils.indicators import rsi as _rsi
 
 # ── Data models ───────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ class TradeOpportunity:
     @property
     def label(self) -> str:
         direction_label = "LONG" if self.direction == "buy" else "SHORT"
-        return "{} {} {}".format(self.market_type.upper(), direction_label, self.symbol)
+        return f"{self.market_type.upper()} {direction_label} {self.symbol}"
 
 
 CoinAnalysis = TradeOpportunity   # legacy alias
@@ -179,9 +180,7 @@ class StrategySelector:
 
         for opp in opps:
             logger.info(
-                "[Selector] {} | strat={} conf={:.0%} regime={} | {}".format(
-                    opp.label, opp.strategy, opp.confidence,
-                    opp.regime, opp.reason))
+                f"[Selector] {opp.label} | strat={opp.strategy} conf={opp.confidence:.0%} regime={opp.regime} | {opp.reason}")
         return opps
 
     def analyze_batch(self, exchange, symbols: list,
@@ -197,7 +196,7 @@ class StrategySelector:
                     results[symbol] = opps
                 time.sleep(0.05)  # Reduced from 0.15s — was adding 7.5s+ per scan
             except Exception as e:
-                logger.debug("[Selector] {} failed: {}".format(symbol, e))
+                logger.debug(f"[Selector] {symbol} failed: {e}")
         return results
 
     def clear_cache(self, symbol: str = None):
@@ -224,10 +223,7 @@ class StrategySelector:
         for opp in all_opps:
             dir_label = "LONG " if opp.direction == "buy" else "SHORT"
             lines.append(
-                "{:<16} {:<8} {:<6} {:<26} {:>4.0%} {:>5.1f} {:>5.1f} {}".format(
-                    opp.symbol, opp.market_type, dir_label,
-                    opp.strategy, opp.confidence,
-                    opp.adx_1h, opp.rsi_1h, opp.regime))
+                f"{opp.symbol:<16} {opp.market_type:<8} {dir_label:<6} {opp.strategy:<26} {opp.confidence:>4.0%} {opp.adx_1h:>5.1f} {opp.rsi_1h:>5.1f} {opp.regime}")
         return "\n".join(lines)
 
     # ── Per-timeframe scan ────────────────────────────────────────────
@@ -322,7 +318,7 @@ class StrategySelector:
             return snap
 
         except Exception as e:
-            logger.debug("[Selector] {} {} scan failed: {}".format(symbol, tf, e))
+            logger.debug(f"[Selector] {symbol} {tf} scan failed: {e}")
             return None
 
     # ── Opportunity builder ───────────────────────────────────────────
@@ -393,8 +389,7 @@ class StrategySelector:
             if adx_avg >= 35 and max(bull_pct, bear_pct) >= 0.7:
                 if bull_pct > bear_pct:
                     conf   = min(0.95, trend_pct * adx_avg / 40)
-                    reason = "Very strong uptrend ADX={:.1f} {:.0%} TFs".format(
-                        adx_avg, trend_pct)
+                    reason = f"Very strong uptrend ADX={adx_avg:.1f} {trend_pct:.0%} TFs"
                     # supertrend_spot KILLED — 0% WR across 8+ trades historically.
                     # supertrend_futures KILLED 2026-04-20 — 39 trades at 41% WR,
                     # -$45.18 cumulative PnL per warehouse.sqlite. Fallback path
@@ -407,7 +402,7 @@ class StrategySelector:
                         if o: opps.append(o)
                 else:
                     conf   = min(0.95, trend_pct * adx_avg / 40)
-                    reason = "Very strong downtrend ADX={:.1f} — SHORT".format(adx_avg)
+                    reason = f"Very strong downtrend ADX={adx_avg:.1f} — SHORT"
                     if full_bear:
                         o = _opp("multitf_futures", "futures", "sell", conf, reason)
                         if o: opps.append(o)
@@ -415,7 +410,7 @@ class StrategySelector:
             elif adx_avg >= 22:
                 if bull_pct > bear_pct and bull_pct >= 0.5:
                     conf   = min(0.85, trend_pct * 0.9)
-                    reason = "Uptrend ADX={:.1f} RSI={:.1f}".format(adx_avg, rsi_avg)
+                    reason = f"Uptrend ADX={adx_avg:.1f} RSI={rsi_avg:.1f}"
                     # supertrend_spot KILLED — use trend_spot (has ADX + R:R filters)
                     if full_bull and adx_avg >= SPOT_ADX_MIN:
                         o = _opp("trend_spot", "spot", "buy", conf, reason)
@@ -426,7 +421,7 @@ class StrategySelector:
 
                 elif bear_pct > bull_pct and bear_pct >= 0.5:
                     conf   = min(0.80, trend_pct * 0.85)
-                    reason = "Downtrend ADX={:.1f} — Futures SHORT".format(adx_avg)
+                    reason = f"Downtrend ADX={adx_avg:.1f} — Futures SHORT"
                     if adx_avg >= FUTURES_ADX_MIN and full_bear:
                         o = _opp("multitf_futures", "futures", "sell", conf, reason)
                         if o: opps.append(o)
@@ -434,7 +429,7 @@ class StrategySelector:
             if full_bull and adx_avg >= 25:
                 # Strong alignment — add high-confidence entries (don't clear existing)
                 conf   = 0.90
-                reason = "4h+1h+15m ALL BULLISH ADX={:.1f}".format(adx_avg)
+                reason = f"4h+1h+15m ALL BULLISH ADX={adx_avg:.1f}"
                 o = _opp("trend_spot", "spot",    "buy", conf*0.9, reason)
                 if o: opps.append(o)
                 o = _opp("multitf_futures", "futures", "buy", conf,     reason)
@@ -442,7 +437,7 @@ class StrategySelector:
 
             elif full_bear and adx_avg >= 25:
                 conf   = 0.90
-                reason = "4h+1h+15m ALL BEARISH ADX={:.1f} — SHORT".format(adx_avg)
+                reason = f"4h+1h+15m ALL BEARISH ADX={adx_avg:.1f} — SHORT"
                 o = _opp("multitf_futures", "futures", "sell", conf, reason)
                 if o: opps.append(o)
 
@@ -456,8 +451,7 @@ class StrategySelector:
         if range_pct >= 0.35 or adx_avg < 20 or trend_pct < 0.35:
             if bb_avg < 0.04:
                 o = _opp("grid_spot", "spot", "buy", 0.75,
-                          "BB squeeze {:.1f}% ADX={:.1f} — Grid".format(
-                              bb_avg*100, adx_avg),
+                          f"BB squeeze {bb_avg*100:.1f}% ADX={adx_avg:.1f} — Grid",
                           regime="ranging")
                 if o: opps.append(o)
             else:
@@ -466,7 +460,7 @@ class StrategySelector:
                     conf_mr = min(0.78, 0.55 + (42 - rsi_avg) * 0.015)
                     o = _opp("mean_reversion_spot", "spot", "buy",
                              conf_mr,
-                             "Ranging RSI={:.1f} oversold".format(rsi_avg),
+                             f"Ranging RSI={rsi_avg:.1f} oversold",
                              regime="ranging")
                     if o: opps.append(o)
                 elif rsi_avg > 58:
@@ -484,15 +478,14 @@ class StrategySelector:
         if rsi_avg < 28 and bear_pct > 0.5:
             o = _opp("mean_reversion_spot", "spot", "buy",
                      min(0.70, 0.50 + (30 - rsi_avg) * 0.02),
-                     "Deeply oversold RSI={:.1f} — MR bounce".format(rsi_avg),
+                     f"Deeply oversold RSI={rsi_avg:.1f} — MR bounce",
                      regime="ranging")
             if o: opps.append(o)
 
         # ── 3c. Grid spot for tight-range coins ─────────────────
         if adx_avg < 20 and atr_avg < 0.020:
             o = _opp("grid_spot", "spot", "buy", 0.68,
-                     "Low vol ADX={:.1f} ATR={:.2f}% — Grid".format(
-                         adx_avg, atr_avg * 100),
+                     f"Low vol ADX={adx_avg:.1f} ATR={atr_avg * 100:.2f}% — Grid",
                      regime="ranging")
             if o: opps.append(o)
 
@@ -503,8 +496,7 @@ class StrategySelector:
                 if full_bull:
                     o = _opp("trend_spot", "spot", "buy",
                              min(0.70, vol_avg*0.28),
-                             "Volume spike {:.1f}x ADX={:.1f} — Breakout".format(
-                                 vol_avg, adx_avg),
+                             f"Volume spike {vol_avg:.1f}x ADX={adx_avg:.1f} — Breakout",
                              regime="breakout")
                     if o: opps.append(o)
             else:
@@ -514,7 +506,7 @@ class StrategySelector:
                 if adx_avg >= FUTURES_ADX_MIN and full_bear:
                     o = _opp("multitf_futures", "futures", "sell",
                              min(0.65, vol_avg*0.25),
-                             "Volume spike {:.1f}x — Breakout SHORT".format(vol_avg),
+                             f"Volume spike {vol_avg:.1f}x — Breakout SHORT",
                              regime="breakout")
                     if o: opps.append(o)
             # Don't return early
@@ -524,7 +516,7 @@ class StrategySelector:
         # DCA only fires when bull consensus is strong enough to be meaningful.
         if bull_pct >= 0.6 and adx_avg >= 20 and rsi_avg > 40:
             o = _opp("dca_spot", "spot", "buy", 0.55,
-                     "Strong bull {:.0%} ADX={:.1f} — DCA".format(bull_pct, adx_avg),
+                     f"Strong bull {bull_pct:.0%} ADX={adx_avg:.1f} — DCA",
                      regime="weak")
             if o: opps.append(o)
 
@@ -535,14 +527,13 @@ class StrategySelector:
             if rsi_avg < 40 and vol_avg >= 0.8:
                 o = _opp("scalping_spot", "spot", "buy",
                          min(0.65, 0.50 + (40 - rsi_avg) * 0.01),
-                         "Scalp oversold RSI={:.1f} vol={:.1f}x".format(
-                             rsi_avg, vol_avg),
+                         f"Scalp oversold RSI={rsi_avg:.1f} vol={vol_avg:.1f}x",
                          regime="ranging")
                 if o: opps.append(o)
             elif rsi_avg > 60 and vol_avg >= 0.8 and futures_symbol:
                 o = _opp("scalping_spot", "futures", "sell",
                          min(0.60, 0.45 + (rsi_avg - 60) * 0.01),
-                         "Scalp overbought RSI={:.1f} — SHORT".format(rsi_avg),
+                         f"Scalp overbought RSI={rsi_avg:.1f} — SHORT",
                          regime="ranging")
                 if o: opps.append(o)
 

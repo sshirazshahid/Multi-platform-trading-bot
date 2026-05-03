@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def _ohlcv_cache_dir(tmp_path: Path, exchange: str, symbol: str) -> Path:
@@ -33,8 +32,8 @@ def _write_cache(p: Path, tf: str, n: int, slope: float, base: float = 100.0):
 
 
 def test_simulate_exit_long_hits_tp():
-    from scripts.agent_backtest import _simulate_exit
     from core.agents.base_agent import Proposal
+    from scripts.agent_backtest import _simulate_exit
     p = Proposal(agent_id="X", symbol="X", side="buy",
                  entry=100, sl=98, tp=104, confidence=0.7, reason="t")
     future = pd.Series([100, 101, 103, 105, 106])  # tp at 104 hit on bar 3
@@ -44,8 +43,8 @@ def test_simulate_exit_long_hits_tp():
 
 
 def test_simulate_exit_long_hits_sl():
-    from scripts.agent_backtest import _simulate_exit
     from core.agents.base_agent import Proposal
+    from scripts.agent_backtest import _simulate_exit
     p = Proposal(agent_id="X", symbol="X", side="buy",
                  entry=100, sl=98, tp=104, confidence=0.7, reason="t")
     future = pd.Series([100, 99, 97, 96])  # sl at 98 hit on bar 2
@@ -55,8 +54,8 @@ def test_simulate_exit_long_hits_sl():
 
 
 def test_simulate_exit_short_hits_tp():
-    from scripts.agent_backtest import _simulate_exit
     from core.agents.base_agent import Proposal
+    from scripts.agent_backtest import _simulate_exit
     p = Proposal(agent_id="X", symbol="X", side="sell",
                  entry=100, sl=102, tp=96, confidence=0.7, reason="t")
     future = pd.Series([100, 99, 97, 95])
@@ -66,8 +65,8 @@ def test_simulate_exit_short_hits_tp():
 
 
 def test_simulate_exit_time_exit_partial():
-    from scripts.agent_backtest import _simulate_exit
     from core.agents.base_agent import Proposal
+    from scripts.agent_backtest import _simulate_exit
     p = Proposal(agent_id="X", symbol="X", side="buy",
                  entry=100, sl=90, tp=110, confidence=0.7, reason="t")
     future = pd.Series([100, 101, 102, 101, 102, 101])
@@ -76,7 +75,7 @@ def test_simulate_exit_time_exit_partial():
 
 
 def test_load_ohlcv_cache_returns_none_when_missing(tmp_path, monkeypatch):
-    from scripts.agent_backtest import _load_ohlcv_cache, ROOT
+    from scripts.agent_backtest import _load_ohlcv_cache
     # Point ROOT to tmp so cache lookups go there
     monkeypatch.setattr("scripts.agent_backtest.ROOT", tmp_path)
     df = _load_ohlcv_cache("binance", "BTC/USDT:USDT", "1h")
@@ -107,7 +106,7 @@ def test_backtest_symbol_runs_all_agents(tmp_path, monkeypatch):
 
 
 def test_render_report_produces_markdown():
-    from scripts.agent_backtest import render_report, BacktestStats
+    from scripts.agent_backtest import BacktestStats, render_report
     sym_stats = {
         "BTC/USDT:USDT": {
             "TrendAgent": BacktestStats(agent="TrendAgent", n=10, wins=6,

@@ -35,13 +35,12 @@ import ccxt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from core.feature_store import (  # noqa: E402
-    FeatureStore,
     _TF_TO_SECONDS,
+    FeatureStore,
     compute_features_from_ohlcv,
     load_ohlcv_window,
 )
 from core.warehouse import get_warehouse  # noqa: E402
-
 
 # Bars of *history* we keep around each candidate ts. Enough for
 # EMA(50) on 4h (~200 bars) and 30d corr on 1h (~720 bars) without

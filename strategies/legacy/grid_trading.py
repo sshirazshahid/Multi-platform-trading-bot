@@ -3,14 +3,16 @@ strategies/grid_trading.py — Grid Trading Strategy.
 Places a ladder of limit BUY/SELL orders and profits from price oscillation.
 """
 
-import uuid
 import time
+import uuid
+
 from loguru import logger
-from strategies.base_strategy import BaseStrategy
-from exchanges.base import BaseExchange
+
+from config import GRID_TRADING as CFG
 from core.order_manager import OrderManager
 from core.risk_manager import RiskManager
-from config import GRID_TRADING as CFG
+from exchanges.base import BaseExchange
+from strategies.base_strategy import BaseStrategy
 
 
 class GridTradingStrategy(BaseStrategy):

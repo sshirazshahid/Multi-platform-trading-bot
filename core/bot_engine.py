@@ -7,49 +7,56 @@ FIX: _extract_usdt now handles Bybit Unified Account correctly.
      Also: _log_balances now fetches Bybit balance ONCE (not spot+futures twice).
 """
 
-import sys
-import time
+import atexit
 import json
 import signal
-import atexit
+import sys
 import threading
-import schedule
-from pathlib import Path
-from loguru import logger
-from rich.console import Console
-from rich.table   import Table
-from rich         import box
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from datetime import datetime, timezone
+from pathlib import Path
+
+import schedule
+from loguru import logger
+from rich import box
+from rich.console import Console
+from rich.table import Table
+
 from config import (
-    TRADING_PAIRS, DRY_RUN, RISK,
-    TRADING_MODE, PORTFOLIO_RESCAN_MINUTES, PORTFOLIO_MIN_VALUE_USD,
+    DRY_RUN,
+    PORTFOLIO_MIN_VALUE_USD,
+    PORTFOLIO_RESCAN_MINUTES,
+    RISK,
+    TRADING_MODE,
+    TRADING_PAIRS,
 )
+
 try:
     from config import CLAUDE_PORTFOLIO
 except ImportError:
     CLAUDE_PORTFOLIO = {"enabled": True, "scan_interval_min": 15, "max_actions_per_cycle": 4}
+from core.learning_engine import LearningEngine
+from core.news_scanner import NewsScanner
+from core.order_manager import OrderManager
+from core.position_tracker import PositionTracker
+from core.risk_manager import RiskManager
 from exchanges import (
     BinanceClient,
-    BybitClient,   BitgetClient,
+    BitgetClient,
+    BybitClient,
 )
-from exchanges.base         import BaseExchange
-from core.risk_manager      import RiskManager
-from core.order_manager     import OrderManager
-from core.position_tracker  import PositionTracker
-from core.learning_engine       import LearningEngine
-from core.news_scanner          import NewsScanner
+
 try:
-    from core.pair_discovery    import discover_all
+    from core.pair_discovery import discover_all
 except ImportError:
     discover_all = None
 try:
-    from core.mcp_brain         import MCPBrain
+    from core.mcp_brain import MCPBrain
 except ImportError:
     MCPBrain = None
 try:
-    from core.spot_manager      import SpotPortfolioManager
+    from core.spot_manager import SpotPortfolioManager
 except ImportError:
     SpotPortfolioManager = None
 try:
@@ -245,7 +252,7 @@ class BotEngine:
             wh = getattr(self, "warehouse", None) or Warehouse()
             self.warehouse = wh
             try:
-                from config import BLACKLIST_HARD, ALLOWED_HOURS_UTC
+                from config import ALLOWED_HOURS_UTC, BLACKLIST_HARD
                 bl = set(BLACKLIST_HARD or set())
                 ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
             except Exception:
@@ -344,8 +351,13 @@ class BotEngine:
         ineffective due to threshold mis-calibration.
         """
         from config import (
-            EXPECTANCY_FILTER, ENTRY_STALENESS_EXIT, CELL_FILTER,
-            SPOT_PORTFOLIO, SPOT_STRATEGY, MODEL_GATE, STAR_SYMBOLS,
+            CELL_FILTER,
+            ENTRY_STALENESS_EXIT,
+            EXPECTANCY_FILTER,
+            MODEL_GATE,
+            SPOT_PORTFOLIO,
+            SPOT_STRATEGY,
+            STAR_SYMBOLS,
         )
         findings: list[str] = []
 
@@ -929,9 +941,14 @@ class BotEngine:
         be blocked downstream — tighter loop, fewer wasted cycles.
         """
         from config import (
-            BLACKLIST_HARD, WHITELIST_SYMBOLS, ALLOWED_HOURS_UTC,
-            PEAK_HOURS_UTC, BLOCKED_HOURS_UTC, SHORTS_REQUIRE_BTC_BEAR,
-            MAX_LOSS_PER_TRADE_PCT, LEVERAGE_TIERS,
+            ALLOWED_HOURS_UTC,
+            BLACKLIST_HARD,
+            BLOCKED_HOURS_UTC,
+            LEVERAGE_TIERS,
+            MAX_LOSS_PER_TRADE_PCT,
+            PEAK_HOURS_UTC,
+            SHORTS_REQUIRE_BTC_BEAR,
+            WHITELIST_SYMBOLS,
         )
 
         total_open = self.tracker.count_open()
@@ -1076,8 +1093,9 @@ class BotEngine:
         Evidence-based blocked hours take precedence over peak/warmup.
         """
         from config import (
-            ALLOWED_HOURS_UTC, WARMUP_HOURS_UTC,
-            PEAK_HOURS_UTC, BLOCKED_HOURS_UTC,
+            BLOCKED_HOURS_UTC,
+            PEAK_HOURS_UTC,
+            WARMUP_HOURS_UTC,
         )
         dynamic_blocked = self._load_dynamic_blocked_hours()
         if hour in BLOCKED_HOURS_UTC or hour in dynamic_blocked:
@@ -1106,7 +1124,8 @@ class BotEngine:
 
         try:
             import pandas as pd
-            from config import BTC_TREND_TIMEFRAME, BTC_TREND_EMA_PERIOD
+
+            from config import BTC_TREND_EMA_PERIOD, BTC_TREND_TIMEFRAME
 
             exchange = (self.active_exchanges.get('binance')
                         or next(iter(self.active_exchanges.values()), None))
@@ -1151,8 +1170,10 @@ class BotEngine:
         Returns {'pause_until': ts, 'downgrade_until': ts, 'tier_cap': str|None}.
         """
         from config import (
-            CONSEC_LOSS_DOWNGRADE_COUNT, CONSEC_LOSS_DOWNGRADE_HOURS,
-            CONSEC_LOSS_PAUSE_COUNT,     CONSEC_LOSS_PAUSE_HOURS,
+            CONSEC_LOSS_DOWNGRADE_COUNT,
+            CONSEC_LOSS_DOWNGRADE_HOURS,
+            CONSEC_LOSS_PAUSE_COUNT,
+            CONSEC_LOSS_PAUSE_HOURS,
         )
 
         state = getattr(self, '_consec_loss_state_cached',
@@ -1217,8 +1238,7 @@ class BotEngine:
         still take the trade (don't waste the signal entirely) but at
         smaller size than the score implies.
         """
-        from config import (LEVERAGE_TIERS, WHITELIST_SYMBOLS,
-                             HIGH_ATR_PCT_THRESHOLD, STAR_SYMBOLS)
+        from config import HIGH_ATR_PCT_THRESHOLD, LEVERAGE_TIERS, STAR_SYMBOLS, WHITELIST_SYMBOLS
 
         hour = self._current_utc_hour()
         hour_class = self._classify_hour(hour)
@@ -1468,9 +1488,12 @@ class BotEngine:
     def _execute_open(self, action: dict) -> bool:
         """Validate and execute an OPEN action from Claude. Returns True if executed."""
         from config import (
-            BLACKLIST_HARD, SHORTS_REQUIRE_BTC_BEAR,
-            OPERATING_MODE, CONTROLLED_LIVE_ENABLED,
-            UNIVERSE_WHITELIST, TRADING_MODE,
+            BLACKLIST_HARD,
+            CONTROLLED_LIVE_ENABLED,
+            OPERATING_MODE,
+            SHORTS_REQUIRE_BTC_BEAR,
+            TRADING_MODE,
+            UNIVERSE_WHITELIST,
         )
 
         symbol     = action.get("symbol", "")
@@ -1570,6 +1593,8 @@ class BotEngine:
             try:
                 from core.short_side_filter import (
                     evaluate as _ssf_eval,
+                )
+                from core.short_side_filter import (
                     extract_btc_trends as _ssf_btc,
                 )
                 _ei_cache = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
@@ -1609,9 +1634,10 @@ class BotEngine:
         _atr_frac_hint = 0.0   # Fed to _select_leverage_tier for high-ATR clamp
         try:
             import json as _j
-            from core.features  import FeatureVector as _FV
+
+            from core.features import FeatureVector as _FV
             from core.meta_filter import MetaFilter as _MetaFilter
-            from core.warehouse  import get_warehouse as _get_wh
+            from core.warehouse import get_warehouse as _get_wh
             _cid = int(action.get("candidate_id") or -1)
             _fv = None
             if _cid > 0:
@@ -1763,7 +1789,8 @@ class BotEngine:
         # anti-EV per claude_portfolio attribution. See
         # docs/superpowers/specs/2026-05-01-cell-filter-entry-gate-design.md
         try:
-            from config import CELL_FILTER as _CF, STAR_SYMBOLS as _STAR
+            from config import CELL_FILTER as _CF
+            from config import STAR_SYMBOLS as _STAR
         except ImportError:
             _CF = {"enabled": False}
             _STAR = set()
@@ -1845,8 +1872,8 @@ class BotEngine:
             _EF = {"enabled": False}
         if _EF.get("enabled", True):
             try:
-                from core.warehouse import get_warehouse as _gw
                 from config import STAR_SYMBOLS as _STAR_FOR_EF
+                from core.warehouse import get_warehouse as _gw
                 _sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
                 # Operator whitelist — bypass the floor entirely.
                 _whitelist = _EF.get("whitelist") or set()
@@ -1900,8 +1927,10 @@ class BotEngine:
         # Regime detector cached 15min — check is cheap.
         try:
             from core.market_regime import (
-                MarketRegimeDetector, REGIME_TRENDING_UP, REGIME_TRENDING_DOWN,
+                REGIME_TRENDING_DOWN,
+                REGIME_TRENDING_UP,
                 REGIME_VOLATILE,
+                MarketRegimeDetector,
             )
             if not hasattr(self, "_regime_detector"):
                 self._regime_detector = MarketRegimeDetector()
@@ -1946,8 +1975,8 @@ class BotEngine:
                 return False
             if side == "sell" and self.auto_mutator.shorts_blocked():
                 logger.info(
-                    f"[Claude] BLOCKED: shorts disabled by AutoMutator "
-                    f"(counter-trend short losses in recent post-mortems)")
+                    "[Claude] BLOCKED: shorts disabled by AutoMutator "
+                    "(counter-trend short losses in recent post-mortems)")
                 return False
 
         # (a2) Caution symbol — soft gate. Knowledge-model WR<35% triggers
@@ -1975,7 +2004,7 @@ class BotEngine:
 
         # (b) Spot — buy-only (no short on spot)
         if market_type == "spot" and side == "sell":
-            logger.warning(f"[Claude] BLOCKED: Cannot short on spot")
+            logger.warning("[Claude] BLOCKED: Cannot short on spot")
             return False
 
         # (c) BTC macro trend + side filter
@@ -2277,7 +2306,7 @@ class BotEngine:
                 model_version=action.get("model_version"),
             )
             if pos is None:
-                logger.info(f"[Claude] open_position returned None — rejected by order manager")
+                logger.info("[Claude] open_position returned None — rejected by order manager")
                 return False
             # Warehouse record_trade_open now happens inside open_position
             # (before SL placement) so fail-closed paths don't lose the row.
@@ -2377,7 +2406,9 @@ class BotEngine:
     def _write_heartbeat(self):
         """Write heartbeat file for external monitoring."""
         try:
-            import psutil, os
+            import os
+
+            import psutil
             process = psutil.Process(os.getpid())
             mem_mb = process.memory_info().rss / 1024 / 1024
         except Exception:
@@ -2459,7 +2490,7 @@ class BotEngine:
                     price = (ticker.get("last") or ticker.get("close")
                              or ticker.get("bid") or ticker.get("ask"))
                 if price:
-                    prev_fails = self._consecutive_api_fails.get(ex_name, 0)
+                    self._consecutive_api_fails.get(ex_name, 0)
                     self._consecutive_api_fails[ex_name] = 0
                     # Auto-resume if previously halted
                     if ex_name in self._exchange_halted:
@@ -2644,6 +2675,7 @@ class BotEngine:
         manager to place protective orders on the exchange.
         """
         import pandas as pd
+
         from utils.indicators import atr as _atr
 
         for pos in positions:

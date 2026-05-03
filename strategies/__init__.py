@@ -18,9 +18,12 @@ behind each retirement.
 """
 
 from .base_strategy import BaseStrategy
-from .dca_strategy  import DCAStrategy
+from .dca_strategy import DCAStrategy
+
+__all__ = ["BaseStrategy", "DCAStrategy"]
 
 try:
-    from .rebalancing import RebalancingStrategy
+    from .rebalancing import RebalancingStrategy  # noqa: F401
+    __all__.append("RebalancingStrategy")
 except ImportError:
     pass

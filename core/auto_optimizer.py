@@ -18,9 +18,10 @@ Uses the Backtester to score each parameter set.
 Metric: Sharpe Ratio (risk-adjusted), with win rate > 50% filter.
 """
 
-import re
 import itertools
+import re
 from pathlib import Path
+
 from loguru import logger
 
 
@@ -49,12 +50,12 @@ class AutoOptimizer:
 
         for period, mult in itertools.product(periods, multipliers):
             try:
-                from strategies.legacy.supertrend import SupertrendStrategy
-                from core.risk_manager     import RiskManager
-                from core.order_manager    import OrderManager
+                from core.backtester import Backtester
+                from core.order_manager import OrderManager
                 from core.position_tracker import PositionTracker
-                from utils.notifier        import TelegramNotifier
-                from core.backtester       import Backtester
+                from core.risk_manager import RiskManager
+                from strategies.legacy.supertrend import SupertrendStrategy
+                from utils.notifier import TelegramNotifier
 
                 risk   = RiskManager()
                 trk    = PositionTracker()
@@ -109,12 +110,12 @@ class AutoOptimizer:
             if ov >= ob:
                 continue
             try:
+                from core.backtester import Backtester
+                from core.order_manager import OrderManager
+                from core.position_tracker import PositionTracker
+                from core.risk_manager import RiskManager
                 from strategies.legacy.mean_reversion import MeanReversionStrategy
-                from core.risk_manager          import RiskManager
-                from core.order_manager         import OrderManager
-                from core.position_tracker      import PositionTracker
-                from utils.notifier             import TelegramNotifier
-                from core.backtester            import Backtester
+                from utils.notifier import TelegramNotifier
 
                 risk  = RiskManager()
                 trk   = PositionTracker()

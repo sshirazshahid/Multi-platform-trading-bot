@@ -22,16 +22,19 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from exchanges.base import BaseExchange  # noqa: E402
-
 from config import (  # noqa: E402
-    BINANCE_API_KEY, BINANCE_SECRET_KEY,
-    BYBIT_API_KEY, BYBIT_SECRET_KEY,
-    BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE,
+    BINANCE_API_KEY,
+    BINANCE_SECRET_KEY,
+    BITGET_API_KEY,
+    BITGET_PASSPHRASE,
+    BITGET_SECRET_KEY,
+    BYBIT_API_KEY,
+    BYBIT_SECRET_KEY,
 )
+from exchanges.base import BaseExchange  # noqa: E402
 from exchanges.binance_client import BinanceClient  # noqa: E402
-from exchanges.bybit_client import BybitClient  # noqa: E402
 from exchanges.bitget_client import BitgetClient  # noqa: E402
+from exchanges.bybit_client import BybitClient  # noqa: E402
 
 
 def _build_clients() -> dict[str, BaseExchange]:

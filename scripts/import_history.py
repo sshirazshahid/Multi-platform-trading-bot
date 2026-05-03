@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 # full trading stack (schedule, ccxt, …) which aren't needed for a pure
 # back-population script and may not be installed on analysis machines.
 import importlib.util as _il  # noqa: E402
+
 _spec = _il.spec_from_file_location("warehouse", ROOT / "core" / "warehouse.py")
 _mod = _il.module_from_spec(_spec)
 sys.modules["warehouse"] = _mod

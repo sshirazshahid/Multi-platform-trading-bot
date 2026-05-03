@@ -412,7 +412,7 @@ def load_ohlcv_window(
 class FeatureStore:
     """Persistence wrapper around `Warehouse.features` table."""
 
-    def __init__(self, warehouse: "Warehouse") -> None:
+    def __init__(self, warehouse: Warehouse) -> None:
         self.wh = warehouse
 
     def write(

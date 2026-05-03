@@ -2,15 +2,14 @@
 strategies/trend_following.py — EMA crossover + RSI + MACD + ATR
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from loguru import logger
 
+from config import RISK
+from config import TREND_FOLLOWING as CFG
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import TREND_FOLLOWING as CFG, RISK
 
 
 def _ema(s, p): return s.ewm(span=p, adjust=False).mean()

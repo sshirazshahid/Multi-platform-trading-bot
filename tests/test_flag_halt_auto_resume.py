@@ -44,7 +44,7 @@ def _write_flag(reason="outlier_loss(-22.20 USD beyond $4.00 cap)",
 def test_flag_halt_resumes_after_cooldown():
     """Outlier-loss flag halt: after SPEC12_AUTO_RESUME_COOLDOWN_MIN,
     must auto-resume even though halt_reason is NOT 'consec_global'."""
-    from core.risk_manager import RiskManager, SPEC12_AUTO_RESUME_COOLDOWN_MIN
+    from core.risk_manager import SPEC12_AUTO_RESUME_COOLDOWN_MIN, RiskManager
 
     cooldown_sec = SPEC12_AUTO_RESUME_COOLDOWN_MIN * 60
     _write_flag(ts=time.time() - cooldown_sec - 60)
@@ -75,7 +75,7 @@ def test_flag_halt_stays_halted_during_cooldown():
 
 def test_consec_global_flag_still_resumes():
     """Regression: the original 'consec_global' branch must still work."""
-    from core.risk_manager import RiskManager, SPEC12_AUTO_RESUME_COOLDOWN_MIN
+    from core.risk_manager import SPEC12_AUTO_RESUME_COOLDOWN_MIN, RiskManager
     cooldown_sec = SPEC12_AUTO_RESUME_COOLDOWN_MIN * 60
     _write_flag(
         reason="5 consecutive global losses",

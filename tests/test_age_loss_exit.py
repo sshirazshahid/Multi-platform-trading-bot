@@ -17,8 +17,6 @@ profits.
 """
 from __future__ import annotations
 
-import pytest
-
 
 def _decide(age_hours: float, net_pct: float, *,
             max_age_h: float = 6.0,

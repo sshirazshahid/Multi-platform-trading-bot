@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ─── Self-contained replica of the merge logic ────────────────────────
 
 

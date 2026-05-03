@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -71,7 +71,7 @@ def test_execution_agent_projects_higher_pnl_at_higher_notional(wh):
 def test_execution_agent_logs_veto(wh):
     from core.agents.execution_agent import ExecutionAgent
     ea = ExecutionAgent(warehouse=wh)
-    row = ea.log_veto(_proposal("buy"), vetoed_by="RiskAgent", reason="halt_active")
+    ea.log_veto(_proposal("buy"), vetoed_by="RiskAgent", reason="halt_active")
     rows = wh.query(
         "SELECT * FROM shadow_decisions WHERE decision='VETO' AND vetoed_by=?",
         ("RiskAgent",),

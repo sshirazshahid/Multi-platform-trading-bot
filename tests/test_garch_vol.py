@@ -1,7 +1,6 @@
 """Tests for core.garch_vol — GARCH(1,1) vol forecaster (Phase 2.3)."""
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -17,7 +16,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.garch_vol import GarchVol  # noqa: E402
-
 
 # -- Helpers ---------------------------------------------------------------
 

@@ -13,8 +13,10 @@ DRY_RUN=true prevents real orders — all paper trades go through DirectExecutor
 
 import ccxt
 from loguru import logger
-from .base  import BaseExchange
+
 from config import BYBIT_API_KEY, BYBIT_SECRET_KEY
+
+from .base import BaseExchange
 
 _PLACEHOLDERS = {
     "", "none", "null",
@@ -158,14 +160,18 @@ class BybitClient(BaseExchange):
             return {}
         # Bybit Unified Trading Account covers both spot and derivatives.
         # 2026-04-16: Use BaseExchange retry/sync loop for timestamp recovery.
-        from exchanges.base import _is_timestamp_error, _is_transient_error, \
-            _backoff_delay, MAX_RETRIES
+        from exchanges.base import (
+            MAX_RETRIES,
+            _backoff_delay,
+            _is_timestamp_error,
+            _is_transient_error,
+        )
         for attempt in range(MAX_RETRIES):
             try:
                 return self.exchange.fetch_balance({"accountType": "UNIFIED"})
             except Exception as e:
                 if _is_timestamp_error(e):
-                    logger.warning(f"[Bybit] Timestamp error on balance — re-syncing clock")
+                    logger.warning("[Bybit] Timestamp error on balance — re-syncing clock")
                     self._sync_time()
                     continue
                 if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
@@ -173,7 +179,8 @@ class BybitClient(BaseExchange):
                     logger.warning(
                         f"[Bybit] fetch_balance transient, "
                         f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
-                    import time as _t; _t.sleep(delay)
+                    import time as _t
+                    _t.sleep(delay)
                     continue
                 logger.debug(f"[Bybit] fetch_balance: {e}")
                 # Fallback: try without accountType
@@ -226,7 +233,7 @@ class BybitClient(BaseExchange):
                     order = super().create_order(symbol, order_type, side, amount,
                                                  price, clean, market_type)
                     return order
-                except Exception as e2:
+                except Exception:
                     raise
             # 2026-04-12: Handle 110007 "ab not enough for new order" — the
             # sizing layer believed more margin was available than the unified

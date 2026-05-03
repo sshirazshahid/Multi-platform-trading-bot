@@ -7,8 +7,10 @@ DRY_RUN=true still prevents real trades on the live endpoint.
 
 import ccxt
 from loguru import logger
-from .base import BaseExchange
+
 from config import BINANCE_API_KEY, BINANCE_SECRET_KEY, BINANCE_TESTNET
+
+from .base import BaseExchange
 
 _PLACEHOLDERS = {"", "your_binance_api_key_here", "your_binance_secret_key_here"}
 
@@ -237,7 +239,7 @@ class BinanceClient(BaseExchange):
                     order = super().create_order(symbol, order_type, side, amount,
                                                  price, clean, market_type)
                     return order
-                except Exception as e2:
+                except Exception:
                     raise
             raise
         finally:

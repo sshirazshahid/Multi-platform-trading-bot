@@ -18,9 +18,8 @@ data/calibration.json, isotonic to data/calibration_iso.pkl.
 """
 
 import json
-import math
 from pathlib import Path
-from collections import defaultdict
+
 from loguru import logger
 
 SAVE_PATH = Path("data/calibration.json")

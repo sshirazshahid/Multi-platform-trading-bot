@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from config import (
     BLACKLIST_HARD,
+    LEVERAGE_TIERS,
     STAR_SYMBOLS,
     WHITELIST_SYMBOLS,
-    LEVERAGE_TIERS,
 )
 
 

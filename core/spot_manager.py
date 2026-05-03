@@ -8,14 +8,18 @@ analysis. Fully autonomous — executes sell/hedge actions without approval.
 
 import json
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from dataclasses import dataclass, asdict
+
 from loguru import logger
 
 try:
     from config import (
-        DRY_RUN, SPOT_PORTFOLIO as CFG,
         CAPITAL_ALLOCATION,
+        DRY_RUN,
+    )
+    from config import (
+        SPOT_PORTFOLIO as CFG,
     )
 except ImportError:
     DRY_RUN = True
@@ -268,7 +272,6 @@ class SpotPortfolioManager:
                 candles = exchange.fetch_ohlcv(symbol, "4h", limit=60, market_type="spot")
                 if candles and len(candles) >= 30:
                     closes = [float(c[4]) for c in candles]
-                    import numpy as np
                     ema20 = self._ema(closes, 20)
                     ema50 = self._ema(closes, 50)
                     rsi = self._rsi(closes, 14)

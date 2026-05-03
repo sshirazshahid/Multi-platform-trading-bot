@@ -63,8 +63,8 @@ def _load_manual_positions() -> list[dict]:
 def _build_exchanges():
     """Connect to all 3 exchanges. Mirrors BotEngine init logic."""
     from exchanges.binance_client import BinanceClient
-    from exchanges.bybit_client import BybitClient
     from exchanges.bitget_client import BitgetClient
+    from exchanges.bybit_client import BybitClient
 
     out: dict = {}
     for name, klass in (
@@ -221,7 +221,7 @@ def main():
                 successes += 1
                 logger.info(f"  ✓ SL registered for {pos.id}")
             else:
-                logger.warning(f"  ✗ _place_exchange_sl_tp returned without _exchange_sl=True")
+                logger.warning("  ✗ _place_exchange_sl_tp returned without _exchange_sl=True")
                 failures += 1
         except Exception as e:
             logger.error(f"  ✗ placement raised: {e}")

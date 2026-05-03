@@ -31,12 +31,11 @@ Backup:     data/knowledge_model.bak.json   (before each write)
 
 import json
 import shutil
-import time
 from collections import defaultdict
-from datetime    import datetime
-from pathlib     import Path
-from loguru      import logger
+from datetime import datetime
+from pathlib import Path
 
+from loguru import logger
 
 MODEL_FILE  = Path("data/knowledge_model.json")
 BACKUP_FILE = Path("data/knowledge_model.bak.json")
@@ -385,9 +384,6 @@ class KnowledgeModel:
             if d.get("trades", 0) >= 3
         ]
         return [h for h, _ in sorted(scored, key=lambda x: x[1], reverse=True)[:5]]
-
-    def is_caution_strategy(self, strategy: str) -> bool:
-        return strategy in self._model.get("caution_strategies", [])
 
     def is_star_strategy(self, strategy: str) -> bool:
         return strategy in self._model.get("star_strategies", [])

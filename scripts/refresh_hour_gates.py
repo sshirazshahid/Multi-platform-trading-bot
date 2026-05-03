@@ -26,7 +26,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 MIN_TRADES_PER_HOUR = 8
 WR_BLOCK_THRESHOLD  = 35.0    # percent
 PNL_BLOCK_THRESHOLD = -3.0    # USDT total

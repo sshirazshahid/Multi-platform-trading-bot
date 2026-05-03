@@ -27,11 +27,12 @@ import smtplib
 import ssl
 import time
 from collections import defaultdict
-from datetime    import datetime, timezone
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
-from email.mime.text      import MIMEText
-from pathlib     import Path
-from loguru      import logger
+from email.mime.text import MIMEText
+from pathlib import Path
+
+from loguru import logger
 
 try:
     from dotenv import load_dotenv
@@ -73,10 +74,10 @@ POSITIONS_FILE  = Path("data/positions.json")
 LAST_SENT_FILE  = Path("data/last_email_sent.json")
 
 def _profile_positions_file(name: str) -> Path:
-    return Path("data/profiles/{}/positions.json".format(name))
+    return Path(f"data/profiles/{name}/positions.json")
 
 def _profile_wallet_file(name: str) -> Path:
-    return Path("data/profiles/{}/wallet.json".format(name))
+    return Path(f"data/profiles/{name}/wallet.json")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -93,7 +94,7 @@ class ReportEmailer:
         now = datetime.now(timezone.utc)
         if now.hour not in [2, 8, 14, 20]:
             return False
-        slot = now.strftime("%Y-%m-%d") + "-{:02d}".format(now.hour)
+        slot = now.strftime("%Y-%m-%d") + f"-{now.hour:02d}"
         return self._last_sent_date != slot
 
     def send_daily(self, force: bool = False) -> bool:
@@ -111,10 +112,10 @@ class ReportEmailer:
             ok = self._send(sender, password, recipient, subject, html)
             if ok:
                 self._save_last_sent()
-                logger.info("[Email] Daily report sent to {}".format(recipient))
+                logger.info(f"[Email] Daily report sent to {recipient}")
             return ok
         except Exception as e:
-            logger.error("[Email] Failed: {}".format(e))
+            logger.error(f"[Email] Failed: {e}")
             return False
 
     def send_alert(self, subject: str, message: str) -> bool:
@@ -128,7 +129,7 @@ class ReportEmailer:
                 "<h2 style='color:#f87171'>&#9888; TradingBot Alert</h2>"
                 "<p>{}</p></body></html>".format(message.replace("\n", "<br>")))
         return self._send(sender, password, recipient,
-                          "[TradingBot Alert] {}".format(subject), html)
+                          f"[TradingBot Alert] {subject}", html)
 
     def is_configured(self) -> bool:
         return bool(GMAIL_SENDER() and GMAIL_PASSWORD() and GMAIL_RECIPIENT())
@@ -153,7 +154,7 @@ class ReportEmailer:
         period_stats = self._compute_period_stats(all_closed)
         today = period_stats["today"]
 
-        leader = (comp or {}).get("leader", "?").upper()
+        (comp or {}).get("leader", "?").upper()
         bias   = (claude or {}).get("market_bias", "neutral").upper()
         fg     = news.get("fear_greed", {}).get("value", "?")
         mode_tag = "LIVE" if op_mode == "CONTROLLED_LIVE" else op_mode
@@ -194,8 +195,7 @@ class ReportEmailer:
     def _section_mode_banner(self, op_mode: str) -> str:
         if op_mode == "CONTROLLED_LIVE":
             try:
-                from config import (RISK, LEVERAGE_TIERS,
-                                    MAX_LOSS_PER_TRADE_USD)
+                from config import LEVERAGE_TIERS, MAX_LOSS_PER_TRADE_USD, RISK
                 max_lev = RISK.get("futures_max_leverage", 3)
                 max_pos = RISK.get("max_position_pct", 0.01) * 100
                 tiers = ", ".join("{}:{}x".format(t, v["leverage"])
@@ -211,9 +211,9 @@ class ReportEmailer:
   </div>
   <div style="display:flex;gap:16px;flex-wrap:wrap">{}</div>
 </div>""".format(_stat_boxes([
-                ("Max Leverage", "{}x".format(max_lev), "green"),
-                ("Position Size", "{:.0f}%".format(max_pos), "green"),
-                ("Max Loss/Trade", "${:.2f}".format(MAX_LOSS_PER_TRADE_USD), "green"),
+                ("Max Leverage", f"{max_lev}x", "green"),
+                ("Position Size", f"{max_pos:.0f}%", "green"),
+                ("Max Loss/Trade", f"${MAX_LOSS_PER_TRADE_USD:.2f}", "green"),
                 ("Min Hold", "2h", "green"),
                 ("R:R Ratio", "2.0:1", "green"),
                 ("Tiers", tiers, "dim"),
@@ -266,13 +266,13 @@ class ReportEmailer:
             flag  = " &#127881;" if name == leader else ""
             hflag = " <span class='red'>[HALTED]</span>" if halt else ""
             rows += _tr(
-                "<b>{}{}{}</b>".format(name.upper(), flag, hflag),
+                f"<b>{name.upper()}{flag}{hflag}</b>",
                 _money(bal), _pct(ret), _wr(wr),
                 _pnl(pnl), _pct(-fees, neg_red=True),
                 "<span class='{}'>{:.1f}%</span>".format(
                     "red" if dd >= 10 else "yellow" if dd >= 5 else "green", dd),
                 str(n),
-                "<span class='yellow'>{:.0f}</span>".format(sc),
+                f"<span class='yellow'>{sc:.0f}</span>",
             )
         rows += ("<tr style='border-top:2px solid #1e3a5f;font-weight:bold'>"
                  + _td("TOTAL (3 profiles)")
@@ -285,18 +285,18 @@ class ReportEmailer:
                  + "</tr>")
 
         rec_c = "green" if "READY" in rec else "yellow"
-        body = """
+        body = f"""
 <table>
   <tr><th>Profile</th><th>Balance</th><th>Return</th><th>Win Rate</th>
       <th>Net P&amp;L</th><th>Fees</th><th>Drawdown</th><th>Trades</th><th>Score</th></tr>
   {rows}
 </table>
-<p style="margin-top:14px;font-size:13px" class="{rc}">{rec}</p>
-""".format(rows=rows, rc=rec_c, rec=rec)
+<p style="margin-top:14px;font-size:13px" class="{rec_c}">{rec}</p>
+"""
 
         return _card(
             "Portfolio Snapshot &nbsp;<span class='dim' style='font-size:12px'>"
-            "Scan #{} &nbsp;|&nbsp; $300 total paper capital</span>".format(scans),
+            f"Scan #{scans} &nbsp;|&nbsp; $300 total paper capital</span>",
             "&#127974;", body)
 
     # ── Section 2: Exchange breakdown ─────────────────────────────────
@@ -364,7 +364,7 @@ class ReportEmailer:
                     total_wallet += bal
                     wallet_rows += _tr(pn.upper(), _money(bal))
             if total_wallet > 0:
-                wallet_rows += "<tr style='font-weight:bold'><td>TOTAL</td><td>{}</td></tr>".format(_money(total_wallet))
+                wallet_rows += f"<tr style='font-weight:bold'><td>TOTAL</td><td>{_money(total_wallet)}</td></tr>"
 
             prof_rows = ""
             for pn, pd in s.get("profiles",{}).items():
@@ -389,17 +389,17 @@ class ReportEmailer:
   </div>
 </div>""".format(col=color, ex_upper=ex.upper(), n=n, open_n=open_n, sp_n=sp_n, ft_n=ft_n,
                  stat_boxes=_stat_boxes([
-                     ("Net P&L", "{:+.4f}".format(pnl), "green" if pnl>=0 else "red"),
-                     ("Win Rate","{:.1f}%".format(wr), "green" if wr>=55 else "yellow" if wr>=40 else "red"),
-                     ("Fees",    "-{:.4f}".format(fees), "orange"),
-                     ("Gross",   "{:+.4f}".format(gross), "green" if gross>=0 else "red"),
+                     ("Net P&L", f"{pnl:+.4f}", "green" if pnl>=0 else "red"),
+                     ("Win Rate",f"{wr:.1f}%", "green" if wr>=55 else "yellow" if wr>=40 else "red"),
+                     ("Fees",    f"-{fees:.4f}", "orange"),
+                     ("Gross",   f"{gross:+.4f}", "green" if gross>=0 else "red"),
                  ]),
                  wallet_rows=wallet_rows or "<tr><td colspan='2' class='dim'>No balance</td></tr>",
                  prof_rows=prof_rows or "<tr><td colspan='4' class='dim'>No trades yet</td></tr>",
                  sp_c="green" if sp_pnl>=0 else "red", ft_c="green" if ft_pnl>=0 else "red",
                  sp_pnl=sp_pnl, ft_pnl=ft_pnl, best=best, worst=worst)
 
-        return "<h2>&#127759; Per-Exchange Breakdown</h2><div class='card'>{}</div>".format(sections_html)
+        return f"<h2>&#127759; Per-Exchange Breakdown</h2><div class='card'>{sections_html}</div>"
 
     # ── Section 3: Claude ─────────────────────────────────────────────
 
@@ -417,19 +417,19 @@ class ReportEmailer:
         for coin, rec in claude.get("coins",{}).items():
             action = rec.get("action","skip"); cadj = rec.get("confidence_adj",1.0)
             reason = rec.get("reason","")[:70]; ac = ALC.get(action,"dim")
-            coin_rows += _tr("<b>{}</b>".format(coin),
+            coin_rows += _tr(f"<b>{coin}</b>",
                 "<span class='{}'>{}</span>".format(ac,action.replace("_"," ").upper()),
                 "<span class='{}'>{:.2f}x</span>".format("green" if cadj>=1.1 else "red" if cadj<=0.7 else "white",cadj),
-                "<span class='dim'>{}</span>".format(reason))
+                f"<span class='dim'>{reason}</span>")
         body = """
 <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">{sb}</div>
 {notes}
 <table><tr><th>Coin</th><th>Action</th><th>Adj</th><th>Reason</th></tr>{cr}</table>
-""".format(sb=_stat_boxes([("Bias",bias.upper(),bc),("Risk","{:.2f}x".format(rm),rmc),
-            ("Best",best or "—","green"),("Src","{} #{}".format(src,call_n),"dim")]),
-           notes="<p style='margin-bottom:12px'><span class='dim'>{}</span><br><b>Advice:</b> {}</p>".format(note[:120],advice[:120]) if (note or advice) else "",
+""".format(sb=_stat_boxes([("Bias",bias.upper(),bc),("Risk",f"{rm:.2f}x",rmc),
+            ("Best",best or "—","green"),("Src",f"{src} #{call_n}","dim")]),
+           notes=f"<p style='margin-bottom:12px'><span class='dim'>{note[:120]}</span><br><b>Advice:</b> {advice[:120]}</p>" if (note or advice) else "",
            cr=coin_rows or "<tr><td colspan='4' class='dim'>No data</td></tr>")
-        return _card("Claude AI &nbsp;<span class='dim' style='font-size:11px'>({}) {}</span>".format(src,ts),"&#129302;",body)
+        return _card(f"Claude AI &nbsp;<span class='dim' style='font-size:11px'>({src}) {ts}</span>","&#129302;",body)
 
     # ── Section 4: Open positions ─────────────────────────────────────
 
@@ -443,21 +443,21 @@ class ReportEmailer:
         for ex in ["binance","bybit","bitget"] + [e for e in by_ex if e not in ("binance","bybit","bitget")]:
             pos_list = by_ex.get(ex,[])
             if not pos_list: continue
-            rows += "<tr style='background:#0f172a'><td colspan='8' style='color:#7dd3fc;font-size:11px;text-transform:uppercase;padding:8px 10px;font-weight:bold'>{} ({})</td></tr>".format(ex.upper(),len(pos_list))
+            rows += f"<tr style='background:#0f172a'><td colspan='8' style='color:#7dd3fc;font-size:11px;text-transform:uppercase;padding:8px 10px;font-weight:bold'>{ex.upper()} ({len(pos_list)})</td></tr>"
             for p in pos_list:
                 side = (p.get("side") or "?").upper()
                 sym  = p.get("symbol","?"); mtype = (p.get("market_type") or "spot").upper()
                 entry= p.get("entry_price",0); sl=p.get("stop_loss",0); tp=p.get("take_profit",0)
                 lev  = p.get("leverage",1); dur = int((time.time()-p.get("open_time",time.time()))/60)
                 raw_s= p.get("strategy","") or ""; prof = raw_s.split("|")[1].upper() if "|" in raw_s else ""
-                lev_s= " {}x".format(lev) if lev>1 else ""; sc = "green" if side=="BUY" else "red"
-                rows += _tr("<span class='{}'>{}</span>".format(sc,side),"<b>{}</b>".format(sym),
-                    "{}{} {}".format(mtype,lev_s,"<span class='yellow'>[{}]</span>".format(prof) if prof else ""),
-                    "${:.4f}".format(entry),"<span class='red'>${:.4f}</span>".format(sl),
-                    "<span class='green'>${:.4f}</span>".format(tp),"<span class='dim'>{}m</span>".format(dur),
+                lev_s= f" {lev}x" if lev>1 else ""; sc = "green" if side=="BUY" else "red"
+                rows += _tr(f"<span class='{sc}'>{side}</span>",f"<b>{sym}</b>",
+                    "{}{} {}".format(mtype,lev_s,f"<span class='yellow'>[{prof}]</span>" if prof else ""),
+                    f"${entry:.4f}",f"<span class='red'>${sl:.4f}</span>",
+                    f"<span class='green'>${tp:.4f}</span>",f"<span class='dim'>{dur}m</span>",
                     "<span class='dim'>{}</span>".format(p.get("order_id","")[-6:]))
-        body = "<table><tr><th>Side</th><th>Symbol</th><th>Market</th><th>Entry</th><th>SL</th><th>TP</th><th>Age</th><th>ID</th></tr>{}</table>".format(rows)
-        return _card("Open Positions ({})".format(len(all_open)),"&#128308;",body)
+        body = f"<table><tr><th>Side</th><th>Symbol</th><th>Market</th><th>Entry</th><th>SL</th><th>TP</th><th>Age</th><th>ID</th></tr>{rows}</table>"
+        return _card(f"Open Positions ({len(all_open)})","&#128308;",body)
 
     # ── Section 5: Research ───────────────────────────────────────────
 
@@ -515,9 +515,9 @@ class ReportEmailer:
         except Exception:
             pass
         if fg <= 15:
-            alerts.append(("info","EXTREME FEAR (F&G={}): Historical buying opportunity.".format(fg)))
+            alerts.append(("info",f"EXTREME FEAR (F&G={fg}): Historical buying opportunity."))
         elif fg >= 80:
-            alerts.append(("warning","EXTREME GREED (F&G={}): High reversal risk. Tighten stops.".format(fg)))
+            alerts.append(("warning",f"EXTREME GREED (F&G={fg}): High reversal risk. Tighten stops."))
 
         # Arbitrage summary
         try:
@@ -526,7 +526,7 @@ class ReportEmailer:
                 arb = json.loads(arb_path.read_text(encoding="utf-8"))
                 arb_n = arb.get("closed_arbs",0); arb_pnl = arb.get("total_pnl",0)
                 if arb_n > 0:
-                    alerts.append(("info","ARBITRAGE: {} closed arbs | PnL: {:+.4f} USDT".format(arb_n,arb_pnl)))
+                    alerts.append(("info",f"ARBITRAGE: {arb_n} closed arbs | PnL: {arb_pnl:+.4f} USDT"))
         except Exception:
             pass
 
@@ -566,9 +566,9 @@ class ReportEmailer:
             if ct and ot and ct >= ot:
                 mins = int((ct - ot) / 60)
                 if mins >= 60:
-                    hold_str = "{}h {:02d}m".format(mins // 60, mins % 60)
+                    hold_str = f"{mins // 60}h {mins % 60:02d}m"
                 else:
-                    hold_str = "{}m".format(mins)
+                    hold_str = f"{mins}m"
 
             # Reconciled flag (imported from exchange history, not bot-tracked)
             pid = t.get("id", "") or ""
@@ -586,21 +586,21 @@ class ReportEmailer:
             if ex != current_ex:
                 current_ex = ex
                 # 11 cols: Time, Mode, Prof, Side, Symbol, Strategy, Hold, Net P&L, Gross, Fees, Reason
-                rows += "<tr style='background:#0f172a'><td colspan='11' style='color:#7dd3fc;font-size:11px;text-transform:uppercase;padding:6px 10px;font-weight:bold'>{}</td></tr>".format(ex.upper())
-            rows += _tr("<span class='dim'>{}</span>".format(ts_str), mode,
-                "<span class='yellow'>{}</span>".format(prof) if prof else "",
-                "<span class='{}'>{}</span>".format(sc,side), "<b>{}</b>".format(sym),
-                "<span class='dim'>{}</span>".format(strat),
-                "<span class='dim'>{}</span>".format(hold_str),
+                rows += f"<tr style='background:#0f172a'><td colspan='11' style='color:#7dd3fc;font-size:11px;text-transform:uppercase;padding:6px 10px;font-weight:bold'>{ex.upper()}</td></tr>"
+            rows += _tr(f"<span class='dim'>{ts_str}</span>", mode,
+                f"<span class='yellow'>{prof}</span>" if prof else "",
+                f"<span class='{sc}'>{side}</span>", f"<b>{sym}</b>",
+                f"<span class='dim'>{strat}</span>",
+                f"<span class='dim'>{hold_str}</span>",
                 "<span class='{}'>{}{:.4f}</span>".format(pc,"+" if pnl>=0 else "",pnl),
-                "<span class='dim'>{:+.4f}</span>".format(gross),
-                "<span class='dim'>-{:.4f}</span>".format(fees),
-                "<span class='dim'>{}</span>".format(reason))
+                f"<span class='dim'>{gross:+.4f}</span>",
+                f"<span class='dim'>-{fees:.4f}</span>",
+                f"<span class='dim'>{reason}</span>")
         legend = ("<p class='dim' style='margin-top:8px;font-size:11px'>"
                   "[P]=Paper &nbsp; <span class='green'>[L]=Live</span> &nbsp; "
                   "<span class='yellow'>[R]=Reconciled from exchange history</span>"
                   "{}</p>").format(
-                      " &nbsp;&mdash;&nbsp; <b>{}</b> reconciled trade(s) in view".format(reconciled_n)
+                      f" &nbsp;&mdash;&nbsp; <b>{reconciled_n}</b> reconciled trade(s) in view"
                       if reconciled_n else "")
         body = ("<table><tr><th>Time</th><th>Mode</th><th>Prof</th><th>Side</th>"
                 "<th>Symbol</th><th>Strategy</th><th>Hold</th><th>Net P&amp;L</th>"
@@ -629,13 +629,13 @@ class ReportEmailer:
             wr = (s["wins"] / s["n"] * 100) if s["n"] > 0 else 0
             pf = s["pnl"] / abs(s["fees"]) if s["fees"] != 0 else 0
             rows += _tr(
-                "<b>{}</b>".format(name), str(s["n"]), _wr(wr),
+                f"<b>{name}</b>", str(s["n"]), _wr(wr),
                 _pnl(s["pnl"]),
                 "<span class='dim'>-{:.4f}</span>".format(s["fees"]),
                 "<span class='{}'>{:.2f}</span>".format(
                     "green" if pf > 1 else "red", pf))
         body = "<table><tr><th>Strategy</th><th>Trades</th><th>WR</th>" \
-               "<th>Net P&amp;L</th><th>Fees</th><th>PF</th></tr>{}</table>".format(rows)
+               f"<th>Net P&amp;L</th><th>Fees</th><th>PF</th></tr>{rows}</table>"
         return _card("Strategy Breakdown", "&#128202;", body)
 
     # ── Section 9: Warehouse Edge ────────────────────────────────────
@@ -675,21 +675,21 @@ class ReportEmailer:
             pf = (s["gross_win"] / s["gross_loss"]) if s["gross_loss"] > 0 \
                  else (999.0 if s["gross_win"] > 0 else 0.0)
             pf_c = "green" if pf >= 1.5 else "yellow" if pf >= 1.0 else "red"
-            pf_str = "&infin;" if pf >= 999 else "{:.2f}".format(pf)
+            pf_str = "&infin;" if pf >= 999 else f"{pf:.2f}"
             avg_hold = (s["hold_secs"] / s["hold_n"]) if s["hold_n"] else 0
             if avg_hold >= 3600:
-                hold_str = "{:.1f}h".format(avg_hold / 3600)
+                hold_str = f"{avg_hold / 3600:.1f}h"
             elif avg_hold >= 60:
-                hold_str = "{:.0f}m".format(avg_hold / 60)
+                hold_str = f"{avg_hold / 60:.0f}m"
             else:
                 hold_str = "--"
             rows += _tr(
-                "<b>{}</b>".format(sym), str(s["n"]), _wr(wr),
+                f"<b>{sym}</b>", str(s["n"]), _wr(wr),
                 _pnl(s["pnl"]),
                 "<span class='{}'>{:+.4f}</span>".format(
                     "green" if ev >= 0 else "red", ev),
-                "<span class='{}'>{}</span>".format(pf_c, pf_str),
-                "<span class='dim'>{}</span>".format(hold_str))
+                f"<span class='{pf_c}'>{pf_str}</span>",
+                f"<span class='dim'>{hold_str}</span>")
         body = ("<p class='dim' style='margin-bottom:10px;font-size:12px'>"
                 "Top 10 and bottom 5 symbols by net P&amp;L. "
                 "PF = gross_win / gross_loss. E[V] = net P&amp;L per trade.</p>"
@@ -773,7 +773,7 @@ class ReportEmailer:
             pnl_c = "green" if s["pnl"] >= 0 else "red"
             pf_c  = "green" if s["pf"]  >= 1 else "red"
             return _tr(
-                "<b>{}</b>".format(label),
+                f"<b>{label}</b>",
                 str(s["n"]),
                 "<span class='green'>{}</span>".format(s["wins"]),
                 "<span class='red'>{}</span>".format(s["losses"]),
@@ -831,18 +831,18 @@ class ReportEmailer:
         stat_cards = _stat_boxes([
             ("Bot State",   "HALTED" if halted else "ACTIVE",
                             "red" if halted else "green"),
-            ("Max DD",      "{:.2f}%".format(dd_pct),
+            ("Max DD",      f"{dd_pct:.2f}%",
                             "red" if dd_pct >= 10 else "yellow" if dd_pct >= 5 else "green"),
-            ("Daily P&L",   "{:+.4f}".format(daily_pnl),
+            ("Daily P&L",   f"{daily_pnl:+.4f}",
                             "green" if daily_pnl >= 0 else "red"),
             ("Trades/day",  str(trades_today), "dim"),
-            ("Peak Bal",    "${:.2f}".format(peak_bal), "dim"),
-            ("Start Bal",   "${:.2f}".format(start_bal), "dim"),
+            ("Peak Bal",    f"${peak_bal:.2f}", "dim"),
+            ("Start Bal",   f"${start_bal:.2f}", "dim"),
         ])
 
         warnings = []
         if halted:
-            warnings.append("<span class='red'>&#9888; HALTED: {}</span>".format(halt_reason))
+            warnings.append(f"<span class='red'>&#9888; HALTED: {halt_reason}</span>")
         if review_required:
             warnings.append("<span class='red'>&#9888; data/review_required.json present "
                             "— owner review required before auto-resume</span>")
@@ -871,8 +871,7 @@ class ReportEmailer:
             wins_n = sum(1 for s in symbols if s == "W")
             losses_n = len(symbols) - wins_n
             streak_html = ("<p style='margin-top:10px;font-size:12px'>"
-                           "<span class='dim'>Last {} results ({}W/{}L):</span> ".format(
-                               len(symbols), wins_n, losses_n)
+                           f"<span class='dim'>Last {len(symbols)} results ({wins_n}W/{losses_n}L):</span> "
                            + streak_html + "</p>")
 
         body = ("<div style='display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px'>"
@@ -915,13 +914,13 @@ class ReportEmailer:
             status = "OK" if total >= 10 else "warmup"
             status_c = "green" if status == "OK" else "dim"
             rows += _tr(
-                "<b>{}</b>".format(strat), str(total),
-                "<span class='{}'>{:.1f}%</span>".format(wr_c, wr),
-                "{:.2f}".format(b),
-                "<span class='{}'>{:+.1f}%</span>".format(edge_c, full_kelly),
-                "<span class='{}'>{:+.1f}%</span>".format(edge_c, frac_kelly),
-                "<span class='{}'>{:+.4f}</span>".format(pnl_c, pnl),
-                "<span class='{}'>{}</span>".format(status_c, status),
+                f"<b>{strat}</b>", str(total),
+                f"<span class='{wr_c}'>{wr:.1f}%</span>",
+                f"{b:.2f}",
+                f"<span class='{edge_c}'>{full_kelly:+.1f}%</span>",
+                f"<span class='{edge_c}'>{frac_kelly:+.1f}%</span>",
+                f"<span class='{pnl_c}'>{pnl:+.4f}</span>",
+                f"<span class='{status_c}'>{status}</span>",
             )
         body = ("<p class='dim' style='margin-bottom:10px;font-size:12px'>"
                 "Kelly edge = (p·b − q) / b where b = avg_win / avg_loss. "
@@ -954,11 +953,11 @@ class ReportEmailer:
             avg = d["pnl"] / d["n"] if d["n"] else 0
             pnl_c = "green" if d["pnl"] >= 0 else "red"
             rows += _tr(
-                "<b>{}</b>".format(name), str(d["n"]),
-                "<span class='dim'>{:.1f}%</span>".format(share),
+                f"<b>{name}</b>", str(d["n"]),
+                f"<span class='dim'>{share:.1f}%</span>",
                 _wr(wr),
                 "<span class='{}'>{:+.4f}</span>".format(pnl_c, d["pnl"]),
-                "<span class='{}'>{:+.4f}</span>".format(pnl_c, avg),
+                f"<span class='{pnl_c}'>{avg:+.4f}</span>",
             )
         body = ("<table><tr><th>Reason</th><th>Count</th><th>Share</th>"
                 "<th>WR</th><th>Net P&amp;L</th><th>Avg</th></tr>"
@@ -1031,21 +1030,19 @@ class ReportEmailer:
         hdr_cols = ["Hour", "N", "W", "L", "WR"]
         if has_pnl:
             hdr_cols.append("Net P&amp;L")
-        hdr = "<tr>" + "".join("<th>{}</th>".format(c) for c in hdr_cols) + "</tr>"
+        hdr = "<tr>" + "".join(f"<th>{c}</th>" for c in hdr_cols) + "</tr>"
 
         # Threshold label is accurate
         threshold_label = "≥2 trades" if any(x["n"] >= 2 for x in items) else "any"
         body = ("<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px'>"
                 "<div><p style='color:#94a3b8;font-size:11px;text-transform:uppercase;margin:0 0 6px'>"
-                "&#11088; Best hours ({thr})</p><table>{h}{r}</table></div>"
+                f"&#11088; Best hours ({threshold_label})</p><table>{hdr}{top_rows}</table></div>"
                 "<div><p style='color:#94a3b8;font-size:11px;text-transform:uppercase;margin:0 0 6px'>"
-                "&#128308; Worst hours ({thr})</p><table>{h}{b}</table></div>"
+                f"&#128308; Worst hours ({threshold_label})</p><table>{hdr}{bot_rows}</table></div>"
                 "</div>"
                 "<p class='dim' style='margin-top:8px;font-size:11px'>"
                 "From data/knowledge_model.json. Hours trending higher WR are favored by the "
-                "MCP Brain timing bonus ({total} total hours tracked).</p>").format(
-                    thr=threshold_label, h=hdr, r=top_rows, b=bot_rows,
-                    total=len(items))
+                f"MCP Brain timing bonus ({len(items)} total hours tracked).</p>")
         return _card("Hourly Performance Heatmap", "&#128197;", body)
 
     # ── Section 15: Active Blacklist ────────────────────────────────
@@ -1065,18 +1062,18 @@ class ReportEmailer:
         rows = ""
         for s in hard:
             rows += _tr("<span class='red'>HARD</span>",
-                        "<b>{}</b>".format(s),
+                        f"<b>{s}</b>",
                         "<span class='dim'>config.BLACKLIST_HARD</span>")
         for s in bl_mut_list:
             if s in hard:
                 continue
             rows += _tr("<span class='yellow'>AUTO</span>",
-                        "<b>{}</b>".format(s),
+                        f"<b>{s}</b>",
                         "<span class='dim'>AutoMutator (recent loss cluster)</span>")
         if leverage_cap:
             rows += _tr("<span class='yellow'>CAP</span>",
                         "<b>Leverage</b>",
-                        "<span class='dim'>AutoMutator cap → {}x</span>".format(leverage_cap))
+                        f"<span class='dim'>AutoMutator cap → {leverage_cap}x</span>")
         if not rows:
             body = "<p class='dim'>No active blacklist entries.</p>"
         else:
@@ -1099,7 +1096,7 @@ class ReportEmailer:
                         pid=pos.get("id","")
                         if pid not in seen_ids: seen_ids.add(pid); all_closed.append(pos)
             except Exception as e:
-                logger.debug("[Email] _ingest {}: {}".format(path,e))
+                logger.debug(f"[Email] _ingest {path}: {e}")
         _ingest(POSITIONS_FILE)
         for name in PROFILE_NAMES: _ingest(_profile_positions_file(name))
         all_closed.sort(key=lambda x: x.get("close_time",0),reverse=True)
@@ -1117,7 +1114,7 @@ class ReportEmailer:
         try:
             if path.exists(): return json.loads(path.read_text(encoding="utf-8"))
         except Exception as e:
-            logger.debug("[Email] Load {}: {}".format(path.name,e))
+            logger.debug(f"[Email] Load {path.name}: {e}")
         return None
 
     def _send(self, sender, password, recipient, subject, html):
@@ -1127,11 +1124,11 @@ class ReportEmailer:
             ctx=ssl.create_default_context()
             with smtplib.SMTP_SSL("smtp.gmail.com",465,context=ctx) as srv:
                 srv.login(sender,password); srv.sendmail(sender,[recipient],msg.as_string())
-            logger.info("[Email] Sent: {}".format(subject[:70])); return True
+            logger.info(f"[Email] Sent: {subject[:70]}"); return True
         except smtplib.SMTPAuthenticationError:
             logger.error("[Email] Auth failed — use a Gmail App Password."); return False
         except Exception as e:
-            logger.error("[Email] Send failed: {}".format(e)); return False
+            logger.error(f"[Email] Send failed: {e}"); return False
 
     def _load_last_sent(self):
         try:
@@ -1143,10 +1140,10 @@ class ReportEmailer:
         try:
             LAST_SENT_FILE.parent.mkdir(parents=True,exist_ok=True)
             _slot_now = datetime.now(timezone.utc)
-            _slot_key = _slot_now.strftime("%Y-%m-%d") + "-{:02d}".format(_slot_now.hour)
+            _slot_key = _slot_now.strftime("%Y-%m-%d") + f"-{_slot_now.hour:02d}"
             LAST_SENT_FILE.write_text(json.dumps({"date":_slot_key,"sent_at":_slot_now.isoformat()}),encoding="utf-8")
         except Exception as e:
-            logger.debug("[Email] Save last-sent: {}".format(e))
+            logger.debug(f"[Email] Save last-sent: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1154,30 +1151,30 @@ class ReportEmailer:
 # ═══════════════════════════════════════════════════════════════════════
 
 def _card(title,icon,body):
-    return "\n<h2>{} {}</h2>\n<div class=\"card\">\n  {}\n</div>".format(icon,title,body)
+    return f"\n<h2>{icon} {title}</h2>\n<div class=\"card\">\n  {body}\n</div>"
 
 def _tr(*cells):
-    return "<tr>"+"".join("<td>{}</td>".format(c) for c in cells)+"</tr>"
+    return "<tr>"+"".join(f"<td>{c}</td>" for c in cells)+"</tr>"
 
 def _td(content=""):
-    return "<td>{}</td>".format(content)
+    return f"<td>{content}</td>"
 
 def _money(val,color=False):
     sign="+" if val>=0 else ""; c=("green" if val>=0 else "red") if color else "white"
-    return "<span class='{}'>{}{:.4f} USDT</span>".format(c,sign,val)
+    return f"<span class='{c}'>{sign}{val:.4f} USDT</span>"
 
 def _pct(val,neg_red=False):
     c="green" if val>=0 else "red"
     if neg_red: c="red" if val!=0 else "dim"
-    return "<span class='{}'>{:+.2f}%</span>".format(c,val)
+    return f"<span class='{c}'>{val:+.2f}%</span>"
 
 def _wr(val):
     c="green" if val>=55 else "yellow" if val>=45 else "red"
-    return "<span class='{}'>{:.1f}%</span>".format(c,val)
+    return f"<span class='{c}'>{val:.1f}%</span>"
 
 def _pnl(val):
     sign="+" if val>=0 else ""; c="green" if val>=0 else "red"
-    return "<span class='{}'>{}{:.4f}</span>".format(c,sign,val)
+    return f"<span class='{c}'>{sign}{val:.4f}</span>"
 
 def _stat_boxes(items):
     boxes=""
@@ -1242,7 +1239,8 @@ _HTML_SHELL = """<!DOCTYPE html>
 if __name__ == "__main__":
     import sys
     try:
-        from dotenv import load_dotenv; load_dotenv()
+        from dotenv import load_dotenv
+        load_dotenv()
     except ImportError:
         pass
     cmd = sys.argv[1] if len(sys.argv) > 1 else "--send"
@@ -1255,16 +1253,19 @@ if __name__ == "__main__":
         ok = emailer._send(s,p,r,"[TradingBot] Test email",
             "<html><body style='font-family:Arial;background:#0f172a;color:#e2e8f0;padding:24px'>"
             "<h2 style='color:#4ade80'>&#10003; Email test successful!</h2>"
-            "<p>Daily reports at {:02d}:00 UTC.</p></body></html>".format(REPORT_HOUR))
+            f"<p>Daily reports at {REPORT_HOUR:02d}:00 UTC.</p></body></html>")
         print("\n  {} — {}".format("SUCCESS" if ok else "FAILED", r)); sys.exit(0 if ok else 1)
     elif cmd == "--preview":
         print("\n  Building preview...\n")
         subject, html = emailer._build_report()
         out = Path("data/email_preview.html"); out.parent.mkdir(parents=True,exist_ok=True)
         out.write_text(html,encoding="utf-8")
-        print("  Subject: {}\n  Preview: {}".format(subject, out.resolve()))
-        try: import os; os.startfile(str(out.resolve()))
-        except Exception: pass
+        print(f"  Subject: {subject}\n  Preview: {out.resolve()}")
+        try:
+            import os
+            os.startfile(str(out.resolve()))
+        except Exception:
+            pass
     else:
         print("\n  Sending daily report...\n")
         ok = emailer.send_daily(force=True)

@@ -11,7 +11,6 @@ expectancy:
 from __future__ import annotations
 
 import importlib.util
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -49,7 +48,7 @@ def _seed_warehouse(db_path: Path, mean_pnl: float, n: int = 50):
 @pytest.fixture
 def patch_warehouse(tmp_path, monkeypatch):
     """Point risk_manager's warehouse path to a temp DB."""
-    db = tmp_path / "warehouse.sqlite"
+    tmp_path / "warehouse.sqlite"
     # The risk_manager hardcodes data/warehouse.sqlite — chdir into tmp_path
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)

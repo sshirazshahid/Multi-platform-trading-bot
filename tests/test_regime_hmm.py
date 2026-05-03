@@ -12,7 +12,6 @@ pytest.importorskip("joblib")
 
 from core.regime_hmm import RegimeHMM
 
-
 # --------------------------------------------------------------------- helpers
 
 

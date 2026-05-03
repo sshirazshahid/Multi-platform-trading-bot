@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
-from pathlib  import Path
-from loguru   import logger
+from pathlib import Path
+
+from loguru import logger
 
 PROFILE_NAMES  = ("conservative", "moderate", "aggressive")
 SNAPSHOT_FILE  = Path("data/wallet_snapshot.json")
@@ -164,7 +165,7 @@ def extract_usdt(bal: dict, exchange_name: str = "") -> float:
 # ══════════════════════════════════════════════════════════════════════
 
 def replicate_live_to_dry(verbose: bool = True) -> dict:
-    from exchanges import BinanceClient, BybitClient, BitgetClient
+    from exchanges import BinanceClient, BitgetClient, BybitClient
 
     clients = {
         "binance": BinanceClient(),
@@ -201,9 +202,9 @@ def replicate_live_to_dry(verbose: bool = True) -> dict:
         for ex_name, snap in snapshot.items():
             total = snap.get("total_usdt", 0)
             total_all += total
-            print("  │  {:<10} ${:>10.2f} USDT".format(ex_name.upper(), total).ljust(55) + "│")
+            print(f"  │  {ex_name.upper():<10} ${total:>10.2f} USDT".ljust(55) + "│")
         print("  │                                                     │")
-        print("  │  GRAND TOTAL  ${:>10.2f} USDT".format(total_all).ljust(55) + "│")
+        print(f"  │  GRAND TOTAL  ${total_all:>10.2f} USDT".ljust(55) + "│")
         print("  └─────────────────────────────────────────────────────┘\n")
 
     _write_profile_wallets(snapshot, verbose)
@@ -242,7 +243,7 @@ def _scan_exchange(exchange, ex_name: str, verbose: bool) -> dict:
             if verbose:
                 print(f"    Unified total USDT: ${total_usdt:.4f}")
         except Exception as e:
-            logger.debug("[WalletReplicator] {} unified balance: {}".format(ex_name, e))
+            logger.debug(f"[WalletReplicator] {ex_name} unified balance: {e}")
     else:
         # ── Spot balance ───────────────────────────────────────────────
         try:
@@ -272,7 +273,7 @@ def _scan_exchange(exchange, ex_name: str, verbose: bool) -> dict:
                 if verbose:
                     print(f"    Spot  {coin:<8} {amount:>12.6f}  @ ${price:>12.4f}  = ${usdt_val:>10.2f}")
         except Exception as e:
-            logger.debug("[WalletReplicator] {} spot balance: {}".format(ex_name, e))
+            logger.debug(f"[WalletReplicator] {ex_name} spot balance: {e}")
 
         # ── Futures balance ────────────────────────────────────────────
         try:
@@ -282,7 +283,7 @@ def _scan_exchange(exchange, ex_name: str, verbose: bool) -> dict:
             if verbose and usdt_f > 0:
                 print(f"    Futures USDT margin: ${usdt_f:.4f}")
         except Exception as e:
-            logger.debug("[WalletReplicator] {} futures balance: {}".format(ex_name, e))
+            logger.debug(f"[WalletReplicator] {ex_name} futures balance: {e}")
 
     # ── Commodity positions (all exchanges) ───────────────────────────
     for com_sym, com_label in _COMMODITY_FUTURES.get(ex_name, {}).items():
@@ -315,7 +316,7 @@ def _scan_exchange(exchange, ex_name: str, verbose: bool) -> dict:
 
 
 def _get_price(exchange, coin: str, verbose: bool) -> float:
-    symbol = "{}/USDT".format(coin)
+    symbol = f"{coin}/USDT"
     try:
         tick  = exchange.fetch_ticker(symbol, "spot")
         price = float(tick.get("last") or tick.get("close") or 0)
@@ -340,7 +341,7 @@ _COMMODITY_FUTURES = {
 def _write_profile_wallets(snapshot: dict, verbose: bool):
     now = time.time()
     for prof_name in PROFILE_NAMES:
-        wallet_path = Path("data/profiles/{}/wallet.json".format(prof_name))
+        wallet_path = Path(f"data/profiles/{prof_name}/wallet.json")
         wallet_path.parent.mkdir(parents=True, exist_ok=True)
         balances = {}
         for ex_name, snap in snapshot.items():
@@ -370,7 +371,7 @@ def _save_snapshot(snapshot: dict):
                 "grand_total": round(sum(s.get("total_usdt",0) for s in snapshot.values()), 4),
             }, indent=2), encoding="utf-8")
     except Exception as e:
-        logger.debug("[WalletReplicator] Save snapshot: {}".format(e))
+        logger.debug(f"[WalletReplicator] Save snapshot: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════

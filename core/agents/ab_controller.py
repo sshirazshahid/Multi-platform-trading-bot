@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-
 SPLIT_PATH = Path("data/ab_split.json")
 RAMP_STAGES = [0.0, 0.10, 0.25, 0.50, 1.00]
 RAMP_DWELL_DAYS = 1  # one ramp step per 24h of continuous PROMOTE

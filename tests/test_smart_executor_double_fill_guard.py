@@ -30,7 +30,6 @@ These tests pin both behaviors:
 """
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
 

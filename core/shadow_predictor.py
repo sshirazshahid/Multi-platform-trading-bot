@@ -64,7 +64,7 @@ class ShadowPredictor:
     _instance = None
 
     @classmethod
-    def get(cls) -> "ShadowPredictor":
+    def get(cls) -> ShadowPredictor:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance

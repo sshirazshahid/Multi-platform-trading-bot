@@ -51,7 +51,7 @@ class GarchVol:
 
     # -- Fitting -----------------------------------------------------------
 
-    def fit(self, returns: np.ndarray) -> "GarchVol":
+    def fit(self, returns: np.ndarray) -> GarchVol:
         """Fit GARCH(p,q) on `returns`. Returns self for chaining."""
         arr = np.asarray(returns, dtype=float).ravel()
         if arr.size == 0:
@@ -122,7 +122,7 @@ class GarchVol:
         )
 
     @classmethod
-    def load(cls, path: str | Path) -> "GarchVol":
+    def load(cls, path: str | Path) -> GarchVol:
         """Load a previously-saved GarchVol."""
         blob = joblib.load(str(path))
         obj = cls(p=blob["p"], q=blob["q"], dist=blob["dist"])

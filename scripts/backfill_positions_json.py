@@ -237,7 +237,7 @@ def main() -> int:
     for kind, wh_row, existing in actions[:30]:
         old = float(existing.get("pnl") or 0) if existing else 0.0
         new = float(wh_row["realized_pnl"])
-        old_s = "{:+.4f}".format(old) if existing else "(new)"
+        old_s = f"{old:+.4f}" if existing else "(new)"
         print("  {:<8}  {:<8}  {:<24}  {:<7}  {:>10}  {:>+10.4f}".format(
             kind, str(wh_row["id"]), wh_row["symbol"][:24],
             wh_row["side"], old_s, new))

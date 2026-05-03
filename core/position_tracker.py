@@ -13,13 +13,13 @@ Fee structure:
 """
 
 import json
-import time
 import threading
-from pathlib     import Path
-from dataclasses import dataclass, field, asdict
-from typing      import Optional
-from loguru      import logger
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Optional
 
+from loguru import logger
 
 _DEFAULT_SPOT_FEE    = 0.001
 _DEFAULT_FUTURES_FEE = 0.0005

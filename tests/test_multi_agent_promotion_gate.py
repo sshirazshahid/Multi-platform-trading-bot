@@ -59,7 +59,8 @@ def _seed_live(wh, n_live, win_pct, sym_offset=0):
 
 def test_promotion_gate_insufficient_decisions_holds(wh):
     from core.multi_agent_promotion_gate import (
-        evaluate_multi_agent_shadow, MAVerdict,
+        MAVerdict,
+        evaluate_multi_agent_shadow,
     )
     _seed_shadow(wh, 50, 0.60)
     _seed_live(wh, 30, 0.40)
@@ -70,7 +71,8 @@ def test_promotion_gate_insufficient_decisions_holds(wh):
 
 def test_promotion_gate_low_wr_holds(wh):
     from core.multi_agent_promotion_gate import (
-        evaluate_multi_agent_shadow, MAVerdict,
+        MAVerdict,
+        evaluate_multi_agent_shadow,
     )
     _seed_shadow(wh, 120, 0.30)  # WR 30% < 40% floor
     _seed_live(wh, 50, 0.40)
@@ -81,7 +83,9 @@ def test_promotion_gate_low_wr_holds(wh):
 
 def test_promotion_gate_promotes_when_all_pass(wh):
     from core.multi_agent_promotion_gate import (
-        evaluate_multi_agent_shadow, MAVerdict, MACriteria,
+        MACriteria,
+        MAVerdict,
+        evaluate_multi_agent_shadow,
     )
     # Shadow strongly outperforms live
     _seed_shadow(wh, 150, 0.70)
@@ -95,7 +99,8 @@ def test_promotion_gate_promotes_when_all_pass(wh):
 
 def test_promotion_gate_rejects_catastrophic(wh):
     from core.multi_agent_promotion_gate import (
-        evaluate_multi_agent_shadow, MAVerdict,
+        MAVerdict,
+        evaluate_multi_agent_shadow,
     )
     _seed_shadow(wh, 120, 0.10)  # 10% WR — catastrophic
     _seed_live(wh, 50, 0.40)

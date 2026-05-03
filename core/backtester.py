@@ -19,11 +19,11 @@ TRAIN / TEST SPLIT:
     strategy is likely overfit and should not be traded live.
 """
 
-import pandas as pd
-import numpy as np
 from dataclasses import dataclass, field
-from loguru import logger
 
+import numpy as np
+import pandas as pd
+from loguru import logger
 
 TRAIN_RATIO = 0.70   # 70% train, 30% test
 
@@ -108,16 +108,15 @@ class Backtester:
         # Minimum candles needed for a meaningful split
         if n < 100:
             logger.warning(
-                "[Backtest] Only {} candles available. "
-                "Recommend 200+ for reliable train/test split.".format(n))
+                f"[Backtest] Only {n} candles available. "
+                "Recommend 200+ for reliable train/test split.")
 
         df_train = df.iloc[:split_idx].copy()
         df_test  = df.iloc[split_idx:].copy()
 
         logger.info(
-            "[Backtest] {} | {} | split=70/30 | "
-            "train={} candles | test={} candles".format(
-                symbol, strategy.name, len(df_train), len(df_test)))
+            f"[Backtest] {symbol} | {strategy.name} | split=70/30 | "
+            f"train={len(df_train)} candles | test={len(df_test)} candles")
 
         # Run both windows
         train_trades = self._run_window(strategy, df_train, "train")
@@ -134,21 +133,20 @@ class Backtester:
         overfit_note = ""
         if (train_result.total_trades >= 5 and test_result.total_trades >= 3):
             wr_drop = train_result.win_rate - test_result.win_rate
-            pnl_drop = train_result.total_pnl - test_result.total_pnl
+            train_result.total_pnl - test_result.total_pnl
             if wr_drop > 20:
                 overfit = True
                 overfit_note = (
-                    "OVERFIT WARNING: Win rate dropped {:.0f}pp from train ({:.1f}%) "
-                    "to test ({:.1f}%). Strategy may be curve-fitted.".format(
-                        wr_drop, train_result.win_rate, test_result.win_rate))
+                    f"OVERFIT WARNING: Win rate dropped {wr_drop:.0f}pp from train ({train_result.win_rate:.1f}%) "
+                    f"to test ({test_result.win_rate:.1f}%). Strategy may be curve-fitted.")
             elif wr_drop > 10:
                 overfit_note = (
-                    "MILD DEGRADATION: WR dropped {:.0f}pp train→test. "
-                    "Monitor carefully in live trading.".format(wr_drop))
+                    f"MILD DEGRADATION: WR dropped {wr_drop:.0f}pp train→test. "
+                    "Monitor carefully in live trading.")
             else:
                 overfit_note = (
-                    "ROBUST: WR delta train→test = {:.0f}pp. "
-                    "Strategy generalises well out-of-sample.".format(wr_drop))
+                    f"ROBUST: WR delta train→test = {wr_drop:.0f}pp. "
+                    "Strategy generalises well out-of-sample.")
 
         # Profit factor (total wins / total losses)
         all_wins = sum(t["pnl"] for t in all_trades if t["pnl"] > 0)
@@ -337,13 +335,12 @@ class Backtester:
         SEP = "=" * 62
 
         logger.info(SEP)
-        logger.info("  BACKTEST RESULT  --  {}  |  {}".format(r.symbol, r.strategy))
+        logger.info(f"  BACKTEST RESULT  --  {r.symbol}  |  {r.strategy}")
         logger.info("  Train/Test Split: 70% train / 30% test")
         logger.info(SEP)
 
         def _row(label, train_val, test_val, overall_val):
-            logger.info("  {:<22} {:>12}  {:>10}  {:>10}".format(
-                label, str(train_val), str(test_val), str(overall_val)))
+            logger.info(f"  {label:<22} {str(train_val):>12}  {str(test_val):>10}  {str(overall_val):>10}")
 
         logger.info("  {:<22} {:>12}  {:>10}  {:>10}".format(
             "", "TRAIN (70%)", "TEST (30%)", "OVERALL"))
@@ -354,54 +351,54 @@ class Backtester:
 
         _row("Candles",       tr.candles,         te.candles,         tr.candles + te.candles)
         _row("Total Trades",  tr.total_trades,    te.total_trades,    r.total_trades)
-        _row("Wins / Losses", "{}/{}".format(tr.wins, tr.losses),
-                               "{}/{}".format(te.wins, te.losses),
-                               "{}/{}".format(r.wins,  r.losses))
+        _row("Wins / Losses", f"{tr.wins}/{tr.losses}",
+                               f"{te.wins}/{te.losses}",
+                               f"{r.wins}/{r.losses}")
         _row("Win Rate",
-             "{:.1f}%".format(tr.win_rate),
-             "{:.1f}%".format(te.win_rate),
-             "{:.1f}%".format(r.win_rate))
+             f"{tr.win_rate:.1f}%",
+             f"{te.win_rate:.1f}%",
+             f"{r.win_rate:.1f}%")
         _row("Total PnL",
-             "{:+.4f}".format(tr.total_pnl),
-             "{:+.4f}".format(te.total_pnl),
-             "{:+.4f}".format(r.total_pnl))
+             f"{tr.total_pnl:+.4f}",
+             f"{te.total_pnl:+.4f}",
+             f"{r.total_pnl:+.4f}")
         _row("Max Drawdown",
-             "{:.2f}%".format(tr.max_drawdown),
-             "{:.2f}%".format(te.max_drawdown),
-             "{:.2f}%".format(r.max_drawdown))
+             f"{tr.max_drawdown:.2f}%",
+             f"{te.max_drawdown:.2f}%",
+             f"{r.max_drawdown:.2f}%")
         _row("Sharpe Ratio",
-             "{:.3f}".format(tr.sharpe_ratio),
-             "{:.3f}".format(te.sharpe_ratio),
-             "{:.3f}".format(r.sharpe_ratio))
+             f"{tr.sharpe_ratio:.3f}",
+             f"{te.sharpe_ratio:.3f}",
+             f"{r.sharpe_ratio:.3f}")
         _row("Sortino Ratio",
-             "{:.3f}".format(tr.sortino_ratio),
-             "{:.3f}".format(te.sortino_ratio),
-             "{:.3f}".format(r.sortino_ratio))
+             f"{tr.sortino_ratio:.3f}",
+             f"{te.sortino_ratio:.3f}",
+             f"{r.sortino_ratio:.3f}")
         _row("Turnover",
-             "{:.4f}".format(tr.turnover),
-             "{:.4f}".format(te.turnover),
-             "{:.4f}".format(r.turnover))
+             f"{tr.turnover:.4f}",
+             f"{te.turnover:.4f}",
+             f"{r.turnover:.4f}")
         _row("Avg Trade",
-             "{:+.3f}%".format(tr.avg_trade_pct),
-             "{:+.3f}%".format(te.avg_trade_pct),
-             "{:+.3f}%".format(r.avg_trade_pct))
+             f"{tr.avg_trade_pct:+.3f}%",
+             f"{te.avg_trade_pct:+.3f}%",
+             f"{r.avg_trade_pct:+.3f}%")
         _row("Best Trade",
-             "{:+.3f}%".format(tr.best_trade),
-             "{:+.3f}%".format(te.best_trade),
-             "{:+.3f}%".format(r.best_trade))
+             f"{tr.best_trade:+.3f}%",
+             f"{te.best_trade:+.3f}%",
+             f"{r.best_trade:+.3f}%")
         _row("Worst Trade",
-             "{:+.3f}%".format(tr.worst_trade),
-             "{:+.3f}%".format(te.worst_trade),
-             "{:+.3f}%".format(r.worst_trade))
+             f"{tr.worst_trade:+.3f}%",
+             f"{te.worst_trade:+.3f}%",
+             f"{r.worst_trade:+.3f}%")
 
         logger.info(SEP)
         if r.split_note:
             prefix = "  ⚠ " if r.overfit_warning else "  ✓ "
-            logger.info("{}{}".format(prefix, r.split_note))
+            logger.info(f"{prefix}{r.split_note}")
         if r.approved:
-            logger.info("  APPROVED for live trading (PF={:.2f})".format(r.profit_factor))
+            logger.info(f"  APPROVED for live trading (PF={r.profit_factor:.2f})")
         else:
-            logger.info("  REJECTED: {}".format(r.reject_reason))
+            logger.info(f"  REJECTED: {r.reject_reason}")
         logger.info(SEP)
 
     # ------------------------------------------------------------------ #
@@ -420,17 +417,17 @@ class Backtester:
         if test and test.total_trades >= 3:
             # Evaluate on out-of-sample data
             if test.win_rate < self.MIN_WIN_RATE:
-                return False, "test WR {:.0f}% < {:.0f}%".format(test.win_rate, self.MIN_WIN_RATE)
+                return False, f"test WR {test.win_rate:.0f}% < {self.MIN_WIN_RATE:.0f}%"
             if test.total_pnl < 0:
-                return False, "test PnL negative ({:+.4f})".format(test.total_pnl)
+                return False, f"test PnL negative ({test.total_pnl:+.4f})"
         if r.total_trades < self.MIN_TRADES:
-            return False, "too few trades ({})".format(r.total_trades)
+            return False, f"too few trades ({r.total_trades})"
         if r.win_rate < self.MIN_WIN_RATE:
-            return False, "WR {:.0f}% < {:.0f}%".format(r.win_rate, self.MIN_WIN_RATE)
+            return False, f"WR {r.win_rate:.0f}% < {self.MIN_WIN_RATE:.0f}%"
         if r.profit_factor < self.MIN_PF:
-            return False, "PF {:.2f} < {:.2f}".format(r.profit_factor, self.MIN_PF)
+            return False, f"PF {r.profit_factor:.2f} < {self.MIN_PF:.2f}"
         if r.max_drawdown > self.MAX_DD:
-            return False, "DD {:.1f}% > {:.1f}%".format(r.max_drawdown, self.MAX_DD)
+            return False, f"DD {r.max_drawdown:.1f}% > {self.MAX_DD:.1f}%"
         if r.overfit_warning:
             return False, "overfit detected (WR drops train→test)"
         return True, "passed"
@@ -460,8 +457,7 @@ class Backtester:
                     win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
                     sortino_ratio=0, avg_trade_pct=0, best_trade=0,
                     worst_trade=0, turnover=0,
-                    reject_reason="insufficient data ({} candles)".format(
-                        len(raw) if raw else 0))
+                    reject_reason=f"insufficient data ({len(raw) if raw else 0} candles)")
                 return r
             df = pd.DataFrame(
                 raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -469,12 +465,12 @@ class Backtester:
             df.set_index("timestamp", inplace=True)
             return self.run(strategy, df, symbol)
         except Exception as e:
-            logger.debug("[Backtest] validate_before_live failed: {}".format(e))
+            logger.debug(f"[Backtest] validate_before_live failed: {e}")
             r = BacktestResult(
                 symbol=symbol, strategy=getattr(strategy, "name", "?"),
                 timeframe=timeframe, total_trades=0, wins=0, losses=0,
                 win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
                 sortino_ratio=0, avg_trade_pct=0, best_trade=0,
                 worst_trade=0, turnover=0,
-                reject_reason="error: {}".format(str(e)[:100]))
+                reject_reason=f"error: {str(e)[:100]}")
             return r

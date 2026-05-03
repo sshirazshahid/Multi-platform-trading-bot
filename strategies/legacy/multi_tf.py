@@ -5,18 +5,19 @@ HTF trend filter (1h/15m) + pullback to EMA or VWAP + tight stop.
 Target 1.2-1.6R with high win-rate entries. Max 3 trades/symbol/day.
 """
 
+from collections import defaultdict
+from datetime import date
+
 import numpy as np
 import pandas as pd
-from datetime import date
-from collections import defaultdict
 from loguru import logger
 
+from config import MULTI_TF as CFG
+from config import RISK
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import MULTI_TF as CFG, RISK
-
 
 # ── Pure-pandas helpers ───────────────────────────────────────────────
 

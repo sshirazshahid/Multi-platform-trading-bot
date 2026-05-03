@@ -38,12 +38,13 @@ Runs on a schedule to avoid rate limits.
 
 import json
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-from pathlib  import Path
-from loguru   import logger
+from pathlib import Path
+
+from loguru import logger
 
 try:
     from config import NEWS as NEWS_CFG

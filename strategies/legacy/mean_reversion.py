@@ -5,16 +5,15 @@ Detects horizontal ranges, waits for liquidity sweep at boundaries,
 enters on sweep reversal. Fast in/out with time-based exit.
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from loguru import logger
 
+from config import MEAN_REVERSION as CFG
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import MEAN_REVERSION as CFG, RISK
-
 
 # ── Pure-pandas indicator helpers ─────────────────────────────────────
 

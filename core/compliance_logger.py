@@ -25,9 +25,9 @@ IMPORTANT:
 import csv
 import json
 from datetime import datetime, timezone
-from pathlib  import Path
-from loguru   import logger
+from pathlib import Path
 
+from loguru import logger
 
 COMPLIANCE_DIR = Path("data/compliance")
 

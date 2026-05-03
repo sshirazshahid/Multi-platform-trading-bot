@@ -31,7 +31,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 WAREHOUSE_PATH = Path("data/warehouse.sqlite")
 
 # Flag thresholds — a row that meets ANY of these produces an actionable.

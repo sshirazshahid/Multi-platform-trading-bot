@@ -24,6 +24,7 @@ ATTRIBUTE NAMES (important — arbitrage engine looks for these):
 """
 
 from __future__ import annotations
+
 from loguru import logger
 
 
@@ -58,26 +59,24 @@ class DirectExecutor:
 
         # Guard: spot cannot short
         if mtype == "spot" and side == "sell":
-            logger.debug("[{}] Spot SHORT blocked for {}".format(
-                self.name, base_sym))
+            logger.debug(f"[{self.name}] Spot SHORT blocked for {base_sym}")
             return False
 
         # Guard: blacklist
         if self.blacklist.is_blacklisted(base_sym):
-            logger.debug("[{}] {} blacklisted".format(self.name, base_sym))
+            logger.debug(f"[{self.name}] {base_sym} blacklisted")
             return False
 
         # Guard: max open positions
         if not self.risk.can_trade(self.tracker.count_open()):
-            logger.debug("[{}] max positions reached".format(self.name))
+            logger.debug(f"[{self.name}] max positions reached")
             return False
 
         # Guard: no duplicate symbol+side+market on this exchange
         for pos in self.tracker.get_open(exchange=exchange.name):
             if (pos.symbol == symbol and pos.side == side
                     and pos.market_type == mtype):
-                logger.debug("[{}] already have {} {} {}".format(
-                    self.name, mtype, side, base_sym))
+                logger.debug(f"[{self.name}] already have {mtype} {side} {base_sym}")
                 return False
 
         # Fetch current price
@@ -85,7 +84,7 @@ class DirectExecutor:
             ticker = exchange.fetch_ticker(symbol, mtype)
             price  = float(ticker.get("last") or ticker.get("close") or 0)
         except Exception as e:
-            logger.debug("[{}] price fetch {}: {}".format(self.name, symbol, e))
+            logger.debug(f"[{self.name}] price fetch {symbol}: {e}")
             return False
 
         if price <= 0:
@@ -100,8 +99,7 @@ class DirectExecutor:
         # Minimum $10 notional (raised from $5 to ensure fees don't dominate)
         notional = size * price
         if size <= 0 or notional < 10.0:
-            logger.debug("[{}] notional ${:.2f} too small for {} (min $10)".format(
-                self.name, notional, base_sym))
+            logger.debug(f"[{self.name}] notional ${notional:.2f} too small for {base_sym} (min $10)")
             return False
 
         # SL/TP: distribution-fitted per (symbol, side) when ≥30 warehouse
@@ -116,8 +114,7 @@ class DirectExecutor:
         reward_d = abs(tp - price)
         rr = reward_d / max(risk_d, 1e-9)
         if rr < 1.5:
-            logger.debug("[{}] R:R {:.2f}:1 too low for {} — skipped".format(
-                self.name, rr, base_sym))
+            logger.debug(f"[{self.name}] R:R {rr:.2f}:1 too low for {base_sym} — skipped")
             return False
 
         # Open position via the profile's open_position_fn
@@ -179,8 +176,7 @@ class DirectExecutor:
                         self.blacklist.record_win(pos.symbol, pos.side)
 
             except Exception as e:
-                logger.debug("[{}] exit check {}: {}".format(
-                    self.name, pos.symbol, e))
+                logger.debug(f"[{self.name}] exit check {pos.symbol}: {e}")
 
     def _fetch_atr(self, exchange, symbol: str, mtype: str,
                     period: int = 14) -> float | None:

@@ -10,15 +10,16 @@ Signal logic:
 Win rate: ~60-65%  |  R:R: 1:3
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from loguru import logger
 
+from config import RISK
+from config import SUPERTREND as CFG
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
 from strategies.base_strategy import BaseStrategy
-from exchanges.base           import BaseExchange
-from core.order_manager       import OrderManager
-from core.risk_manager        import RiskManager
-from config                   import SUPERTREND as CFG, RISK
 
 
 def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series,

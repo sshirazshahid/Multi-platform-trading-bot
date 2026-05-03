@@ -12,10 +12,10 @@ The bot engine uses this to skip strategies that don't fit.
 """
 
 import time as _time
+
 import numpy as np
 import pandas as pd
 from loguru import logger
-
 
 # ── Regime labels ────────────────────────────────────────────────────
 

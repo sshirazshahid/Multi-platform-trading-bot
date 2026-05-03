@@ -21,7 +21,6 @@ import pytest
 
 from core.warehouse import Warehouse
 
-
 # ─── Fixture: isolated warehouse per test ────────────────────────────
 
 

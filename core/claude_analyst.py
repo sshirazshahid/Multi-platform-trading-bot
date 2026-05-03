@@ -28,12 +28,10 @@ from __future__ import annotations
 
 import json
 import os
-import time
-import urllib.request
-import urllib.error
 from datetime import datetime, timezone
-from pathlib  import Path
-from loguru   import logger
+from pathlib import Path
+
+from loguru import logger
 
 try:
     from dotenv import load_dotenv
@@ -83,7 +81,7 @@ def _load_research() -> dict:
         if RESEARCH_FILE.exists():
             return json.loads(RESEARCH_FILE.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.debug("[Claude] Research load: {}".format(e))
+        logger.debug(f"[Claude] Research load: {e}")
     return {}
 
 
@@ -97,7 +95,7 @@ class ClaudeAnalyst:
         self._analysis   = self._load_cached()
         self._call_count = 0
         self._research   = _load_research()
-        from utils.claude_client import is_available, _check_claude_code
+        from utils.claude_client import _check_claude_code
         if _check_claude_code():
             logger.info("[Claude] Claude Code CLI available — will use CLI for analysis")
         elif _load_api_key():
@@ -110,7 +108,7 @@ class ClaudeAnalyst:
             fws = [k for k in ["goldman","morgan_stanley","bridgewater",
                                "jpmorgan","blackrock","citadel","harvard","bain"]
                    if k in self._research]
-            logger.info("[Claude] Research loaded: {} frameworks active".format(len(fws)))
+            logger.info(f"[Claude] Research loaded: {len(fws)} frameworks active")
         else:
             logger.warning("[Claude] No research data — run: python run_research.py")
 
@@ -181,8 +179,7 @@ class ClaudeAnalyst:
         rm   = self._analysis.get("risk_multiplier", 1.0)
         note = self._analysis.get("market_note", "")
         src  = self._analysis.get("source", "embedded")
-        return "[Claude-{} #{} {}] bias={} rm={:.2f} | {}".format(
-            src.upper(), self._call_count, ts, bias, rm, note[:70])
+        return f"[Claude-{src.upper()} #{self._call_count} {ts}] bias={bias} rm={rm:.2f} | {note[:70]}"
 
     # ------------------------------------------------------------------ #
     # Live API call                                                        #
@@ -193,7 +190,7 @@ class ClaudeAnalyst:
         prompt = self._build_api_prompt(snapshots, news, profiles, open_positions)
 
         # Primary: Claude Code CLI; Fallback: Anthropic API
-        from utils.claude_client import call_claude, strip_markdown_fences
+        from utils.claude_client import call_claude
         text = call_claude(
             prompt,
             model="sonnet",
@@ -223,8 +220,7 @@ class ClaudeAnalyst:
                 result.get("risk_multiplier", "?")))
             return result
         except Exception as e:
-            logger.error("[Claude] Parse/validation error: {} — text: {}".format(
-                e, text[:200]))
+            logger.error(f"[Claude] Parse/validation error: {e} — text: {text[:200]}")
             return None
 
     def _build_api_prompt(self, snapshots, news, profiles, open_positions) -> str:
@@ -233,15 +229,13 @@ class ClaudeAnalyst:
 
         lines = []
         for symbol, tf_snaps in (snapshots or {}).items():
-            lines.append("  {}:".format(symbol))
+            lines.append(f"  {symbol}:")
             for tf in ["1d", "4h", "1h", "15m"]:
                 snap = (tf_snaps or {}).get(tf)
                 if snap and hasattr(snap, "adx"):
                     lines.append(
-                        "    {:4s}  ADX={:5.1f}  RSI={:5.1f}  "
-                        "dir={:7s}  regime={}  atr={:.2f}%".format(
-                            tf, snap.adx, snap.rsi, snap.direction,
-                            snap.regime, snap.atr_pct * 100))
+                        f"    {tf:4s}  ADX={snap.adx:5.1f}  RSI={snap.rsi:5.1f}  "
+                        f"dir={snap.direction:7s}  regime={snap.regime}  atr={snap.atr_pct * 100:.2f}%")
 
         fg_val = (news or {}).get("fear_greed", {}).get("value", 50)
         fg_lbl = (news or {}).get("fear_greed", {}).get("label", "")
@@ -386,27 +380,27 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
 
         if fg < 15:
             bias, rm = "bullish", 1.20
-            note = "Extreme Fear F&G={} — historical buy opportunity".format(fg)
+            note = f"Extreme Fear F&G={fg} — historical buy opportunity"
         elif fg < 25:
             bias, rm = "bullish", 1.10
-            note = "Fear F&G={} — lean bullish, follow strong signals".format(fg)
+            note = f"Fear F&G={fg} — lean bullish, follow strong signals"
         elif fg < 45:
             bias, rm = "neutral", 1.00
-            note = "Cautious F&G={} — neutral, trade technicals".format(fg)
+            note = f"Cautious F&G={fg} — neutral, trade technicals"
         elif fg < 55:
             bias, rm = "neutral", 1.00
-            note = "Neutral F&G={} — follow technical signals".format(fg)
+            note = f"Neutral F&G={fg} — follow technical signals"
         elif fg < 75:
             bias, rm = "neutral", 0.95
-            note = "Mild greed F&G={} — reduce position sizes".format(fg)
+            note = f"Mild greed F&G={fg} — reduce position sizes"
         else:
             bias, rm = "bearish", 0.80
-            note = "Extreme Greed F&G={} — high reversal risk".format(fg)
+            note = f"Extreme Greed F&G={fg} — high reversal risk"
 
         # BlackRock regime override
         if "CRASH" in br_regime or "VOLATILE" in br_regime:
             rm *= 0.85
-            note += " | BlackRock: {} regime".format(br_regime)
+            note += f" | BlackRock: {br_regime} regime"
         elif "ACCUMULATION" in br_regime and bias != "bearish":
             rm *= 1.05
             note += " | BlackRock: accumulation phase"
@@ -446,7 +440,7 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
         adx     = getattr(primary, "adx",     20.0)
         rsi     = getattr(primary, "rsi",     50.0)
         atr_pct = getattr(primary, "atr_pct", 0.03)
-        regime  = getattr(primary, "regime",  "weak_trend")
+        getattr(primary, "regime",  "weak_trend")
         direct  = getattr(primary, "direction","neutral")
 
         # Multi-TF confluence
@@ -495,20 +489,18 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
         # ── Hard filters ──────────────────────────────────────────────
         if atr_pct > 0.08:
             return {"action": "skip", "confidence_adj": 0.4,
-                    "reason": "volatile ATR={:.1f}% — all frameworks defer".format(
-                        atr_pct * 100),
+                    "reason": f"volatile ATR={atr_pct * 100:.1f}% — all frameworks defer",
                     "scores": scores, "composite": round(composite, 3)}
 
         if rsi > 82 and adx > 28:
             return {"action": "short_futures", "confidence_adj": 1.10,
-                    "reason": "RSI={:.0f} overbought + ADX={:.0f} Citadel short".format(
-                        rsi, adx),
+                    "reason": f"RSI={rsi:.0f} overbought + ADX={adx:.0f} Citadel short",
                     "scores": scores, "composite": round(composite, 3)}
 
         if rsi < 20:
             cadj = 1.30 if market_bias in ("bullish", "neutral") else 1.0
             return {"action": "long_spot", "confidence_adj": cadj,
-                    "reason": "RSI={:.0f} deeply oversold — Goldman+Citadel BUY".format(rsi),
+                    "reason": f"RSI={rsi:.0f} deeply oversold — Goldman+Citadel BUY",
                     "scores": scores, "composite": round(composite, 3)}
 
         # ── Decision from composite ───────────────────────────────────
@@ -517,12 +509,11 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             if adx > 30 and bull_n >= 2:
                 action = "long_futures"
                 cadj   = min(1.40, 0.90 + composite)
-                reason = "8-fw composite={:.2f} + strong trend ADX={:.0f}".format(
-                    composite, adx)
+                reason = f"8-fw composite={composite:.2f} + strong trend ADX={adx:.0f}"
             else:
                 action = "long_spot"
                 cadj   = min(1.25, 0.85 + composite)
-                reason = "8-fw composite={:.2f} bullish consensus".format(composite)
+                reason = f"8-fw composite={composite:.2f} bullish consensus"
             if market_bias == "bearish":
                 cadj *= 0.75
                 reason += " (vs bearish mkt)"
@@ -535,12 +526,11 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             if adx > 28 and bear_n >= 2:
                 action = "short_futures"
                 cadj   = min(1.30, 0.80 + abs(composite))
-                reason = "8-fw composite={:.2f} + downtrend ADX={:.0f}".format(
-                    composite, adx)
+                reason = f"8-fw composite={composite:.2f} + downtrend ADX={adx:.0f}"
             else:
                 action = "skip"
                 cadj   = 0.60
-                reason = "8-fw composite={:.2f} bearish — skip".format(composite)
+                reason = f"8-fw composite={composite:.2f} bearish — skip"
             if market_bias == "bullish":
                 cadj *= 0.75
             return {"action": action, "confidence_adj": round(cadj, 2),
@@ -550,12 +540,12 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
         # Mixed signals
         if composite > 0.10 and bull_n > bear_n:
             return {"action": "long_spot", "confidence_adj": 0.85,
-                    "reason": "8-fw composite={:.2f} mild bullish".format(composite),
+                    "reason": f"8-fw composite={composite:.2f} mild bullish",
                     "scores": scores, "composite": round(composite, 3)}
 
         if composite < -0.05 and bear_n > bull_n and adx > 25:
             return {"action": "short_futures", "confidence_adj": 0.80,
-                    "reason": "8-fw composite={:.2f} mild bearish".format(composite),
+                    "reason": f"8-fw composite={composite:.2f} mild bearish",
                     "scores": scores, "composite": round(composite, 3)}
 
         # Ranging — use Goldman entry zones
@@ -567,7 +557,7 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
                     "scores": scores, "composite": round(composite, 3)}
 
         return {"action": "skip", "confidence_adj": 0.70,
-                "reason": "mixed signals composite={:.2f}".format(composite),
+                "reason": f"mixed signals composite={composite:.2f}",
                 "scores": scores, "composite": round(composite, 3)}
 
     def _decide_from_research_only(self, coin: str, market_bias: str,
@@ -587,16 +577,15 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
 
         if composite > 0.30 and fg < 30:
             return {"action": "long_spot", "confidence_adj": 0.85,
-                    "reason": "research-only composite={:.2f} + F&G={}".format(
-                        composite, fg),
+                    "reason": f"research-only composite={composite:.2f} + F&G={fg}",
                     "scores": scores, "composite": round(composite, 3)}
         if composite > 0.20:
             return {"action": "long_spot", "confidence_adj": 0.75,
-                    "reason": "research-only composite={:.2f}".format(composite),
+                    "reason": f"research-only composite={composite:.2f}",
                     "scores": scores, "composite": round(composite, 3)}
         if composite < -0.15:
             return {"action": "skip", "confidence_adj": 0.50,
-                    "reason": "research bearish composite={:.2f}".format(composite),
+                    "reason": f"research bearish composite={composite:.2f}",
                     "scores": scores, "composite": round(composite, 3)}
 
         return {"action": "skip", "confidence_adj": 0.80,
@@ -845,14 +834,14 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
                     "Tighten stops to Goldman levels. Short futures only with "
                     "Citadel confirmation.")
         if bias == "bullish":
-            return ("Bullish — Goldman+Citadel+Bain aligned. Best: {}. "
-                    "Use Morgan Stanley DCF as value anchor.".format(best))
+            return (f"Bullish — Goldman+Citadel+Bain aligned. Best: {best}. "
+                    "Use Morgan Stanley DCF as value anchor.")
         if bias == "bearish":
             return ("Bearish — Bridgewater+BlackRock caution. "
                     "Short futures on 4h+1h bear confluence. "
                     "Avoid spot longs unless Harvard yield > 5%.")
         return ("Neutral — trade Citadel setups with R:R > 2:1. "
-                "Goldman entry zones as support. Best signal: {}.".format(best))
+                f"Goldman entry zones as support. Best signal: {best}.")
 
     # ------------------------------------------------------------------ #
     # Logging                                                              #
@@ -867,12 +856,11 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
         avoid  = analysis.get("avoid", [])
         advice = analysis.get("advice", "")
 
-        logger.info("[Claude-{}] ---- ANALYSIS #{} (8 FRAMEWORKS) ----".format(
-            src, self._call_count))
-        logger.info("[Claude] Bias={} rm={:.2f} | {}".format(bias, rm, note))
+        logger.info(f"[Claude-{src}] ---- ANALYSIS #{self._call_count} (8 FRAMEWORKS) ----")
+        logger.info(f"[Claude] Bias={bias} rm={rm:.2f} | {note}")
         logger.info("[Claude] Best: {} | Avoid: {}".format(
             best, ", ".join(avoid) if avoid else "none"))
-        logger.info("[Claude] {}".format(advice))
+        logger.info(f"[Claude] {advice}")
 
         labels = {"long_spot":     "BUY   SPOT   ",
                   "long_futures":  "LONG  FUTURES",
@@ -883,9 +871,7 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             cadj      = rec.get("confidence_adj", 1.0)
             reason    = rec.get("reason", "")
             composite = rec.get("composite", 0)
-            logger.info("[Claude]   {:<6} {} adj={:.2f}x comp={:+.2f} | {}".format(
-                coin, labels.get(action, action.upper()[:13]),
-                cadj, composite, reason[:55]))
+            logger.info(f"[Claude]   {coin:<6} {labels.get(action, action.upper()[:13])} adj={cadj:.2f}x comp={composite:+.2f} | {reason[:55]}")
 
     # ------------------------------------------------------------------ #
     # HTML export                                                          #
@@ -968,7 +954,7 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             ANALYSIS_HTML.parent.mkdir(parents=True, exist_ok=True)
             ANALYSIS_HTML.write_text(html, encoding="utf-8")
         except Exception as e:
-            logger.debug("[Claude] HTML: {}".format(e))
+            logger.debug(f"[Claude] HTML: {e}")
 
     # ------------------------------------------------------------------ #
     # Persistence                                                          #
@@ -980,7 +966,7 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             ANALYSIS_FILE.write_text(
                 json.dumps(analysis, indent=2, default=str), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Claude] Save: {}".format(e))
+            logger.debug(f"[Claude] Save: {e}")
 
     def _load_cached(self) -> dict:
         try:
@@ -1000,4 +986,4 @@ Citadel entry/stop/target, Bridgewater risk levels. Include ALL coins.""".format
             HISTORY_FILE.write_text(
                 json.dumps(history, indent=2, default=str), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Claude] History: {}".format(e))
+            logger.debug(f"[Claude] History: {e}")

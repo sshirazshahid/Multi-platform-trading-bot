@@ -37,7 +37,6 @@ import argparse
 import re
 import sqlite3
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,9 +72,8 @@ def _open_log(p: Path):
                 # Each daily zip contains one log file; iterate inner members
                 for name in zf.namelist():
                     with zf.open(name) as raw:
-                        for ln in io.TextIOWrapper(raw, encoding="utf-8",
-                                                   errors="replace"):
-                            yield ln
+                        yield from io.TextIOWrapper(raw, encoding="utf-8",
+                                                   errors="replace")
         except (zipfile.BadZipFile, OSError):
             return
     else:

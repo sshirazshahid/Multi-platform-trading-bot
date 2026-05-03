@@ -67,8 +67,11 @@ def test_regime_gate_runs_before_blacklist():
 
 def test_market_regime_module_importable():
     from core.market_regime import (
-        MarketRegimeDetector, REGIME_TRENDING_UP, REGIME_TRENDING_DOWN,
-        REGIME_VOLATILE, REGIME_RANGING,
+        REGIME_RANGING,
+        REGIME_TRENDING_DOWN,
+        REGIME_TRENDING_UP,
+        REGIME_VOLATILE,
+        MarketRegimeDetector,
     )
     assert MarketRegimeDetector is not None
     assert REGIME_TRENDING_UP and REGIME_TRENDING_DOWN
