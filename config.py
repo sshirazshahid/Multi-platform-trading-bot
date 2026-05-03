@@ -389,6 +389,16 @@ def get_commodity_meta(symbol: str) -> dict:
 # signal confluence (confidence ≥ 85% for 20x vs 65% for 5x).
 # ==============================================================
 RISK = {
+    # 2026-05-04 (Phase 19, Ruflo audit): caution-symbol/caution-strategy
+    # binary BLOCK gate disabled by default per UNBLOCK_ALL directive.
+    # The gate at bot_engine.py:1992 was hard-blocking entries with conf<0.90
+    # on any symbol whose 30d WR < 35%. With Phase 16 adaptive sizing
+    # (sizes down by rolling EV) + Phase 18 calibrator (pulls confidence
+    # toward historical WR) already handling these cases organically,
+    # the binary block is a redundant double-veto contradicting the
+    # "engine should decide" directive. Flip True to restore.
+    "caution_symbol_block_enabled":   False,
+    "caution_strategy_block_enabled": False,
     # 2026-04-24: raised from 0.01 → 0.05 on explicit user direction after the
     # 386-trade postmortem (WR 41.7%, avg_win $0.12 vs avg_loss $0.18, negative
     # expectancy because per-trade costs dominate at $0.10-0.30 gross). At $377

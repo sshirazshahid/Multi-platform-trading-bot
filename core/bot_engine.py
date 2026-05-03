@@ -1986,21 +1986,27 @@ class BotEngine:
         # stale-close rules) that have since been fixed. A permanent symbol
         # block punishes setups we'd now take. Confidence 0.90 is the
         # natural break in the 30d ALLOW histogram (~top 50%).
-        try:
-            from core.knowledge_model import KnowledgeModel
-            _km = KnowledgeModel()
-            if _km.is_caution_symbol(symbol) or _km.is_caution_symbol(symbol_key):
-                if confidence >= 0.90:
-                    logger.info(
-                        f"[Claude] caution-symbol OVERRIDE {symbol} "
-                        f"(conf={confidence:.2f} >= 0.90) — high-conviction pass")
-                else:
-                    logger.info(
-                        f"[Claude] BLOCKED: {symbol} is caution symbol "
-                        f"(<50% WR, conf={confidence:.2f} < 0.90)")
-                    return False
-        except Exception:
-            pass
+        # 2026-05-04 (Phase 19): gate now config-flagged. Default False per
+        # UNBLOCK_ALL — Phase 16 adaptive sizing + Phase 18 calibrator already
+        # size down low-EV setups organically. Set RISK.caution_symbol_block_enabled
+        # = True to restore. Stale "<50% WR" log corrected to "<35% WR" — actual
+        # threshold is in knowledge_model.py:284 (wr < 35).
+        if RISK.get("caution_symbol_block_enabled", False):
+            try:
+                from core.knowledge_model import KnowledgeModel
+                _km = KnowledgeModel()
+                if _km.is_caution_symbol(symbol) or _km.is_caution_symbol(symbol_key):
+                    if confidence >= 0.90:
+                        logger.info(
+                            f"[Claude] caution-symbol OVERRIDE {symbol} "
+                            f"(conf={confidence:.2f} >= 0.90) — high-conviction pass")
+                    else:
+                        logger.info(
+                            f"[Claude] BLOCKED: {symbol} is caution symbol "
+                            f"(<35% WR, conf={confidence:.2f} < 0.90)")
+                        return False
+            except Exception:
+                pass
 
         # (b) Spot — buy-only (no short on spot)
         if market_type == "spot" and side == "sell":
@@ -2076,7 +2082,7 @@ class BotEngine:
             logger.info(f"[Risk/Spec12] strategy family '{strategy_name}' is paused — skipping")
             return False
 
-        if strategy_name:
+        if strategy_name and RISK.get("caution_strategy_block_enabled", False):
             try:
                 from core.knowledge_model import KnowledgeModel
                 km = KnowledgeModel()
