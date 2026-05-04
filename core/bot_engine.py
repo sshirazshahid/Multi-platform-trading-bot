@@ -1918,13 +1918,21 @@ class BotEngine:
             except Exception as _ee:
                 logger.debug(f"[Expectancy] check skipped ({_ee}) — defaulting to ALLOW")
 
-        # ── 2026-05-03 (Phase 16): Regime-aware entry gate ──────────────
-        # Block entries when the market regime contradicts the signal:
+        # ── 2026-05-03 (Phase 16) → 2026-05-04 (Phase 22): Regime-aware gate
+        # COUNTER-TREND remains HARD BLOCK (stronger evidence of bad edge):
         #   - long signal in TRENDING_DOWN regime → skip
         #   - short signal in TRENDING_UP regime → skip
-        #   - any signal in VOLATILE regime → skip (extreme vol)
-        # RANGING / TRENDING-aligned regime → allow.
+        # VOLATILE: SOFT multiplier (×0.4 by default, tunable via
+        #   RISK.regime_volatile_size_mult). Phase 16's hard-block on
+        #   volatile produced 10+ rejections per hour during normal market
+        #   conditions (BTC at 0.79% ATR getting "vol_extreme" via 95th-pctl
+        #   relative classification). Per UNBLOCK_ALL philosophy + same
+        #   pattern as Phase 17/18 soft-multipliers, we now SIZE DOWN
+        #   instead of veto. Flip RISK.regime_volatile_block_enabled=True
+        #   to restore the hard block.
+        # RANGING / TRENDING-aligned regime → allow at full size.
         # Regime detector cached 15min — check is cheap.
+        _regime_size_mult = 1.0   # default — full size unless volatile soft-mult
         try:
             from core.market_regime import (
                 REGIME_TRENDING_DOWN,
@@ -1939,12 +1947,21 @@ class BotEngine:
                 regime = self._regime_detector.detect(ex_obj, symbol)
                 _block = False
                 _why = ""
-                if regime == REGIME_VOLATILE:
-                    _block, _why = True, "regime:volatile"
-                elif side == "buy" and regime == REGIME_TRENDING_DOWN:
+                # Counter-trend: hard block (Phase 16 unchanged)
+                if side == "buy" and regime == REGIME_TRENDING_DOWN:
                     _block, _why = True, "regime:trending_down_blocks_long"
                 elif side == "sell" and regime == REGIME_TRENDING_UP:
                     _block, _why = True, "regime:trending_up_blocks_short"
+                # Volatile: Phase 22 soft multiplier (or hard block if user re-enabled)
+                elif regime == REGIME_VOLATILE:
+                    if RISK.get("regime_volatile_block_enabled", False):
+                        _block, _why = True, "regime:volatile"
+                    else:
+                        _regime_size_mult = float(
+                            RISK.get("regime_volatile_size_mult", 0.4))
+                        logger.info(
+                            f"[Regime] {symbol} {side} VOLATILE — "
+                            f"soft size ×{_regime_size_mult:.2f} (Phase 22)")
                 if _block:
                     logger.info(f"[Regime] BLOCKED {symbol} {side}: {_why}")
                     try:
@@ -2250,6 +2267,17 @@ class BotEngine:
                         f"calibrated={_calibrated:.2f})")
         except Exception:
             pass
+        # 2026-05-04 (Phase 22): regime soft-multiplier. When regime gate
+        # detected VOLATILE earlier in this function, _regime_size_mult was
+        # set to RISK.regime_volatile_size_mult (default 0.4) instead of
+        # hard-blocking. Apply it here as the FINAL multiplier in the
+        # chain, AFTER Phase 17 ev_mult and Phase 18 cal_mult so we always
+        # de-risk by the same fraction regardless of what came before.
+        if _regime_size_mult != 1.0:
+            size_fraction *= _regime_size_mult
+            logger.info(
+                f"[Claude] {symbol} size ×{_regime_size_mult:.2f} "
+                f"(regime soft-mult — Phase 22)")
         notional = mtype_bal * size_fraction
         # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
         # min-notional floor reduced to the exchange-side minimum ($5).

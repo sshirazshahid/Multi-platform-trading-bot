@@ -399,6 +399,15 @@ RISK = {
     # "engine should decide" directive. Flip True to restore.
     "caution_symbol_block_enabled":   False,
     "caution_strategy_block_enabled": False,
+    # 2026-05-04 (Phase 22): regime VOLATILE soft-multiplier instead of
+    # hard block. Phase 16's hard block was rejecting 10+ proposals/hour
+    # on BTC/ETH/LINK at 0.6-1.5% ATR (95th-pctl-relative classification).
+    # Now: counter-trend keeps hard block; volatile gets ×0.4 size
+    # multiplier (default — tunable). Trade through volatile regime at
+    # 40% size; capture momentum upside, cap drawdown vs full-size.
+    # Flip regime_volatile_block_enabled=True to restore Phase 16 behavior.
+    "regime_volatile_block_enabled":  False,
+    "regime_volatile_size_mult":      0.4,
     # 2026-04-24: raised from 0.01 → 0.05 on explicit user direction after the
     # 386-trade postmortem (WR 41.7%, avg_win $0.12 vs avg_loss $0.18, negative
     # expectancy because per-trade costs dominate at $0.10-0.30 gross). At $377

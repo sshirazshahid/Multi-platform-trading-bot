@@ -14,7 +14,7 @@ from pathlib import Path
 def test_regime_gate_present_in_bot_engine():
     """Source contains the regime-block branch in _execute_open."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
-    assert "Regime-aware entry gate" in src
+    assert "Regime-aware gate" in src
     assert "REGIME_VOLATILE" in src
     assert "REGIME_TRENDING_DOWN" in src
     assert "REGIME_TRENDING_UP" in src
@@ -60,7 +60,7 @@ def test_regime_detector_lazy_init():
 def test_regime_gate_runs_before_blacklist():
     """Source order: regime gate must precede the static blacklist check."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
-    regime_idx = src.index("Regime-aware entry gate")
+    regime_idx = src.index("Regime-aware gate")
     bl_idx = src.index("Symbol blacklist — evidence-based hard block")
     assert regime_idx < bl_idx
 
