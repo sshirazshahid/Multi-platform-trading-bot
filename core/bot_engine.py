@@ -134,6 +134,16 @@ class BotEngine:
         except ImportError:
             self.universe_filter = None
 
+        # Phase 23 (2026-05-04): per-symbol cooldown after dust-skip OR
+        # calibrator hard-refuse. User flagged "PEAK gate but only 1
+        # trade open" — investigation showed the same 3 symbols (BTC,
+        # ETH, LINK) being re-proposed every 5min for 30+ minutes
+        # because (a) BTC/ETH dust-skipped on exchange step lots and
+        # (b) LINK had a calibrator-zero pattern where Phase 18's soft
+        # mult clamp couldn't kill the trade. Cooldown stops the noise.
+        # In-memory only — restart wipes it (intentional).
+        self._dust_skip_cooldown: dict[str, float] = {}
+
         self.exchanges = {
             "binance": BinanceClient(),
             "bybit":   BybitClient(),
@@ -1508,6 +1518,21 @@ class BotEngine:
             logger.warning(f"[Claude] Invalid OPEN action: {action}")
             return False
 
+        # Phase 23 (2026-05-04): per-symbol cooldown — see __init__ context.
+        # Silent early-exit when the symbol was just dust-skipped or
+        # calibrator-refused. Stops MCP/news/sizing waste on the same
+        # signal every 5min for 30min.
+        try:
+            import time as _t_p23
+            _cool_until = self._dust_skip_cooldown.get(symbol, 0.0)
+            if _cool_until > 0:
+                if _t_p23.time() < _cool_until:
+                    return False
+                # cooldown expired — clear it
+                del self._dust_skip_cooldown[symbol]
+        except Exception:
+            pass
+
         # ── LEARNING-FIRST MODE GATES (spec §3, §13) ─────────────────────
         # (A) OBSERVATION mode: never place any order, even paper. The
         #     candidate will still be recorded in the warehouse (Phase B),
@@ -2249,8 +2274,16 @@ class BotEngine:
         # found by Ruflo audit. The calibrator was never called from the
         # entry path; now we feed predicted_conf at close (in
         # order_manager._finalize_close) and use the calibrated value
-        # here as a [0.7, 1.3] symmetric size multiplier. Per UNBLOCK_ALL
-        # directive: never gates, never zeroes — only adjusts size.
+        # here as a [0.7, 1.3] symmetric size multiplier.
+        #
+        # 2026-05-04 (Phase 23): hard-refuse layer ON TOP of the soft mult.
+        # Soft-discounting a signal the calibrator has *measured* as 9%
+        # actual win-rate (raw conf 85%, n=35) is structurally negative
+        # EV: even at 70% size you lose. Refuse instead of size-down.
+        # Use divergence (`abs(_calibrated - _raw_conf) > 0.02`) to
+        # distinguish "calibrator has data" from "calibrate() fell
+        # through to raw_conf" — the old `_calibrated > 0` guard
+        # silently skipped the catastrophic 0.0 case (Phase 18 bug).
         try:
             _raw_score = float(
                 action.get("mcp_score") or action.get("score") or 0.0)
@@ -2258,8 +2291,21 @@ class BotEngine:
             if _raw_conf > 0:
                 _calibrated = self.order_mgr.calibrator.calibrate(
                     _raw_conf, "claude_portfolio")
-                if _calibrated > 0 and abs(_calibrated - _raw_conf) > 0.02:
-                    _cal_mult = max(0.7, min(1.3, _calibrated / _raw_conf))
+                _has_calib_data = abs(_calibrated - _raw_conf) > 0.02
+                # Phase 23 — hard-refuse when actual edge has collapsed
+                if _has_calib_data and _calibrated < 0.40:
+                    import time as _t_p23r
+                    self._dust_skip_cooldown[symbol] = _t_p23r.time() + 1800
+                    logger.warning(
+                        f"[Claude] {symbol} REFUSED: calibrator predicts "
+                        f"actual win-rate {_calibrated:.0%} for raw conf "
+                        f"{_raw_conf:.0%} (Phase 23 hard-refuse < 40%, "
+                        f"30min cooldown).")
+                    return False
+                # Soft mult — existing Phase 18 behavior, unchanged
+                if _has_calib_data:
+                    _cal_mult = max(0.7, min(1.3,
+                                             _calibrated / max(_raw_conf, 0.01)))
                     size_fraction *= _cal_mult
                     logger.info(
                         f"[Claude] {symbol} size ×{_cal_mult:.2f} "
@@ -2331,9 +2377,15 @@ class BotEngine:
             step = exchange.get_amount_precision(trade_symbol)
             if step > 0 and size < step:
                 min_notional = step * price / max(leverage, 1)
+                # Phase 23 (2026-05-04): set 30min cooldown to stop
+                # re-pitching the same symbol every 5min when the
+                # multiplier chain crushes it below exchange step lot.
+                import time as _t_p23d
+                self._dust_skip_cooldown[symbol] = _t_p23d.time() + 1800
                 logger.info(
                     f"[Claude] {symbol}: size {size:.8f} < step {step} "
-                    f"(need ${min_notional:.0f} at {leverage}x, have ${notional:.0f}) — skip")
+                    f"(need ${min_notional:.0f} at {leverage}x, "
+                    f"have ${notional:.0f}) — skip + 30min cooldown")
                 return False
         except Exception:
             pass
