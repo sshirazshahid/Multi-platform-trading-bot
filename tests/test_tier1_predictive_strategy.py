@@ -177,32 +177,35 @@ def test_filter_allows_above_floor():
     assert allow is True
 
 
-def test_filter_default_floor_is_2x_round_trip_fee():
-    """Pin the documented default. Round-trip fee at current $4.40
-    notional, 0.1% fee = $0.0088. Calibrated floor: $0.05 (~5x fee,
-    just above breakeven). STAR floor 0.00 — must not be net-negative."""
+def test_filter_disabled_by_default_phase20():
+    """Pin the 2026-05-04 Phase 20 disable: EXPECTANCY_FILTER.enabled
+    defaulted to False per UNBLOCK_ALL directive after live monitor
+    showed 0/N entries firing on otherwise-valid setups (BTC at conf=0.81
+    blocked because recent_mean=-$0.467 < $0.05 floor — chicken-and-egg
+    lockout with no recovery path).
+
+    Phase 16 adaptive sizing + Phase 18 calibrator handle low-EV setups
+    organically (size down by rolling EV + soft confidence multiplier).
+    The hard $0.05 floor was a binary triple-veto on top.
+
+    Floor lowered to -$0.50 as catastrophic-only guard if user flips
+    enabled=True back. Same value for STAR + non-STAR (the asymmetry
+    only made sense with positive floors)."""
     from config import EXPECTANCY_FILTER as ef
-    assert ef["enabled"] is True
-    assert ef["min_expected_dollar"] == 0.05
-    assert ef["min_expected_star"] == 0.00
+    assert ef["enabled"] is False, "Phase 20: filter disabled per UNBLOCK_ALL"
+    assert ef["min_expected_dollar"] == -0.50
+    assert ef["min_expected_star"] == -0.50
     assert ef["lookback_days"] == 30
     assert ef["min_sample_size"] == 5
 
 
-def test_star_symbol_uses_relaxed_floor():
-    """STAR symbols use min_expected_star (0.00) not min_expected_dollar
-    (0.05). A STAR with mean +$0.02 passes; a non-STAR with same mean
-    blocks. Pin the asymmetry."""
+def test_star_floor_at_or_below_nonstar_floor():
+    """Star floor must remain at-or-below non-STAR floor (relaxed, not
+    stricter) — pinned across versions even after the Phase 20 disable."""
     from config import EXPECTANCY_FILTER as ef
     star_floor = ef["min_expected_star"]
     nonstar_floor = ef["min_expected_dollar"]
-    # STAR floor must be at-or-below non-STAR (relaxed, not stricter)
     assert star_floor <= nonstar_floor
-    # Concrete: a barely-positive symbol (mean=$0.02) — STAR passes,
-    # non-STAR blocks
-    barely_positive = 0.02
-    assert barely_positive >= star_floor      # STAR allowed
-    assert barely_positive <  nonstar_floor   # non-STAR blocked
 
 
 # ─── Component 1.1: is_entry_invalidated ─────────────────────────────

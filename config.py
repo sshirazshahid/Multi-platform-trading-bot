@@ -710,9 +710,32 @@ SPOT_STRATEGY = {
 # in the lookback window, return None (allow through). We don't block on
 # noise — only on evidence-backed negative cells.
 EXPECTANCY_FILTER = {
-    "enabled":              True,
-    "min_expected_dollar":  0.05,   # non-STAR floor (~2× actual round-trip fee)
-    "min_expected_star":    0.00,   # STAR floor: just must not be net-negative
+    # 2026-05-04 (Phase 20, after live monitor showed 0/N entries firing):
+    # Disabled per UNBLOCK_ALL directive ("Don't block any trades. Engine
+    # should decide.") — same rationale as Phase 19's caution-symbol
+    # disable. Phase 16 adaptive sizing (rolling-50 EV) and Phase 18
+    # calibrator (soft size multiplier) already handle low-EV setups
+    # ORGANICALLY: a symbol with negative recent expectancy gets sized
+    # down by both layers. The hard $0.05 floor was a binary veto on
+    # top of that — a triple-gate that locked out symbols whose recent
+    # mean had drifted slightly negative, with no path to recovery
+    # (chicken-and-egg: 0 trades → mean never moves).
+    #
+    # Live evidence (08:34 UTC): conf=0.81 BTC entry blocked because
+    # recent_mean=-$0.467 < $0.05 floor. Even at floor=$-0.30, BTC
+    # would still fail — effective state is "permanently locked out
+    # until manually whitelisted." That's not "engine should decide."
+    #
+    # The floor is also lowered to a "catastrophic-only" guard: -$0.50
+    # mean PnL across 5+ trades is genuinely catastrophic and should
+    # be vetoed even if the user re-enables. Below this, the bot is
+    # losing > 1× its average notional per trade — Phase 16 sizing
+    # alone can't compensate.
+    #
+    # Flip enabled=True to restore the gate.
+    "enabled":              False,
+    "min_expected_dollar": -0.50,   # catastrophic-only floor (was 0.05)
+    "min_expected_star":   -0.50,   # STAR uses same catastrophic floor
     "lookback_days":        30,
     "min_sample_size":      5,
     # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —
