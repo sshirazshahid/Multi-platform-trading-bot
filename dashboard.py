@@ -1244,11 +1244,35 @@ def calc_stats(closed):
     a_wins = 0; a_best = 0.0; a_worst = 0.0
     win_amounts = []; loss_amounts = []
 
+    # 2026-05-04: exclude EXTERNAL-ORIGIN reconciliations from "Today" /
+    # "Yesterday" stats. These are positions the bot didn't open — manual
+    # positions imported via sync_with_exchanges. Counting them as bot
+    # trades distorts WR for the day they're reconciled.
+    #
+    # NOT excluded (these are bot-opened positions that closed via
+    # exchange-side mechanisms — exchange SL fill, manual close on the
+    # exchange, etc.): ghost_sync, ghost_reconciled, ghost_force_close.
+    # Per core/position_tracker.py:425+ those fire on positions the bot
+    # was tracking that no longer exist on the exchange. Real bot trades.
+    #
+    # All-time stats include everything (real PnL is real PnL).
+    _RECONCILE_REASONS = {
+        "reconciled_from_exchange",
+        "reconciled_no_context",
+    }
+
     for t in closed:
         pnl   = t.get("pnl",       0) or 0
         gross = t.get("gross_pnl", pnl) or pnl
         fees  = t.get("total_fees", 0) or 0
         ct    = t.get("close_time", 0) or 0
+        cr    = (t.get("close_reason") or "")
+        pid   = (t.get("id") or "")
+        strat = (t.get("strategy") or "")
+        # 2026-05-04: manual positions imported via sync_with_exchanges
+        # carry id-prefix "MANUAL-" or strategy="manual". They aren't
+        # bot-initiated and shouldn't count toward bot trade stats.
+        is_manual = pid.startswith("MANUAL-") or strat.lower() == "manual"
         a_pnl += pnl; a_gross += gross; a_fees += fees
         a_best  = max(a_best,  pnl)
         a_worst = min(a_worst, pnl)
@@ -1257,7 +1281,7 @@ def calc_stats(closed):
             win_amounts.append(pnl)
         elif pnl < 0:
             loss_amounts.append(abs(pnl))
-        if ct:
+        if ct and cr not in _RECONCILE_REASONS and not is_manual:
             try:
                 d = datetime.fromtimestamp(ct).date()
             except (OSError, ValueError, OverflowError):
