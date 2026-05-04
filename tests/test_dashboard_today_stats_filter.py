@@ -61,7 +61,9 @@ def _make_closed(close_reason="trailing_stop", pnl=1.0,
 
 
 def test_manual_id_prefix_excluded_from_today():
-    """An id starting with MANUAL- means user reconciled, not bot trade."""
+    """An id starting with MANUAL- means user reconciled, not bot trade.
+    Phase 21 (2026-05-04): filter now also applies to all-time stats so
+    every cell on the dashboard shows the same definition of bot-trade."""
     from dashboard import calc_stats
     closed = [
         _make_closed(position_id="MANUAL-bitget-x", pnl=0.998,
@@ -72,9 +74,9 @@ def test_manual_id_prefix_excluded_from_today():
     s = calc_stats(closed)
     assert s["today_n"] == 1, "MANUAL- id must be excluded"
     assert abs(s["today_pnl"] - 0.228) < 1e-6
-    # All-time still includes everything
-    assert s["total_n"] == 2
-    assert abs(s["all_pnl"] - 1.226) < 1e-6
+    # Phase 21: all-time also filtered for cell-to-cell consistency
+    assert s["total_n"] == 1
+    assert abs(s["all_pnl"] - 0.228) < 1e-6
 
 
 def test_manual_strategy_excluded_from_today():
@@ -116,8 +118,16 @@ def test_ghost_sync_INCLUDED_when_bot_opened():
     assert abs(s["today_pnl"] - 1.0) < 1e-6
 
 
-def test_all_time_pnl_unchanged_by_filter():
-    """The filter only affects today/yesterday, NEVER all-time."""
+def test_all_time_now_filtered_too_phase21():
+    """Phase 21 (2026-05-04): supersedes the prior 'all-time unchanged'
+    rule. After the rule alignment for cell-to-cell consistency, the
+    filter applies to All-Time too — so the count + PnL on the
+    Performance > All Time row uses the same definition of bot-trade as
+    Today / Yesterday / Daily PnL / Weekly / Strategy Breakdown.
+
+    Trade-off accepted: realized account PnL across history is no longer
+    what 'All Time' shows on the dashboard. Use warehouse for that.
+    """
     from dashboard import calc_stats
     closed = [
         _make_closed(position_id="MANUAL-x", pnl=10.0),
@@ -126,6 +136,58 @@ def test_all_time_pnl_unchanged_by_filter():
         _make_closed(pnl=1.0),
     ]
     s = calc_stats(closed)
+    # Only the bot-initiated row counts in any time window now
     assert s["today_n"] == 1
-    assert abs(s["all_pnl"] - 14.0) < 1e-6
-    assert s["total_n"] == 4
+    assert abs(s["today_pnl"] - 1.0) < 1e-6
+    assert s["total_n"] == 1
+    assert abs(s["all_pnl"] - 1.0) < 1e-6
+
+
+# ─── Phase 21 — cross-panel consistency ───────────────────────────────
+
+
+def test_calc_daily_pnl_applies_filter():
+    """Daily PnL heatmap must use the same filter — was producing a
+    different 'today's PnL' than Performance Today before Phase 21."""
+    from dashboard import calc_daily_pnl
+    closed = [
+        _make_closed(position_id="MANUAL-x", pnl=10.0),
+        _make_closed(close_reason="reconciled_from_exchange", pnl=5.0),
+        _make_closed(pnl=1.0),
+        _make_closed(close_reason="ghost_sync", pnl=2.0),
+    ]
+    daily = calc_daily_pnl(closed, days=2)
+    # Find today's bucket (last entry, since result is days-1..0)
+    today_bucket = daily[-1]
+    # Only 2 rows survive the filter (pnl=1.0 and ghost_sync 2.0)
+    assert today_bucket["trades"] == 2
+    assert abs(today_bucket["pnl"] - 3.0) < 1e-6
+
+
+def test_calc_strategy_stats_applies_filter():
+    from dashboard import calc_strategy_stats
+    closed = [
+        _make_closed(strategy="manual",      pnl=5.0),
+        _make_closed(strategy="claude_portfolio", pnl=1.0),
+        _make_closed(strategy="claude_portfolio", pnl=-0.5),
+    ]
+    s = calc_strategy_stats(closed)
+    # 'manual' must be filtered out entirely
+    assert "manual" not in s
+    assert s["claude_portfolio"]["n"] == 2
+
+
+def test_calc_exchange_stats_applies_filter():
+    from dashboard import calc_exchange_stats
+    closed = [
+        _make_closed(position_id="MANUAL-x", pnl=10.0),
+        _make_closed(pnl=1.0),
+    ]
+    open_pos = []
+    s = calc_exchange_stats(closed, open_pos)
+    # Default exchange in fixture is "binance" (None → "unknown" — let's
+    # check the totals don't include the manual row)
+    binance = s.get("binance") or s.get("unknown")
+    assert binance is not None
+    assert binance["n"] == 1
+    assert abs(binance["pnl"] - 1.0) < 1e-6

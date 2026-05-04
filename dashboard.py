@@ -1233,9 +1233,51 @@ def calc_unrealized(open_pos: list, fetcher: LiveFetcher) -> dict:
     return result
 
 
+# 2026-05-04: shared filter for bot-initiated trades. Excludes:
+#   - id-prefix "MANUAL-": user-imported positions via sync_with_exchanges
+#   - strategy=="manual": same
+#   - close_reason in {reconciled_from_exchange, reconciled_no_context}:
+#     positions imported via sync, never closed by the bot
+#
+# NOT excluded (these ARE bot trades — bot OPENED them, closed via
+# exchange-side mechanism such as SL fill or manual exchange close):
+#   - ghost_sync / ghost_reconciled / ghost_force_close
+#
+# Used by every PnL/trade-count panel so all "Today/Yesterday/Daily/
+# Weekly/AllTime" cells show the same definition of "the bot's trade".
+_DASH_RECONCILE_REASONS = frozenset({
+    "reconciled_from_exchange",
+    "reconciled_no_context",
+})
+
+
+def _is_bot_trade(t: dict) -> bool:
+    """True if this closed-trade row is bot-initiated (vs sync-imported)."""
+    pid = (t.get("id") or "")
+    if pid.startswith("MANUAL-"):
+        return False
+    if (t.get("strategy") or "").lower() == "manual":
+        return False
+    cr = t.get("close_reason") or ""
+    if cr in _DASH_RECONCILE_REASONS:
+        return False
+    return True
+
+
+def _filter_bot_trades(closed):
+    """Apply _is_bot_trade to a list of closed positions."""
+    return [t for t in closed if _is_bot_trade(t)]
+
+
 def calc_stats(closed):
     today     = datetime.now().date()
     yesterday = today - timedelta(days=1)
+    # Phase 21 (2026-05-04): apply the shared bot-trade filter at top.
+    # Was inline only for today/yesterday — now also applies to All-Time
+    # so the count + WR + PnL are consistent across cells that read the
+    # same `closed` list. Manual positions and external reconciliations
+    # don't count as the bot's trading activity.
+    closed = _filter_bot_trades(closed)
     t_pnl = t_gross = t_fees = 0.0
     t_n   = t_wins  = 0
     y_pnl = y_gross = y_fees = 0.0
@@ -1244,35 +1286,11 @@ def calc_stats(closed):
     a_wins = 0; a_best = 0.0; a_worst = 0.0
     win_amounts = []; loss_amounts = []
 
-    # 2026-05-04: exclude EXTERNAL-ORIGIN reconciliations from "Today" /
-    # "Yesterday" stats. These are positions the bot didn't open — manual
-    # positions imported via sync_with_exchanges. Counting them as bot
-    # trades distorts WR for the day they're reconciled.
-    #
-    # NOT excluded (these are bot-opened positions that closed via
-    # exchange-side mechanisms — exchange SL fill, manual close on the
-    # exchange, etc.): ghost_sync, ghost_reconciled, ghost_force_close.
-    # Per core/position_tracker.py:425+ those fire on positions the bot
-    # was tracking that no longer exist on the exchange. Real bot trades.
-    #
-    # All-time stats include everything (real PnL is real PnL).
-    _RECONCILE_REASONS = {
-        "reconciled_from_exchange",
-        "reconciled_no_context",
-    }
-
     for t in closed:
         pnl   = t.get("pnl",       0) or 0
         gross = t.get("gross_pnl", pnl) or pnl
         fees  = t.get("total_fees", 0) or 0
         ct    = t.get("close_time", 0) or 0
-        cr    = (t.get("close_reason") or "")
-        pid   = (t.get("id") or "")
-        strat = (t.get("strategy") or "")
-        # 2026-05-04: manual positions imported via sync_with_exchanges
-        # carry id-prefix "MANUAL-" or strategy="manual". They aren't
-        # bot-initiated and shouldn't count toward bot trade stats.
-        is_manual = pid.startswith("MANUAL-") or strat.lower() == "manual"
         a_pnl += pnl; a_gross += gross; a_fees += fees
         a_best  = max(a_best,  pnl)
         a_worst = min(a_worst, pnl)
@@ -1281,7 +1299,7 @@ def calc_stats(closed):
             win_amounts.append(pnl)
         elif pnl < 0:
             loss_amounts.append(abs(pnl))
-        if ct and cr not in _RECONCILE_REASONS and not is_manual:
+        if ct:
             try:
                 d = datetime.fromtimestamp(ct).date()
             except (OSError, ValueError, OverflowError):
@@ -1335,6 +1353,9 @@ def calc_stats(closed):
 
 
 def calc_exchange_stats(closed, open_pos):
+    # Phase 21 (2026-05-04): apply shared bot-trade filter — exchange-level
+    # PnL/WR should match the Performance / Daily / Weekly cells.
+    closed = _filter_bot_trades(closed)
     ex_stats = defaultdict(lambda: {
         "pnl": 0.0, "n": 0, "wins": 0, "fees": 0.0, "open": 0,
         "spot_pnl": 0.0, "spot_n": 0, "spot_wins": 0,
@@ -1365,6 +1386,9 @@ def calc_exchange_stats(closed, open_pos):
 
 def calc_strategy_stats(closed):
     """Breakdown PnL and win rate by strategy."""
+    # Phase 21 (2026-05-04): apply shared bot-trade filter so the strategy
+    # breakdown agrees with All-Time count from calc_stats.
+    closed = _filter_bot_trades(closed)
     strat_stats = defaultdict(lambda: {"pnl": 0.0, "n": 0, "wins": 0})
     for t in closed:
         raw  = t.get("strategy", "unknown") or "unknown"
@@ -1392,6 +1416,11 @@ def calc_hourly_heatmap(closed):
 
 
 def calc_daily_pnl(closed, days=7):
+    # Phase 21 (2026-05-04): apply shared bot-trade filter so the
+    # heatmap matches Performance > Today/Yesterday cells. Was previously
+    # counting reconciled+manual events, producing a different "today's
+    # PnL" number than the Performance box.
+    closed = _filter_bot_trades(closed)
     buckets = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0})
     today   = datetime.now().date()
     for t in closed:
@@ -1446,6 +1475,9 @@ def calc_weekly_stats(closed):
       - worst_day:     (date, pnl, n) — worst day in the current week
       - active_days:   number of days in the current week with at least 1 trade
     """
+    # Phase 21 (2026-05-04): apply shared bot-trade filter so weekly
+    # stats match Performance + Daily PnL cells.
+    closed = _filter_bot_trades(closed)
     now_ts = time.time()
     cutoff_this = now_ts - 7 * 86400
     cutoff_prev = now_ts - 14 * 86400
