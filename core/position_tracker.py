@@ -201,6 +201,12 @@ class PositionTracker:
     def __init__(self):
         self._open:   dict = {}
         self._closed: list = []
+        # Phase 24 (2026-05-05): short-lived ledger of recently-closed
+        # positions so sync_with_exchanges can label leftover-size
+        # re-imports as RECONCILE (cosmetic) instead of MANUAL (warning).
+        # Pruned to last 5 min on every record/match call. List of dicts:
+        #   {exchange, symbol, side, size, entry_price, close_time}
+        self._recent_closes: list[dict] = []
         # RLock so methods already holding the lock (add/close/sync) can
         # call _save() — which also acquires the lock — without deadlocking.
         # Required because bot_engine's _sltp_monitor_loop calls tracker._save()
@@ -239,6 +245,8 @@ class PositionTracker:
             # Trim closed list to prevent unbounded memory growth
             if len(self._closed) > 500:
                 self._closed = self._closed[-500:]
+            # Phase 24 — record for reconcile-label matching in sync.
+            self._record_recent_close(pos)
 
             tag  = "[PAPER]" if pos.paper_trade else "[LIVE]"
             sign = "+" if pos.pnl >= 0 else ""
@@ -265,6 +273,61 @@ class PositionTracker:
             except Exception as e:
                 logger.error(f"[Positions] on_close hook failed for {pos.symbol}: {e}")
         return pos
+
+    # Phase 24 (2026-05-05): RECONCILE-vs-MANUAL re-import labelling.
+    # Bot tracker can drift from exchange reality (partial fills, untracked
+    # ghosts, manual user adds). When a close is followed within ~5min by
+    # sync importing leftover size on the same (ex, sym, side), tag the
+    # import as RECONCILE so it doesn't pollute warning logs / dashboard
+    # stats. Functional behaviour unchanged: SL+TP still get placed.
+    def _record_recent_close(self, pos: "Position") -> None:
+        """Append a close record. Called from close() under the lock."""
+        now = time.time()
+        self._recent_closes.append({
+            "exchange": (pos.exchange or "").lower(),
+            "symbol": pos.symbol,
+            "side": pos.side,
+            "size": float(pos.size or 0),
+            "entry_price": float(pos.entry_price or 0),
+            "close_time": now,
+        })
+        cutoff = now - 300
+        self._recent_closes = [
+            r for r in self._recent_closes if r["close_time"] >= cutoff
+        ]
+
+    def _match_recent_close(self, exchange: str, symbol: str, side: str,
+                            size: float, entry: float) -> Optional[dict]:
+        """Return a recent close that matches a re-imported position so we
+        can tag it RECONCILE. All-or-nothing match:
+          - same (exchange, symbol, side)
+          - size within 0.5% of recorded close size
+          - entry price within 1% of recorded entry (skip if either is 0)
+          - within last 5 min (the prune already enforces this)
+        """
+        if not self._recent_closes:
+            return None
+        now = time.time()
+        cutoff = now - 300
+        ex_lower = (exchange or "").lower()
+        for r in reversed(self._recent_closes):
+            if r["close_time"] < cutoff:
+                continue
+            if (r["exchange"] != ex_lower
+                    or r["symbol"] != symbol
+                    or r["side"] != side):
+                continue
+            rsize = r["size"]
+            if rsize <= 0 or size <= 0:
+                continue
+            if abs(size - rsize) / max(rsize, 1e-9) > 0.005:
+                continue
+            rentry = r["entry_price"]
+            if rentry > 0 and entry > 0:
+                if abs(entry - rentry) / rentry > 0.01:
+                    continue
+            return r
+        return None
 
     def get_open(self, exchange: str = None, symbol: str = None) -> list:
         with self._lock:
@@ -380,14 +443,32 @@ class PositionTracker:
             except (TypeError, ValueError):
                 lev = 1
             liq = float(ep.get("liquidationPrice") or 0)
-            pid = f"MANUAL-{ex_name}-{sym}-{side}-{int(time.time())}"
+            # Phase 24 (2026-05-05): if this leftover size matches a
+            # close we just booked (within 5min, ±0.5% size, ±1% entry),
+            # label it RECONCILE — the bot's close successfully booked
+            # PnL on its tracked share but the exchange shows leftover.
+            # Functional behaviour identical (SL/TP still placed by
+            # _protect_imported_positions); the relabel quiets the
+            # warning + dashboard pollution.
+            recon_match = self._match_recent_close(
+                ex_name, sym, side, size, entry)
+            if recon_match:
+                pid = f"RECONCILE-{ex_name}-{sym}-{side}-{int(time.time())}"
+                strat = "reconcile"
+                _log_label = "RECONCILED leftover position"
+                _log_warn = False
+            else:
+                pid = f"MANUAL-{ex_name}-{sym}-{side}-{int(time.time())}"
+                strat = "manual"
+                _log_label = "IMPORTED manual position"
+                _log_warn = True
             pos = Position(
                 id=pid,
                 exchange=ex_name,
                 symbol=sym,
                 side=side,
                 market_type="futures",
-                strategy="manual",
+                strategy=strat,
                 entry_price=entry,
                 size=size,
                 stop_loss=liq,      # best available — liquidation as fallback SL
@@ -397,9 +478,14 @@ class PositionTracker:
             )
             with self._lock:
                 self._open[pid] = pos
-            logger.warning(
-                f"[Positions] IMPORTED manual position: {sym} {side.upper()} "
-                f"on {ex_name} @ {entry:.4f} size={size:.6f} lev={lev}x | id={pid}")
+            _msg = (
+                f"[Positions] {_log_label}: {sym} {side.upper()} "
+                f"on {ex_name} @ {entry:.4f} size={size:.6f} lev={lev}x | id={pid}"
+            )
+            if _log_warn:
+                logger.warning(_msg)
+            else:
+                logger.info(_msg)
             imported_list.append(pos)
 
         if imported_list:

@@ -1252,11 +1252,18 @@ _DASH_RECONCILE_REASONS = frozenset({
 
 
 def _is_bot_trade(t: dict) -> bool:
-    """True if this closed-trade row is bot-initiated (vs sync-imported)."""
+    """True if this closed-trade row is bot-initiated (vs sync-imported).
+
+    Phase 24 (2026-05-05): also filter RECONCILE-prefix id and
+    'reconcile' strategy — those are leftover-size re-imports that the
+    bot didn't actually open, just protected with SL/TP after a partial
+    close. Same treatment as MANUAL for stats purposes.
+    """
     pid = (t.get("id") or "")
-    if pid.startswith("MANUAL-"):
+    if pid.startswith("MANUAL-") or pid.startswith("RECONCILE-"):
         return False
-    if (t.get("strategy") or "").lower() == "manual":
+    strat = (t.get("strategy") or "").lower()
+    if strat in ("manual", "reconcile"):
         return False
     cr = t.get("close_reason") or ""
     if cr in _DASH_RECONCILE_REASONS:
