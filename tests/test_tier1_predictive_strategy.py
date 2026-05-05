@@ -177,22 +177,14 @@ def test_filter_allows_above_floor():
     assert allow is True
 
 
-def test_filter_disabled_by_default_phase20():
-    """Pin the 2026-05-04 Phase 20 disable: EXPECTANCY_FILTER.enabled
-    defaulted to False per UNBLOCK_ALL directive after live monitor
-    showed 0/N entries firing on otherwise-valid setups (BTC at conf=0.81
-    blocked because recent_mean=-$0.467 < $0.05 floor — chicken-and-egg
-    lockout with no recovery path).
-
-    Phase 16 adaptive sizing + Phase 18 calibrator handle low-EV setups
-    organically (size down by rolling EV + soft confidence multiplier).
-    The hard $0.05 floor was a binary triple-veto on top.
-
-    Floor lowered to -$0.50 as catastrophic-only guard if user flips
-    enabled=True back. Same value for STAR + non-STAR (the asymmetry
-    only made sense with positive floors)."""
+def test_filter_enabled_phase27_supersedes_phase20():
+    """Phase 27 (2026-05-05) re-enabled EXPECTANCY_FILTER as a GRADUATED
+    multiplier rather than the binary block Phase 20 disabled. The
+    -$0.50 catastrophic floor is preserved from Phase 20's safer
+    re-enable target — tier sizing in _ev_per_symbol_multiplier handles
+    mild/moderate negative EV via downsize, not hard veto."""
     from config import EXPECTANCY_FILTER as ef
-    assert ef["enabled"] is False, "Phase 20: filter disabled per UNBLOCK_ALL"
+    assert ef["enabled"] is True, "Phase 27: filter re-enabled as graduated"
     assert ef["min_expected_dollar"] == -0.50
     assert ef["min_expected_star"] == -0.50
     assert ef["lookback_days"] == 30
@@ -285,11 +277,16 @@ def test_unknown_side_does_not_invalidate():
 
 
 def test_production_has_expectancy_filter():
-    """Pin that bot_engine._execute_open carries the expectancy block."""
+    """Pin that bot_engine._execute_open carries the EV check.
+    Phase 27 (2026-05-05): expectancy is now applied via the helper
+    `_ev_per_symbol_multiplier` which calls `recent_expectancy` and
+    emits a `[EV] BLOCKED` log on the catastrophic short-circuit.
+    """
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     assert "EXPECTANCY_FILTER" in src
-    assert "[Expectancy] BLOCKED" in src
+    assert "[EV] BLOCKED" in src
     assert "recent_expectancy" in src
+    assert "_ev_per_symbol_multiplier" in src
 
 
 def test_production_has_entry_staleness():

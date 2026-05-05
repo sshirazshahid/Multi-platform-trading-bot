@@ -741,10 +741,18 @@ EXPECTANCY_FILTER = {
     # losing > 1× its average notional per trade — Phase 16 sizing
     # alone can't compensate.
     #
-    # Flip enabled=True to restore the gate.
-    "enabled":              False,
-    "min_expected_dollar": -0.50,   # catastrophic-only floor (was 0.05)
-    "min_expected_star":   -0.50,   # STAR uses same catastrophic floor
+    # 2026-05-05 (Phase 27): re-enabled as a GRADUATED multiplier, not a
+    # binary block. _ev_per_symbol_multiplier in bot_engine.py reads this
+    # config and returns:
+    #   mean >= 0:               ×1.0 (full size)
+    #   -0.20 <= mean < 0:       ×0.75
+    #   -0.50 <= mean < -0.20:   ×0.50
+    #   mean < -0.50 (n>=5):     ×0.0  HARD BLOCK (catastrophic only)
+    # Whitelist still bypasses entirely. Per user directive:
+    #   "Test before it trades. No bias. Just data. Self-correcting."
+    "enabled":              True,
+    "min_expected_dollar": -0.50,   # catastrophic-only floor
+    "min_expected_star":   -0.50,
     "lookback_days":        30,
     "min_sample_size":      5,
     # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —

@@ -1495,6 +1495,59 @@ class BotEngine:
         logger.info(
             f"[Claude] Cycle complete: {executed}/{len(actions)} actions executed")
 
+    def _ev_per_symbol_multiplier(self, symbol: str, side: str) -> tuple:
+        """Phase 27 (2026-05-05): Graduated historical-EV size multiplier.
+
+        Pure data-driven 'test before trade' check. Queries warehouse
+        for the last N days of realised PnL on (symbol, side) and
+        returns a size multiplier in [0.0, 1.0]:
+
+          n < min_sample_size:        1.0  (insufficient data, allow)
+          mean >= 0:                  1.0  (positive EV — full size)
+          -0.20 <= mean < 0:          0.75 (mildly negative — downsize)
+          -0.50 <= mean < -0.20:      0.50 (moderately negative)
+          mean < -0.50:               0.0  (catastrophic — BLOCK)
+
+        Whitelisted symbols (config.EXPECTANCY_FILTER.whitelist) bypass.
+
+        Self-correcting: as a symbol's EV improves, the multiplier auto
+        ratchets back up. No curated lists, no operator override beyond
+        the explicit whitelist.
+        """
+        try:
+            from config import EXPECTANCY_FILTER as _EF
+        except ImportError:
+            return 1.0, ""
+        if not _EF.get("enabled"):
+            return 1.0, ""
+        try:
+            from core.warehouse import get_warehouse as _gw
+            sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
+            wl = _EF.get("whitelist") or set()
+            if symbol in wl or sym_key in wl:
+                return 1.0, "whitelisted"
+            days = int(_EF.get("lookback_days", 30))
+            min_n = int(_EF.get("min_sample_size", 5))
+            exp = _gw().recent_expectancy(
+                sym_key, side=side, days=days, min_n=min_n)
+            if exp is None:
+                # insufficient data — allow at full size (don't block on noise)
+                return 1.0, ""
+            mean = float(exp.get("mean", 0.0))
+            n = int(exp.get("n", 0))
+            wr = float(exp.get("win_rate", 0.0))
+            if mean < -0.50 and n >= 5:
+                return 0.0, (
+                    f"ev_catastrophic_${mean:+.2f}_n{n}_wr{wr:.0%}")
+            if mean < -0.20:
+                return 0.5, f"ev_neg_med_${mean:+.2f}_n{n}"
+            if mean < 0.0:
+                return 0.75, f"ev_neg_mild_${mean:+.2f}_n{n}"
+            return 1.0, ""
+        except Exception as e:
+            logger.debug(f"[EV] _ev_per_symbol_multiplier exception: {e}")
+            return 1.0, ""
+
     def _execute_open(self, action: dict) -> bool:
         """Validate and execute an OPEN action from Claude. Returns True if executed."""
         from config import (
@@ -1884,64 +1937,43 @@ class BotEngine:
                         pass
                     return False
 
-        # ── EXPECTANCY FILTER (2026-05-01 Tier 1.2) ──────────────────────
-        # Per-symbol abstain: if recent realised mean PnL < min_expected,
-        # skip even if cell-filter allowed. Self-correcting as data
-        # accumulates — a STAR symbol whose recent performance flipped
-        # negative gets auto-vetoed without manual STAR_SYMBOLS edits.
-        # Returns None on insufficient evidence (< min_sample_size in
-        # lookback) — we let those through, won't block on noise.
+        # ── PHASE 27 (2026-05-05): GRADUATED EV TEST-BEFORE-TRADE ────────
+        # User directive: "Scan 24/7. No emotions. No bias. Just data.
+        # Test before it trades." This block translates that into a
+        # warehouse-grounded EV check on (symbol, side) before sizing.
+        #
+        # Replaces the prior BINARY filter (Tier 1.2 / Phase 20-disabled)
+        # which locked symbols out forever once recent mean dropped under
+        # the floor — chicken-and-egg, no path to recovery. Phase 27
+        # uses GRADUATED tiers: as evidence worsens, size shrinks; only
+        # catastrophic EV (< -$0.50 mean over n>=5) hard-blocks. As the
+        # symbol's EV improves, size auto-restores. Pure data, no
+        # curated lists. Self-correcting.
+        #
+        # Multiplier saved to `_ev_symbol_mult` and applied in the
+        # size_fraction chain alongside Phase 17/18/22.
+        _ev_symbol_mult = 1.0
+        _ev_symbol_reason = ""
         try:
-            from config import EXPECTANCY_FILTER as _EF
-        except ImportError:
-            _EF = {"enabled": False}
-        if _EF.get("enabled", True):
+            _ev_symbol_mult, _ev_symbol_reason = self._ev_per_symbol_multiplier(
+                symbol, side)
+        except Exception as _ee:
+            logger.debug(f"[EV] check skipped ({_ee}) — defaulting to ALLOW")
+        if _ev_symbol_mult <= 0.0:
+            logger.warning(
+                f"[EV] BLOCKED {symbol} {side} ({_ev_symbol_reason}). "
+                f"Phase 27: catastrophic historical EV — refuse to trade.")
             try:
-                from config import STAR_SYMBOLS as _STAR_FOR_EF
-                from core.warehouse import get_warehouse as _gw
-                _sym_key = symbol if ":" in symbol else f"{symbol}:USDT"
-                # Operator whitelist — bypass the floor entirely.
-                _whitelist = _EF.get("whitelist") or set()
-                if symbol in _whitelist or _sym_key in _whitelist:
-                    logger.info(
-                        f"[Expectancy] WHITELISTED {symbol} {side} — bypass floor"
+                from core.warehouse import get_warehouse as _gw_block
+                if (_cid := int(action.get("candidate_id") or 0)) > 0:
+                    _gw_block().query(
+                        "UPDATE candidates SET decision='SKIP', "
+                        "skip_reason=? WHERE id=?",
+                        (f"ev_phase27:{_ev_symbol_reason}", _cid),
                     )
-                    _exp = None  # short-circuit; treat as insufficient-data path
-                else:
-                    _exp = _gw().recent_expectancy(
-                        _sym_key,
-                        side=side,
-                        days=int(_EF.get("lookback_days", 30)),
-                        min_n=int(_EF.get("min_sample_size", 5)),
-                    )
-                # STAR symbols use a relaxed floor (just must not be
-                # net-negative). Cell-filter has already validated them
-                # as proven-edge; the expectancy filter's role here is
-                # to catch regime-flip into outright loss only.
-                _is_star = (symbol in _STAR_FOR_EF or _sym_key in _STAR_FOR_EF)
-                _floor = float(
-                    _EF.get("min_expected_star", 0.00) if _is_star
-                    else _EF.get("min_expected_dollar", 0.05)
-                )
-                if _exp is not None and _exp["mean"] < _floor:
-                    _tag = "STAR" if _is_star else "non-STAR"
-                    logger.info(
-                        f"[Expectancy] BLOCKED {symbol} {side} ({_tag}): recent mean "
-                        f"${_exp['mean']:+.3f} < ${_floor:.2f} floor "
-                        f"(n={_exp['n']}, WR={_exp['win_rate']:.0%})")
-                    try:
-                        if (_cid := int(action.get("candidate_id") or 0)) > 0:
-                            _gw().query(
-                                "UPDATE candidates SET decision='SKIP', "
-                                "skip_reason=? WHERE id=?",
-                                (f"expectancy:mean${_exp['mean']:+.2f}<${_floor:.2f}",
-                                 _cid),
-                            )
-                    except Exception:
-                        pass
-                    return False
-            except Exception as _ee:
-                logger.debug(f"[Expectancy] check skipped ({_ee}) — defaulting to ALLOW")
+            except Exception:
+                pass
+            return False
 
         # ── 2026-05-03 (Phase 16) → 2026-05-04 (Phase 22): Regime-aware gate
         # COUNTER-TREND remains HARD BLOCK (stronger evidence of bad edge):
@@ -2313,6 +2345,15 @@ class BotEngine:
                         f"calibrated={_calibrated:.2f})")
         except Exception:
             pass
+        # 2026-05-05 (Phase 27): historical-EV per-symbol multiplier from
+        # _ev_per_symbol_multiplier (set earlier). 0.0 already short-circuited
+        # at the EV check above (return False); here we apply 0.5 / 0.75
+        # downsize tiers on graduated-negative-EV cases.
+        if _ev_symbol_mult < 1.0:
+            size_fraction *= _ev_symbol_mult
+            logger.info(
+                f"[Claude] {symbol} size ×{_ev_symbol_mult:.2f} "
+                f"(Phase 27 EV: {_ev_symbol_reason})")
         # 2026-05-04 (Phase 22): regime soft-multiplier. When regime gate
         # detected VOLATILE earlier in this function, _regime_size_mult was
         # set to RISK.regime_volatile_size_mult (default 0.4) instead of

@@ -19,19 +19,22 @@ def test_doge_is_in_whitelist():
 
 
 def test_whitelist_check_lives_before_floor_comparison():
-    """The bypass branch in bot_engine must short-circuit BEFORE
-    `_gw().recent_expectancy()` is called and BEFORE the floor compare."""
+    """Phase 27 (2026-05-05): the whitelist bypass is now inside
+    `_ev_per_symbol_multiplier`. When a symbol is in the whitelist,
+    the helper returns (1.0, 'whitelisted') BEFORE calling
+    `recent_expectancy`. This test pins that ordering at source level
+    so the bypass cannot regress to firing post-query."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
-    # Whitelist short-circuit and the floor check must both exist
-    assert "WHITELISTED" in src
-    assert "bypass floor" in src
-    assert "_EF.get(\"whitelist\")" in src or "_EF.get('whitelist')" in src
-    # And the bypass must precede recent_expectancy in source order
-    bypass_idx = src.index("WHITELISTED")
-    floor_idx = src.index("recent mean")
-    assert bypass_idx < floor_idx, (
-        "Whitelist log must appear before the BLOCKED log in source order — "
-        "otherwise the bypass is wired after the comparison"
+    # Find _ev_per_symbol_multiplier definition
+    func_start = src.index("def _ev_per_symbol_multiplier")
+    func_end = src.index("def _execute_open", func_start)
+    func_block = src[func_start:func_end]
+    # whitelist bypass must come before recent_expectancy call
+    wl_idx = func_block.index("whitelisted")
+    re_idx = func_block.index("recent_expectancy")
+    assert wl_idx < re_idx, (
+        "Whitelist short-circuit must precede the recent_expectancy "
+        "call inside _ev_per_symbol_multiplier"
     )
 
 
