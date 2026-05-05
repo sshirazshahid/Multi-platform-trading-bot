@@ -1495,6 +1495,72 @@ class BotEngine:
         logger.info(
             f"[Claude] Cycle complete: {executed}/{len(actions)} actions executed")
 
+    def _btc_cross_regime_multiplier(self, side: str) -> tuple:
+        """Phase 31 (2026-05-05): BTC cross-regime soft veto.
+
+        Audit found 04-07 disaster: 5 SHORT trades all hit SL on the
+        same day during a BTC bull squeeze. SHORTS_REQUIRE_BTC_BEAR
+        config exists but is off per UNBLOCK_ALL — so we apply a SOFT
+        multiplier instead of hard veto:
+
+          BUY  + BTC trend bear  → ×0.6  (counter-trend size cut)
+          SELL + BTC trend bull  → ×0.6
+          aligned or BTC neutral → ×1.0
+
+        Composes with Phase 27 (per-symbol EV), Phase 28 (asymmetric
+        SHORT), Phase 22 (regime).
+        """
+        try:
+            trend = self._get_btc_trend()
+        except Exception:
+            return 1.0, ""
+        if side == "buy" and trend == "bear":
+            return 0.6, "btc_bear_vs_buy"
+        if side == "sell" and trend == "bull":
+            return 0.6, "btc_bull_vs_sell"
+        return 1.0, ""
+
+    def _hour_of_day_multiplier(self, side: str) -> tuple:
+        """Phase 32 (2026-05-05): hour-of-day bleed multiplier.
+
+        Pure-data hour cell EV check: queries warehouse for last 30d
+        realized PnL on (utc_hour, side) and downsizes when current
+        hour cell shows historical losses with sample size >=10.
+
+        Tiers:
+          n < 10:                ×1.0  (insufficient data)
+          mean >= 0:             ×1.0  (positive EV)
+          -$0.20 <= mean < 0:    ×0.75 (mildly negative)
+          mean < -$0.20:         ×0.50 (strongly negative)
+
+        Complements Phase 27 per-(symbol, side) by adding the
+        orthogonal dimension of (hour, side). Self-correcting: as
+        the hour cell improves, multiplier auto-restores.
+        """
+        try:
+            from datetime import datetime, timezone
+            cur_hour = datetime.now(timezone.utc).hour
+            from core.warehouse import get_warehouse
+            rows = list(get_warehouse().query(
+                "SELECT realized_pnl FROM trades WHERE status='CLOSED' "
+                "AND side=? "
+                "AND CAST(strftime('%H', ts_entry, 'unixepoch') AS INT)=? "
+                "AND ts_entry > strftime('%s', 'now', '-30 days')",
+                (side, cur_hour),
+            ))
+            if len(rows) < 10:
+                return 1.0, ""
+            pnls = [float(r[0] or 0) for r in rows]
+            mean = sum(pnls) / len(pnls)
+            if mean >= 0:
+                return 1.0, ""
+            if mean >= -0.20:
+                return 0.75, f"hour{cur_hour}_{side}_neg_${mean:+.2f}_n{len(pnls)}"
+            return 0.50, f"hour{cur_hour}_{side}_negstrong_${mean:+.2f}_n{len(pnls)}"
+        except Exception as e:
+            logger.debug(f"[HourEV] check skipped: {e}")
+            return 1.0, ""
+
     def _ev_per_symbol_multiplier(self, symbol: str, side: str) -> tuple:
         """Phase 27 (2026-05-05): Graduated historical-EV size multiplier.
 
@@ -2393,6 +2459,32 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size ×{_ev_symbol_mult:.2f} "
                 f"(Phase 27 EV: {_ev_symbol_reason})")
+
+        # Phase 31 (2026-05-05): BTC cross-regime soft veto. Counter-trend
+        # to BTC's macro direction gets ×0.6 — addresses the 04-07
+        # disaster (5 shorts SL during BTC squeeze).
+        try:
+            _btc_mult, _btc_reason = self._btc_cross_regime_multiplier(side)
+            if _btc_mult < 1.0:
+                size_fraction *= _btc_mult
+                logger.info(
+                    f"[Claude] {symbol} size ×{_btc_mult:.2f} "
+                    f"(Phase 31 BTC: {_btc_reason})")
+        except Exception:
+            pass
+
+        # Phase 32 (2026-05-05): hour-of-day bleed multiplier. Pure data
+        # check on (current_utc_hour, side) realized PnL over 30d.
+        # Orthogonal dimension to Phase 27's (symbol, side).
+        try:
+            _hr_mult, _hr_reason = self._hour_of_day_multiplier(side)
+            if _hr_mult < 1.0:
+                size_fraction *= _hr_mult
+                logger.info(
+                    f"[Claude] {symbol} size ×{_hr_mult:.2f} "
+                    f"(Phase 32 hour-EV: {_hr_reason})")
+        except Exception:
+            pass
         # 2026-05-04 (Phase 22): regime soft-multiplier. When regime gate
         # detected VOLATILE earlier in this function, _regime_size_mult was
         # set to RISK.regime_volatile_size_mult (default 0.4) instead of
