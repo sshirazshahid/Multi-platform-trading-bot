@@ -32,12 +32,18 @@ SPEC12_AUTO_RESUME_COOLDOWN_MIN = 240
 # and DD-based recovery both need trades, but trades are blocked while halted,
 # so the only exit was the midnight new-day reset. Real losing streaks are
 # already caught by Spec §12 (5 consec global losses, 4h cooldown) independent
-# of the drawdown gate, so a matching 4h cooldown here is safe. On resume we
-# reset peak_balance to the current effective balance — otherwise the next
-# losing trade would re-trip the drawdown immediately since the math is
-# unchanged. daily_pnl is NOT reset: the daily-loss circuit-breaker is a
-# separate constraint that must run independently.
-DRAWDOWN_HALT_COOLDOWN_MIN = 240
+# of the drawdown gate. On resume we reset peak_balance to the current
+# effective balance — otherwise the next losing trade would re-trip the
+# drawdown immediately. daily_pnl is NOT reset: the daily-loss
+# circuit-breaker is a separate constraint that must run independently.
+#
+# 2026-05-05 (Phase 25): reduced 240→60min. At a $568 account size, 4h of
+# downtime per drawdown trip is structurally too long — user reported
+# "HALTED again" after ~12min of bot uptime because the loaded peak was
+# stale ($653 from a prior session). Spec §12 still independently caches
+# real losing-streak halts at 240min. The drawdown halt is best treated
+# as a slow-bleed circuit-breaker, not a long pause.
+DRAWDOWN_HALT_COOLDOWN_MIN = 60
 
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
@@ -101,6 +107,12 @@ class RiskManager:
         self._daily_pnl:     float = 0.0
         self._start_balance: float = 0.0
         self._peak_balance:  float = 0.0
+        # Phase 25 (2026-05-05): set to True after _load_state restores
+        # peak from disk; first note_balance_update checks if the loaded
+        # peak is stale (>10% above current effective) and resets if so.
+        # Stops the "peak from a higher-equity prior session haunts
+        # forever, drawdown halts every restart" anti-pattern.
+        self._peak_stale_flag: bool = False
         self._trading_day:   date  = date.today()
         self._halted:        bool  = False
         self._halt_reason:   str   = ""
@@ -204,6 +216,11 @@ class RiskManager:
             self._daily_pnl = state.get("daily_pnl", 0.0)
             self._trading_day = saved_day
             self._peak_balance = state.get("peak_balance", 0.0)
+            # Phase 25: mark loaded peak as potentially stale. The first
+            # note_balance_update will compare against actual exchange
+            # equity and reset if the gap is >10%.
+            if self._peak_balance > 0:
+                self._peak_stale_flag = True
             # Restore start_balance so drawdown math survives process restart.
             # Without this, (self._start_balance or self._peak_balance) in the
             # DD resume / daily-loss paths falls through to peak, which nullifies
@@ -749,6 +766,23 @@ class RiskManager:
         # Effective balance = start balance + cumulative daily PnL
         # (The `balance` param is often just position notional — unreliable for DD calc)
         effective_balance = (self._start_balance or balance) + self._daily_pnl
+
+        # Phase 25 (2026-05-05): stale-peak reset on first update post-restart.
+        # If the peak loaded from disk is >10% above current effective, the
+        # peak is from a richer prior session and should not gate today's
+        # drawdown calc. Reset to current × 1.05 to give a small buffer for
+        # normal volatility without losing all guard.
+        if self._peak_stale_flag:
+            self._peak_stale_flag = False
+            if (effective_balance > 0
+                    and self._peak_balance > effective_balance * 1.10):
+                old_peak = self._peak_balance
+                self._peak_balance = effective_balance * 1.05
+                logger.warning(
+                    f"[Risk] Phase 25: stale peak ${old_peak:.2f} > "
+                    f"${effective_balance:.2f} × 1.10 — reset to "
+                    f"${self._peak_balance:.2f} (current × 1.05).")
+
         if effective_balance > self._peak_balance:
             self._peak_balance = effective_balance
 

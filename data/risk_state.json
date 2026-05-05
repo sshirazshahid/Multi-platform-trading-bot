@@ -1,34 +1,22 @@
 {
-  "is_halted": true,
-  "halt_reason": "drawdown 35.3% (peak $572.49)",
-  "halt_time": 1777203993.6176996,
-  "daily_pnl": -0.3681,
-  "max_drawdown_pct": 0.3136,
-  "start_balance": 393.32,
-  "peak_balance": 572.49,
-  "trading_day": "2026-04-26",
-  "trades_today": 44,
+  "is_halted": false,
+  "halt_reason": "",
+  "halt_time": 0,
+  "daily_pnl": -2.1517,
+  "max_drawdown_pct": 0.0,
+  "start_balance": 566.3,
+  "peak_balance": 568.32,
+  "trading_day": "2026-05-05",
+  "trades_today": 2,
   "recent_results": [
-    false,
-    true,
-    false,
-    true,
-    false,
-    false,
-    false,
-    true,
-    true,
-    true,
     true,
     true,
     false,
     false,
     false,
-    true,
     false,
-    true,
     false,
-    false
+    true
   ],
   "trade_history": [
     [
@@ -206,39 +194,77 @@
     [
       false,
       -3.9511415525113933
+    ],
+    [
+      false,
+      -0.6477123253581564
+    ],
+    [
+      false,
+      -0.6234711744233582
+    ],
+    [
+      true,
+      0.7252254507108538
+    ],
+    [
+      false,
+      -1.3181924181957059
+    ],
+    [
+      true,
+      3.1692124153527694
+    ],
+    [
+      false,
+      -1.4341876025754474
+    ],
+    [
+      false,
+      -4.078978327393485
+    ],
+    [
+      false,
+      -3.209200312844253
+    ],
+    [
+      true,
+      0.6412491857645185
+    ],
+    [
+      true,
+      0.04206415405912568
+    ],
+    [
+      false,
+      -2.1961483594864406
+    ],
+    [
+      false,
+      -2.8208794149125924
+    ],
+    [
+      false,
+      -0.896315702807345
+    ],
+    [
+      false,
+      -1.8377980024072549
+    ],
+    [
+      false,
+      -1.2709034391926595
+    ],
+    [
+      true,
+      0.3347207361438125
     ]
   ],
-  "symbol_pauses": {
-    "AAVE/USDT:USDT": 1776837083.8452485,
-    "GRT/USDT:USDT": 1777004400.9720106,
-    "ATOM/USDT:USDT": 1777163245.6222239,
-    "ARB/USDT:USDT": 1777229404.5065165
-  },
-  "family_pauses": {
-    "claude_portfolio": 1777026000.9720106,
-    "manual": 1776958216.0810082
-  },
+  "symbol_pauses": {},
+  "family_pauses": {},
   "global_streak": [
-    false,
     true,
-    false,
-    true,
-    false,
-    false,
-    false,
-    true,
-    true,
-    true,
-    true,
-    true,
-    false,
-    false,
-    false,
-    true,
-    false,
-    true,
-    false,
     false
   ],
-  "timestamp": 1777207804.5065165
+  "timestamp": 1777940517.8848555
 }
