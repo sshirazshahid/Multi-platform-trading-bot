@@ -121,9 +121,25 @@ def test_ev_mult_does_not_block_on_low_sample_catastrophic(monkeypatch):
 
 
 def test_ev_mult_whitelisted_bypasses(monkeypatch):
-    """Whitelist symbols return 1.0 regardless of EV."""
+    """Whitelist symbols return 1.0 regardless of EV.
+
+    Phase 33 (2026-05-05) emptied the live whitelist per UNBLOCK_ALL.
+    This test still validates the whitelist LOGIC works when populated —
+    we monkey-patch a temporary entry to verify the bypass mechanism."""
     eng = _stub_engine_with_expectancy(
         {"mean": -2.00, "n": 30, "win_rate": 0.0}, monkeypatch)
+    monkeypatch.setattr(
+        "config.EXPECTANCY_FILTER",
+        {
+            "enabled": True,
+            "min_expected_dollar": -0.50,
+            "min_expected_star": -0.50,
+            "lookback_days": 30,
+            "min_sample_size": 5,
+            "whitelist": {"DOGE/USDT:USDT", "DOGE/USDT"},
+        },
+        raising=False,
+    )
     mult, reason = eng._ev_per_symbol_multiplier("DOGE/USDT:USDT", "buy")
     assert mult == 1.0
     assert "whitelist" in reason.lower()

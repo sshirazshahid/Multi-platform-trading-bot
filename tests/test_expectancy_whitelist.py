@@ -10,12 +10,15 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_doge_is_in_whitelist():
-    """Without this, the user's directive isn't actually applied."""
+def test_whitelist_emptied_phase33():
+    """Phase 33 (2026-05-05) emptied the operator whitelist per UNBLOCK_ALL.
+    DOGE no longer special — Phase 27 graduated EV evaluates it on the
+    same data terms as everything else. This test was originally
+    'test_doge_is_in_whitelist' pinning DOGE bypass."""
     from config import EXPECTANCY_FILTER
-    wl = EXPECTANCY_FILTER.get("whitelist", set())
-    assert "DOGE/USDT:USDT" in wl
-    assert "DOGE/USDT" in wl
+    wl = EXPECTANCY_FILTER.get("whitelist") or {}
+    assert len(wl) == 0
+    assert "DOGE/USDT:USDT" not in wl
 
 
 def test_whitelist_check_lives_before_floor_comparison():

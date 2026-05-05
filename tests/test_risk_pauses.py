@@ -15,9 +15,16 @@ from core.risk_manager import RiskManager
 
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path, monkeypatch):
-    """Run every test with a pristine state dir so previous runs don't bleed."""
+    """Run every test with a pristine state dir so previous runs don't bleed.
+
+    Phase 33 (2026-05-05) flipped SPEC12_SYMBOL/FAMILY_PAUSE_ENABLED to
+    False per UNBLOCK_ALL. These tests verify the underlying pause
+    LOGIC still works when the flags are on — so we re-enable them
+    here for the duration of the test."""
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)
+    monkeypatch.setattr("config.SPEC12_SYMBOL_PAUSE_ENABLED", True, raising=False)
+    monkeypatch.setattr("config.SPEC12_FAMILY_PAUSE_ENABLED", True, raising=False)
     yield
 
 

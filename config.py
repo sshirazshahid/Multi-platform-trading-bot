@@ -758,13 +758,31 @@ EXPECTANCY_FILTER = {
     # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —
     # a symbol on this list trades regardless of recent expectancy. Per-trade
     # SL, MODEL_GATE, and Spec §12 streak halt still apply.
-    # 2026-05-03: DOGE whitelisted per user directive after 30d mean=-$0.013
-    # (62% WR, asymmetric R:R) blocked an OPEN signal.
-    "whitelist": {
-        "DOGE/USDT:USDT",
-        "DOGE/USDT",
-    },
+    # 2026-05-05 (Phase 33): UNBLOCK_ALL_STRICT — operator whitelist
+    # emptied per user directive: "Remove any blocks, blacklist. Trade
+    # ANY PAIR whether SPOT/FUTURE if the bot analyzes its going to be
+    # profitable." DOGE no longer special — Phase 27 graduated EV
+    # evaluates it on the same data terms as everything else.
+    # historical reference (kept commented for audit trail):
+    #   "DOGE/USDT:USDT", "DOGE/USDT" used to live here pre-Phase 33
+    "whitelist": set(),
 }
+
+# 2026-05-05 (Phase 33): UNBLOCK_ALL_STRICT — gate-toggle flags.
+# User directive: "Remove any blocks, blacklist. Trade ANY PAIR
+# whether SPOT/FUTURE if the bot analyzes its going to be profitable."
+#
+# These flags disable PROTECTIVE GATES that aren't per-trade analysis.
+# Phase 23 (calibrator hard-refuse <40%) and Phase 27 (graduated EV)
+# stay ON because those ARE the analysis. ShortGate, Spec §12 per-pair
+# pauses are protective rules layered ON TOP of analysis — disabled.
+#
+# Spec §12 GLOBAL halt (5 consecutive losses → 4h cooldown) is a
+# catastrophic safety rail and stays ON regardless. Phase 29 post-SL
+# cooldown stays ON (it's a 30min cooldown, not a block).
+SHORT_GATE_ENABLED        = False  # rolling 30-trade SELL WR < 45% pause
+SPEC12_SYMBOL_PAUSE_ENABLED = False  # per-symbol pause after 2 consec losses
+SPEC12_FAMILY_PAUSE_ENABLED = False  # per-family pause after 3 consec losses
 
 # 2026-05-01 — Entry-Staleness Exit (Tier 1.1 from predictive-strategy stack).
 # On every position monitor cycle, re-check the entry's directional

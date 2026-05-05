@@ -19,8 +19,13 @@ from core.risk_manager import RiskManager
 
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path, monkeypatch):
+    """Phase 33 flipped SPEC12 per-symbol/family pause flags to False.
+    Re-enable for these tests — they verify the underlying neutrality
+    LOGIC still works when the gates are on."""
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)
+    monkeypatch.setattr("config.SPEC12_SYMBOL_PAUSE_ENABLED", True, raising=False)
+    monkeypatch.setattr("config.SPEC12_FAMILY_PAUSE_ENABLED", True, raising=False)
     yield
 
 

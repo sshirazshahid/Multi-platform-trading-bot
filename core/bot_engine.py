@@ -1707,12 +1707,16 @@ class BotEngine:
                 )
                 return False
 
-        # (C.2) Short gate — 2026-04-24
-        # SELL trades were running 14.3% WR (1W/6L) over the last 72h and 38.7%
-        # over 30d vs buys at 45.6% / 41.9%. Block new shorts until a rolling
-        # 30-SELL window clears 45% WR. Gate auto-re-enables once recovery WR
-        # breaks 45% — no manual flag flip needed. Buys bypass the gate.
-        if side == "sell":
+        # (C.2) Short gate — 2026-04-24, gated behind SHORT_GATE_ENABLED
+        # (Phase 33, 2026-05-05). User directive: "Remove any blocks."
+        # Phase 28 (asymmetric SHORT SL+size) and Phase 27 (per-symbol
+        # graduated EV) handle SHORT-side risk in a per-trade,
+        # data-driven way without a blanket pause.
+        try:
+            from config import SHORT_GATE_ENABLED as _SGE
+        except ImportError:
+            _SGE = True  # default-on for safety if config missing flag
+        if _SGE and side == "sell":
             try:
                 sell_wr, sell_n = self._recent_side_wr("sell", limit=30)
             except Exception as _e:

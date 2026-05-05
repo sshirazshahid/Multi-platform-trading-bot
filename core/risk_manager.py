@@ -1044,8 +1044,24 @@ class RiskManager:
         now = _time.time()
         hour = 3600
 
+        # Phase 33 (2026-05-05): per-symbol / per-family Spec §12 pauses
+        # gated behind config flags. User directive: "Remove any blocks."
+        # GLOBAL Spec §12 halt (5 consec losses → 4h cooldown) below
+        # remains ON as catastrophic safety rail. The per-symbol and
+        # per-family layers are duplicated by Phase 27 (per-symbol-side
+        # graduated EV) and Phase 29 (post-SL cooldown) in a per-trade
+        # data-driven way, so the static-pause version is removable.
+        try:
+            from config import (
+                SPEC12_FAMILY_PAUSE_ENABLED as _F12F,
+                SPEC12_SYMBOL_PAUSE_ENABLED as _F12S,
+            )
+        except ImportError:
+            _F12S = True
+            _F12F = True
+
         # Per-symbol pause
-        if len(sym_hist) >= SPEC_SYMBOL_LOSSES_TO_PAUSE and not any(
+        if _F12S and len(sym_hist) >= SPEC_SYMBOL_LOSSES_TO_PAUSE and not any(
             sym_hist[-SPEC_SYMBOL_LOSSES_TO_PAUSE:]
         ):
             until = now + SPEC_SYMBOL_PAUSE_HOURS * hour
@@ -1056,7 +1072,7 @@ class RiskManager:
             )
 
         # Per-family pause
-        if len(fam_hist) >= SPEC_FAMILY_LOSSES_TO_PAUSE and not any(
+        if _F12F and len(fam_hist) >= SPEC_FAMILY_LOSSES_TO_PAUSE and not any(
             fam_hist[-SPEC_FAMILY_LOSSES_TO_PAUSE:]
         ):
             key = family or "unknown"
