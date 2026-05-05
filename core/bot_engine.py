@@ -2127,6 +2127,29 @@ class BotEngine:
             sl_pct = tier_params["sl_pct"] * 100.0
             tp_pct = tier_params["tp_pct"] * 100.0
 
+        # Phase 28 (2026-05-05): asymmetric SHORT-side risk reduction.
+        # Audit of 267 closed trades:
+        #   SHORT side: 102 trades, 37.3% WR, $-52.12 sum  (79% of bleed)
+        #   BUY  side: 165 trades, 44.8% WR, $-14.48 sum
+        # Per-side asymmetric SL: tighter SHORT stop caps per-loss damage
+        # at the cost of more frequent SL touches. Net per-trade EV math
+        # (assuming WR drops 4 points to 33% but per-loss shrinks 40%):
+        #   old: 0.37 × $win − 0.63 × $loss        ≈ −$0.51
+        #   new: 0.33 × $win − 0.67 × ($loss×0.60) ≈ −$0.19
+        # ~$0.32/trade improvement → ~$5/30d at current SHORT volume.
+        # Size also cut 25% on shorts as additive de-risk on the bad side.
+        # ShortGate (existing) still gates entry on 30d SELL WR<45%.
+        # Phase 27 graduated EV still downsizes per-(symbol, side) cell.
+        if side == "sell":
+            _orig_sl = sl_pct
+            _orig_size = size_pct
+            sl_pct = sl_pct * 0.60
+            size_pct = size_pct * 0.75
+            logger.info(
+                f"[Claude] {symbol} SHORT asymmetric: "
+                f"SL {_orig_sl:.2f}%→{sl_pct:.2f}% size "
+                f"{_orig_size:.1f}%→{size_pct:.1f}% (Phase 28)")
+
         # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
         min_rr = RISK.get("min_rr_ratio", 1.8)
         actual_rr = tp_pct / sl_pct if sl_pct > 0 else 0
