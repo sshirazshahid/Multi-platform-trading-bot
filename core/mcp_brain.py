@@ -1569,6 +1569,54 @@ class MCPBrain:
     # CLAUDE PORTFOLIO PROMPT BUILDER
     # ──────────────────────────────────────────────────────────────────
 
+    def _recent_tape_summary(self, coins: list) -> list:
+        """Phase 30 (2026-05-05) — TradingAgents pattern.
+
+        For each candidate coin, returns a one-liner like:
+          "BTC: 7 trades, WR 14%, mean -$0.45 | last 5: L L L W L"
+        Pulled from warehouse trades over last 30d. Empty list when
+        the warehouse is unavailable or has no rows for these coins.
+
+        Token-conscious: only emits coins with n>=3 trades; one short
+        line each. The whole block adds ~250 tokens for 15 coins.
+        """
+        try:
+            from core.warehouse import get_warehouse
+            wh = get_warehouse()
+        except Exception:
+            return []
+        out = []
+        for coin in coins:
+            sym_key = coin if ":" in coin else f"{coin}/USDT:USDT"
+            try:
+                rows = list(wh.query(
+                    "SELECT realized_pnl, ts_entry FROM trades "
+                    "WHERE status='CLOSED' AND symbol=? "
+                    "AND ts_entry > strftime('%s','now','-30 days') "
+                    "ORDER BY ts_entry DESC LIMIT 30",
+                    (sym_key,),
+                ))
+            except Exception:
+                continue
+            if len(rows) < 3:
+                continue
+            pnls = [float(r[0] or 0) for r in rows]
+            wins = sum(1 for p in pnls if p > 0)
+            wr = wins / len(pnls) * 100
+            mean_pnl = sum(pnls) / len(pnls)
+            # Last 5 outcomes, oldest first for readability
+            tail = pnls[:5][::-1]
+            tail_str = " ".join("W" if p > 0 else "L" for p in tail)
+            tag = ""
+            if mean_pnl > 0.10:
+                tag = "  ← winner"
+            elif mean_pnl < -0.30:
+                tag = "  ← BLEEDS"
+            out.append(
+                f"  {coin}: n={len(pnls)} WR={wr:.0f}% "
+                f"mean=${mean_pnl:+.2f} | last 5: {tail_str}{tag}")
+        return out
+
     def _ask_claude_portfolio(self, coins, data, exchange_indicators,
                                open_positions, exchange_balances,
                                risk_envelope, recent_trades) -> list:
@@ -1703,6 +1751,22 @@ class MCPBrain:
             coin_lines.append(line)
 
         sections.append("COINS:" + "\n".join(coin_lines))
+
+        # Phase 30 (2026-05-05) — TradingAgents-style past-outcome memory
+        # injection. Audit found high MCP scores INVERSELY correlate with
+        # WR (90+ score has 29% WR). The LLM gets coin price/indicator
+        # data but never sees the empirical loss tape on the same symbols.
+        # Surface last-30d realized PnL + last 5 outcomes per candidate
+        # coin so Claude must confront historical reality before deciding.
+        try:
+            tape_lines = self._recent_tape_summary(coins[:15])
+            if tape_lines:
+                sections.append(
+                    "RECENT TAPE (last 30d, this bot's actual trades — "
+                    "do NOT repeat patterns that lose):\n" +
+                    "\n".join(tape_lines))
+        except Exception as _e:
+            logger.debug(f"[Phase30] tape injection skipped: {_e}")
 
         prompt = "\n\n".join(sections)
 

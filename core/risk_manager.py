@@ -138,6 +138,16 @@ class RiskManager:
         self._family_pauses:  dict = {}   # family → epoch_until
         self._global_streak:  list = []   # last 20 global outcomes
 
+        # Phase 29 (2026-05-05) — freqtrade-style post-SL CooldownPeriod.
+        # Audit of 267 trades found 48 stop_loss hits totaling -$78.10
+        # (largest active bleed source). Many of those are likely
+        # immediate re-entries on a symbol that just stopped out.
+        # Ledger of recent SL exits per (symbol, side):
+        #   key = "<symbol>|<side>", value = list of close timestamps
+        # Pruned on every check + record (>24h entries dropped).
+        # In-memory only — fresh restart wipes; intentional.
+        self._recent_sl_by_pair_side: dict = {}
+
         # Restore persisted state from previous session
         self._load_state()
 
@@ -308,6 +318,67 @@ class RiskManager:
             f"(reason='{flag_reason}', action='{flag_action}', "
             f"age={elapsed_min:.1f}min, cooldown remaining={remaining_min:.1f}min). "
             f"Halt restored from flag — risk_state.json value ignored.")
+
+    # Phase 29 (2026-05-05) — post-SL cooldown helpers ─────────────────
+    # freqtrade-style CooldownPeriod + StoplossGuard (per-pair-side).
+    # First SL on (symbol, side):  refuse re-entry for 30 min
+    # 2+ SL on (symbol, side) in 24h: refuse for 6 h
+    # The check runs at the top of bot_engine._execute_open. SL recording
+    # happens in order_manager._finalize_close.
+    POST_SL_SHORT_COOLDOWN_MIN = 30      # after any SL on this pair-side
+    POST_SL_GUARD_TRADE_LIMIT  = 2       # SL count to escalate
+    POST_SL_GUARD_LOOKBACK_HRS = 24      # window for the SL-count
+    POST_SL_GUARD_LOCK_HRS     = 6       # escalated lock duration
+
+    def note_sl_hit(self, symbol: str, side: str) -> None:
+        """Record that a position closed via stop_loss. Called from
+        order_manager._finalize_close on `reason == "stop_loss"` only.
+        """
+        if not symbol or not side:
+            return
+        key = f"{symbol}|{side}"
+        now = _time.time()
+        lst = self._recent_sl_by_pair_side.get(key, [])
+        # Prune entries older than guard lookback (default 24h)
+        cutoff = now - self.POST_SL_GUARD_LOOKBACK_HRS * 3600
+        lst = [t for t in lst if t >= cutoff]
+        lst.append(now)
+        self._recent_sl_by_pair_side[key] = lst
+
+    def is_sl_cooldown_active(self, symbol: str, side: str) -> tuple:
+        """Return (active: bool, reason: str). Checks both layers:
+          1. 30min hard cooldown after the last SL on this pair-side
+          2. 6h escalated lock if 2+ SL on this pair-side in last 24h
+        Caller refuses the trade when active=True. No state mutation.
+        """
+        if not symbol or not side:
+            return False, ""
+        key = f"{symbol}|{side}"
+        lst = self._recent_sl_by_pair_side.get(key)
+        if not lst:
+            return False, ""
+        now = _time.time()
+        # Prune in-place for accurate window — caller guard
+        cutoff = now - self.POST_SL_GUARD_LOOKBACK_HRS * 3600
+        lst = [t for t in lst if t >= cutoff]
+        self._recent_sl_by_pair_side[key] = lst
+        if not lst:
+            return False, ""
+        last_sl = max(lst)
+        elapsed_min = (now - last_sl) / 60.0
+        # Layer 2: escalated guard (StoplossGuard equivalent)
+        if (len(lst) >= self.POST_SL_GUARD_TRADE_LIMIT
+                and elapsed_min < self.POST_SL_GUARD_LOCK_HRS * 60):
+            remain = self.POST_SL_GUARD_LOCK_HRS * 60 - elapsed_min
+            return True, (
+                f"sl_guard:{len(lst)}_in_{self.POST_SL_GUARD_LOOKBACK_HRS}h "
+                f"lock_remain={remain:.0f}min")
+        # Layer 1: short post-SL cooldown
+        if elapsed_min < self.POST_SL_SHORT_COOLDOWN_MIN:
+            remain = self.POST_SL_SHORT_COOLDOWN_MIN - elapsed_min
+            return True, (
+                f"post_sl_cooldown:remain={remain:.0f}min")
+        return False, ""
 
     # ── Trading gate with SMART RECOVERY ─────────────────────────────
 

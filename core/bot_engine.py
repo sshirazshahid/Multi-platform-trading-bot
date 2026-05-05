@@ -1586,6 +1586,22 @@ class BotEngine:
         except Exception:
             pass
 
+        # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
+        # per-pair-side StoplossGuard. After a position closes via SL on
+        # this (symbol, side):
+        #   - Layer 1: 30min hard cooldown
+        #   - Layer 2: 6h lock if 2+ SL in last 24h (escalation)
+        # Targets the $-78 stop_loss bleed (largest active leak in audit).
+        # Refuses revenge re-entry on a pair-side that just stopped out.
+        try:
+            _sl_active, _sl_reason = self.risk.is_sl_cooldown_active(symbol, side)
+            if _sl_active:
+                logger.info(
+                    f"[Risk29] {symbol} {side} BLOCKED: {_sl_reason}")
+                return False
+        except Exception as _e:
+            logger.debug(f"[Risk29] sl-cooldown check skipped: {_e}")
+
         # ── LEARNING-FIRST MODE GATES (spec §3, §13) ─────────────────────
         # (A) OBSERVATION mode: never place any order, even paper. The
         #     candidate will still be recorded in the warehouse (Phase B),

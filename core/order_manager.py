@@ -1448,6 +1448,17 @@ class OrderManager:
         return self._calibrator_instance
 
     def _finalize_close(self, pos: Position, price: float, reason: str) -> None:
+        # Phase 29 (2026-05-05) — record stop_loss exits for the post-SL
+        # cooldown / StoplossGuard layers in RiskManager. Runs FIRST so
+        # ledger is updated even if downstream notifier/warehouse code
+        # raises. freqtrade pattern: revenge re-entry on a freshly-stopped
+        # pair-side is the dominant pattern in the audit's $-78 stop_loss
+        # bleed; cooldown breaks it.
+        if reason == "stop_loss":
+            try:
+                self.risk.note_sl_hit(pos.symbol, pos.side)
+            except Exception as _e:
+                logger.debug(f"[Risk29] note_sl_hit failed: {_e}")
         """Post-close hooks fired by PositionTracker.on_close after EVERY
         close (normal exit, ghost-sync, ghost-reconciled, ghost_force_close,
         STALE, AGE_LIMIT, fail-closed). Centralising here is the fix for the
