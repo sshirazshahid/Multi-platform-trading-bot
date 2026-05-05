@@ -153,7 +153,7 @@ class TrailingStopManager:
             if t["active"]:
                 trail_pct = self._trail_distance(peak_pnl)
                 trail_sl = round(t["peak"] * (1 - trail_pct), 8)
-                lock_frac = self._lock_fraction(peak_pnl)
+                lock_frac = self._lock_fraction(peak_pnl, position)
                 lock_sl = ep * (1 + peak_pnl * lock_frac)
                 # Breakeven floor: NEVER let trailing SL go below breakeven
                 new_sl = max(trail_sl, lock_sl, be)
@@ -182,7 +182,7 @@ class TrailingStopManager:
             if t["active"]:
                 trail_pct = self._trail_distance(peak_pnl)
                 trail_sl = round(t["trough"] * (1 + trail_pct), 8)
-                lock_frac = self._lock_fraction(peak_pnl)
+                lock_frac = self._lock_fraction(peak_pnl, position)
                 lock_sl = ep * (1 - peak_pnl * lock_frac)
                 # Breakeven floor: NEVER let trailing SL go above breakeven (for shorts)
                 new_sl = min(trail_sl, lock_sl, be)
@@ -199,7 +199,7 @@ class TrailingStopManager:
         if dirty: self._save_peaks()
         return False, "", sl
 
-    def _lock_fraction(self, peak_pnl: float) -> float:
+    def _lock_fraction(self, peak_pnl: float, position=None) -> float:
         """Graduated profit lock — protect bigger winners more aggressively.
 
         When `data/trailing_params.json` provided a fitted base lock fraction
@@ -207,7 +207,25 @@ class TrailingStopManager:
         and let the high-tier protections take over for exceptional winners
         (those tiers are sample-poor — only 4 historical TP hits at the time
         of writing — so the fit cannot speak to them).
+
+        Phase 26A (2026-05-05) — winner age-lock. Audit of 267 closed
+        trades found the 4h+ hold bucket bled $-41.71 (63% of total
+        bleed): winners profitable at hour 1-2 reversed by hour 4 because
+        the default 65% lock left too much room. When a position has
+        been open >2h AND has any unrealized profit, ratchet lock to
+        95% so reversal locks in near-peak instead of giving back the
+        whole move. Targets the structural "MCP monitor exits on
+        weakness with worse price" pattern (31 losses for $-21 in
+        mcp_brain_close).
         """
+        if position is not None:
+            try:
+                import time as _t
+                age_min = (_t.time() - getattr(position, "open_time", _t.time())) / 60.0
+            except Exception:
+                age_min = 0.0
+            if age_min >= 120 and peak_pnl > 0:
+                return 0.95
         if getattr(self, "_lock_override", None) is not None and peak_pnl < 0.05:
             return float(self._lock_override)
         return self.__class__._lock_fraction_default(peak_pnl)
