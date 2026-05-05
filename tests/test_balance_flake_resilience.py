@@ -67,7 +67,12 @@ def test_update_current_balance_does_not_clobber_start_balance():
     """The session-start balance is set once by set_start_balance().
     Subsequent update_current_balance() calls (which run every cycle when
     balance fluctuates) must NOT modify it — otherwise the drawdown
-    formula breaks."""
+    formula breaks.
+
+    Phase 34 (2026-05-05) note: peak_balance no longer advances via
+    update_current_balance either — it only advances via record_trade_pnl
+    on a realized win. The wallet-equity reading includes unrealized P&L
+    on open positions which was spiking peak above realized capital."""
     rm = _make_rm()
     rm.set_start_balance(300.0)
     assert rm._start_balance == 300.0
@@ -79,10 +84,11 @@ def test_update_current_balance_does_not_clobber_start_balance():
         "set_start_balance's job. Overwriting it breaks the drawdown "
         "circuit-breaker math.")
 
-    # Even a balance INCREASE shouldn't shift start_balance — only peak.
+    # Even a balance INCREASE shouldn't shift start_balance — and per
+    # Phase 34, no longer shifts peak either (could be unrealized).
     rm.update_current_balance(320.0)
     assert rm._start_balance == 300.0
-    assert rm._peak_balance == 320.0
+    assert rm._peak_balance == 300.0  # Phase 34: peak realized-only
 
 
 # ─── Bug 2: 30% DOWN-spike must be rejected like the existing UP-spike guard
@@ -108,25 +114,36 @@ def test_partial_balance_fetch_rejected():
     assert rm._start_balance == 360.0, "start must NOT shift on flake"
 
 
-def test_real_balance_increase_still_advances_peak():
-    """The down-spike guard must NOT reject genuine P&L increases."""
+def test_real_balance_increase_advances_peak_only_via_record_trade_pnl():
+    """Phase 34 (2026-05-05): peak_balance no longer advances from
+    update_current_balance — that path was reading wallet equity which
+    includes unrealized P&L on open positions. Peak now only advances
+    when record_trade_pnl books a realized win."""
     rm = _make_rm()
     rm.set_start_balance(300.0)
+    # update_current_balance no longer advances peak
     rm.update_current_balance(305.0)
-    assert rm._peak_balance == 305.0
+    assert rm._peak_balance == 300.0
     rm.update_current_balance(312.0)
-    assert rm._peak_balance == 312.0
+    assert rm._peak_balance == 300.0
+    # But a realized winning close DOES advance peak
+    rm.record_trade_pnl(5.0, 300.0, is_win=True, pnl_pct=None)
+    assert rm._peak_balance == 305.0  # 300 start + 5 realized
 
 
 def test_modest_drawdown_not_rejected():
     """A real -10% drawdown is plausible P&L — must NOT be rejected as a
-    flake. Only ≥30% drops are treated as fetch flakes."""
+    flake. Only ≥30% drops are treated as fetch flakes.
+
+    Phase 34: peak no longer advances on update_current_balance, so
+    peak stays at start_balance (300) — the modest drop just updates
+    _last_balance_seen for the flake guard."""
     rm = _make_rm()
     rm.set_start_balance(300.0)
     rm.update_current_balance(305.0)
-    rm.update_current_balance(280.0)  # -8.2% from prior — REAL loss
-    # peak unchanged (no rule says -8% advances peak)
-    assert rm._peak_balance == 305.0
+    rm.update_current_balance(280.0)  # -8.2% from prior — REAL loss, not flake
+    # Peak unchanged (Phase 34: never advances via update_current_balance)
+    assert rm._peak_balance == 300.0
     # last_balance_seen IS updated (it's not a flake)
     assert rm._last_balance_seen == 280.0
 
@@ -158,7 +175,8 @@ def test_phantom_drawdown_70pct_does_not_fire():
     rm = _make_rm()
     rm.set_start_balance(300.0)
     rm.update_current_balance(360.0)  # genuine high reading
-    assert rm._peak_balance == 360.0
+    # Phase 34: peak no longer advances on update_current_balance
+    assert rm._peak_balance == 300.0
     assert rm._start_balance == 300.0  # set ONCE, stays put
 
     # Flake: one exchange stalls, balance reads as $108.

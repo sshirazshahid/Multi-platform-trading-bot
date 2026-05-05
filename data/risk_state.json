@@ -2,12 +2,12 @@
   "is_halted": false,
   "halt_reason": "",
   "halt_time": 0,
-  "daily_pnl": -2.1517,
+  "daily_pnl": 0.4802,
   "max_drawdown_pct": 0.0,
-  "start_balance": 566.3,
-  "peak_balance": 568.32,
+  "start_balance": 566.18,
+  "peak_balance": 566.66,
   "trading_day": "2026-05-05",
-  "trades_today": 2,
+  "trades_today": 7,
   "recent_results": [
     true,
     true,
@@ -16,6 +16,14 @@
     false,
     false,
     false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
     true
   ],
   "trade_history": [
@@ -258,13 +266,52 @@
     [
       true,
       0.3347207361438125
+    ],
+    [
+      true,
+      1.5615139611423756
+    ],
+    [
+      true,
+      1.3238538909475737
+    ],
+    [
+      true,
+      0.052345886808341124
+    ],
+    [
+      true,
+      0.7621817799284553
+    ],
+    [
+      true,
+      1.8741344626786443
+    ],
+    [
+      true,
+      6.424531498147143
+    ],
+    [
+      true,
+      3.3165087956698343
+    ],
+    [
+      true,
+      0.6617461799388593
     ]
   ],
   "symbol_pauses": {},
   "family_pauses": {},
   "global_streak": [
     true,
-    false
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
   ],
-  "timestamp": 1777940517.8848555
+  "timestamp": 1777988950.0472164
 }

@@ -894,10 +894,10 @@ class RiskManager:
         self._start_balance = balance
 
         if self._trading_day == date.today() and self._peak_balance > 0:
-            # Same-day restart: keep resumed daily PnL and peak
-            # Only advance peak if current balance exceeds it
-            if balance > self._peak_balance:
-                self._peak_balance = balance
+            # Same-day restart: keep resumed daily PnL and peak.
+            # Phase 34: do NOT advance peak from startup `balance` —
+            # it includes unrealized P&L. Peak only advances via
+            # record_trade_pnl (realized).
             # Keep _daily_pnl as loaded from state
             # Keep _halted as loaded (daily loss halt still valid same day)
             logger.info(
@@ -966,16 +966,24 @@ class RiskManager:
                     f"Skipping peak update for this cycle.")
                 return
         self._last_balance_seen = balance
-        if balance > self._peak_balance:
-            if self._peak_balance > 0:
-                jump_pct = (balance - self._peak_balance) / self._peak_balance
-                if jump_pct > 0.30:
-                    logger.warning(
-                        f"[Risk] Balance spike rejected: ${balance:.2f} is "
-                        f"{jump_pct:.0%} above peak ${self._peak_balance:.2f} "
-                        f"— likely a balance-fetch bug, not real P&L")
-                    return
-            self._peak_balance = balance
+        # Phase 34 (2026-05-05): peak_balance is NO LONGER bumped here.
+        # The `balance` parameter is wallet equity which includes UNREALIZED
+        # P&L from open positions. A favorable intra-trade swing was
+        # spiking peak above realized capital, then any reversal of that
+        # same unrealized P&L tripped the 8% drawdown halt for "money"
+        # that was never actually realized.
+        #
+        # Live evidence: 2026-05-05 17:13 — peak $713.64 set from
+        # unrealized spike, equity drew down to $566 (still above
+        # start_balance $568.32), drawdown computed 20.6% off the
+        # phantom peak, halt fired. No realized capital was lost.
+        #
+        # Peak is now bumped ONLY in record_trade_pnl (after a close
+        # books realized PnL into daily_pnl). Drawdown becomes
+        # realized-vs-realized — the value that reflects actual money kept.
+        # update_current_balance still runs the flake guards above
+        # (drop/spike rejection on _last_balance_seen) for the
+        # downstream 30%-drop guard, just doesn't advance peak.
 
     def resume_trading(self):
         """Manually resume trading after a halt."""
