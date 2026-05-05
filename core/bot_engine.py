@@ -430,6 +430,38 @@ class BotEngine:
         except Exception:
             pass
 
+        # 4b) Phase 35 (2026-05-05) — ML model freshness check.
+        # The Phase 13 LR + GBM ensemble drives MODEL_GATE and the
+        # LR soft size multiplier. Models trained on stale data lose
+        # predictive power in fast-moving crypto markets. freqtrade's
+        # FreqAI pattern is continuous retraining; we don't auto-retrain
+        # but we DO surface staleness to the operator so manual refit
+        # can be triggered.
+        try:
+            import time as _t_p35
+            from pathlib import Path as _P_p35
+            ensemble = _P_p35("data/models/ensemble_futures_latest.json")
+            if ensemble.exists():
+                age_h = (_t_p35.time() - ensemble.stat().st_mtime) / 3600
+                if age_h > 168:   # > 7 days = stale
+                    findings.append(
+                        f"ML ensemble model is {age_h/24:.1f} days old "
+                        f"(>{168/24:.0f}d threshold) — refit via "
+                        f"`python scripts/train_models.py` to keep MODEL_GATE "
+                        f"and LR sizing predictions current.")
+                elif age_h > 48:  # 2-7 days = warning
+                    findings.append(
+                        f"ML ensemble model is {age_h/24:.1f} days old "
+                        f"(>2d) — consider refitting via "
+                        f"`python scripts/train_models.py` for fresher predictions.")
+            else:
+                findings.append(
+                    "ML ensemble model file not found "
+                    "(data/models/ensemble_futures_latest.json) — "
+                    "MODEL_GATE may be operating without learned weights.")
+        except Exception as _e:
+            logger.debug(f"[GateHealth] model-age check skipped: {_e}")
+
         # 5) Recent gate-stack soak status (last-7d closed trade volume)
         try:
             import sqlite3 as _sq

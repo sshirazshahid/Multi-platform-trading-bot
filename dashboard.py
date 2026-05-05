@@ -70,7 +70,7 @@ GOLD   = "\033[38;5;220m"
 SILVER = "\033[38;5;250m"
 
 # Defaults match TradingBot.bat (menu: "Dashboard 60s"); override via --refresh
-REFRESH_SECONDS = 60
+REFRESH_SECONDS = 5    # default redraw cadence; CLI --refresh overrides
 DASH_WIDTH = 80
 
 # Background fetch thread: last error for footer (throttled display)
