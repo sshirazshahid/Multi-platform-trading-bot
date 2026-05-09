@@ -1338,6 +1338,11 @@ def calc_stats(closed):
     # silently bottom-out at 0.0 (would hide the actual best/worst pnl).
     a_best = None; a_worst = None
     win_amounts = []; loss_amounts = []
+    # Phase 45: track all-time best/worst DAY (cumulative daily PnL).
+    # User wants "highest numbers achieved since bot started" — best
+    # single trade alone doesn't capture that. Best/worst day all-time
+    # is the high-water mark of bot's daily performance.
+    daily_totals: dict = {}
 
     for t in closed:
         pnl   = t.get("pnl",       0) or 0
@@ -1347,6 +1352,13 @@ def calc_stats(closed):
         a_pnl += pnl; a_gross += gross; a_fees += fees
         a_best  = pnl if a_best  is None else max(a_best,  pnl)
         a_worst = pnl if a_worst is None else min(a_worst, pnl)
+        # Phase 45: accumulate per-day totals
+        if ct:
+            try:
+                _d = datetime.fromtimestamp(ct).date()
+                daily_totals[_d] = daily_totals.get(_d, 0.0) + pnl
+            except (OSError, ValueError, OverflowError):
+                pass
         if pnl > 0:
             a_wins += 1
             win_amounts.append(pnl)
@@ -1399,6 +1411,13 @@ def calc_stats(closed):
         "all_wr":    (a_wins / total_n * 100) if total_n else 0,
         "all_best":  a_best if a_best is not None else 0.0,
         "all_worst": a_worst if a_worst is not None else 0.0,
+        # Phase 45: best/worst DAY all-time (the bot's high-water marks).
+        "best_day_alltime":   max(daily_totals.values()) if daily_totals else 0.0,
+        "worst_day_alltime":  min(daily_totals.values()) if daily_totals else 0.0,
+        "best_day_date": (max(daily_totals.items(), key=lambda x: x[1])[0]
+                          if daily_totals else None),
+        "worst_day_date": (min(daily_totals.items(), key=lambda x: x[1])[0]
+                           if daily_totals else None),
         "profit_factor": pf,
         "avg_win":   (total_wins / len(win_amounts)) if win_amounts else 0,
         "avg_loss":  (total_losses / len(loss_amounts)) if loss_amounts else 0,
@@ -1904,9 +1923,21 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         pnl_str_short(-s["avg_loss"]) if s["avg_loss"] else col("--", DIM),
         pf_s, streak_s))
     if s["all_best"] != 0 or s["all_worst"] != 0:
-        row("  Best: {}  Worst: {}  Fees: {}".format(
+        row("  Best Trade: {}  Worst Trade: {}  Fees: {}".format(
             pnl_str_short(s["all_best"]), pnl_str_short(s["all_worst"]),
             col("-{:.4f}".format(s["all_fees"]), RED)))
+    # Phase 45: show all-time best/worst DAY — "highest numbers achieved
+    # since bot started". Captures the bot's high-water mark in cumulative
+    # daily PnL, which is more meaningful for "achievement" than a single
+    # trade.
+    if s.get("best_day_alltime", 0) != 0 or s.get("worst_day_alltime", 0) != 0:
+        bd_date = s.get("best_day_date")
+        wd_date = s.get("worst_day_date")
+        bd_str  = bd_date.strftime("%d %b") if bd_date else "?"
+        wd_str  = wd_date.strftime("%d %b") if wd_date else "?"
+        row("  Peak Day:   {} ({})  Worst Day:   {} ({})".format(
+            pnl_str_short(s["best_day_alltime"]),  col(bd_str, DIM),
+            pnl_str_short(s["worst_day_alltime"]), col(wd_str, DIM)))
     box_bot()
     print()
 
