@@ -1333,7 +1333,10 @@ def calc_stats(closed):
     y_pnl = y_gross = y_fees = 0.0
     y_n   = y_wins  = 0
     a_pnl = a_gross = a_fees = 0.0
-    a_wins = 0; a_best = 0.0; a_worst = 0.0
+    a_wins = 0
+    # Phase 43: use None sentinels so all-losing or all-winning sets don't
+    # silently bottom-out at 0.0 (would hide the actual best/worst pnl).
+    a_best = None; a_worst = None
     win_amounts = []; loss_amounts = []
 
     for t in closed:
@@ -1342,8 +1345,8 @@ def calc_stats(closed):
         fees  = t.get("total_fees", 0) or 0
         ct    = t.get("close_time", 0) or 0
         a_pnl += pnl; a_gross += gross; a_fees += fees
-        a_best  = max(a_best,  pnl)
-        a_worst = min(a_worst, pnl)
+        a_best  = pnl if a_best  is None else max(a_best,  pnl)
+        a_worst = pnl if a_worst is None else min(a_worst, pnl)
         if pnl > 0:
             a_wins += 1
             win_amounts.append(pnl)
@@ -1394,7 +1397,8 @@ def calc_stats(closed):
         "all_pnl":   a_pnl, "all_gross": a_gross, "all_fees": a_fees,
         "total_n":   total_n, "all_wins": a_wins,
         "all_wr":    (a_wins / total_n * 100) if total_n else 0,
-        "all_best":  a_best, "all_worst": a_worst,
+        "all_best":  a_best if a_best is not None else 0.0,
+        "all_worst": a_worst if a_worst is not None else 0.0,
         "profit_factor": pf,
         "avg_win":   (total_wins / len(win_amounts)) if win_amounts else 0,
         "avg_loss":  (total_losses / len(loss_amounts)) if loss_amounts else 0,
@@ -1451,7 +1455,14 @@ def calc_strategy_stats(closed):
 
 
 def calc_hourly_heatmap(closed):
-    """PnL by hour of day (UTC) — identifies best/worst trading hours."""
+    """PnL by hour of day (UTC) — identifies best/worst trading hours.
+
+    Phase 43 (2026-05-10): apply real-trade filter so heatmap is consistent
+    with PERFORMANCE/Daily/Weekly cells. Without this, MANUAL/RECONCILE
+    trades contaminated the hourly buckets, making the heatmap show
+    different "best/worst hours" than what the bot actually traded.
+    """
+    closed = _filter_real_trades(closed)
     hours = defaultdict(lambda: {"pnl": 0.0, "n": 0})
     for t in closed:
         ct = t.get("close_time", 0)
@@ -1869,7 +1880,8 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     streak_s = col("{}{}".format(sk, stype), GREEN if stype == "W" else RED) if sk > 0 else col("--", DIM)
     pf = s["profit_factor"]
     pf_c = GREEN if pf >= 1.5 else (YELLOW if pf >= 1.0 else RED)
-    pf_s = col("{:.2f}".format(min(pf, 99.99)), pf_c)
+    # Phase 43: 999.0 is the no-losses sentinel — show as ∞ instead of literal "999.00"
+    pf_s = col("∞" if pf >= 100 else "{:.2f}".format(pf), pf_c)
 
     row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
         vljust(col("Today", WHITE), 11), pnl_str(s["today_pnl"]),

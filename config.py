@@ -976,10 +976,16 @@ BLACKLIST_HARD: set = {
 #   H02 H03 H06 H07 H11 H13 H14 H15 H17
 #
 # ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
-ALLOWED_HOURS_UTC = {1, 2, 3, 4, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20}
-PEAK_HOURS_UTC    = {1, 8, 10, 16, 18, 20}
-WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17}
-BLOCKED_HOURS_UTC = {0, 5, 9, 19, 21, 22, 23}
+# Phase 44 (2026-05-10): re-fitted on REAL-trade filter (Phase 43 dashboard
+# audit revealed unfiltered data was contaminated by MANUAL/RECONCILE imports).
+# Changes vs Phase 39:
+#   H05: BLOCKED → ALLOWED (filtered: +$2.40 / 78% WR — was unfiltered -$19.12)
+#   H22: BLOCKED → ALLOWED (filtered: -$0.35 / 62% WR — was unfiltered -$35.81)
+# Real catastrophic losers (kept blocked): H00, H09, H19, H21, H23
+ALLOWED_HOURS_UTC = {1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22}
+PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # H05 promoted (78% WR)
+WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17, 22}
+BLOCKED_HOURS_UTC = {0, 9, 19, 21, 23}
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals

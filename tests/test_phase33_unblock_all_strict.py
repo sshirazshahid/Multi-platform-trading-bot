@@ -72,14 +72,14 @@ def test_blacklist_hard_evidence_based():
 def test_allowed_hours_evidence_based():
     """Phase 39: 7 catastrophic loss hours blocked from 421-trade data."""
     from config import ALLOWED_HOURS_UTC, BLOCKED_HOURS_UTC
-    assert len(ALLOWED_HOURS_UTC) == 17
-    assert len(BLOCKED_HOURS_UTC) == 7
+    assert len(ALLOWED_HOURS_UTC) == 19  # Phase 44: H05+H22 unblocked
+    assert len(BLOCKED_HOURS_UTC) == 5  # Phase 44: H05+H22 unblocked
 
 
 def test_blocked_hours_are_catastrophic_losers():
     """Phase 39: blocked hours have combined -$107+ loss all-time."""
     from config import BLOCKED_HOURS_UTC
-    catastrophic = {0, 5, 9, 19, 21, 22, 23}
+    catastrophic = {0, 9, 19, 21, 23}  # Phase 44: H05/H22 unblocked
     assert catastrophic == BLOCKED_HOURS_UTC, f"BLOCKED_HOURS_UTC mismatch: got {BLOCKED_HOURS_UTC}"
 
 

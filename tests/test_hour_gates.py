@@ -58,7 +58,7 @@ def test_phase39_catastrophic_losers_blocked():
     """
     if not BLOCKED_HOURS_UTC:
         return  # UNBLOCK_ALL mode — relaxed
-    catastrophic = {0, 5, 9, 19, 21, 22, 23}
+    catastrophic = {0, 9, 19, 21, 23}  # Phase 44: H05/H22 unblocked after real-filter audit
     assert catastrophic.issubset(BLOCKED_HOURS_UTC), (
         f"unblocked catastrophic-loss hours: "
         f"{catastrophic - BLOCKED_HOURS_UTC}")
@@ -86,6 +86,6 @@ def test_warmup_and_peak_disjoint():
 def test_phase39_peak_hours_are_strongest_winners():
     """PEAK should be highest-EV hours from all-time 421-trade data.
     H08 70%WR, H16 90%WR, H18 72%WR, H20 65%WR, H01 large sum, H10 +$5.60."""
-    expected_peak = {1, 8, 10, 16, 18, 20}
+    expected_peak = {1, 5, 8, 10, 16, 18, 20}  # Phase 44: H05 promoted (78% WR)
     assert expected_peak == PEAK_HOURS_UTC, (
         f"PEAK should be {expected_peak}; got {PEAK_HOURS_UTC}")
