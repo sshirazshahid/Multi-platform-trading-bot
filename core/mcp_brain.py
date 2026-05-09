@@ -1715,6 +1715,31 @@ class MCPBrain:
                     sections.append("COIN SENT: " + " | ".join(parts))
 
         # ── Per-coin data (top 15 for prompt speed) ──
+        # Phase 42 (2026-05-10): pre-filter BLACKLIST_HARD + AutoMutator
+        # dynamic blocks BEFORE passing to Claude. Without this filter,
+        # Claude wastes prompt budget analyzing guaranteed-block symbols
+        # (BTC/ETH/DOGE/SOL/XRP/APT) and proposes trades that always get
+        # rejected at _execute_open. Cycles like 01:32:37 returned 0/3
+        # executed because Claude proposed 3 blacklisted symbols.
+        # Filtering here means Claude focuses on the tradable universe,
+        # which means more usable proposals per cycle and lower API cost.
+        try:
+            import config as _cfg
+            _bl_bases: set = set()
+            for sym in getattr(_cfg, "BLACKLIST_HARD", []) or []:
+                _bl_bases.add(sym.split("/")[0].upper())
+            try:
+                from core.auto_mutator import AutoMutator as _AM
+                for sym in _AM().get_effective_blacklist():
+                    _bl_bases.add(sym.split("/")[0].upper())
+            except Exception:
+                pass
+            if _bl_bases:
+                _filtered = [c for c in coins if c.upper() not in _bl_bases]
+                if len(_filtered) >= 5:  # keep at least 5 candidates
+                    coins = _filtered
+        except Exception:
+            pass
         coin_lines = []
         for coin in coins[:15]:
             gecko = data.get("gecko", {}).get(coin, {})
