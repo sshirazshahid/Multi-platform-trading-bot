@@ -1,23 +1,22 @@
-"""Phase 12.2 — hour-gating invariants (claude_portfolio-only basis).
+"""Phase 39 (2026-05-09) — hour-gating invariants (421 all-time real trades).
 
-Locks the partition between ALLOWED_HOURS_UTC and BLOCKED_HOURS_UTC.
-The basis was changed in Phase 12.2: previously we used COMBINED-warehouse
-attribution, but combined data was dominated by the deprecated MultiTF /
-Supertrend strategies. The active path is claude_portfolio (+ its
-systematic_v3_1 fallback), so the hour gate must reflect WHERE THAT
-STRATEGY makes/loses money.
+Re-fitted on the full 421-trade all-time dataset (all strategies combined)
+after 65h soak. Previous Phase 12.2 data was claude_portfolio-only and
+had too few samples in many hours.
 
-When updating these sets, query claude_portfolio-only data:
+Catastrophic losers now blocked (net PnL ≤ -$9.9, n ≥ 8 all-time):
+  H22 -$35.81  H09 -$23.59  H05 -$19.12  H00 -$15.69
+  H23 -$12.05  H19 -$10.33  H21  -$9.91
 
-    SELECT CAST(strftime('%H', ts_entry, 'unixepoch') AS INT) hr,
-           COUNT(*), ROUND(SUM(realized_pnl),2)
-    FROM trades WHERE status='CLOSED' AND strategy_family='claude_portfolio'
-    GROUP BY hr;
+Strong winners kept (net PnL ≥ +$1.17, n ≥ 9 all-time):
+  H08 +$5.27 70%WR  H01 +$5.17  H20 +$6.30 65%WR  H10 +$5.60
+  H18 +$1.71 72%WR  H16 +$2.25 90%WR  H04 +$1.92  H12 +$1.65
 
-Phase 10.3 → 12.2 transition: H00 / H17 / H19 were UNBLOCKED because
-claude_portfolio-only data showed them as net positive (combined data
-was misleading). H02 / H13 / H14 / H15 / H16 / H21 / H23 stayed allowed.
-H06-H10 are thin-sample (n<3) and default-allowed pending data.
+When updating, query all real trades:
+    SELECT CAST(strftime('%H', close_time, 'unixepoch') AS INT) hr,
+           COUNT(*), ROUND(SUM(pnl),2)
+    FROM positions WHERE status='CLOSED'
+    GROUP BY hr ORDER BY hr;
 """
 from __future__ import annotations
 
@@ -38,42 +37,31 @@ def test_allowed_and_blocked_partition_24h():
         f"missing hours: {set(range(24)) - union}")
 
 
-def test_phase12_claude_portfolio_winners_allowed():
-    """Hours with sum PnL > +$0.50 in claude_portfolio (n>=3) must be allowed.
+def test_phase39_winning_hours_allowed():
+    """Phase 39: hours with net PnL ≥ +$1.17 all-time must be allowed.
 
-    Evidence (claude_portfolio-only as of 2026-04-28):
-      H03 +$1.02 (80%, n=5)   H19 +$1.04 (40%, n=5)
-      H00 +$0.98 (50%, n=10)  H17 +$0.89 (33%, n=6)
-      H02 +$0.70 (33%, n=3)   H15 +$0.67 (40%, n=5)
-      H14 +$0.57 (33%, n=6)   H21 +$0.50 (67%, n=3)
+    Evidence (421 all-time real trades, 2026-05-09):
+      H08 +$5.27 70%WR   H01 +$5.17   H20 +$6.30 65%WR  H10 +$5.60
+      H18 +$1.71 72%WR   H16 +$2.25 90%WR  H04 +$1.92   H12 +$1.65
     """
-    cp_winners = {0, 2, 3, 14, 15, 17, 19, 21}
-    assert cp_winners.issubset(ALLOWED_HOURS_UTC), (
-        f"removed claude_portfolio-winning hours: "
-        f"{cp_winners - ALLOWED_HOURS_UTC}")
+    winners = {1, 4, 8, 10, 12, 16, 18, 20}
+    assert winners.issubset(ALLOWED_HOURS_UTC), (
+        f"removed winning hours: {winners - ALLOWED_HOURS_UTC}")
 
 
-def test_phase12_catastrophic_claude_portfolio_losers_blocked():
-    """Hours with sum PnL < -$0.40 in claude_portfolio (n>=3) SHOULD be
-    blocked when block-mode is engaged.
+def test_phase39_catastrophic_losers_blocked():
+    """Phase 39: hours with net PnL ≤ -$9.91 all-time must be blocked.
 
-    Evidence preserved (claude_portfolio-only attribution as of Phase 12.2):
-      H22 -$3.49 (0%, n=5)    H05 -$1.31 (0%, n=6)
-      H18 -$0.54 (40%, n=5)   H20 -$0.53 (20%, n=5)
-      H01 -$0.49 (0%, n=3)    H12 -$0.45 (50%, n=6)
-
-    2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" means
-    BLOCKED_HOURS_UTC may legitimately be empty. When that's the case, the
-    test passes — the policy is "let everything through and let
-    AutoMutator's runtime blacklist do the policing." Restore evidence-
-    based blocking by repopulating BLOCKED_HOURS_UTC in config.py.
+    Evidence (421 all-time real trades, 2026-05-09):
+      H22 -$35.81  H09 -$23.59  H05 -$19.12  H00 -$15.69
+      H23 -$12.05  H19 -$10.33  H21  -$9.91
     """
     if not BLOCKED_HOURS_UTC:
-        return  # UNBLOCK_ALL mode — assertion intentionally relaxed
-    cp_losers = {1, 5, 12, 18, 20, 22}
-    assert cp_losers.issubset(BLOCKED_HOURS_UTC), (
-        f"unblocked claude_portfolio losers: "
-        f"{cp_losers - BLOCKED_HOURS_UTC}")
+        return  # UNBLOCK_ALL mode — relaxed
+    catastrophic = {0, 5, 9, 19, 21, 22, 23}
+    assert catastrophic.issubset(BLOCKED_HOURS_UTC), (
+        f"unblocked catastrophic-loss hours: "
+        f"{catastrophic - BLOCKED_HOURS_UTC}")
 
 
 def test_warmup_hours_subset_of_allowed():
@@ -95,9 +83,9 @@ def test_warmup_and_peak_disjoint():
         f"warmup/peak overlap: {WARMUP_HOURS_UTC & PEAK_HOURS_UTC}")
 
 
-def test_phase12_peak_hours_are_strongest_winners():
-    """PEAK should be the highest-EV hours from claude_portfolio data.
-    Strongest sums: H19 +$1.04, H03 +$1.02, H00 +$0.98, H17 +$0.89."""
-    expected_peak = {0, 3, 17, 19}
+def test_phase39_peak_hours_are_strongest_winners():
+    """PEAK should be highest-EV hours from all-time 421-trade data.
+    H08 70%WR, H16 90%WR, H18 72%WR, H20 65%WR, H01 large sum, H10 +$5.60."""
+    expected_peak = {1, 8, 10, 16, 18, 20}
     assert expected_peak == PEAK_HOURS_UTC, (
         f"PEAK should be {expected_peak}; got {PEAK_HOURS_UTC}")

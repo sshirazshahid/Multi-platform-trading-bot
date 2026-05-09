@@ -272,11 +272,20 @@ class KnowledgeModel:
         caution_symbols = []
         star_symbols    = []
 
+        # Phase 39 (2026-05-09): claude_portfolio is the PRIMARY entry strategy —
+        # never add it to caution_strats regardless of WR. The caution gate was
+        # suppressing all new entries (bot opened 0 trades in 65h). The WR
+        # benchmark is computed over the full mixed trade history including
+        # reconciled/ghost closes which dilute the signal. Hard-exempt it so
+        # the entry engine is never auto-disabled.
+        _EXEMPT_FROM_CAUTION = {"claude_portfolio"}
+
         for strat, scores in self._model["strategy_scores"].items():
             data = scores.get(mode_key, {})
             if data.get("trades", 0) >= MIN_STRATEGY_SAMPLE:
                 wr = data.get("win_rate", 50)
-                if wr < 50:   caution_strats.append(strat)
+                if wr < 50 and strat not in _EXEMPT_FROM_CAUTION:
+                    caution_strats.append(strat)
                 if wr >= 65:  star_strats.append(strat)
 
         for sym, scores in self._model["symbol_scores"].items():

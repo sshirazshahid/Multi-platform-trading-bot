@@ -39,9 +39,10 @@ def test_star_set_is_evidence_based():
     Membership history:
       2026-04-28: {ATOM, ARB} — Phase 12.3 initial set
       2026-05-01: + DOGE — n=10, +$4.83, 50% WR, $0.483/trade
-                            (top contributor, surfaced by ultrareview audit)
+      2026-05-09: - DOGE removed (Phase 39) — n grew to 18, now -$3.71 net
+                            (asymmetric R:R: wins small, losses large)
     """
-    expected = {"ATOM/USDT:USDT", "ARB/USDT:USDT", "DOGE/USDT:USDT"}
+    expected = {"ATOM/USDT:USDT", "ARB/USDT:USDT"}
     assert STAR_SYMBOLS == expected, (
         f"STAR set changed from {expected} to {STAR_SYMBOLS}; "
         f"verify the underlying claude_portfolio attribution still supports "

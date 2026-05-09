@@ -3870,11 +3870,15 @@ class BotEngine:
                     mtype = pos_entry["market_type"]
 
                     if action in ("TAKE_PROFIT", "CLOSE"):
-                        # Higher thresholds for external positions (unknown age/history)
-                        if action == "CLOSE" and conf < 0.85:
-                            logger.debug(
-                                f"[MCP-Brain] EXT CLOSE skipped: {pos_entry['symbol']} on {ex_name} "
-                                f"conf={conf:.0%} < 85% threshold")
+                        # Phase 39 (2026-05-09): CLOSE disabled for external positions.
+                        # mcp_brain_close accumulated -$20.09 over 44 trades (30% WR).
+                        # The monitor was cutting positions early against subsequent
+                        # price action. SL, trailing_stop, and mcp_take_profit own
+                        # all exits now — CLOSE is demoted to logged-only.
+                        if action == "CLOSE":
+                            logger.info(
+                                f"[MCP-Brain] EXT CLOSE suppressed (Phase 39 policy): "
+                                f"{pos_entry['symbol']} on {ex_name} conf={conf:.0%} — {reason[:60]}")
                             continue
                         if action == "TAKE_PROFIT":
                             if mtype == "futures" and (_pnl_pct < 1.0 or conf < 0.70):

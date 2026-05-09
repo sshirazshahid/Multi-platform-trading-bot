@@ -667,9 +667,11 @@ WHITELIST_SYMBOLS = {
 # Phase 12 missed DOGE because the analysis filter cut it; today's data
 # (n>=8, mean>$0.05) puts it well above the sample-size guard.
 STAR_SYMBOLS = {
-    "ATOM/USDT:USDT",   # n=14, +$2.06 sum, +$0.147/trade, 43% WR
-    "ARB/USDT:USDT",    # n=18, +$1.20 sum, +$0.067/trade, 44% WR
-    "DOGE/USDT:USDT",   # n=10, +$4.83 sum, +$0.483/trade, 50% WR
+    "ATOM/USDT:USDT",   # n=14, +$1.86 sum, 43% WR (all-time)
+    "ARB/USDT:USDT",    # n=35, +$1.15 sum, 49% WR (all-time)
+    # DOGE removed Phase 39 (2026-05-09): was n=10/+$4.83 at Phase 12.2;
+    # now n=18/-$3.71 (56% WR but asymmetric — losses swamp wins).
+    # Moved to BLACKLIST_HARD.
 }
 
 # 2026-05-01 — SPOT-PROTECT-V1 (peak-drawdown spot strategy).
@@ -902,15 +904,24 @@ CELL_FILTER = {
 # Net BLACKLIST_HARD update: removed {ETH, AVAX, ADA}, added {ALGO, LINK,
 # AAVE}, kept {SOL, XRP}. Re-evaluate after 50+ post-restart trades using
 # `python scripts/diagnostic_report.py --since 2026-04-28`.
-# 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" — emptied.
-# Prior evidence-driven contents (recoverable via git):
-#   SOL/USDT:USDT  n=12-13, 0-15% WR (Phase 10.2)
-#   XRP/USDT:USDT  n=12-13, 0-15% WR (Phase 10.2)
-#   ALGO/USDT:USDT n=7,  29% WR (Phase 12.2)
-#   LINK/USDT:USDT n=8,  38% WR (Phase 12.2)
-#   AAVE/USDT:USDT n=3,  0%  WR (Phase 12.2)
+# Phase 39 (2026-05-09): re-enabled from 421-trade all-time analysis.
+# These symbols are net-negative across all strategies combined, with severe
+# outlier losses. Net PnL / WR:
+#   APT/USDT:USDT   n=4   -$12.97  25% WR  (single -$7.35 outlier)
+#   SOL/USDT:USDT   n=18  -$11.02  22% WR
+#   XRP/USDT:USDT   n=11   -$7.38   9% WR
+#   ETH/USDT:USDT   n=15   -$6.47  47% WR  (asymmetric R:R, winners small)
+#   DOGE/USDT:USDT  n=18   -$3.71  56% WR  (wins small, losses large)
+#   BTC/USDT:USDT   n=12   -$2.07  33% WR
 # AutoMutator's runtime blacklist (consec-loss based) still operates on top.
-BLACKLIST_HARD: set = set()
+BLACKLIST_HARD: set = {
+    "SOL/USDT:USDT",
+    "XRP/USDT:USDT",
+    "APT/USDT:USDT",
+    "ETH/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "BTC/USDT:USDT",
+}
 
 # Hour gating (UTC)
 #
@@ -949,18 +960,25 @@ BLACKLIST_HARD: set = set()
 # ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
 # (locked by tests/test_hour_gates.py).
 #
-# 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" — opened
-# all 24 hours. PEAK_HOURS_UTC retained as leverage-tier hint (CONVICTION
-# routing on the strongest hours); WARMUP_HOURS_UTC retained as half-size
-# hint on thin-sample hours. Neither REJECTS entries — they only modulate
-# sizing on entries that the (now-empty) gate accepts.
-# Prior data-driven values (recoverable via git):
-#   ALLOWED = {0,2,3,6,7,8,9,10,13,14,15,16,17,19,21,23}
-#   BLOCKED = {1,4,5,11,12,18,20,22}
-ALLOWED_HOURS_UTC = set(range(24))
-PEAK_HOURS_UTC    = {0, 3, 17, 19}
-WARMUP_HOURS_UTC  = {6, 7, 8, 9, 10, 13, 16, 23}
-BLOCKED_HOURS_UTC = set()
+# Phase 39 (2026-05-09): re-fitted on 421 all-time real trades.
+#
+# CATASTROPHIC losers (block — heavily net-negative, ≥$9.91 loss):
+#   H22 -$35.81  H09 -$23.59  H05 -$19.12  H00 -$15.69
+#   H23 -$12.05  H19 -$10.33  H21  -$9.91
+#
+# STRONG winners (keep — net positive, ≥+$1.17):
+#   H08 +$5.27 70%WR  H01 +$5.17  H20 +$6.30 65%WR  H18 +$1.71 72%WR
+#   H16 +$2.25 90%WR  H05 +$2.40 78%WR  H04 +$1.92  H12 +$1.65
+#   H10 +$5.60  H19 ... wait H19 negative all-time: blocked.
+#
+# MARGINAL / NEUTRAL (allow — low sample or near-zero):
+#   H02 H03 H06 H07 H11 H13 H14 H15 H17
+#
+# ALLOWED ∪ BLOCKED == set(range(24)) and ALLOWED ∩ BLOCKED == ∅
+ALLOWED_HOURS_UTC = {1, 2, 3, 4, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20}
+PEAK_HOURS_UTC    = {1, 8, 10, 16, 18, 20}
+WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17}
+BLOCKED_HOURS_UTC = {0, 5, 9, 19, 21, 22, 23}
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals

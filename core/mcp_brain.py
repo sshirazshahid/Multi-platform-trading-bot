@@ -1509,10 +1509,18 @@ class MCPBrain:
             return []
         self._last_entry_run = now
 
-        # Fetch all external data sources
+        # Fetch all external data sources; retry once on total blackout
         data = self._fetch_all_data(coins)
         if data["sources_ok"] < 2:
-            logger.warning("[MCP-Brain] < 2 data sources — no actions")
+            # Phase 39: clear cache and retry once — transient network blip
+            logger.warning("[MCP-Brain] < 2 data sources — retrying once")
+            self._cached_data = {}
+            self._cache_time  = 0
+            import time as _time_mod
+            _time_mod.sleep(5)
+            data = self._fetch_all_data(coins)
+        if data["sources_ok"] < 2:
+            logger.warning("[MCP-Brain] < 2 data sources after retry — no actions")
             return []
 
         # Merge news context into data

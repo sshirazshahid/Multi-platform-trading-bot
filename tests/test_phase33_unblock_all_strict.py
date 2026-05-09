@@ -62,19 +62,26 @@ def test_expectancy_whitelist_emptied_phase33():
 # ─── Static lists confirmed clear ─────────────────────────────────────
 
 
-def test_blacklist_hard_empty():
+def test_blacklist_hard_evidence_based():
+    """Phase 39 (2026-05-09): BLACKLIST_HARD re-enabled from 421-trade data."""
     from config import BLACKLIST_HARD
-    assert len(BLACKLIST_HARD) == 0
+    expected = {"SOL/USDT:USDT", "XRP/USDT:USDT", "APT/USDT:USDT",
+                "ETH/USDT:USDT", "DOGE/USDT:USDT", "BTC/USDT:USDT"}
+    assert expected == BLACKLIST_HARD, f"BLACKLIST_HARD mismatch: got {BLACKLIST_HARD}"
 
 
-def test_allowed_hours_full_24():
-    from config import ALLOWED_HOURS_UTC
-    assert ALLOWED_HOURS_UTC == set(range(24))
+def test_allowed_hours_evidence_based():
+    """Phase 39: 7 catastrophic loss hours blocked from 421-trade data."""
+    from config import ALLOWED_HOURS_UTC, BLOCKED_HOURS_UTC
+    assert len(ALLOWED_HOURS_UTC) == 17
+    assert len(BLOCKED_HOURS_UTC) == 7
 
 
-def test_blocked_hours_empty():
+def test_blocked_hours_are_catastrophic_losers():
+    """Phase 39: blocked hours have combined -$107+ loss all-time."""
     from config import BLOCKED_HOURS_UTC
-    assert len(BLOCKED_HOURS_UTC) == 0
+    catastrophic = {0, 5, 9, 19, 21, 22, 23}
+    assert catastrophic == BLOCKED_HOURS_UTC, f"BLOCKED_HOURS_UTC mismatch: got {BLOCKED_HOURS_UTC}"
 
 
 def test_shorts_require_btc_bear_off():
