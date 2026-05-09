@@ -45,6 +45,12 @@ SPEC12_AUTO_RESUME_COOLDOWN_MIN = 240
 # as a slow-bleed circuit-breaker, not a long pause.
 DRAWDOWN_HALT_COOLDOWN_MIN = 60
 
+# Phase 38 (2026-05-06): disable drawdown circuit-breaker per operator directive
+# "Trade with confidence 24x7 — don't halt on drawdown."
+# Spec §12 (consecutive-loss streaks) still operates independently.
+# Set True to re-enable the drawdown halt.
+DRAWDOWN_HALT_ENABLED = False
+
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
 # 2 consecutive losses on a symbol → pause that symbol 6h.
@@ -872,7 +878,8 @@ class RiskManager:
             return
 
         # Max drawdown circuit-breaker (with smart recovery)
-        if self._peak_balance > 0:
+        # Phase 38: gated by DRAWDOWN_HALT_ENABLED (operator can disable)
+        if DRAWDOWN_HALT_ENABLED and self._peak_balance > 0:
             drawdown = (self._peak_balance - effective_balance) / self._peak_balance
             if drawdown >= self.max_drawdown_pct and not self._halted:
                 self._halted      = True

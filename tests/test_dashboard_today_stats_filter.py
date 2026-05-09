@@ -1,32 +1,23 @@
-"""Pin the 2026-05-04 dashboard fix: 'Today' / 'Yesterday' stats filter
-out manual positions and external reconciliations.
+"""Pin dashboard PERFORMANCE filter behaviour.
 
-Bug we're fixing
-================
-User reported the dashboard's PERFORMANCE box showing:
+2026-05-04 Phase 21: PERFORMANCE excluded MANUAL-prefix positions so the
+count matched bot-opened trades only. This caused the dashboard to appear
+frozen — emails fired for MANUAL closes (bot manages SL/TP on them) but
+PERFORMANCE didn't update.
 
-    Today        +0.1883 USDT  trades:3  W:2 L:1  WR:66.7%
+2026-05-06 Phase 36: switched PERFORMANCE/Daily/Weekly/Heatmap to
+_filter_real_trades (broader): includes MANUAL-prefix and strategy="manual"
+positions since they hold real capital and the bot actively manages their
+exits. Only RECONCILE size-adjustments and zero-context imports remain
+excluded. STRATEGY BREAKDOWN keeps _filter_bot_trades (bot-initiated only).
 
-When the bot had only opened/closed 2 actual bot trades today.
-Investigation showed positions.json had 3 entries closed today:
-
-  - MANUAL-bitget-... +$0.998 (a manual BTC position on Bitget the
-    user opened+closed on the exchange; bot only reconciled it)
-  - 1002434242541    -$1.038 (bot trade, opened yesterday, closed today)
-  - 14349108500733   +$0.228 (bot trade, opened today, closed today)
-
-The MANUAL position inflated trade count + WR. The fix excludes:
-  - id-prefix "MANUAL-" or strategy="manual" (manual user positions
-    imported via sync_with_exchanges, not bot-initiated)
-  - close_reason in {reconciled_from_exchange, reconciled_no_context}
-    (external imports the bot didn't trade)
-
-Importantly NOT excluded (these ARE bot trades):
-  - close_reason in {ghost_sync, ghost_reconciled, ghost_force_close} —
-    positions the bot OPENED that closed via exchange-side mechanisms
-    (SL fill, manual close on exchange). Real bot trades; counted.
-
-All-time stats unchanged — they include everything (real PnL is real PnL).
+Filter matrix (after Phase 36):
+  id MANUAL-prefix    → INCLUDED in PERFORMANCE (real money)
+  id RECONCILE-prefix → EXCLUDED (size adjustment, not a standalone trade)
+  strategy "manual"   → INCLUDED in PERFORMANCE
+  strategy "reconcile"→ EXCLUDED
+  close_reason in {reconciled_from_exchange, reconciled_no_context} → EXCLUDED
+  ghost_sync / ghost_reconciled / ghost_force_close → INCLUDED (real closes)
 """
 from __future__ import annotations
 
@@ -60,10 +51,11 @@ def _make_closed(close_reason="trailing_stop", pnl=1.0,
     }
 
 
-def test_manual_id_prefix_excluded_from_today():
-    """An id starting with MANUAL- means user reconciled, not bot trade.
-    Phase 21 (2026-05-04): filter now also applies to all-time stats so
-    every cell on the dashboard shows the same definition of bot-trade."""
+def test_manual_id_prefix_included_in_performance():
+    """Phase 36 (2026-05-06): MANUAL-prefix positions ARE included in
+    PERFORMANCE because the bot manages their SL/TP and their P&L is real.
+    Excluding them caused the dashboard to appear frozen when emails fired
+    for MANUAL closes but the stats panel didn't update."""
     from dashboard import calc_stats
     closed = [
         _make_closed(position_id="MANUAL-bitget-x", pnl=0.998,
@@ -72,14 +64,15 @@ def test_manual_id_prefix_excluded_from_today():
                      close_reason="ghost_sync"),
     ]
     s = calc_stats(closed)
-    assert s["today_n"] == 1, "MANUAL- id must be excluded"
-    assert abs(s["today_pnl"] - 0.228) < 1e-6
-    # Phase 21: all-time also filtered for cell-to-cell consistency
-    assert s["total_n"] == 1
-    assert abs(s["all_pnl"] - 0.228) < 1e-6
+    assert s["today_n"] == 2, "MANUAL- id must now be INCLUDED in PERFORMANCE"
+    assert abs(s["today_pnl"] - (0.998 + 0.228)) < 1e-6
+    assert s["total_n"] == 2
+    assert abs(s["all_pnl"] - (0.998 + 0.228)) < 1e-6
 
 
-def test_manual_strategy_excluded_from_today():
+def test_manual_strategy_included_in_performance():
+    """Phase 36: strategy="manual" also included in PERFORMANCE — same
+    rationale as MANUAL-prefix id."""
     from dashboard import calc_stats
     closed = [
         _make_closed(strategy="manual", pnl=2.0, close_reason="ghost_sync"),
@@ -87,8 +80,8 @@ def test_manual_strategy_excluded_from_today():
                      close_reason="trailing_stop"),
     ]
     s = calc_stats(closed)
-    assert s["today_n"] == 1
-    assert abs(s["today_pnl"] - 1.0) < 1e-6
+    assert s["today_n"] == 2, "strategy='manual' must now be INCLUDED"
+    assert abs(s["today_pnl"] - 3.0) < 1e-6
 
 
 def test_reconcile_reasons_excluded_from_today():
@@ -118,50 +111,44 @@ def test_ghost_sync_INCLUDED_when_bot_opened():
     assert abs(s["today_pnl"] - 1.0) < 1e-6
 
 
-def test_all_time_now_filtered_too_phase21():
-    """Phase 21 (2026-05-04): supersedes the prior 'all-time unchanged'
-    rule. After the rule alignment for cell-to-cell consistency, the
-    filter applies to All-Time too — so the count + PnL on the
-    Performance > All Time row uses the same definition of bot-trade as
-    Today / Yesterday / Daily PnL / Weekly / Strategy Breakdown.
-
-    Trade-off accepted: realized account PnL across history is no longer
-    what 'All Time' shows on the dashboard. Use warehouse for that.
+def test_all_time_real_trade_filter_phase36():
+    """Phase 36 (2026-05-06): PERFORMANCE uses _filter_real_trades.
+    MANUAL-prefix and strategy="manual" are INCLUDED (real capital).
+    Only RECONCILE-prefix and reconciled_* close_reasons are excluded.
     """
     from dashboard import calc_stats
     closed = [
-        _make_closed(position_id="MANUAL-x", pnl=10.0),
-        _make_closed(strategy="manual",      pnl=5.0),
-        _make_closed(close_reason="reconciled_from_exchange", pnl=-2.0),
-        _make_closed(pnl=1.0),
+        _make_closed(position_id="MANUAL-x", pnl=10.0),     # INCLUDED
+        _make_closed(strategy="manual",      pnl=5.0),       # INCLUDED
+        _make_closed(close_reason="reconciled_from_exchange", pnl=-2.0),  # excluded
+        _make_closed(pnl=1.0),                               # INCLUDED
     ]
     s = calc_stats(closed)
-    # Only the bot-initiated row counts in any time window now
-    assert s["today_n"] == 1
-    assert abs(s["today_pnl"] - 1.0) < 1e-6
-    assert s["total_n"] == 1
-    assert abs(s["all_pnl"] - 1.0) < 1e-6
+    # 3 rows included: MANUAL-x, strategy=manual, plain pnl=1.0
+    assert s["today_n"] == 3
+    assert abs(s["today_pnl"] - 16.0) < 1e-6
+    assert s["total_n"] == 3
+    assert abs(s["all_pnl"] - 16.0) < 1e-6
 
 
 # ─── Phase 21 — cross-panel consistency ───────────────────────────────
 
 
 def test_calc_daily_pnl_applies_filter():
-    """Daily PnL heatmap must use the same filter — was producing a
-    different 'today's PnL' than Performance Today before Phase 21."""
+    """Daily PnL heatmap uses _filter_real_trades — same as PERFORMANCE.
+    Phase 36: MANUAL-x is now included; reconciled_from_exchange excluded."""
     from dashboard import calc_daily_pnl
     closed = [
-        _make_closed(position_id="MANUAL-x", pnl=10.0),
-        _make_closed(close_reason="reconciled_from_exchange", pnl=5.0),
-        _make_closed(pnl=1.0),
-        _make_closed(close_reason="ghost_sync", pnl=2.0),
+        _make_closed(position_id="MANUAL-x", pnl=10.0),           # INCLUDED
+        _make_closed(close_reason="reconciled_from_exchange", pnl=5.0),  # excluded
+        _make_closed(pnl=1.0),                                     # INCLUDED
+        _make_closed(close_reason="ghost_sync", pnl=2.0),          # INCLUDED
     ]
     daily = calc_daily_pnl(closed, days=2)
-    # Find today's bucket (last entry, since result is days-1..0)
     today_bucket = daily[-1]
-    # Only 2 rows survive the filter (pnl=1.0 and ghost_sync 2.0)
-    assert today_bucket["trades"] == 2
-    assert abs(today_bucket["pnl"] - 3.0) < 1e-6
+    # 3 rows: MANUAL-x + pnl=1 + ghost_sync pnl=2
+    assert today_bucket["trades"] == 3
+    assert abs(today_bucket["pnl"] - 13.0) < 1e-6
 
 
 def test_calc_strategy_stats_applies_filter():
@@ -178,6 +165,7 @@ def test_calc_strategy_stats_applies_filter():
 
 
 def test_calc_exchange_stats_applies_filter():
+    """Phase 36: MANUAL-x is now included in exchange stats (real P&L)."""
     from dashboard import calc_exchange_stats
     closed = [
         _make_closed(position_id="MANUAL-x", pnl=10.0),
@@ -185,9 +173,58 @@ def test_calc_exchange_stats_applies_filter():
     ]
     open_pos = []
     s = calc_exchange_stats(closed, open_pos)
-    # Default exchange in fixture is "binance" (None → "unknown" — let's
-    # check the totals don't include the manual row)
-    binance = s.get("binance") or s.get("unknown")
-    assert binance is not None
-    assert binance["n"] == 1
-    assert abs(binance["pnl"] - 1.0) < 1e-6
+    exchange = s.get("binance") or s.get("unknown")
+    assert exchange is not None
+    assert exchange["n"] == 2, "MANUAL-x must now be INCLUDED in exchange stats"
+    assert abs(exchange["pnl"] - 11.0) < 1e-6
+
+
+# ─── Phase 37 — RECONCILE positions closed by bot count ───────────────
+
+
+def test_reconcile_prefix_with_mcp_take_profit_included():
+    """Phase 37 (2026-05-06): RECONCILE-prefix positions actively closed by
+    the bot (close_reason=mcp_take_profit) must be counted in PERFORMANCE.
+    These are real capital events — the bot managed the exit.
+    Observed in prod: RECONCILE-binance-DOT +$1.36 and RECONCILE-binance-BNB
+    +$0.99 via mcp_take_profit were excluded, creating a ~$2.35 gap between
+    the daily email (reads risk_state.daily_pnl) and the dashboard."""
+    from dashboard import calc_stats
+    closed = [
+        _make_closed(position_id="RECONCILE-binance-DOT", pnl=1.3613,
+                     strategy="reconcile", close_reason="mcp_take_profit"),
+        _make_closed(position_id="RECONCILE-binance-BNB", pnl=0.9871,
+                     strategy="reconcile", close_reason="mcp_take_profit"),
+        _make_closed(pnl=1.0, close_reason="trailing_stop"),
+    ]
+    s = calc_stats(closed)
+    assert s["today_n"] == 3, (
+        "RECONCILE positions closed by mcp_take_profit must be INCLUDED")
+    assert abs(s["today_pnl"] - (1.3613 + 0.9871 + 1.0)) < 1e-4
+
+
+def test_reconcile_prefix_pure_import_excluded():
+    """RECONCILE positions with no bot-active close reason stay excluded."""
+    from dashboard import calc_stats
+    closed = [
+        _make_closed(position_id="RECONCILE-binance-X", pnl=5.0,
+                     strategy="reconcile", close_reason="unknown_reason"),
+        _make_closed(pnl=1.0, close_reason="trailing_stop"),
+    ]
+    s = calc_stats(closed)
+    assert s["today_n"] == 1, (
+        "RECONCILE with unknown close_reason must remain EXCLUDED")
+    assert abs(s["today_pnl"] - 1.0) < 1e-6
+
+
+def test_reconcile_age_loss_included():
+    """RECONCILE positions closed by AGE_LOSS (bot's age-cutoff rule) count."""
+    from dashboard import calc_stats
+    closed = [
+        _make_closed(position_id="RECONCILE-binance-DOT", pnl=-0.21,
+                     strategy="reconcile", close_reason="AGE_LOSS"),
+        _make_closed(pnl=1.0, close_reason="trailing_stop"),
+    ]
+    s = calc_stats(closed)
+    assert s["today_n"] == 2
+    assert abs(s["today_pnl"] - (-0.21 + 1.0)) < 1e-4

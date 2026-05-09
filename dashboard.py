@@ -1271,20 +1271,63 @@ def _is_bot_trade(t: dict) -> bool:
     return True
 
 
+_BOT_CLOSE_REASONS = frozenset({
+    "mcp_take_profit", "trailing_stop", "mcp_stop_loss", "stop_loss",
+    "age_loss", "AGE_LOSS", "ghost_sync", "ghost_reconciled",
+    "ghost_force_close", "mcp_manual",
+})
+
+
+def _is_real_trade(t: dict) -> bool:
+    """True if this closed-trade row represents real capital at risk.
+
+    Rules (Phase 36 → Phase 37):
+    - Pure import records (reconciled_from_exchange, reconciled_no_context):
+      excluded — bot never managed these positions.
+    - RECONCILE-prefix / strategy="reconcile" positions that were actively
+      closed by the bot (mcp_take_profit, trailing_stop, AGE_LOSS, etc.):
+      INCLUDED — the bot managed the exit, the P&L is real.
+    - RECONCILE-prefix with no bot-active close reason: excluded.
+    - MANUAL-prefix / strategy="manual": INCLUDED — bot manages SL/TP.
+    - All other bot-opened positions: INCLUDED.
+
+    This definition matches risk_state.daily_pnl (accumulated via
+    record_trade_pnl), so PERFORMANCE, Daily, Weekly, and Heatmap panels
+    agree with the daily email report.
+    """
+    cr = t.get("close_reason") or ""
+    # Pure import — bot never touched it
+    if cr in _DASH_RECONCILE_REASONS:
+        return False
+    pid   = (t.get("id") or "")
+    strat = (t.get("strategy") or "").lower()
+    is_reconcile = pid.startswith("RECONCILE-") or strat in ("reconcile", "reconciled_exchange")
+    if is_reconcile:
+        # Bot actively closed it → counts as real P&L
+        if cr in _BOT_CLOSE_REASONS or cr.lower().startswith("mcp_"):
+            return True
+        return False
+    return True
+
+
 def _filter_bot_trades(closed):
-    """Apply _is_bot_trade to a list of closed positions."""
+    """Apply _is_bot_trade to a list of closed positions (bot-originated only)."""
     return [t for t in closed if _is_bot_trade(t)]
+
+
+def _filter_real_trades(closed):
+    """Apply _is_real_trade to a list of closed positions (all managed positions)."""
+    return [t for t in closed if _is_real_trade(t)]
 
 
 def calc_stats(closed):
     today     = datetime.now().date()
     yesterday = today - timedelta(days=1)
-    # Phase 21 (2026-05-04): apply the shared bot-trade filter at top.
-    # Was inline only for today/yesterday — now also applies to All-Time
-    # so the count + WR + PnL are consistent across cells that read the
-    # same `closed` list. Manual positions and external reconciliations
-    # don't count as the bot's trading activity.
-    closed = _filter_bot_trades(closed)
+    # Use the broad "real trade" filter so PERFORMANCE matches email
+    # notifications: MANUAL-prefix positions (already open on exchange at
+    # startup) are still bot-managed and their P&L is real. Only RECONCILE
+    # size-adjustments are excluded. Strategy breakdown uses _filter_bot_trades.
+    closed = _filter_real_trades(closed)
     t_pnl = t_gross = t_fees = 0.0
     t_n   = t_wins  = 0
     y_pnl = y_gross = y_fees = 0.0
@@ -1360,9 +1403,8 @@ def calc_stats(closed):
 
 
 def calc_exchange_stats(closed, open_pos):
-    # Phase 21 (2026-05-04): apply shared bot-trade filter — exchange-level
-    # PnL/WR should match the Performance / Daily / Weekly cells.
-    closed = _filter_bot_trades(closed)
+    # Use broad real-trade filter to match PERFORMANCE / Daily / Weekly cells.
+    closed = _filter_real_trades(closed)
     ex_stats = defaultdict(lambda: {
         "pnl": 0.0, "n": 0, "wins": 0, "fees": 0.0, "open": 0,
         "spot_pnl": 0.0, "spot_n": 0, "spot_wins": 0,
@@ -1424,10 +1466,8 @@ def calc_hourly_heatmap(closed):
 
 def calc_daily_pnl(closed, days=7):
     # Phase 21 (2026-05-04): apply shared bot-trade filter so the
-    # heatmap matches Performance > Today/Yesterday cells. Was previously
-    # counting reconciled+manual events, producing a different "today's
-    # PnL" number than the Performance box.
-    closed = _filter_bot_trades(closed)
+    # Use broad real-trade filter so heatmap matches Performance > Today/Yesterday.
+    closed = _filter_real_trades(closed)
     buckets = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0})
     today   = datetime.now().date()
     for t in closed:
@@ -1482,9 +1522,8 @@ def calc_weekly_stats(closed):
       - worst_day:     (date, pnl, n) — worst day in the current week
       - active_days:   number of days in the current week with at least 1 trade
     """
-    # Phase 21 (2026-05-04): apply shared bot-trade filter so weekly
-    # stats match Performance + Daily PnL cells.
-    closed = _filter_bot_trades(closed)
+    # Use broad real-trade filter so weekly stats match Performance + Daily PnL.
+    closed = _filter_real_trades(closed)
     now_ts = time.time()
     cutoff_this = now_ts - 7 * 86400
     cutoff_prev = now_ts - 14 * 86400
