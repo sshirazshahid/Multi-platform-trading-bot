@@ -95,14 +95,14 @@ def test_dust_skip_log_mentions_cooldown():
 # ─── A1: Hard-refuse when calibrator < 0.40 ──────────────────────────
 
 
-def test_calibrator_hard_refuse_threshold_is_40_percent():
+def test_calibrator_hard_refuse_threshold_is_30_percent_phase40():
     """When calibrator has data and predicts <40% win, refuse the
     trade outright instead of soft-discounting through the 0.7 floor."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     cal_idx = src.index("self.order_mgr.calibrator.calibrate(")
     block = src[cal_idx:cal_idx + 3000]
-    assert "_calibrated < 0.40" in block, \
-        "Phase 23 hard-refuse threshold must be < 40%"
+    assert "_calibrated < 0.30" in block, \
+        "Phase 23 hard-refuse threshold must be < 30% (Phase 40)"
     assert "REFUSED" in block, \
         "log line must say REFUSED so operators see the gate fire"
 
@@ -115,7 +115,7 @@ def test_calibrator_refuse_also_sets_cooldown():
     block = src[cal_idx:cal_idx + 3000]
     # The < 0.40 branch must contain BOTH a return False AND a
     # cooldown set — proximity check
-    refuse_idx = block.index("_calibrated < 0.40")
+    refuse_idx = block.index("_calibrated < 0.30")
     refuse_block = block[refuse_idx:refuse_idx + 800]
     assert "self._dust_skip_cooldown[symbol]" in refuse_block
     assert "return False" in refuse_block

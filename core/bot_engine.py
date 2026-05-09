@@ -2465,14 +2465,23 @@ class BotEngine:
                 _calibrated = self.order_mgr.calibrator.calibrate(
                     _raw_conf, "claude_portfolio")
                 _has_calib_data = abs(_calibrated - _raw_conf) > 0.02
-                # Phase 23 — hard-refuse when actual edge has collapsed
-                if _has_calib_data and _calibrated < 0.40:
+                # Phase 23 — hard-refuse when actual edge has collapsed.
+                # Phase 40 (2026-05-10): threshold 0.40 → 0.30. The calibrator
+                # was fit on stale data (pre-Phase-39: 5x leverage disaster
+                # days, mcp_brain_close drag, blacklist symbols still trading).
+                # Avg calib error = 41.8% — essentially noise. After Phase 39
+                # structural fixes, refusing every trade <40% creates a
+                # chicken-and-egg: 0 trades → no fresh data → calibrator
+                # never updates. Math: at 30% WR + 2:1 R:R, EV = -0.10 / trade
+                # — soft mult sizes those down to 70% so worst-case bleed is
+                # contained. This unblocks fresh data collection.
+                if _has_calib_data and _calibrated < 0.30:
                     import time as _t_p23r
                     self._dust_skip_cooldown[symbol] = _t_p23r.time() + 1800
                     logger.warning(
                         f"[Claude] {symbol} REFUSED: calibrator predicts "
                         f"actual win-rate {_calibrated:.0%} for raw conf "
-                        f"{_raw_conf:.0%} (Phase 23 hard-refuse < 40%, "
+                        f"{_raw_conf:.0%} (Phase 40 hard-refuse < 30%, "
                         f"30min cooldown).")
                     return False
                 # Soft mult — existing Phase 18 behavior, unchanged

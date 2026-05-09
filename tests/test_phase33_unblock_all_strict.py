@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # ─── Config flags ─────────────────────────────────────────────────────
 
 
@@ -127,10 +126,10 @@ def test_global_spec12_halt_still_present():
 
 
 def test_phase23_calibrator_refuse_still_active():
-    """Phase 23 hard-refuse <40% calibrator stays — that IS the analysis."""
+    """Phase 40 hard-refuse <40% calibrator stays — that IS the analysis."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
-    assert "_calibrated < 0.40" in src
-    assert "Phase 23 hard-refuse" in src
+    assert "_calibrated < 0.30" in src
+    assert "Phase 40 hard-refuse" in src
 
 
 def test_phase27_graduated_ev_still_active():

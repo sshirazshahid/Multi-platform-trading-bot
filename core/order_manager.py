@@ -2101,14 +2101,28 @@ class OrderManager:
             max_stale_h = RISK.get("max_stale_hours", 4)
             net_pnl, net_pct, _ = self._net_pnl_at_price(pos, price)
 
-            if age_hours >= max_age_h and net_pnl < 0:
+            # Phase 41 (2026-05-10): AGE_LOSS DISABLED, AGE_LIMIT tightened.
+            # 6 AGE_LOSS trades all-time, 0% WR, -$1.78. Rule realizes paper
+            # losses (-0.5% to -3%) at 3h hold before SL backstop (-2.5%) gets
+            # to fire OR position recovers. Math: recovery rate >13% makes
+            # "no AGE_LOSS" net positive (avoids realizing -1.5% avg). With
+            # 46% overall WR, recovery rate on stale losers is plausibly
+            # 20-30% — trust the SL instead.
+            # AGE_LIMIT (24h backstop) tightened: only fires when loss
+            # >= 1.5% (was: any loss). Tiny -0.1% age-outs realized losses
+            # on positions that just needed more time.
+            AGE_LOSS_ENABLED = False
+            AGE_LIMIT_MIN_LOSS_PCT = 1.5
+            if (age_hours >= max_age_h and net_pnl < 0
+                    and abs(net_pct) >= AGE_LIMIT_MIN_LOSS_PCT):
                 logger.warning(
                     f"[Orders] AGE_LIMIT: {pos.symbol} {pos.side} "
                     f"open {age_hours:.1f}h (limit {max_age_h}h), "
                     f"net={net_pct:+.2f}% — force-closing losing position")
                 self.close_position(exchange, pos, "AGE_LIMIT", price)
                 continue
-            elif (age_hours >= max_loss_age_h
+            elif (AGE_LOSS_ENABLED
+                    and age_hours >= max_loss_age_h
                     and net_pct <= -max_loss_age_pct):
                 logger.warning(
                     f"[Orders] AGE_LOSS: {pos.symbol} {pos.side} "
