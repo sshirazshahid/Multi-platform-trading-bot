@@ -1067,10 +1067,8 @@ class RiskManager:
         # graduated EV) and Phase 29 (post-SL cooldown) in a per-trade
         # data-driven way, so the static-pause version is removable.
         try:
-            from config import (
-                SPEC12_FAMILY_PAUSE_ENABLED as _F12F,
-                SPEC12_SYMBOL_PAUSE_ENABLED as _F12S,
-            )
+            from config import SPEC12_FAMILY_PAUSE_ENABLED as _F12F
+            from config import SPEC12_SYMBOL_PAUSE_ENABLED as _F12S
         except ImportError:
             _F12S = True
             _F12F = True

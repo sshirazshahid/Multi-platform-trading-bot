@@ -3,6 +3,7 @@ config.py — Central configuration. All settings in one place.
 """
 
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
