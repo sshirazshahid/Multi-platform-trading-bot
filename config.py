@@ -591,8 +591,16 @@ MAX_LOSS_PER_TRADE_USD = 15.0
 # Consecutive-loss throttle — dynamic leverage downgrade + pause
 CONSEC_LOSS_DOWNGRADE_COUNT = 2   # 2 losses in a row → drop tier cap by 1
 CONSEC_LOSS_DOWNGRADE_HOURS = 4   # downgrade lasts 4h
-CONSEC_LOSS_PAUSE_COUNT     = 3   # 3 losses in a row → full pause
-CONSEC_LOSS_PAUSE_HOURS     = 0.5 # pause lasts 30min (was 2h — too long, missed recoveries)
+# Phase 49 (2026-05-10): PAUSE disabled. The L-streak counts ghost_sync /
+# ghost_reconciled / sl_placement_failed closes which are EXCHANGE-side
+# events (network outage forced closes), not bot decisions. Penalizing
+# the bot for those by halting entries for 30min is wrong — the user
+# explicitly wants "trade with confidence 24x7" and "focus on recovering
+# losses, not halting". Tier DOWNGRADE (above) still applies as a softer
+# risk-management measure: bot keeps trading but at smaller size during
+# losing streaks. To re-enable pause, set hours back to 0.5.
+CONSEC_LOSS_PAUSE_COUNT     = 999  # effectively disabled
+CONSEC_LOSS_PAUSE_HOURS     = 0    # pause disabled
 
 # Volatility-adaptive leverage cap — high-ATR symbols clamp to STANDARD
 HIGH_ATR_PCT_THRESHOLD = 0.025    # ATR% > 2.5% → max leverage = STANDARD (2x)
