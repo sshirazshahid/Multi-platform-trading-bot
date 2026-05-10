@@ -1343,6 +1343,10 @@ def calc_stats(closed):
     # single trade alone doesn't capture that. Best/worst day all-time
     # is the high-water mark of bot's daily performance.
     daily_totals: dict = {}
+    # Phase 47: track tie count + date range for clarity.
+    a_ties = 0
+    earliest_ts = None
+    latest_ts = None
 
     for t in closed:
         pnl   = t.get("pnl",       0) or 0
@@ -1352,6 +1356,14 @@ def calc_stats(closed):
         a_pnl += pnl; a_gross += gross; a_fees += fees
         a_best  = pnl if a_best  is None else max(a_best,  pnl)
         a_worst = pnl if a_worst is None else min(a_worst, pnl)
+        # Phase 47: track ties (pnl == 0) explicitly + date range
+        if pnl == 0:
+            a_ties += 1
+        if ct:
+            if earliest_ts is None or ct < earliest_ts:
+                earliest_ts = ct
+            if latest_ts is None or ct > latest_ts:
+                latest_ts = ct
         # Phase 45: accumulate per-day totals
         if ct:
             try:
@@ -1411,6 +1423,13 @@ def calc_stats(closed):
         "all_wr":    (a_wins / total_n * 100) if total_n else 0,
         "all_best":  a_best if a_best is not None else 0.0,
         "all_worst": a_worst if a_worst is not None else 0.0,
+        # Phase 47: classic WR (excludes ties from denominator) + tie count
+        "all_ties":  a_ties,
+        "all_losses": (total_n - a_wins - a_ties),
+        "all_wr_classic": (a_wins / (a_wins + total_n - a_wins - a_ties) * 100)
+                          if (a_wins + total_n - a_wins - a_ties) > 0 else 0,
+        "earliest_ts": earliest_ts,
+        "latest_ts":   latest_ts,
         # Phase 45: best/worst DAY all-time (the bot's high-water marks).
         "best_day_alltime":   max(daily_totals.values()) if daily_totals else 0.0,
         "worst_day_alltime":  min(daily_totals.values()) if daily_totals else 0.0,
@@ -1914,10 +1933,24 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     else:
         row("  {}  {}".format(vljust(col("Yesterday", WHITE), 11),
                               col("no closed trades", DIM)))
-    row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
-        vljust(col("All Time", WHITE), 11), pnl_str(s["all_pnl"]),
-        s["total_n"], col(s["all_wins"], GREEN), col(al, RED),
-        col("{:.1f}%".format(s["all_wr"]), wr_col(s["all_wr"]))))
+    # Phase 47: show date range + ties (if any) for clarity. WR uses the
+    # classic formula (W / (W + L)) excluding ties from denominator; the
+    # raw display L count includes ties for compactness.
+    _at_label = "All Time"
+    _earliest = s.get("earliest_ts")
+    if _earliest:
+        try:
+            _at_label = "All Time (since {})".format(
+                datetime.fromtimestamp(_earliest).strftime("%d %b"))
+        except (OSError, ValueError, OverflowError):
+            pass
+    _ties = s.get("all_ties", 0)
+    _ties_str = "  T:{}".format(_ties) if _ties > 0 else ""
+    _wr_disp = s.get("all_wr_classic", s["all_wr"])
+    row("  {}  {}  trades:{}  W:{} L:{}{}  WR:{}".format(
+        vljust(col(_at_label, WHITE), 22), pnl_str(s["all_pnl"]),
+        s["total_n"], col(s["all_wins"], GREEN), col(al, RED), _ties_str,
+        col("{:.1f}%".format(_wr_disp), wr_col(_wr_disp))))
     row("  Avg Win: {}  Avg Loss: {}  PF: {}  Streak: {}".format(
         pnl_str_short(s["avg_win"]),
         pnl_str_short(-s["avg_loss"]) if s["avg_loss"] else col("--", DIM),
