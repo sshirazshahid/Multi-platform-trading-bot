@@ -3780,28 +3780,44 @@ class BotEngine:
                         continue
 
                     if action == "TAKE_PROFIT":
-                        # Fee-aware: estimate round-trip fees and require net profit >= 0.5%
+                        # Fee-aware: estimate round-trip fees and require net profit >= threshold
+                        # Phase 46 (2026-05-10): STAR symbols get HIGHER threshold (1.5%
+                        # vs 0.5%) so they're allowed to ride to bigger wins. Historical
+                        # R:R for STARs (ATOM, ARB) is 1.85+ — capping their profits at
+                        # +0.5% leaves big upside on the table. Non-STAR symbols keep
+                        # the +0.5% threshold (their realized R:R is closer to 1:1).
+                        # The 4 historical full-TP hits (avg $2.83) demonstrate that
+                        # bigger wins are achievable when positions are given room.
                         from config import FEE
+                        try:
+                            from config import STAR_SYMBOLS as _STAR
+                        except ImportError:
+                            _STAR = set()
                         if p.market_type == "futures":
                             rt_fee_pct = (FEE.get("futures_maker", 0.0002) + FEE.get("futures_taker", 0.0005)) * 100
                         else:
                             rt_fee_pct = (FEE.get("spot_maker", 0.001) + FEE.get("spot_taker", 0.001)) * 100
                         net_pnl_pct = _pnl_pct - rt_fee_pct
-                        if net_pnl_pct >= 0.5 and conf >= 0.60:
+                        # Phase 46: STAR threshold 1.5%, non-STAR 0.5%
+                        is_star = p.symbol in _STAR
+                        tp_threshold = 1.5 if is_star else 0.5
+                        if net_pnl_pct >= tp_threshold and conf >= 0.60:
                             for ex_name, exchange in self.active_exchanges.items():
                                 if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
+                                    star_tag = " [STAR ride]" if is_star else ""
                                     logger.warning(
-                                        f"[MCP-Brain] TAKE PROFIT: {p.symbol} {p.side} "
+                                        f"[MCP-Brain] TAKE PROFIT{star_tag}: {p.symbol} {p.side} "
                                         f"pnl={_pnl_pct:+.1f}% net~{net_pnl_pct:+.1f}% "
-                                        f"conf={conf:.0%} — {reason}")
+                                        f"conf={conf:.0%} (threshold={tp_threshold}%) — {reason}")
                                     self.order_mgr.close_position(
                                         exchange, p, "mcp_take_profit")
                                     break
                         else:
+                            star_note = " [STAR — letting it run]" if is_star else ""
                             logger.debug(
-                                f"[MCP-Brain] TAKE_PROFIT skipped: {p.symbol} "
+                                f"[MCP-Brain] TAKE_PROFIT skipped{star_note}: {p.symbol} "
                                 f"pnl={_pnl_pct:+.1f}% net~{net_pnl_pct:+.1f}% conf={conf:.0%} "
-                                f"(need net>=0.5% + conf>=60%)")
+                                f"(need net>={tp_threshold}% + conf>=60%)")
 
                     elif action == "CLOSE":
                         # 2026-04-24: systematic_close disabled. Historical 1W/17L
