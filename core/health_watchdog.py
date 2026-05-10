@@ -56,7 +56,12 @@ POST_MORTEM_PATH      = Path("data/post_mortem.json")
 DECISIONS_PATH        = Path("data/mcp_decisions.jsonl")
 WAREHOUSE_PATH        = Path("data/warehouse.sqlite")
 
-HEARTBEAT_STALE_SEC      = 5 * 60         # 5 min
+# Phase 48 (2026-05-10): bumped 5min → 10min. Bot's portfolio cycle runs
+# every 5min and a single Claude API call can take 60-90s; with order
+# execution on top, a healthy cycle can briefly exceed 300s. The 5-min
+# threshold fired alert emails on TRANSIENT slow cycles, not real
+# stalls. 10min gives 2 cycles of buffer before alarming on a genuine hang.
+HEARTBEAT_STALE_SEC      = 10 * 60        # 10 min
 EXCHANGE_HALT_SEC        = 10 * 60        # 10 min
 SL_FAIL_PNL_PCT          = -3.0
 LOSS_STREAK_N            = 3
