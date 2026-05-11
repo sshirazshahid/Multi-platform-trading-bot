@@ -135,11 +135,13 @@ class Position:
     funding_paid: float           = 0.0
     # ── Mode tag — this is the key field for learning separation ──────
     paper_trade:  bool            = field(default_factory=_is_dry_run)
-    # ── Exchange-side SL registration flag ────────────────────────────
+    # ── Exchange-side SL/TP registration flags ────────────────────────
     # True once OrderManager._place_exchange_sl_tp succeeds. Persisted
-    # so a restart doesn't try to re-place an SL that's already live.
-    # 2026-05-01: added so manual-position SL recovery is idempotent.
+    # so a restart doesn't try to re-place orders that are already live.
+    # _exchange_tp MUST be a declared field (not a dynamic attr) so
+    # dataclasses.asdict() includes it in positions.json saves.
     _exchange_sl: bool            = False
+    _exchange_tp: bool            = False
     # ── Predicted confidence at entry (Phase 18, 2026-05-04) ──────────
     # MCP score / 100, recorded for the ProbabilityCalibrator feed.
     # Defaults to 0.0 so old positions in JSON load fine; calibrator

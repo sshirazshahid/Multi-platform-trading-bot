@@ -58,6 +58,7 @@ class BinanceClient(BaseExchange):
         self.exchange = ccxt.binance({
             "apiKey":          self.api_key,
             "secret":          self.secret,
+            "timeout":         30000,   # 30s hard timeout — prevents scheduler hangs
             "options":         options,
             "enableRateLimit": True,
         })

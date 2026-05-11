@@ -52,6 +52,7 @@ class BybitClient(BaseExchange):
             self.exchange = ccxt.bybit({
                 "apiKey":  self.api_key,
                 "secret":  self.secret,
+                "timeout": 30000,   # 30s hard timeout — prevents scheduler hangs
                 "options": {
                     "defaultType":             "spot",
                     "adjustForTimeDifference": True,
