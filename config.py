@@ -515,32 +515,22 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # MAX_LOSS_PER_TRADE_PCT cap below.
 LEVERAGE_TIERS = {
     "STANDARD": {
-        # 2026-04-29: reverted 99→2 per user directive. size_pct retained at
-        # 0.50 for capital deployment ("go all-in with available USDT").
-        "leverage":               2,
+        # 2026-05-12 (phase51): 2→3x per user directive. Covers all allowed-
+        # hour signals at conf>=55%. The 3x era (90 trades) was the only
+        # historically profitable leverage era (+$0.28 net vs -$5.07 at 2x).
+        "leverage":               3,
         "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
-        # 2026-04-28 (UNBLOCK_ALL/A): 0.65 -> 0.0. STANDARD now accepts
-        # any candidate the score gate passed. Restore by reverting to 0.65.
-        # 2026-05-01 (stop-bleed plan): raised 0.0 -> 0.55 — recent
-        # mcp_decisions.jsonl shows OPENs at confidence 0.44/0.51/0.52
-        # with `algo_confidence: null` (Claude advisor timed out → bot
-        # opening blind). 0.55 still permits the warmup band but blocks
-        # the lowest-quality fallback signals. Functionally a no-op for
-        # the algorithmic path (confidence = 0.66 + bonus×0.08 starts
-        # ≥ 0.66) — gates Claude-AI-proposed entries which can return
-        # arbitrary confidence values.
         "min_confidence":         0.55,
         "requires_whitelist":     False,
-        # 2026-04-28 (UNBLOCK_ALL/A): hour gate already empty — flag retained
-        # for higher tiers' use; doesn't matter for STANDARD when allowed=24h.
         "requires_allowed_hour":  True,
         "requires_peak_hour":     False,
         "requires_btc_aligned":   False,
     },
     "STRONG": {
-        "leverage":               2,
+        # 2026-05-12 (phase51): 2→4x. Whitelist + BTC-aligned any allowed hour.
+        "leverage":               4,
         "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
@@ -551,7 +541,9 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "CONVICTION": {
-        "leverage":               2,
+        # 2026-05-12 (phase51): 2→5x per user directive. Whitelist + peak hour
+        # + BTC aligned. Tightest standard conditions — highest-conviction setups.
+        "leverage":               5,
         "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
@@ -562,7 +554,10 @@ LEVERAGE_TIERS = {
         "requires_btc_aligned":   True,
     },
     "AGGRESSIVE": {
-        "leverage":               2,
+        # 2026-05-12 (phase51): 2→10x per user directive. Fires only at conf
+        # >=85% during peak hours on whitelist symbols with BTC aligned.
+        # Anti-EV score cap removed in bot_engine (was from bug-era data).
+        "leverage":               10,
         "size_pct":               0.50,
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,

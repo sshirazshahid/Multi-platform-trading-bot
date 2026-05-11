@@ -1316,14 +1316,12 @@ class BotEngine:
         # half-size path unreachable and silently discarding WARMUP_HOURS_UTC opportunities.
         is_allowed_hour = hour_class in ("peak", "allowed", "warmup")
         high_atr        = atr_pct >= HIGH_ATR_PCT_THRESHOLD
-        # 2026-05-01: high-score anti-EV cap. score >= 85 in claude_portfolio
-        # data is net-negative. Force STANDARD tier so we still take the
-        # trade but don't size it up. tier_cap is also set by the consec-
-        # loss throttle above; combine via "tightest wins".
-        if mcp_score >= 85.0:
-            tier_cap = "STANDARD"
+        # 2026-05-12 (phase51): anti-EV cap removed. Cap was based on bug-era
+        # data (0.57:1 R:R, ghost-close leaks, misattributed trades). Post-fix
+        # R:R is 2.37:1 and score 85+ now maps to AGGRESSIVE (10x) by user
+        # directive. tier_cap still set by consec-loss throttle above.
 
-        # Try tiers highest → lowest (20x → 15x → 10x → 5x)
+        # Try tiers highest → lowest (10x → 5x → 4x → 3x)
         for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD"):
             if tier_cap == "STANDARD" and tier_name != "STANDARD":
                 continue
