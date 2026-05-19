@@ -235,7 +235,9 @@ class AutoMutator:
             and any("counter-trend" in m.lower() or "counter trend" in m.lower()
                     for m in a.get("mistakes", []))
         )
-        if short_counter_trend >= SHORT_LOSS_BLOCK_COUNT:
+        # 2026-05-19: gated by HALT_MECHANISMS["auto_mutator_short_block"]
+        if (_HM_AM.get("auto_mutator_short_block", True)
+                and short_counter_trend >= SHORT_LOSS_BLOCK_COUNT):
             if self._state.get("shorts_blocked_until", 0) < now:
                 self._state["shorts_blocked_until"] = now + SHORT_BLOCK_HOURS * 3600
                 logger.warning(
@@ -249,7 +251,9 @@ class AutoMutator:
             if any("leverage" in m.lower() and "amplif" in m.lower()
                    for m in a.get("mistakes", []))
         )
-        if leverage_losses >= LEVERAGE_LOSS_COUNT:
+        # 2026-05-19: gated by HALT_MECHANISMS["auto_mutator_leverage_cap"]
+        if (_HM_AM.get("auto_mutator_leverage_cap", True)
+                and leverage_losses >= LEVERAGE_LOSS_COUNT):
             if self._state.get("leverage_cap_until", 0) < now:
                 self._state["leverage_cap"] = LEVERAGE_CAP_VALUE
                 self._state["leverage_cap_until"] = now + LEVERAGE_CAP_HOURS * 3600

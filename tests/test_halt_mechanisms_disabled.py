@@ -12,12 +12,13 @@ import json
 # Test 1 — pin all flags = False (catches accidental revert)
 
 def test_halt_mechanisms_all_disabled_by_default():
-    """All 7 mechanisms must be False in checked-in config."""
+    """All 9 mechanisms must be False in checked-in config."""
     from config import HALT_MECHANISMS
     expected_keys = {
         "daily_pnl_halt", "drawdown_halt", "spec12_streak_halt",
         "symbol_pause", "family_pause", "outlier_loss_flag",
         "auto_mutator_blacklist",
+        "auto_mutator_short_block", "auto_mutator_leverage_cap",
     }
     assert set(HALT_MECHANISMS.keys()) == expected_keys, \
         f"HALT_MECHANISMS keys drifted: {set(HALT_MECHANISMS.keys())}"
@@ -196,3 +197,67 @@ def test_re_enabling_one_flag_restores_that_mechanism(tmp_path, monkeypatch):
         "Either the gate code path is wrong or record_trade_result API drifted. "
         f"is_halted={halted}, review_required exists={review_file_exists}"
     )
+
+
+# Helper: seed post_mortem.json so AutoMutator.refresh() picks the analyses up
+
+def _seed_post_mortems(tmp_path, analyses):
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "post_mortem.json").write_text(
+        json.dumps({"analyses": analyses})
+    )
+
+
+# Test 9 — shorts-block does NOT set when flag off
+
+def test_short_block_not_set_when_flag_off(tmp_path, monkeypatch):
+    """With auto_mutator_short_block=False, counter-trend short losses don't block shorts."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+
+    from core.auto_mutator import SHORT_LOSS_BLOCK_COUNT, AutoMutator
+
+    # Inject synthetic analyses with counter-trend short losses
+    analyses = []
+    for i in range(SHORT_LOSS_BLOCK_COUNT + 1):
+        analyses.append({
+            "symbol": f"X{i}/USDT:USDT",
+            "side": "sell",
+            "verdict": "LOSS",
+            "mistakes": ["counter-trend entry"],
+        })
+    _seed_post_mortems(tmp_path, analyses)
+
+    am = AutoMutator()
+    am.refresh(force=True)
+
+    assert am._state.get("shorts_blocked_until", 0) == 0, \
+        f"shorts_blocked_until was set: {am._state.get('shorts_blocked_until')}"
+
+
+# Test 10 — leverage-cap does NOT set when flag off
+
+def test_leverage_cap_not_set_when_flag_off(tmp_path, monkeypatch):
+    """With auto_mutator_leverage_cap=False, leverage-amplified losses don't cap leverage."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+
+    from core.auto_mutator import LEVERAGE_LOSS_COUNT, AutoMutator
+
+    analyses = []
+    for i in range(LEVERAGE_LOSS_COUNT + 1):
+        analyses.append({
+            "symbol": f"X{i}/USDT:USDT",
+            "side": "buy",
+            "verdict": "LOSS",
+            "mistakes": ["leverage amplification of loss"],
+        })
+    _seed_post_mortems(tmp_path, analyses)
+
+    am = AutoMutator()
+    am.refresh(force=True)
+
+    assert am._state.get("leverage_cap_until", 0) == 0, \
+        f"leverage_cap_until was set: {am._state.get('leverage_cap_until')}"
+    assert am._state.get("leverage_cap") is None, \
+        f"leverage_cap was set: {am._state.get('leverage_cap')}"

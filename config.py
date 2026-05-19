@@ -1280,7 +1280,7 @@ MCP_TP_PROXIMITY_THRESHOLD: float = 0.7
 MCP_TP_GRACE_SEC: int = 1800
 
 # 2026-05-19 — User directive: "Don't halt or pause when losing trades."
-# All seven loss-driven halt/pause mechanisms disabled. Flip any individual
+# All nine loss-driven halt/pause mechanisms disabled. Flip any individual
 # key to True to re-enable just that mechanism; restart bot to apply.
 # Nuclear restore: set every value to True, restart. Sub-1-minute reversal.
 #
@@ -1290,11 +1290,13 @@ MCP_TP_GRACE_SEC: int = 1800
 #
 # Risk register: docs/superpowers/specs/2026-05-19-disable-halts-and-verify-tiered-leverage-design.md §7
 HALT_MECHANISMS = {
-    "daily_pnl_halt":         False,  # A: was True (gates core/risk_manager.py:~901)
-    "drawdown_halt":          False,  # B: was True (gates core/risk_manager.py:~914)
-    "spec12_streak_halt":     False,  # C: was True (gates core/risk_manager.py:~1132)
-    "symbol_pause":           False,  # D: was True (gates core/risk_manager.py:~1109)
-    "family_pause":           False,  # E: was True (gates core/risk_manager.py:~1120)
-    "outlier_loss_flag":      False,  # F: was True (gates core/risk_manager.py:~1158)
-    "auto_mutator_blacklist": False,  # G: was True (gates core/auto_mutator.py:~187, ~216)
+    "daily_pnl_halt":           False,  # A: was True (gates core/risk_manager.py:~901)
+    "drawdown_halt":            False,  # B: was True (gates core/risk_manager.py:~914)
+    "spec12_streak_halt":       False,  # C: was True (gates core/risk_manager.py:~1132)
+    "symbol_pause":             False,  # D: was True (gates core/risk_manager.py:~1109)
+    "family_pause":             False,  # E: was True (gates core/risk_manager.py:~1120)
+    "outlier_loss_flag":        False,  # F: was True (gates core/risk_manager.py:~1158)
+    "auto_mutator_blacklist":   False,  # G: was True (gates core/auto_mutator.py:~187, ~216)
+    "auto_mutator_short_block": False,  # H1: was True (gates core/auto_mutator.py:~238)
+    "auto_mutator_leverage_cap": False, # H2: was True (gates core/auto_mutator.py:~252)
 }
