@@ -1252,3 +1252,9 @@ SCALING = {
     "max_drawdown_for_scale": 0.10,
     "scale_factor":           1.5,
 }
+
+# 2026-05-19 Patch #0 — Ghost-class reroute instrumentation (log-only).
+# Wraps the ghost-emit path with a counter that records what Patch #1 WOULD
+# have done. No behavior change. Read by scripts/ghost_reroute_report.py
+# over a 72h window; results gate whether Patch #1 ships.
+GHOST_REROUTE_INSTRUMENT: bool = True

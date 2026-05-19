@@ -98,6 +98,11 @@ class BotEngine:
         # trailing cleanup, post-mortem, notifier). Before this wiring,
         # ghost-closed losses bypassed all safety rails.
         self.tracker.on_close = self.order_mgr._finalize_close
+        # 2026-05-19 Patch #0 — Ghost-class reroute instrumentation needs
+        # order_manager.verify_exchange_sl_alive/tp_alive accessible from
+        # sync_with_exchanges. Wired here (after order_mgr exists) rather
+        # than via __init__ to avoid changing the tracker constructor.
+        self.tracker.order_manager = self.order_mgr
         self.learner   = LearningEngine()
         self.news      = NewsScanner()
         self.mcp_brain = MCPBrain() if MCPBrain else None

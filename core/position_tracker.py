@@ -195,6 +195,48 @@ class Position:
         return self.size * self.entry_price
 
 
+# 2026-05-19 Patch #0 — Ghost-class reroute instrumentation (log-only).
+# Computes the hypothetical Patch #1 decision for every ghost-detected
+# close and logs it. Does NOT change close behavior. Read by
+# scripts/ghost_reroute_report.py to gate Patch #1 deployment.
+#
+# Deviation from plan: function takes `exchange_instance` (a BaseExchange,
+# not the string `pos.exchange`). `verify_exchange_sl_alive` /
+# `verify_exchange_tp_alive` both call `exchange.name.lower()` and would
+# raise AttributeError on a string, getting silently swallowed by the
+# except block — producing zero instrumentation events in production and
+# silently failing the Day 4–5 decision gate by absence-of-data.
+def _patch0_instrument_ghost(tracker, pos, order_manager,
+                             exchange_instance, ghost_class_reason):
+    """Log what Patch #1 would have done; no behavior change."""
+    import config
+    if not getattr(config, "GHOST_REROUTE_INSTRUMENT", False):
+        return
+    try:
+        upnl_pct = tracker._compute_unrealized_pnl_pct(pos)
+        if upnl_pct > 0:
+            sl_alive = bool(order_manager.verify_exchange_sl_alive(
+                exchange_instance, pos))
+            tp_alive = bool(order_manager.verify_exchange_tp_alive(
+                exchange_instance, pos))
+            would_reroute = sl_alive and tp_alive
+        else:
+            sl_alive = None
+            tp_alive = None
+            would_reroute = False
+        logger.info(
+            f"GHOST_REROUTE_INSTRUMENT: symbol={pos.symbol} "
+            f"side={pos.side} exchange={pos.exchange} "
+            f"upnl_pct={upnl_pct:.4f} sl_alive={sl_alive} tp_alive={tp_alive} "
+            f"would_reroute={would_reroute} reason={ghost_class_reason}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"GHOST_REROUTE_INSTRUMENT: failed to compute hypothetical "
+            f"for {getattr(pos, 'symbol', '?')}: {str(e)[:120]}"
+        )
+
+
 class PositionTracker:
 
     SAVE_PATH = Path("data/positions.json")
@@ -347,6 +389,23 @@ class PositionTracker:
                 return sum(1 for p in self._open.values()
                            if p.exchange.lower() == exchange.lower())
             return len(self._open)
+
+    def _compute_unrealized_pnl_pct(self, pos) -> float:
+        """Best-effort uPnL fraction for a tracked position, without leverage.
+
+        Returns a signed decimal (e.g., 0.02 = 2% in favor). Uses current
+        market mark from the most recent tick the tracker has seen; falls
+        back to entry price (returns 0.0) if no mark is known.
+        """
+        try:
+            mark = self._last_mark_price.get((pos.exchange.lower(), pos.symbol)) \
+                if hasattr(self, "_last_mark_price") else None
+            if mark is None or pos.entry_price is None or pos.entry_price <= 0:
+                return 0.0
+            sign = 1.0 if pos.side == "long" else -1.0
+            return sign * (float(mark) - float(pos.entry_price)) / float(pos.entry_price)
+        except Exception:
+            return 0.0
 
     def summary(self) -> dict:
         with self._lock:
@@ -515,6 +574,13 @@ class PositionTracker:
                 f"[Positions] GHOST detected: {pos.symbol} {pos.side.upper()} "
                 f"on {pos.exchange} — not found on exchange. Auto-closing.")
             ex = active_exchanges.get(pos.exchange.lower())
+
+            # 2026-05-19 Patch #0 — instrumentation (log-only, no behavior change)
+            order_manager = getattr(self, "order_manager", None)
+            if order_manager is not None and ex is not None:
+                _patch0_instrument_ghost(self, pos, order_manager, ex,
+                                         "ghost_sync")
+
             close_price = pos.entry_price  # last-resort fallback
             close_reason = "ghost_sync"
             resolved_src = "entry_fallback"
