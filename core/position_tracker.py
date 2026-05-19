@@ -206,15 +206,58 @@ class Position:
 # raise AttributeError on a string, getting silently swallowed by the
 # except block — producing zero instrumentation events in production and
 # silently failing the Day 4–5 decision gate by absence-of-data.
+#
+# 2026-05-19 follow-up fix — code-review caught three issues in the
+# original commit (357d025):
+#   1. Original helper looked up self._last_mark_price, which is never
+#      written anywhere — uPnL always returned 0.0, every event logged
+#      would_reroute=False. Fixed: caller resolves the current mark via
+#      ex.fetch_ticker(...)["last"] (same pattern as bot_engine) and
+#      passes it in via `current_mark`. uPnL is computed inline here.
+#   2. Original used `pos.side == "long"`; codebase canonical convention
+#      is "buy" / "sell" (see Position.close() and other side checks in
+#      this file). Fixed below.
+#   3. ghost_reroute_report.py hardcoded notional_proxy=$50.0; real
+#      position notionals vary ~5x. Fixed by emitting `notional=...`
+#      (pos.size * pos.entry_price) in the log line and reading it back
+#      in the report.
 def _patch0_instrument_ghost(tracker, pos, order_manager,
-                             exchange_instance, ghost_class_reason):
-    """Log what Patch #1 would have done; no behavior change."""
+                             exchange_instance, ghost_class_reason,
+                             current_mark=None):
+    """Log what Patch #1 would have done; no behavior change.
+
+    Args:
+        tracker: PositionTracker (unused now — kept for API compat).
+        pos: Position-like object with .symbol, .side ("buy"/"sell"),
+            .exchange, .entry_price, .size.
+        order_manager: OrderManager for verify_exchange_sl/tp_alive.
+        exchange_instance: BaseExchange (NOT the string pos.exchange —
+            verify_exchange_*_alive calls exchange.name.lower()).
+        ghost_class_reason: short label for the close path triggering
+            instrumentation (e.g. "ghost_sync", "ghost_reconciled").
+        current_mark: current mark price for `pos.symbol`, resolved by
+            the caller via the exchange instance. None ⇒ uPnL logged as
+            NaN; would_reroute=False. Caller is responsible for handling
+            its own fetch errors and passing None on failure.
+    """
     import config
     if not getattr(config, "GHOST_REROUTE_INSTRUMENT", False):
         return
     try:
-        upnl_pct = tracker._compute_unrealized_pnl_pct(pos)
-        if upnl_pct > 0:
+        # uPnL fraction (unleveraged), signed. Uses canonical "buy"/"sell".
+        entry = float(pos.entry_price or 0)
+        if (current_mark is None) or (entry <= 0):
+            upnl_pct = float("nan")
+        else:
+            sign = 1.0 if pos.side == "buy" else -1.0
+            upnl_pct = sign * (float(current_mark) - entry) / entry
+
+        # Real position notional (size × entry_price). The report uses
+        # this to compute saved-pnl per event — replaces the previous
+        # hardcoded $50 proxy that made the gate decision random.
+        notional = float(pos.size or 0) * entry
+
+        if upnl_pct > 0:  # NaN > 0 is False, so missing mark ⇒ skip checks
             sl_alive = bool(order_manager.verify_exchange_sl_alive(
                 exchange_instance, pos))
             tp_alive = bool(order_manager.verify_exchange_tp_alive(
@@ -227,7 +270,8 @@ def _patch0_instrument_ghost(tracker, pos, order_manager,
         logger.info(
             f"GHOST_REROUTE_INSTRUMENT: symbol={pos.symbol} "
             f"side={pos.side} exchange={pos.exchange} "
-            f"upnl_pct={upnl_pct:.4f} sl_alive={sl_alive} tp_alive={tp_alive} "
+            f"upnl_pct={upnl_pct:.4f} notional={notional:.4f} "
+            f"sl_alive={sl_alive} tp_alive={tp_alive} "
             f"would_reroute={would_reroute} reason={ghost_class_reason}"
         )
     except Exception as e:
@@ -389,23 +433,6 @@ class PositionTracker:
                 return sum(1 for p in self._open.values()
                            if p.exchange.lower() == exchange.lower())
             return len(self._open)
-
-    def _compute_unrealized_pnl_pct(self, pos) -> float:
-        """Best-effort uPnL fraction for a tracked position, without leverage.
-
-        Returns a signed decimal (e.g., 0.02 = 2% in favor). Uses current
-        market mark from the most recent tick the tracker has seen; falls
-        back to entry price (returns 0.0) if no mark is known.
-        """
-        try:
-            mark = self._last_mark_price.get((pos.exchange.lower(), pos.symbol)) \
-                if hasattr(self, "_last_mark_price") else None
-            if mark is None or pos.entry_price is None or pos.entry_price <= 0:
-                return 0.0
-            sign = 1.0 if pos.side == "long" else -1.0
-            return sign * (float(mark) - float(pos.entry_price)) / float(pos.entry_price)
-        except Exception:
-            return 0.0
 
     def summary(self) -> dict:
         with self._lock:
@@ -575,11 +602,27 @@ class PositionTracker:
                 f"on {pos.exchange} — not found on exchange. Auto-closing.")
             ex = active_exchanges.get(pos.exchange.lower())
 
-            # 2026-05-19 Patch #0 — instrumentation (log-only, no behavior change)
+            # 2026-05-19 Patch #0 — instrumentation (log-only, no behavior change).
+            # Resolve current mark via fetch_ticker (same pattern as
+            # bot_engine._position_monitor: ticker["last"]) so the
+            # instrument helper can compute real uPnL. Fail-soft: any
+            # error → current_mark=None → upnl_pct logged as NaN and
+            # would_reroute=False (event still recorded for rate counting).
             order_manager = getattr(self, "order_manager", None)
             if order_manager is not None and ex is not None:
+                current_mark = None
+                try:
+                    tkr = ex.fetch_ticker(pos.symbol, pos.market_type)
+                    current_mark = float(tkr.get("last", 0) or 0) or None
+                except Exception as _e:
+                    logger.debug(
+                        f"GHOST_REROUTE_INSTRUMENT: fetch_ticker "
+                        f"{pos.symbol} on {pos.exchange} failed: "
+                        f"{str(_e)[:120]}"
+                    )
                 _patch0_instrument_ghost(self, pos, order_manager, ex,
-                                         "ghost_sync")
+                                         "ghost_sync",
+                                         current_mark=current_mark)
 
             close_price = pos.entry_price  # last-resort fallback
             close_reason = "ghost_sync"

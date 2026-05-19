@@ -16,13 +16,19 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Match: "GHOST_REROUTE_INSTRUMENT: symbol=... upnl_pct=0.0234 sl_alive=True tp_alive=True would_reroute=True reason=ghost_sync"
+# Match: "GHOST_REROUTE_INSTRUMENT: symbol=... upnl_pct=0.0234 notional=42.5 sl_alive=True tp_alive=True would_reroute=True reason=ghost_sync"
+# 2026-05-19 follow-up: notional emitted by producer (was hardcoded $50
+# proxy in this script — caused mean_saved_pnl > 0 gate decision to
+# depend on a ~4x guess).
+# uPnL may be `nan` (when caller could not fetch a current mark);
+# regex matches the literal "nan" alongside signed decimals.
 LINE_RE = re.compile(
     r"GHOST_REROUTE_INSTRUMENT: "
     r"symbol=(?P<symbol>\S+) "
     r"side=(?P<side>\S+) "
     r"exchange=(?P<exchange>\S+) "
-    r"upnl_pct=(?P<upnl>-?\d+\.\d+) "
+    r"upnl_pct=(?P<upnl>nan|-?\d+\.\d+) "
+    r"notional=(?P<notional>-?\d+\.\d+) "
     r"sl_alive=(?P<sl>\S+) "
     r"tp_alive=(?P<tp>\S+) "
     r"would_reroute=(?P<reroute>True|False) "
@@ -68,12 +74,15 @@ def main():
                     continue
                 if ts < since:
                     continue
+                # float("nan") is fine; just won't pass uPnL>0 in the
+                # would_reroute gate (already enforced producer-side).
                 events.append({
                     "ts": ts,
                     "symbol": line_m.group("symbol"),
                     "side": line_m.group("side"),
                     "exchange": line_m.group("exchange"),
                     "upnl": float(line_m.group("upnl")),
+                    "notional": float(line_m.group("notional")),
                     "would_reroute": line_m.group("reroute") == "True",
                     "reason": line_m.group("reason"),
                 })
@@ -84,11 +93,11 @@ def main():
 
     total = len(events)
     rerouted = sum(1 for e in events if e["would_reroute"])
-    # Rough expected-saved-pnl proxy: average uPnL of reroute candidates ×
-    # typical position notional ($50). Replace with smarter estimator if
-    # warehouse has the position notional column joinable by symbol+ts.
-    notional_proxy = 50.0
-    saved_pnls = [e["upnl"] * notional_proxy for e in events if e["would_reroute"]]
+    # Expected-saved-pnl per event: uPnL fraction × real position notional
+    # (size × entry_price, emitted by the producer). Previous version
+    # hardcoded a $50 proxy — since real notionals vary ~5x, the
+    # mean_saved_pnl > 0 gate decision was effectively a ~4x guess.
+    saved_pnls = [e["upnl"] * e["notional"] for e in events if e["would_reroute"]]
     by_reason = Counter(e["reason"] for e in events if e["would_reroute"])
     by_exchange = Counter(e["exchange"] for e in events if e["would_reroute"])
 
