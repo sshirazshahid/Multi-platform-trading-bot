@@ -55,6 +55,12 @@ def test_five_consecutive_losses_writes_review_required(tmp_path, monkeypatch):
     # process even though they don't drive behavior here.
     import config  # noqa: F401
     from core import order_manager  # noqa: F401
+
+    # 2026-05-19: halts are disabled by default in checked-in config; this test
+    # asserts the halt mechanism still WORKS when re-enabled, not that the
+    # default is True.
+    monkeypatch.setitem(config.HALT_MECHANISMS, "spec12_streak_halt", True)
+
     from core.risk_manager import RiskManager
 
     rm = RiskManager()

@@ -26,6 +26,13 @@ def _isolate_state(tmp_path, monkeypatch):
     Path("data").mkdir(exist_ok=True)
     monkeypatch.setattr("config.SPEC12_SYMBOL_PAUSE_ENABLED", True, raising=False)
     monkeypatch.setattr("config.SPEC12_FAMILY_PAUSE_ENABLED", True, raising=False)
+    # 2026-05-19: HALT_MECHANISMS now an outer gate on the same sites. Tests
+    # verify the MECHANISMS, not the deployment state — re-enable them all.
+    import config
+    for _k in (
+        "symbol_pause", "family_pause", "spec12_streak_halt", "outlier_loss_flag",
+    ):
+        monkeypatch.setitem(config.HALT_MECHANISMS, _k, True)
     yield
 
 

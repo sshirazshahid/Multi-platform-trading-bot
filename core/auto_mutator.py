@@ -177,19 +177,22 @@ class AutoMutator:
             if a.get("verdict") == "LOSS":
                 sym_losses[s] = sym_losses.get(s, 0) + 1
 
-        for sym, n_loss in sym_losses.items():
-            total = sym_total.get(sym, n_loss)
-            rate = n_loss / total if total else 0.0
-            if n_loss >= SYMBOL_LOSS_BLACKLIST and rate >= SYMBOL_BLACKLIST_MIN_RATE:
-                # Only (re)apply if not already active — prevents spam
-                current_exp = self._state["blacklist"].get(sym, 0)
-                if current_exp < now:
-                    self._state["blacklist"][sym] = now + SYMBOL_BLACKLIST_HOURS * 3600
-                    logger.warning(
-                        f"[AutoMutator] BLACKLIST {sym} for {SYMBOL_BLACKLIST_HOURS}h "
-                        f"— {n_loss}/{total} losses ({rate:.0%}) in last "
-                        f"{LOOKBACK_ANALYSES} trades")
-                    mutations_applied += 1
+        # 2026-05-19: gated by HALT_MECHANISMS["auto_mutator_blacklist"]
+        from config import HALT_MECHANISMS as _HM_AM
+        if _HM_AM.get("auto_mutator_blacklist", True):
+            for sym, n_loss in sym_losses.items():
+                total = sym_total.get(sym, n_loss)
+                rate = n_loss / total if total else 0.0
+                if n_loss >= SYMBOL_LOSS_BLACKLIST and rate >= SYMBOL_BLACKLIST_MIN_RATE:
+                    # Only (re)apply if not already active — prevents spam
+                    current_exp = self._state["blacklist"].get(sym, 0)
+                    if current_exp < now:
+                        self._state["blacklist"][sym] = now + SYMBOL_BLACKLIST_HOURS * 3600
+                        logger.warning(
+                            f"[AutoMutator] BLACKLIST {sym} for {SYMBOL_BLACKLIST_HOURS}h "
+                            f"— {n_loss}/{total} losses ({rate:.0%}) in last "
+                            f"{LOOKBACK_ANALYSES} trades")
+                        mutations_applied += 1
 
         # ── 1b) Per-symbol SHORT-only loss accumulation (May 2026) ──
         # Tighter thresholds for shorts — concentrated short losers don't
@@ -205,23 +208,25 @@ class AutoMutator:
             if a.get("verdict") == "LOSS":
                 sym_losses_short[s] = sym_losses_short.get(s, 0) + 1
 
-        for sym, n_loss in sym_losses_short.items():
-            total = sym_total_short.get(sym, n_loss)
-            rate = n_loss / total if total else 0.0
-            if (n_loss >= SHORT_SYMBOL_LOSS_BLACKLIST
-                    and rate >= SHORT_SYMBOL_BLACKLIST_MIN_RATE):
-                key = f"SHORT:{sym}"
-                current_exp = self._state["blacklist"].get(key, 0)
-                if current_exp < now:
-                    self._state["blacklist"][key] = (
-                        now + SHORT_SYMBOL_BLACKLIST_HOURS * 3600
-                    )
-                    logger.warning(
-                        f"[AutoMutator] SHORT-BLACKLIST {sym} for "
-                        f"{SHORT_SYMBOL_BLACKLIST_HOURS}h — {n_loss}/{total} "
-                        f"sell losses ({rate:.0%})"
-                    )
-                    mutations_applied += 1
+        # 2026-05-19: gated by HALT_MECHANISMS["auto_mutator_blacklist"] (same flag as G1)
+        if _HM_AM.get("auto_mutator_blacklist", True):
+            for sym, n_loss in sym_losses_short.items():
+                total = sym_total_short.get(sym, n_loss)
+                rate = n_loss / total if total else 0.0
+                if (n_loss >= SHORT_SYMBOL_LOSS_BLACKLIST
+                        and rate >= SHORT_SYMBOL_BLACKLIST_MIN_RATE):
+                    key = f"SHORT:{sym}"
+                    current_exp = self._state["blacklist"].get(key, 0)
+                    if current_exp < now:
+                        self._state["blacklist"][key] = (
+                            now + SHORT_SYMBOL_BLACKLIST_HOURS * 3600
+                        )
+                        logger.warning(
+                            f"[AutoMutator] SHORT-BLACKLIST {sym} for "
+                            f"{SHORT_SYMBOL_BLACKLIST_HOURS}h — {n_loss}/{total} "
+                            f"sell losses ({rate:.0%})"
+                        )
+                        mutations_applied += 1
 
         # ── 2) Counter-trend short losses ───────────────────────────
         short_counter_trend = sum(

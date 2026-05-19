@@ -31,6 +31,11 @@ def _losses(symbol: str, side: str, n: int) -> list[dict]:
 def _redirect_state_files(tmp_path, monkeypatch):
     monkeypatch.setattr(am, "POST_MORTEM_FILE", tmp_path / "post_mortem.json")
     monkeypatch.setattr(am, "MUTATIONS_FILE",   tmp_path / "auto_mutations.json")
+    # 2026-05-19: HALT_MECHANISMS["auto_mutator_blacklist"] now gates both
+    # blacklist-write paths. Tests verify the MECHANISM, not the deployment
+    # state — re-enable it.
+    import config
+    monkeypatch.setitem(config.HALT_MECHANISMS, "auto_mutator_blacklist", True)
     yield
 
 

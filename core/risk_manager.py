@@ -898,7 +898,11 @@ class RiskManager:
         daily_loss_limit = (self._start_balance or balance) * self.max_daily_loss_pct
 
         # Daily loss circuit-breaker
-        if self._daily_pnl < -daily_loss_limit and not self._halted:
+        # Gated by HALT_MECHANISMS["daily_pnl_halt"] (2026-05-19)
+        from config import HALT_MECHANISMS as _HM
+        if (_HM.get("daily_pnl_halt", True)
+                and self._daily_pnl < -daily_loss_limit
+                and not self._halted):
             self._halted      = True
             self._halt_reason = f"daily loss ({self._daily_pnl:+.4f} USDT)"
             self._halt_time   = _time.time()
@@ -911,7 +915,9 @@ class RiskManager:
 
         # Max drawdown circuit-breaker (with smart recovery)
         # Phase 38: gated by DRAWDOWN_HALT_ENABLED (operator can disable)
-        if DRAWDOWN_HALT_ENABLED and self._peak_balance > 0:
+        # 2026-05-19: also gated by HALT_MECHANISMS["drawdown_halt"]
+        if (_HM.get("drawdown_halt", True)
+                and DRAWDOWN_HALT_ENABLED and self._peak_balance > 0):
             drawdown = (self._peak_balance - effective_balance) / self._peak_balance
             if drawdown >= self.max_drawdown_pct and not self._halted:
                 self._halted      = True
@@ -1105,9 +1111,14 @@ class RiskManager:
             _F12S = True
             _F12F = True
 
+        # 2026-05-19: outer gate on all four loss-streak / outlier sites
+        from config import HALT_MECHANISMS as _HM2
+
         # Per-symbol pause
-        if _F12S and len(sym_hist) >= SPEC_SYMBOL_LOSSES_TO_PAUSE and not any(
-            sym_hist[-SPEC_SYMBOL_LOSSES_TO_PAUSE:]
+        # 2026-05-19: gated by HALT_MECHANISMS["symbol_pause"]
+        if (_HM2.get("symbol_pause", True)
+                and _F12S and len(sym_hist) >= SPEC_SYMBOL_LOSSES_TO_PAUSE
+                and not any(sym_hist[-SPEC_SYMBOL_LOSSES_TO_PAUSE:])
         ):
             until = now + SPEC_SYMBOL_PAUSE_HOURS * hour
             self._symbol_pauses[symbol] = until
@@ -1117,8 +1128,10 @@ class RiskManager:
             )
 
         # Per-family pause
-        if _F12F and len(fam_hist) >= SPEC_FAMILY_LOSSES_TO_PAUSE and not any(
-            fam_hist[-SPEC_FAMILY_LOSSES_TO_PAUSE:]
+        # 2026-05-19: gated by HALT_MECHANISMS["family_pause"]
+        if (_HM2.get("family_pause", True)
+                and _F12F and len(fam_hist) >= SPEC_FAMILY_LOSSES_TO_PAUSE
+                and not any(fam_hist[-SPEC_FAMILY_LOSSES_TO_PAUSE:])
         ):
             key = family or "unknown"
             until = now + SPEC_FAMILY_PAUSE_HOURS * hour
@@ -1129,8 +1142,10 @@ class RiskManager:
             )
 
         # 5 global consec → force observation + review
-        if len(self._global_streak) >= SPEC_GLOBAL_LOSSES_TO_REVIEW and not any(
-            self._global_streak[-SPEC_GLOBAL_LOSSES_TO_REVIEW:]
+        # 2026-05-19: gated by HALT_MECHANISMS["spec12_streak_halt"]
+        if (_HM2.get("spec12_streak_halt", True)
+                and len(self._global_streak) >= SPEC_GLOBAL_LOSSES_TO_REVIEW
+                and not any(self._global_streak[-SPEC_GLOBAL_LOSSES_TO_REVIEW:])
         ):
             self._write_review_flag(
                 reason=f"{SPEC_GLOBAL_LOSSES_TO_REVIEW} consecutive global losses",
@@ -1155,7 +1170,8 @@ class RiskManager:
             from config import MAX_LOSS_PER_TRADE_USD as _max_loss
         except ImportError:
             _max_loss = 2.0
-        if pnl_usd < -abs(_max_loss):
+        # 2026-05-19: gated by HALT_MECHANISMS["outlier_loss_flag"]
+        if _HM2.get("outlier_loss_flag", True) and pnl_usd < -abs(_max_loss):
             self._write_review_flag(
                 reason=f"outlier_loss({pnl_usd:+.2f} USD beyond ${_max_loss:.2f} cap)",
                 action="manual_review",

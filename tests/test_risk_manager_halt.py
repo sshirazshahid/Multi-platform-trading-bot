@@ -39,6 +39,13 @@ from core.risk_manager import (
 def _isolate_state(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)
+    # 2026-05-19: HALT_MECHANISMS now an outer gate. These tests assert the
+    # halt MECHANISMS still wire up correctly, not the deployment state —
+    # re-enable them for the test duration.
+    import config
+    for _k in ("spec12_streak_halt", "outlier_loss_flag",
+               "symbol_pause", "family_pause", "daily_pnl_halt", "drawdown_halt"):
+        monkeypatch.setitem(config.HALT_MECHANISMS, _k, True)
     yield
 
 
