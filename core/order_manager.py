@@ -2129,13 +2129,30 @@ class OrderManager:
             # on positions that just needed more time.
             AGE_LOSS_ENABLED = False
             AGE_LIMIT_MIN_LOSS_PCT = 1.5
+
+            # 2026-05-19 Patch #3 — soft-close amplification wrapper.
+            # `_try_soft_close` defers STALE / AGE_LIMIT / AGE_LOSS when
+            # proximity to mcp_take_profit ≥ threshold; otherwise it
+            # invokes the close immediately. The `_close` closure binds
+            # the current exchange / pos / price so the helper only
+            # needs the reason label.
+            def _close(reason_label, _ex=exchange, _p=pos, _px=price):
+                self.close_position(_ex, _p, reason_label, _px)
+                return True
+
+            # Populate the dynamic attrs the proximity scorer reads.
+            # These match Patch #3 plan §5.5 — pos object is mutated so
+            # `score_take_profit_proximity` has current mark + uPnL.
+            pos.current_px = price
+            pos.unrealized_pnl_pct = net_pct / 100.0
+
             if (age_hours >= max_age_h and net_pnl < 0
                     and abs(net_pct) >= AGE_LIMIT_MIN_LOSS_PCT):
                 logger.warning(
                     f"[Orders] AGE_LIMIT: {pos.symbol} {pos.side} "
                     f"open {age_hours:.1f}h (limit {max_age_h}h), "
                     f"net={net_pct:+.2f}% — force-closing losing position")
-                self.close_position(exchange, pos, "AGE_LIMIT", price)
+                _try_soft_close(self, pos, "AGE_LIMIT", proceed_fn=_close)
                 continue
             elif (AGE_LOSS_ENABLED
                     and age_hours >= max_loss_age_h
@@ -2144,12 +2161,114 @@ class OrderManager:
                     f"[Orders] AGE_LOSS: {pos.symbol} {pos.side} "
                     f"open {age_hours:.1f}h (loss-age limit {max_loss_age_h}h), "
                     f"net={net_pct:+.2f}% — cutting before mid-hold bleed worsens")
-                self.close_position(exchange, pos, "AGE_LOSS", price)
+                _try_soft_close(self, pos, "AGE_LOSS", proceed_fn=_close)
                 continue
             elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.3:
                 logger.warning(
                     f"[Orders] STALE: {pos.symbol} {pos.side} "
                     f"open {age_hours:.1f}h (stale limit {max_stale_h}h), "
                     f"net={net_pct:+.2f}% — near breakeven, freeing capital")
-                self.close_position(exchange, pos, "STALE", price)
+                _try_soft_close(self, pos, "STALE", proceed_fn=_close)
                 continue
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 2026-05-19 Patch #3 — mcp_take_profit path amplification helper.
+#
+# Wraps soft-close call sites (STALE / AGE_LIMIT / AGE_LOSS) so that
+# when a position is "close to firing TP" (proximity score
+# ≥ config.MCP_TP_PROXIMITY_THRESHOLD) the soft-close is deferred by
+# config.MCP_TP_GRACE_SEC seconds. After grace expires the original
+# close fires with `_post_grace` suffix on the exit_reason.
+#
+# SL paths (stop_loss / sl_failed / sl_placement_failed) are NEVER
+# gated — they always close immediately. SL is the last line of
+# defense; amplifying it would defeat the circuit breaker.
+#
+# Grace state lives on `position._mcp_tp_grace_until` (set dynamically
+# on the Position dataclass, same pattern as `_ghost_reroute_count` in
+# Task 1). No module-level state — each position carries its own
+# timer, so leak-across-positions is impossible.
+# ─────────────────────────────────────────────────────────────────────
+def _try_soft_close(order_manager, position, soft_reason, proceed_fn):
+    """Soft-close decision gate.
+
+    Args:
+        order_manager: OrderManager instance (currently unused; kept for
+            API symmetry with `_patch0_instrument_ghost` and so future
+            callers can read config off the manager if needed).
+        position: Position object with `_mcp_tp_grace_until` writable.
+            Callers must have set `position.current_px` and
+            `position.unrealized_pnl_pct` (fraction) before invoking,
+            so `score_take_profit_proximity` has the data it needs.
+        soft_reason: short label for the close path (e.g. "STALE",
+            "AGE_LIMIT", "AGE_LOSS"). SL paths bypass entirely.
+        proceed_fn: callable taking a reason-string. Should perform the
+            close and return whatever the caller wants returned. This
+            helper returns `proceed_fn(reason)` when closing.
+
+    Returns:
+        None when the close is deferred (still in grace, or first time
+        proximity meets threshold). Otherwise the return value of
+        `proceed_fn(reason)`. Reason is `f"{soft_reason}_post_grace"`
+        on the post-grace fire path, otherwise the original
+        `soft_reason`.
+    """
+    # Local imports keep ruff/isort happy and avoid circular-import
+    # risk with `core.mcp_brain` (which transitively re-imports parts
+    # of this module). `time` is already imported at module level but
+    # we re-bind here for explicitness — proximity grace math reads
+    # `_time.time()` once.
+    import time as _time  # noqa: I001 — function-local by design
+    import config as _cfg  # noqa: I001
+    from core.mcp_brain import score_take_profit_proximity  # noqa: I001
+
+    # Invariant: SL paths never gated.
+    SL_REASONS = ("stop_loss", "sl_failed", "sl_placement_failed")
+    if soft_reason in SL_REASONS:
+        return proceed_fn(soft_reason)
+
+    # Master kill-switch — flag off bypasses amplification entirely.
+    if not getattr(_cfg, "MCP_TP_AMPLIFY_ENABLED", True):
+        return proceed_fn(soft_reason)
+
+    threshold = float(getattr(_cfg, "MCP_TP_PROXIMITY_THRESHOLD", 0.7))
+    grace_sec = int(getattr(_cfg, "MCP_TP_GRACE_SEC", 1800))
+
+    try:
+        proximity = float(score_take_profit_proximity(position))
+    except Exception:
+        proximity = 0.0
+
+    # Below threshold → close immediately, no defer.
+    if proximity < threshold:
+        return proceed_fn(soft_reason)
+
+    now = _time.time()
+    grace_until = float(getattr(position, "_mcp_tp_grace_until", 0) or 0)
+
+    # First time crossing threshold — set grace and defer.
+    if grace_until <= 0:
+        position._mcp_tp_grace_until = now + grace_sec
+        try:
+            logger.info(
+                f"[Orders] MCP_TP_AMPLIFY: deferring {soft_reason} on "
+                f"{getattr(position, 'symbol', '?')} "
+                f"(prox={proximity:.2f}, grace={grace_sec}s)")
+        except Exception:
+            pass
+        return None
+
+    # Inside the grace window → still defer.
+    if now < grace_until:
+        return None
+
+    # Grace expired → close with `_post_grace` suffix.
+    try:
+        logger.info(
+            f"[Orders] MCP_TP_AMPLIFY: grace expired for "
+            f"{getattr(position, 'symbol', '?')} — firing "
+            f"{soft_reason}_post_grace")
+    except Exception:
+        pass
+    return proceed_fn(f"{soft_reason}_post_grace")

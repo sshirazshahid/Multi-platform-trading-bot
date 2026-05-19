@@ -1258,3 +1258,15 @@ SCALING = {
 # have done. No behavior change. Read by scripts/ghost_reroute_report.py
 # over a 72h window; results gate whether Patch #1 ships.
 GHOST_REROUTE_INSTRUMENT: bool = True
+
+# 2026-05-19 Patch #3 — mcp_take_profit path amplification.
+# When a soft-close (STALE/AGE_LIMIT/AGE_LOSS) would fire, first check
+# how close the position is to triggering mcp_take_profit. If proximity
+# >= threshold, defer the soft-close by MCP_TP_GRACE_SEC and let TP
+# fire if it's going to. After grace expires the original soft-close
+# fires with `_post_grace` suffix in the exit_reason.
+# SL paths (stop_loss / sl_failed / sl_placement_failed) are NEVER gated.
+# Rollback: flip MCP_TP_AMPLIFY_ENABLED to False, restart. <1 min.
+MCP_TP_AMPLIFY_ENABLED: bool = True
+MCP_TP_PROXIMITY_THRESHOLD: float = 0.7
+MCP_TP_GRACE_SEC: int = 1800

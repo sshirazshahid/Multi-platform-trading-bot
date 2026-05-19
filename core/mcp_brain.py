@@ -3216,3 +3216,87 @@ class MCPBrain:
 
     def accuracy_stats(self) -> dict:
         return self._accuracy.stats()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 2026-05-19 Patch #3 — mcp_take_profit path amplification.
+#
+# Returns 0.0 → 1.0 indicating how close the position is to firing
+# `mcp_take_profit`. `_try_soft_close` in core/order_manager.py reads
+# this and defers a STALE / AGE_LIMIT / AGE_LOSS close when proximity
+# meets config.MCP_TP_PROXIMITY_THRESHOLD.
+#
+# Plan deviation (declared): spec §5.3 references position attributes
+# that don't exist on the dataclass (`tp_price`, `entry_atr`,
+# `target_pnl_pct`). The Position dataclass at
+# core/position_tracker.py:117 only has `take_profit` and `entry_price`.
+# Falls back as follows:
+#   tp_price          ← pos.take_profit
+#   entry_atr proxy   ← abs(take_profit − entry_price) — the entry-to-TP
+#                       distance unit. Means dist_score and pnl_score
+#                       carry correlated signal (both measure entry→TP
+#                       travel fraction), so the formula effectively
+#                       weights that travel 80% and momentum 20%. That's
+#                       acceptable — the patch's purpose is to detect
+#                       "close to firing TP", which both terms answer.
+#   target_pnl_pct    ← (take_profit − entry_price) / entry_price for
+#                       longs, sign-flipped for shorts. Same units as
+#                       pos.unrealized_pnl_pct (fraction, not %).
+#   ema_aligned helper ← absent → momentum_score = 0.5 (neutral). When
+#                       a future EMA-alignment helper lands, swap it in.
+#
+# Callers in `_try_soft_close` populate `pos.current_px` and
+# `pos.unrealized_pnl_pct` before invoking. Missing attributes
+# return 0.0 (safe default — skips the amplification, soft-close
+# fires normally).
+# ─────────────────────────────────────────────────────────────────────
+def score_take_profit_proximity(position) -> float:
+    """Score 0.0 (far from TP) → 1.0 (about to fire TP).
+
+    Weights: distance-to-TP 50%, pnl-progress 30%, momentum 20%.
+    Returns 0.0 if required attributes are missing.
+    """
+    try:
+        tp = getattr(position, "take_profit", None)
+        entry = getattr(position, "entry_price", None)
+        current = getattr(position, "current_px", None)
+        upnl_frac = getattr(position, "unrealized_pnl_pct", None)
+        side = getattr(position, "side", "buy")
+
+        if not tp or not entry or current is None or upnl_frac is None:
+            return 0.0
+        if tp <= 0 or entry <= 0:
+            return 0.0
+
+        # ATR proxy = entry→TP distance unit. Cannot be zero (would
+        # mean TP == entry, which never happens for a legit setup).
+        atr_proxy = abs(float(tp) - float(entry))
+        if atr_proxy <= 0:
+            return 0.0
+
+        # Distance from current price to TP, in ATR-proxy units.
+        # /2.0 keeps the score curve gentle: at 1 ATR-proxy away the
+        # score contribution is 0.5, at 2 ATR-proxy away it's 0.0.
+        dist_atr = abs(float(current) - float(tp)) / atr_proxy
+        dist_score = max(0.0, 1.0 - dist_atr / 2.0)
+
+        # PnL progress as fraction of target_pnl_pct.
+        # target_pnl_pct: how much price must move from entry to TP,
+        # as a signed fraction. For longs positive, for shorts negative.
+        # We use abs() on both sides so the ratio is in [0, 1].
+        if side == "buy":
+            target_frac = (float(tp) - float(entry)) / float(entry)
+        else:
+            target_frac = (float(entry) - float(tp)) / float(entry)
+        if abs(target_frac) <= 0:
+            return 0.0
+        pnl_progress = float(upnl_frac) / target_frac
+        pnl_score = max(0.0, min(1.0, pnl_progress))
+
+        # Momentum: spec calls ema_aligned(); not implemented in this
+        # brain yet. Neutral 0.5 keeps the term well-defined.
+        momentum_score = 0.5
+
+        return 0.5 * dist_score + 0.3 * pnl_score + 0.2 * momentum_score
+    except Exception:
+        return 0.0
