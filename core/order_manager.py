@@ -20,7 +20,7 @@ from core.compliance_logger import ComplianceLogger
 from core.kelly_sizer import KellySizer
 from core.position_tracker import Position, PositionTracker
 from core.post_mortem import PostMortem
-from core.risk_manager import RiskManager
+from core.risk_manager import RiskManager, load_age_cutoffs
 from core.sim_execution import SimExecutionModel
 from core.smart_executor import SmartExecutor
 from core.trailing_stop_manager import TrailingStopManager
@@ -2099,6 +2099,22 @@ class OrderManager:
             max_loss_age_h = RISK.get("max_loss_age_hours", 3.0)
             max_loss_age_pct = RISK.get("max_loss_age_pct", 0.5)
             max_stale_h = RISK.get("max_stale_hours", 4)
+            # Patch #2 (2026-05-19): refit-driven per-tier AGE_LIMIT override.
+            # scripts/refit_age_cutoffs.py writes data/models/age_cutoffs.json
+            # ONLY when the 45d-fit / 15d-holdout split shows strict
+            # improvement on the holdout. If the JSON is absent, we keep the
+            # RISK config global (the "current cutoff" the refit would have
+            # had to beat). If present, we resolve cutoff-by-tier via
+            # pos.confidence (= mcp_score / 100, persisted at entry).
+            _age_cutoffs = load_age_cutoffs()
+            if _age_cutoffs and getattr(pos, "confidence", 0.0) > 0:
+                _score = float(pos.confidence) * 100.0
+                if _score >= 85 and "AGGRESSIVE" in _age_cutoffs:
+                    max_age_h = float(_age_cutoffs["AGGRESSIVE"]) / 60.0
+                elif _score >= 75 and "CONVICTION" in _age_cutoffs:
+                    max_age_h = float(_age_cutoffs["CONVICTION"]) / 60.0
+                elif _score >= 65 and "STANDARD" in _age_cutoffs:
+                    max_age_h = float(_age_cutoffs["STANDARD"]) / 60.0
             net_pnl, net_pct, _ = self._net_pnl_at_price(pos, price)
 
             # Phase 41 (2026-05-10): AGE_LOSS DISABLED, AGE_LIMIT tightened.

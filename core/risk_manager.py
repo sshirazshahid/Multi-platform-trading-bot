@@ -82,6 +82,38 @@ _SPEC12_NEUTRAL_REASONS = frozenset({
 _SPEC12_SCRATCH_PCT = 0.5
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Patch #2 (2026-05-19) — refit-driven age-cutoff loader
+# ─────────────────────────────────────────────────────────────────────
+# scripts/refit_age_cutoffs.py writes data/models/age_cutoffs.json with per-tier
+# (STANDARD/CONVICTION/AGGRESSIVE) max-age cutoffs in MINUTES when the 45d-fit
+# / 15d-holdout split shows strict holdout improvement over current. If the JSON
+# is absent or unreadable, callers fall back to RISK["max_position_age_hours"].
+_AGE_CUTOFFS_DEFAULT_PATH = Path("data/models/age_cutoffs.json")
+
+
+def load_age_cutoffs(path: Path | str | None = None) -> dict | None:
+    """Load the refit-driven per-tier age cutoffs from JSON.
+
+    Returns the JSON payload as a dict on success (keys typically include
+    STANDARD/CONVICTION/AGGRESSIVE → int minutes, plus fitted_at,
+    fit_sample_size). Returns None when the file is missing or unreadable
+    so the caller can fall back to RISK config constants.
+    """
+    p = Path(path) if path is not None else _AGE_CUTOFFS_DEFAULT_PATH
+    if not p.exists():
+        return None
+    try:
+        with p.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict):
+            return None
+        return payload
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"[risk] load_age_cutoffs: failed to read {p}: {e}")
+        return None
+
+
 class RiskManager:
 
     def _notify_halt(self, subject: str, body: str) -> None:
