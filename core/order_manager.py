@@ -2241,7 +2241,23 @@ def _try_soft_close(order_manager, position, soft_reason, proceed_fn):
         proximity = 0.0
 
     # Below threshold → close immediately, no defer.
+    # BUT: if grace_until was previously set (proximity crossed threshold
+    # earlier and we're now back below it), preserve the `_post_grace`
+    # audit signal so sprint_kpi.py can count amplified closes correctly.
+    # Without this, the close emits the bare `soft_reason` and the fact
+    # that the position was ever deferred becomes invisible.
     if proximity < threshold:
+        prior_grace = float(getattr(position, "_mcp_tp_grace_until", 0) or 0)
+        if prior_grace > 0:
+            try:
+                logger.info(
+                    f"[Orders] MCP_TP_AMPLIFY: proximity dropped below "
+                    f"threshold for {getattr(position, 'symbol', '?')} "
+                    f"after grace was set — firing "
+                    f"{soft_reason}_post_grace")
+            except Exception:
+                pass
+            return proceed_fn(f"{soft_reason}_post_grace")
         return proceed_fn(soft_reason)
 
     now = _time.time()

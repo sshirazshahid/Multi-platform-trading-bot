@@ -218,3 +218,73 @@ def test_sl_path_unaffected():
             f"SL path {reason!r} should fire immediately")
         assert closed["reason"] == reason
         assert result is True
+
+
+# ─────────────────────── regression-protection tests ─────────────────────
+
+
+def test_proximity_short_side_sign_correct():
+    """SHORT mirror of `test_proximity_high_when_close_to_tp`.
+
+    Regression protection: `score_take_profit_proximity` has explicit
+    side-aware sign logic at mcp_brain.py:3526-3529. If a future refactor
+    inverts the sign convention for shorts, this test catches it.
+
+    Short setup mirrors the long around entry=100:
+      LONG : entry=100, tp=105, current=104  → 80% of the way to TP
+      SHORT: entry=100, tp=95,  current=96   → 80% of the way to TP
+
+    Both should produce ~0.79 (within 0.05 of each other).
+    """
+    long_pos = _make_pos(entry_price=100.0, take_profit=105.0, side="buy",
+                         current_px=104.0, unrealized_pnl_pct=0.04)
+    long_score = score_take_profit_proximity(long_pos)
+
+    # For SHORT: price moved from 100 → 96 = +4% PnL (price fell, short wins)
+    # upnl_frac is the absolute fraction gain, sign matches the long side.
+    short_pos = _make_pos(entry_price=100.0, take_profit=95.0, side="sell",
+                          current_px=96.0, unrealized_pnl_pct=0.04)
+    short_score = score_take_profit_proximity(short_pos)
+
+    assert abs(long_score - short_score) < 0.05, (
+        f"SHORT side ({short_score:.3f}) should mirror LONG "
+        f"({long_score:.3f}) within 0.05 — sign-flip regression?")
+    # Both should be in the 'close to TP' band.
+    assert 0.7 < short_score < 0.85, (
+        f"SHORT score {short_score:.3f} outside expected ~0.79 band")
+
+
+def test_post_grace_suffix_preserved_when_proximity_drops(monkeypatch):
+    """Grace previously set, then proximity dropped below threshold.
+
+    Without the fix at order_manager.py:2742, the close would fire with
+    the bare `soft_reason` ("STALE"), making it invisible to
+    sprint_kpi.py's `_post_grace` attribution counter. The fix detects
+    `_mcp_tp_grace_until > 0` even on the below-threshold branch and
+    emits the suffix.
+
+    Setup: grace_until = (past) AND current proximity below threshold
+    (high threshold 0.99 forces the < branch). This simulates a position
+    that crossed the proximity bar earlier, then the market moved away.
+    """
+    # Force the proximity < threshold branch by setting threshold > any
+    # achievable score for this synthetic position.
+    monkeypatch.setattr(config, "MCP_TP_PROXIMITY_THRESHOLD", 0.99,
+                        raising=False)
+    pos = _make_pos(entry_price=100.0, take_profit=105.0, side="buy",
+                    current_px=104.0, unrealized_pnl_pct=0.04,
+                    grace_until=time.time() - 60)
+    om = MagicMock()
+    closed = {"called": False, "reason": None}
+
+    def _close(reason):
+        closed["called"] = True
+        closed["reason"] = reason
+        return True
+
+    result = om_mod._try_soft_close(om, pos, "STALE", proceed_fn=_close)
+    assert closed["called"] is True
+    assert closed["reason"] == "STALE_post_grace", (
+        f"Expected `_post_grace` suffix preserved when grace was set "
+        f"and proximity then dropped — got {closed['reason']!r}")
+    assert result is True
