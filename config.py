@@ -1168,11 +1168,19 @@ ENABLE_REBALANCE = False
 # ==============================================================
 # PARTIAL TAKE PROFIT
 # ==============================================================
+# 2026-05-19 sweet-spot retune. Captures more wins in the empirically
+# proven 30-60min hold-time cell (67% WR, +$10.05 / 33 trades / 30d).
+# Lowered first_take_at_pct from 0.5 to 0.35 (fires earlier) and raised
+# first_take_size from 0.5 to 0.6 (books larger chunk early), so more
+# positions book a small win before deteriorating into the
+# 120-240min bleed band (-$23.63 / 30d).
+# Rollback: revert both values to 0.5, restart bot. Sub-1-minute reversal.
+# Spec: docs/superpowers/specs/2026-05-19-sweet-spot-partial-tp-retune-design.md
 PARTIAL_TP = {
-    "enabled":                True,
-    "first_take_at_pct":      0.5,    # close partial at 50% of TP distance
-    "first_take_size":        0.5,    # close 50% of position
-    "move_sl_to_breakeven":   True,   # move SL to entry after partial
+    "enabled": True,
+    "first_take_at_pct": 0.35,
+    "first_take_size": 0.6,
+    "move_sl_to_breakeven": True,
 }
 
 # ==============================================================

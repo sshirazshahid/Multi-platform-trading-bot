@@ -58,6 +58,40 @@ def _is_permission_error(e: Exception) -> bool:
     return any(s.lower() in msg for s in _PERM_ERRORS)
 
 
+def _should_fire_partial_tp(position, price: float, partial_tp_config: dict):
+    """Pure decision function: should the partial-TP fire on this position at this price?
+
+    Returns:
+        (should_fire: bool, take_size: float, partial_level: float)
+
+    Inputs:
+        position: object with .side ('buy'/'sell'), .entry_price, .take_profit, .partial_taken
+        price: current monitor-cycle price for the position
+        partial_tp_config: the config.PARTIAL_TP dict
+
+    Extracted from the inline check_sl_tp logic on 2026-05-19 to enable direct
+    unit testing. Behavior is byte-equivalent to the original inline block.
+    """
+    if not partial_tp_config.get("enabled"):
+        return (False, 0.0, 0.0)
+    if getattr(position, "partial_taken", False):
+        return (False, 0.0, 0.0)
+    if not (position.take_profit and position.entry_price):
+        return (False, 0.0, 0.0)
+
+    take_at = partial_tp_config.get("first_take_at_pct", 0.5)
+    take_sz = partial_tp_config.get("first_take_size", 0.5)
+
+    if position.side == "buy":
+        tp_dist = position.take_profit - position.entry_price
+        partial_level = position.entry_price + tp_dist * take_at
+        return (price >= partial_level, take_sz, partial_level)
+    else:
+        tp_dist = position.entry_price - position.take_profit
+        partial_level = position.entry_price - tp_dist * take_at
+        return (price <= partial_level, take_sz, partial_level)
+
+
 def _mid_from_ticker(ticker: dict) -> float:
     """Extract mid price (bid+ask)/2 from a ccxt ticker dict.
 
@@ -1890,28 +1924,15 @@ class OrderManager:
             # ── PARTIAL TAKE PROFIT ──
             try:
                 from config import PARTIAL_TP
-                if (PARTIAL_TP.get("enabled") and not pos.partial_taken
-                        and pos.take_profit and pos.entry_price):
+                should_fire, take_sz, _level = _should_fire_partial_tp(
+                    pos, price, PARTIAL_TP)
+                if should_fire:
                     take_at = PARTIAL_TP.get("first_take_at_pct", 0.5)
-                    take_sz = PARTIAL_TP.get("first_take_size", 0.5)
-                    if pos.side == "buy":
-                        tp_dist = pos.take_profit - pos.entry_price
-                        partial_level = pos.entry_price + tp_dist * take_at
-                        if price >= partial_level:
-                            logger.info(
-                                f"[Orders] PARTIAL TP: {pos.symbol} BUY "
-                                f"@ {price:.4f} ({take_at:.0%} of TP)")
-                            self.partial_close_position(
-                                exchange, pos, take_sz, "partial_tp", price)
-                    else:
-                        tp_dist = pos.entry_price - pos.take_profit
-                        partial_level = pos.entry_price - tp_dist * take_at
-                        if price <= partial_level:
-                            logger.info(
-                                f"[Orders] PARTIAL TP: {pos.symbol} SELL "
-                                f"@ {price:.4f} ({take_at:.0%} of TP)")
-                            self.partial_close_position(
-                                exchange, pos, take_sz, "partial_tp", price)
+                    logger.info(
+                        f"[Orders] PARTIAL TP: {pos.symbol} {pos.side.upper()} "
+                        f"@ {price:.4f} ({take_at:.0%} of TP)")
+                    self.partial_close_position(
+                        exchange, pos, take_sz, "partial_tp", price)
             except ImportError:
                 pass
 
