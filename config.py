@@ -132,9 +132,12 @@ PORTFOLIO_RESCAN_MINUTES = int(os.getenv("PORTFOLIO_RESCAN_MINUTES",   "60"))
 # ==============================================================
 CLAUDE_PORTFOLIO = {
     "enabled":              True,
-    "scan_interval_min":    5,        # 5 min — was 15; faster reaction in peak hours.
-                                      # At 15 min the bot was only getting 4 chances/hour
-                                      # which is too slow when signals are time-sensitive.
+    "scan_interval_min":    1,        # 1 min — was 5 (2026-05-20). User directive:
+                                      # "don't miss a single second to miss a profitable
+                                      # trade". Pairs with parallel _fetch_exchange_indicators
+                                      # so 60s cycle stays under wall-time budget. Engine sees
+                                      # 60 chances/hour vs prior 12. ENTRY_COOLDOWN dropped
+                                      # to 50s in mcp_brain.py to track.
     "position_monitor_sec": 30,       # Position monitor every 30s (consumed by bot_engine)
     "max_actions_per_cycle": 4,       # Max 4 OPEN/CLOSE actions per cycle
     "model":                "sonnet", # Claude model for portfolio analysis
@@ -1300,3 +1303,26 @@ HALT_MECHANISMS = {
     "auto_mutator_short_block": False,  # H1: was True (gates core/auto_mutator.py:~238)
     "auto_mutator_leverage_cap": False, # H2: was True (gates core/auto_mutator.py:~252)
 }
+
+# ==============================================================
+# 2026-05-20 GHOST + NOISE CLEANUP + SMALL-TP CAPTURE
+# Per-area kill switches for the five-area improvement set.
+# Spec: docs/superpowers/specs/2026-05-20-ghost-and-noise-cleanup-design.md
+# ==============================================================
+
+# Area 1 — Ghost path accuracy
+GHOST_LEDGER_WINDOW_H = 24       # was 6; widen to catch lagged ledger writes
+GHOST_PENDING_REQUEUE = True     # two-pass reconcile: ghost_sync upgrades on next sync
+
+# Area 4 — Age-aware SL→breakeven tightening
+AGE_AWARE_SL_ENABLED      = True
+AGE_AWARE_SL_MIN_AGE_MIN  = 60   # fire at age >= 60 min
+# Profit band [low, high) — exclusive on high to leave [1%, 2%) to Area 5
+AGE_AWARE_SL_MIN_PNL_FRAC = 0.0001  # > 0 (strictly in profit)
+AGE_AWARE_SL_MAX_PNL_FRAC = 0.02    # < 2% (trailing stop owns above)
+
+# Area 5 — Deterministic small-TP capture
+AUTO_SMALL_TP_ENABLED        = True
+AUTO_SMALL_TP_MIN_AGE_MIN    = 30   # fire at age >= 30 min
+AUTO_SMALL_TP_MIN_PNL_FRAC   = 0.01 # >= +1.0%
+AUTO_SMALL_TP_MAX_PNL_FRAC   = 0.02 # < +2% (trailing stop owns above)
