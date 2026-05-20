@@ -264,3 +264,89 @@ def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
         f"110001 cancel race must not log at ERROR. Found: "
         f"{[r.message for r in error_records]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# AREA 3 — Reliability hardening (_safe_cancel_order)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_cancel_order_swallows_110001(caplog):
+    """Bybit 110001 'order not exists or too late to cancel' returns {} cleanly."""
+    import ccxt
+    from exchanges import base as base_mod
+
+    class _FakeBybit:
+        def cancel_order(self, order_id, symbol, params=None):
+            raise ccxt.InvalidOrder(
+                'bybit {"retCode":110001,"retMsg":"order not exists or too late to cancel"}'
+            )
+
+    fake_be = MagicMock(spec=base_mod.BaseExchange)
+    fake_be.name = "bybit"
+    fake_be._ready = lambda: True
+    fake_be.exchange = _FakeBybit()
+    fake_be._futures_params = lambda: {}
+    fake_be._CANCEL_RACE_MARKERS = base_mod.BaseExchange._CANCEL_RACE_MARKERS
+
+    result = base_mod.BaseExchange.cancel_order(
+        fake_be, "ABC-123", "BNB/USDT:USDT", "futures"
+    )
+
+    assert result == {}, f"expected swallowed cancel to return empty dict, got {result}"
+
+
+def test_safe_cancel_order_swallows_bitget_40034(caplog):
+    """Bitget 40034 'order does not exist' race — same swallow semantics."""
+    import ccxt
+    from exchanges import base as base_mod
+
+    class _FakeBitget:
+        def cancel_order(self, order_id, symbol, params=None):
+            raise ccxt.InvalidOrder(
+                'bitget {"code":"40034","msg":"order does not exist"}'
+            )
+
+    fake_be = MagicMock(spec=base_mod.BaseExchange)
+    fake_be.name = "bitget"
+    fake_be._ready = lambda: True
+    fake_be.exchange = _FakeBitget()
+    fake_be._futures_params = lambda: {}
+    fake_be._CANCEL_RACE_MARKERS = base_mod.BaseExchange._CANCEL_RACE_MARKERS
+
+    result = base_mod.BaseExchange.cancel_order(
+        fake_be, "XYZ-987", "AVAX/USDT:USDT", "futures"
+    )
+    assert result == {}
+
+
+def test_safe_cancel_order_reraises_unknown_errors(caplog):
+    """Unknown error classes (RuntimeError, ConnectionError, generic) must
+    still be logged at ERROR and not silently swallowed."""
+    from exchanges import base as base_mod
+
+    class _FakeExchange:
+        def cancel_order(self, order_id, symbol, params=None):
+            raise RuntimeError("boom: something genuinely unexpected")
+
+    fake_be = MagicMock(spec=base_mod.BaseExchange)
+    fake_be.name = "binance"
+    fake_be._ready = lambda: True
+    fake_be.exchange = _FakeExchange()
+    fake_be._futures_params = lambda: {}
+    fake_be._CANCEL_RACE_MARKERS = base_mod.BaseExchange._CANCEL_RACE_MARKERS
+
+    caplog.clear()
+    result = base_mod.BaseExchange.cancel_order(
+        fake_be, "DEF-456", "ETH/USDT:USDT", "futures"
+    )
+    assert result == {}  # caller still gets a safe {}; behavior preserved
+    # But the unknown error MUST surface at ERROR (visibility for real bugs)
+    error_records = [
+        r for r in caplog.records
+        if r.levelname == "ERROR" and "boom" in r.message
+    ]
+    assert error_records, (
+        f"unknown errors must still log at ERROR; got: "
+        f"{[(r.levelname, r.message) for r in caplog.records]}"
+    )

@@ -352,12 +352,23 @@ class BaseExchange(ABC):
                     algo = self.exchange.fetch_open_orders(
                         symbol, params={"stop": True, "acknowledged": True}) or []
                     for o in algo:
+                        # Area 3 (2026-05-20): route algo cancels through the
+                        # race-aware wrapper so 110001/40034 race errors are
+                        # absorbed uniformly, not just on regular-order cancels.
                         try:
+                            params_algo = self._futures_params() if market_type == "futures" else {}
+                            params_algo["stop"] = True
                             self.exchange.cancel_order(
-                                o["id"], symbol, params={"stop": True})
+                                o["id"], symbol, params=params_algo)
                         except Exception as _ce:
-                            logger.debug(
-                                f"[{self.name}] algo cancel {o.get('id')}: {_ce}")
+                            _err_lc = str(_ce).lower()
+                            if any(m in _err_lc for m in self._CANCEL_RACE_MARKERS):
+                                logger.debug(
+                                    f"[{self.name}] algo cancel {o.get('id')}: "
+                                    f"race (already filled/cancelled)")
+                            else:
+                                logger.debug(
+                                    f"[{self.name}] algo cancel {o.get('id')}: {_ce}")
                 except Exception as _ae:
                     logger.debug(f"[{self.name}] algo fetch skipped: {_ae}")
             logger.info(f"[{self.name}] Cancelled all orders for {symbol}")
