@@ -308,6 +308,12 @@ class PositionTracker:
         # the safety rails — a -$0.64 ghost-reconciled DOT loss on 04-26
         # never reached daily_pnl, the SELL streak counter, or the warehouse.
         self.on_close = None
+        # 2026-05-20 Area 1 — Two-pass ghost reconcile. First sync that
+        # detects a missing position adds it here with the timestamp.
+        # Second sync 15s later attempts ledger lookup again — most lagged
+        # ledger writes appear within 15-30s of the actual fill.
+        # Map: position_id -> first_seen_ts.
+        self._pending_ghost_reconcile: dict[str, float] = {}
         self._load()
 
     def add(self, position: Position):
@@ -628,20 +634,32 @@ class PositionTracker:
             close_reason = "ghost_sync"
             resolved_src = "entry_fallback"
 
-            # 2026-04-24: Reconcile ghost against exchange history BEFORE
-            # falling back to ticker. Prior behavior booked PnL at current
-            # mid-price, which was usually optimistic vs. the actual SL fill
-            # that the exchange already executed. Pull the real realized-PnL
-            # ledger record and use its exit_price — same record the
-            # reconcile_closed_pnl path uses, just sourced here synchronously.
+            # 2026-04-24 / 2026-05-20: Reconcile ghost against exchange history
+            # BEFORE falling back to ticker. The exchange ledger has the actual
+            # SL/TP fill price — much more accurate than ticker.last.
+            #
+            # 2026-05-20 (Area 1): three improvements over the original code:
+            #   1. Window widened from 6h → GHOST_LEDGER_WINDOW_H (24h default).
+            #      Bitget and Bybit sometimes write ledger entries with several
+            #      hours of lag; 24h captures these without bloating results.
+            #   2. Two-pass reconcile: if the first sync finds no ledger record,
+            #      record the position in _pending_ghost_reconcile and try again
+            #      on the next sync cycle 15s later. Most lagged writes land in
+            #      that 15-30s window. Only finalize as ghost_sync if BOTH the
+            #      pending recheck AND the fresh attempt fail.
+            #   3. Fallback price source is exchange mark_price (not ticker.last)
+            #      when present. For SL/TP-triggered closes the trigger fires
+            #      off mark price, so mark is closer to the actual fill.
+            try:
+                from config import GHOST_LEDGER_WINDOW_H, GHOST_PENDING_REQUEUE
+            except ImportError:
+                GHOST_LEDGER_WINDOW_H = 24
+                GHOST_PENDING_REQUEUE = True
+
             reconciled = False
             if ex and hasattr(ex, "fetch_closed_pnl"):
                 try:
-                    # Look back 6h — wide enough to cover reconcile-cycle lag
-                    # and venue-side ledger latency without blowing up the
-                    # result set. Was 2h, which silently missed records when
-                    # the bot's monitor cycle skipped a beat.
-                    since_ms = int((time.time() - 6 * 3600) * 1000)
+                    since_ms = int((time.time() - GHOST_LEDGER_WINDOW_H * 3600) * 1000)
                     records = ex.fetch_closed_pnl(
                         since_ms=since_ms, symbol=pos.symbol) or []
                     exit_px, best = match_ghost_ledger_record(pos, records)
@@ -649,9 +667,6 @@ class PositionTracker:
                         close_price = exit_px
                         reconciled = True
                         resolved_src = "exchange_ledger"
-                        # Tag the closed reason so warehouse queries can
-                        # distinguish exchange-side SL fills from true
-                        # desync ghosts.
                         close_reason = "ghost_reconciled"
                         logger.info(
                             f"[Positions] GHOST reconciled via ledger: "
@@ -659,23 +674,55 @@ class PositionTracker:
                             f"exit={exit_px:.6g} "
                             f"realized_pnl={best.get('realized_pnl') if best else None}"
                         )
+                        # Clear from pending map if present
+                        self._pending_ghost_reconcile.pop(pos.id, None)
                 except Exception as e:
                     logger.debug(
                         f"[Positions] ghost reconcile lookup failed "
                         f"{pos.symbol}: {str(e)[:120]}")
 
-            # Fallback 2: ticker mid if ledger didn't resolve.
-            if not reconciled and ex:
-                try:
-                    ticker = ex.fetch_ticker(pos.symbol, pos.market_type)
-                    tp = float(ticker.get("last") or ticker.get("close") or 0)
-                    if tp > 0:
-                        close_price = tp
-                        resolved_src = "ticker_fallback"
-                except Exception:
-                    pass
+            # If still not reconciled, decide between (a) parking for retry or
+            # (b) finalizing now with the mark_price fallback.
+            if not reconciled:
+                pending_already = pos.id in self._pending_ghost_reconcile
+                if GHOST_PENDING_REQUEUE and not pending_already:
+                    # First time seeing this missing position — park it for the
+                    # next sync cycle (15s later). Most lagged ledger writes land
+                    # within that window. Do NOT close yet.
+                    self._pending_ghost_reconcile[pos.id] = time.time()
+                    logger.debug(
+                        f"[Positions] GHOST pending reconcile: {pos.symbol} "
+                        f"{pos.side.upper()} — will retry ledger in 15s")
+                    continue  # skip this ghost for now; keep in _open
+                else:
+                    # Either two-pass disabled OR already pending → finalize now
+                    # via mark_price fallback (preferred) or ticker.last.
+                    if ex:
+                        try:
+                            ticker = ex.fetch_ticker(pos.symbol, pos.market_type)
+                            info = ticker.get("info", {}) or {}
+                            mark = info.get("markPrice") or info.get("mark")
+                            try:
+                                tp = float(mark) if mark else 0.0
+                            except (TypeError, ValueError):
+                                tp = 0.0
+                            if tp <= 0:
+                                tp = float(
+                                    ticker.get("last") or ticker.get("close") or 0)
+                            if tp > 0:
+                                close_price = tp
+                                resolved_src = (
+                                    "mark_price_fallback" if mark
+                                    else "ticker_fallback")
+                        except Exception:
+                            pass
+                    self._pending_ghost_reconcile.pop(pos.id, None)
 
-            logger.info(
+            # Demote routine GHOST detection to INFO when the reconcile path
+            # produced a clean ledger match (Area 2 noise cleanup) — keep WARNING
+            # only when we had to fall back to mark/ticker (genuine desync).
+            log_fn = logger.info if reconciled else logger.warning
+            log_fn(
                 f"[Positions] GHOST close price source={resolved_src} "
                 f"price={close_price:.6g}")
             self.close(pos.id, close_price, close_reason)
