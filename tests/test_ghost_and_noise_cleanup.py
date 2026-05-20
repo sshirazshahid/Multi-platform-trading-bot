@@ -168,3 +168,99 @@ def test_ghost_fallback_uses_mark_price(tmp_path, monkeypatch):
     assert abs(closed[0].exit_price - 87.20) < 0.01, (
         f"expected exit_price 87.20 (mark_price), got {closed[0].exit_price}"
     )
+
+
+# ---------------------------------------------------------------------------
+# AREA 2 — Log noise cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_ghost_detected_at_info_level_when_reconciled(tmp_path, monkeypatch, caplog):
+    """When a ghost reconciles cleanly via the ledger path, the price-source
+    log line should be at INFO level, not WARNING (Area 2 demotion)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+
+    tracker = pt.PositionTracker()
+    p = pt.Position(
+        id="TEST-AREA2-001",
+        exchange="bybit",
+        symbol="BCH/USDT:USDT",
+        side="sell",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=370.0,
+        size=0.05,
+        stop_loss=374.0,
+        take_profit=360.0,
+        paper_trade=False,
+    )
+    p.open_time = time.time() - 3600
+    tracker._open[p.id] = p
+
+    fake_ex = MagicMock()
+    fake_ex.fetch_positions.return_value = []  # position no longer on exchange
+    fake_ex.fetch_closed_pnl.return_value = [
+        {
+            "symbol": "BCH/USDT:USDT",
+            "side": "sell",
+            "exit_price": 369.5,
+            "realized_pnl": 0.025,
+            "close_time": time.time(),
+        }
+    ]
+    fake_ex.name = "bybit"
+
+    caplog.clear()
+    tracker.sync_with_exchanges({"bybit": fake_ex})
+
+    # The "GHOST close price source=" log line must be at INFO when reconciled.
+    price_source_records = [
+        r for r in caplog.records
+        if "GHOST close price source" in r.message
+    ]
+    assert price_source_records, "expected the GHOST close price source log line"
+    assert price_source_records[0].levelname == "INFO", (
+        f"expected INFO when reconciled, got {price_source_records[0].levelname}"
+    )
+
+
+def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
+    """Bybit 110001 'order not exists or too late to cancel' is the race-
+    condition expected case (the order already filled). It should log at
+    DEBUG, NOT ERROR, and return {} cleanly (Area 2 demotion + Area 3 swallow)."""
+    import ccxt
+    from exchanges import base as base_mod
+
+    # Build a tiny fake BaseExchange that throws ccxt-style 110001
+    class _FakeExchange:
+        id = "bybit"
+        def cancel_order(self, order_id, symbol, params=None):
+            raise ccxt.InvalidOrder(
+                'bybit {"retCode":110001,"retMsg":"order not exists or too late to cancel"}'
+            )
+
+    fake_be = MagicMock(spec=base_mod.BaseExchange)
+    fake_be.name = "bybit"
+    fake_be._ready = lambda: True
+    fake_be.exchange = _FakeExchange()
+    fake_be._futures_params = lambda: {}
+    fake_be._CANCEL_RACE_MARKERS = base_mod.BaseExchange._CANCEL_RACE_MARKERS
+
+    caplog.clear()
+    # cancel_order is bound on the class; call the real one with our fake
+    result = base_mod.BaseExchange.cancel_order(
+        fake_be, "ABC-123", "BNB/USDT:USDT", "futures"
+    )
+
+    # Result should be a clean {} (no exception leaks out)
+    assert result == {}, f"expected swallowed cancel to return {{}}, got {result}"
+    # No ERROR-level log allowed for known-race 110001 (DEBUG/INFO are fine)
+    error_records = [
+        r for r in caplog.records
+        if r.levelname == "ERROR" and "cancel_order" in r.message
+    ]
+    assert not error_records, (
+        f"110001 cancel race must not log at ERROR. Found: "
+        f"{[r.message for r in error_records]}"
+    )

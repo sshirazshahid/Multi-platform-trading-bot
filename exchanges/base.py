@@ -170,7 +170,9 @@ class BaseExchange(ABC):
                     continue
                 if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
                     delay = _backoff_delay(attempt)
-                    logger.warning(
+                    # Area 2: retry-in-progress messages go to DEBUG so only the
+                    # final-attempt failure surfaces at WARNING.
+                    logger.debug(
                         f"[{self.name}] fetch_ticker {symbol}: transient, "
                         f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
                     _time.sleep(delay)
@@ -179,7 +181,8 @@ class BaseExchange(ABC):
                     logger.warning(f"[{self.name}] fetch_ticker {symbol}: "
                                    f"failed after {MAX_RETRIES} attempts: {e}")
                 else:
-                    logger.warning(f"[{self.name}] fetch_ticker {symbol}: {e}")
+                    # Mid-attempt non-transient miss — DEBUG (next attempt may succeed)
+                    logger.debug(f"[{self.name}] fetch_ticker {symbol}: {e}")
                 return {}
         return {}
 
@@ -295,6 +298,18 @@ class BaseExchange(ABC):
         logger.error(f"[{self.name}] create_order {symbol}: failed after {MAX_RETRIES} attempts")
         raise last_err
 
+    # Known race-condition error markers — the order was already filled or
+    # cancelled between our last observation and our cancel call. Returning
+    # success silently is the correct behavior; the position is already gone.
+    _CANCEL_RACE_MARKERS = (
+        "order not exists",
+        "too late to cancel",
+        "110001",       # Bybit
+        "40034",        # Bitget
+        "order does not exist",
+        "orderid not found",
+    )
+
     def cancel_order(self, order_id: str, symbol: str,
                      market_type: str = "spot") -> dict:
         if not self._ready():
@@ -303,6 +318,16 @@ class BaseExchange(ABC):
             params = self._futures_params() if market_type == "futures" else {}
             return self.exchange.cancel_order(order_id, symbol, params=params)
         except Exception as e:
+            # Areas 2 + 3 (2026-05-20): swallow known cancel-race errors.
+            # If the order is already gone, our intent (cancel) is satisfied;
+            # logging at ERROR creates noise and triggers alerts unnecessarily.
+            _err_lc = str(e).lower()
+            if any(m in _err_lc for m in self._CANCEL_RACE_MARKERS):
+                logger.debug(
+                    f"[{self.name}] cancel_order {order_id}: race "
+                    f"(already filled/cancelled) — {str(e)[:80]}")
+                return {}
+            # Unknown error — keep at ERROR
             logger.error(f"[{self.name}] cancel_order {order_id}: {e}")
             return {}
 
@@ -322,8 +347,10 @@ class BaseExchange(ABC):
             # empty).
             if market_type == "futures":
                 try:
+                    # Area 2 (2026-05-20): acknowledged=True silences ccxt's
+                    # "you've been warned" notice for the stop-order endpoint.
                     algo = self.exchange.fetch_open_orders(
-                        symbol, params={"stop": True}) or []
+                        symbol, params={"stop": True, "acknowledged": True}) or []
                     for o in algo:
                         try:
                             self.exchange.cancel_order(

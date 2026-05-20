@@ -2853,7 +2853,11 @@ class BotEngine:
                 fails = self._consecutive_api_fails.get(ex_name, 0) + 1
                 self._consecutive_api_fails[ex_name] = fails
                 self._api_latency[ex_name] = -1
-                logger.warning(
+                # Area 2 (2026-05-20): first-attempt failure is usually a
+                # transient API blip — the existing retry path handles it.
+                # Only escalate to WARNING on the 2nd+ failure.
+                _level_fn = logger.debug if fails == 1 else logger.warning
+                _level_fn(
                     f"[Health] {ex_name} health check FAILED "
                     f"(attempt {fails}): {e}")
                 if fails >= 3 and ex_name not in self._exchange_halted:

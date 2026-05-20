@@ -384,8 +384,17 @@ class OrderManager:
                 if attempt == 0:
                     _t.sleep(0.5)  # brief wait for order to propagate
                 else:
-                    logger.warning(
-                        f"[Orders] Order verification failed for {order_id}: {e}")
+                    # Area 2 (2026-05-20): demote Bybit's "fetchOrder() can only access an order
+                    # within last 20 mins" warning to DEBUG — it's a Bybit API limitation, not
+                    # a bot issue. Other unexpected errors still surface at WARNING.
+                    _err_text = str(e).lower()
+                    if "can only access an order" in _err_text:
+                        logger.debug(
+                            f"[Orders] Order verification skipped (Bybit 20-min limit) "
+                            f"for {order_id}: {str(e)[:120]}")
+                    else:
+                        logger.warning(
+                            f"[Orders] Order verification failed for {order_id}: {e}")
         return None
 
     # ── Balance helpers ───────────────────────────────────────────────
