@@ -3921,6 +3921,25 @@ class BotEngine:
                     f"[MCP-Monitor] {n_tracked} tracked + {n_ext_fut} ext-futures "
                     f"+ {n_ext_spot} ext-spot = {len(pos_data)} sent to MCP Brain")
 
+            # ── Phase 3.5 (2026-05-20): Deterministic exits BEFORE MCP brain ──
+            # Areas 5 + 4 are pure threshold rules (no judgment, no narrative).
+            # Running them here means they fire even on cycles where Claude
+            # would have said HOLD. Ordering matters: Area 5 (close) is decisive
+            # over Area 4 (SL move) — check Area 5 first, return early on fire.
+            #
+            # Only TRACKER positions get this treatment — external (exchange-
+            # discovered) positions don't have full Position state (stop_loss,
+            # entry_price, side as a Position attr) and are handled in the
+            # source=='exchange' branch of the MCP-advice loop below.
+            for pid_local, p_local in list(tracker_map.items()):
+                try:
+                    if self._maybe_capture_small_tp(p_local):
+                        continue  # Area 5 fired — position closing; skip Area 4
+                    self._maybe_tighten_aged_position(p_local)
+                except Exception as _de:
+                    logger.debug(
+                        f"[DeterministicExits] {p_local.symbol}: {_de}")
+
             # ── Phase 4: Send to MCP Brain ──
             advice = self.mcp_brain.monitor_positions(pos_data)
             if not advice:

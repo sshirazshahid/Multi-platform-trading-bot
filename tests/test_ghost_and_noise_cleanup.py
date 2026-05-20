@@ -559,3 +559,33 @@ def test_auto_small_tp_skips_spot(monkeypatch):
     fired = bot_engine.BotEngine._maybe_capture_small_tp(eng, p)
     assert fired is False, "spot should be exempt from Area 5"
     eng.order_mgr.close_position.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# WIRING — ordering invariant: Area 5 checked before Area 4 (close decisive)
+# ---------------------------------------------------------------------------
+
+
+def test_area5_checked_before_area4_ordering():
+    """The deterministic-exits hook must invoke _maybe_capture_small_tp
+    first and short-circuit Area 4 when it fires. Otherwise a position in
+    the [1%, 2%) overlap band could have its SL moved instead of being
+    closed for the +1-2% profit — losing the captured win."""
+    import inspect
+    from core import bot_engine
+
+    src = inspect.getsource(bot_engine.BotEngine._run_mcp_position_monitor)
+    # Both calls must exist
+    assert "_maybe_capture_small_tp" in src, (
+        "_run_mcp_position_monitor must wire Area 5 (_maybe_capture_small_tp)"
+    )
+    assert "_maybe_tighten_aged_position" in src, (
+        "_run_mcp_position_monitor must wire Area 4 (_maybe_tighten_aged_position)"
+    )
+    # Area 5 must appear strictly before Area 4 in source order
+    idx5 = src.index("_maybe_capture_small_tp")
+    idx4 = src.index("_maybe_tighten_aged_position")
+    assert idx5 < idx4, (
+        f"Area 5 must be called BEFORE Area 4 in _run_mcp_position_monitor; "
+        f"found area5_idx={idx5}, area4_idx={idx4}"
+    )
