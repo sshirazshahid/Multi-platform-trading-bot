@@ -1710,12 +1710,30 @@ class OrderManager:
             _open_n = self.tracker.count_open()
             if self.dry_run:
                 _bal_after = float(self.wallet.total_balance() or 0.0)
-            # Today's trade stats
+            # Today's trade stats — use local-calendar midnight so email
+            # "Daily PnL / WR" matches the dashboard's "Today" panel exactly.
+            # Old code used (now - 86400) which is a rolling 24h window:
+            # at 07:51AM it reached back to yesterday 07:51AM and blended
+            # today+yesterday trades, making the email diverge from the
+            # dashboard by up to 2× the daily PnL.
             import time as _t
-            day_start = int(_t.time()) - 24 * 3600
+            import datetime as _dt
+            _today = _dt.date.today()
+            _midnight = _dt.datetime(
+                _today.year, _today.month, _today.day, 0, 0, 0
+            )
+            day_start = int(_midnight.timestamp())
+            # Also exclude pure-import reconcile closures (reconciled_no_context,
+            # reconciled_from_exchange) which are position-tracker sync events,
+            # not real capital decisions. This matches _is_real_trade in dashboard.
+            _IMPORT_REASONS = frozenset({
+                "reconciled_no_context",
+                "reconciled_from_exchange",
+            })
             todays = [
                 p for p in self.tracker._closed
-                if float(getattr(p, "close_time", 0) or 0) >= day_start
+                if (float(getattr(p, "close_time", 0) or 0) >= day_start
+                    and (getattr(p, "close_reason", "") or "") not in _IMPORT_REASONS)
             ]
             _daily_trades = len(todays)
             _daily_pnl = sum(float(p.pnl or 0) for p in todays)

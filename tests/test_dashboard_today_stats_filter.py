@@ -204,7 +204,18 @@ def test_reconcile_prefix_with_mcp_take_profit_included():
 
 
 def test_reconcile_prefix_pure_import_excluded():
-    """RECONCILE positions with no bot-active close reason stay excluded."""
+    """RECONCILE positions are INCLUDED when the close reason is not a pure-import
+    marker (reconciled_no_context / reconciled_from_exchange).
+
+    2026-05-20 fix: the old whitelist (_BOT_CLOSE_REASONS) missed Claude's
+    descriptive close reasons such as "4h RSI=32.2 near oversold, lock +1.4%".
+    Those are real bot decisions that carry real P&L (AAVE +$1.23, BCH -$0.39
+    on 2026-05-20). The new rule: include RECONCILE positions unless the close
+    reason is explicitly a pure-import marker. An "unknown_reason" on a RECONCILE
+    position means the bot's position monitor decided to close it — include it.
+    Only _DASH_RECONCILE_REASONS values (reconciled_no_context, reconciled_from_exchange)
+    are excluded.
+    """
     from dashboard import calc_stats
     closed = [
         _make_closed(position_id="RECONCILE-binance-X", pnl=5.0,
@@ -212,9 +223,9 @@ def test_reconcile_prefix_pure_import_excluded():
         _make_closed(pnl=1.0, close_reason="trailing_stop"),
     ]
     s = calc_stats(closed)
-    assert s["today_n"] == 1, (
-        "RECONCILE with unknown close_reason must remain EXCLUDED")
-    assert abs(s["today_pnl"] - 1.0) < 1e-6
+    assert s["today_n"] == 2, (
+        "RECONCILE with any non-import close_reason must now be INCLUDED")
+    assert abs(s["today_pnl"] - 6.0) < 1e-6
 
 
 def test_reconcile_age_loss_included():

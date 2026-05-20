@@ -1271,23 +1271,19 @@ def _is_bot_trade(t: dict) -> bool:
     return True
 
 
-_BOT_CLOSE_REASONS = frozenset({
-    "mcp_take_profit", "trailing_stop", "mcp_stop_loss", "stop_loss",
-    "age_loss", "AGE_LOSS", "ghost_sync", "ghost_reconciled",
-    "ghost_force_close", "mcp_manual",
-})
-
-
 def _is_real_trade(t: dict) -> bool:
     """True if this closed-trade row represents real capital at risk.
 
-    Rules (Phase 36 → Phase 37):
-    - Pure import records (reconciled_from_exchange, reconciled_no_context):
-      excluded — bot never managed these positions.
-    - RECONCILE-prefix / strategy="reconcile" positions that were actively
-      closed by the bot (mcp_take_profit, trailing_stop, AGE_LOSS, etc.):
-      INCLUDED — the bot managed the exit, the P&L is real.
-    - RECONCILE-prefix with no bot-active close reason: excluded.
+    Rules (2026-05-20 fix — replaced over-narrow whitelist):
+    - Pure import records (close_reason in _DASH_RECONCILE_REASONS): excluded.
+    - RECONCILE-prefix / strategy="reconcile" positions: INCLUDED when the
+      close reason is NOT a pure-import reason. The old whitelist
+      (_BOT_CLOSE_REASONS) missed Claude's descriptive reasons such as
+      "4h RSI=32.2 near oversold, lock +1.4%" — those are still real bot
+      exits that carry real P&L (e.g. AAVE +$1.23, BCH -$0.39 on 2026-05-20).
+      By the time we reach the is_reconcile block the top-level
+      _DASH_RECONCILE_REASONS check has already excluded pure-import closes,
+      so returning True for everything that remains is correct.
     - MANUAL-prefix / strategy="manual": INCLUDED — bot manages SL/TP.
     - All other bot-opened positions: INCLUDED.
 
@@ -1303,10 +1299,10 @@ def _is_real_trade(t: dict) -> bool:
     strat = (t.get("strategy") or "").lower()
     is_reconcile = pid.startswith("RECONCILE-") or strat in ("reconcile", "reconciled_exchange")
     if is_reconcile:
-        # Bot actively closed it → counts as real P&L
-        if cr in _BOT_CLOSE_REASONS or cr.lower().startswith("mcp_"):
-            return True
-        return False
+        # cr is NOT a pure-import reason (already caught above).
+        # Any other reason — including Claude's descriptive reasons — means
+        # the bot actively decided to close. Count the P&L.
+        return True
     return True
 
 
@@ -2495,7 +2491,14 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     #  RECENT TRADES & MARKET INFO (side by side conceptually)
     # ══════════════════════════════════════════════════════════════════
     box_top("RECENT TRADES  (last 8)")
-    recent = sorted(closed, key=lambda x: x.get("close_time", 0), reverse=True)[:8]
+    # 2026-05-20: exclude pure-import phantom entries (reconciled_no_context,
+    # reconciled_from_exchange) — those are position-tracker sync events, not
+    # real trades, and they cluttered the panel with confusing BUY records
+    # (e.g. "BUY AAVE +1.3310 reconciled_no_context" alongside real short closes).
+    recent = sorted(
+        [t for t in closed if (t.get("close_reason") or "") not in _DASH_RECONCILE_REASONS],
+        key=lambda x: x.get("close_time", 0), reverse=True
+    )[:8]
     if recent:
         for t in recent:
             sym    = t.get("symbol", "?"); pnl = t.get("pnl", 0) or 0
