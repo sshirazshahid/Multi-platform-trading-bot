@@ -457,3 +457,105 @@ def test_age_aware_tighten_no_op_outside_band(monkeypatch):
 
     # No tightener calls in any of the above
     assert eng._replace_exchange_sl.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# AREA 5 — Deterministic small-TP capture
+# ---------------------------------------------------------------------------
+
+
+def test_auto_small_tp_fires_at_1pct_after_30min(monkeypatch):
+    """Futures position age 35min pnl +1.2% → close_position called with
+    reason='auto_small_tp_1pct'."""
+    from core import bot_engine
+
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng.order_mgr = MagicMock()
+    eng.order_mgr.close_position = MagicMock()
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.012)  # +1.2%
+    monkeypatch.setattr("config.STAR_SYMBOLS", set())  # empty STAR set for this test
+
+    p = _make_long_position(age_min=35.0, entry=1.0, current_mark=1.012)
+
+    fired = bot_engine.BotEngine._maybe_capture_small_tp(eng, p)
+    assert fired is True, "expected Area 5 to fire"
+
+    # close_position was called with the right close_reason
+    eng.order_mgr.close_position.assert_called_once()
+    pos_args = eng.order_mgr.close_position.call_args.args
+    # Expected signature: close_position(exchange, position, reason)
+    assert pos_args[2] == "auto_small_tp_1pct", (
+        f"expected close reason 'auto_small_tp_1pct', got {pos_args[2]}"
+    )
+
+
+def test_auto_small_tp_no_op_below_1pct_or_below_30min(monkeypatch):
+    """No-op when: pnl < 1%, age < 30min, pnl >= 2% (trailing zone)."""
+    from core import bot_engine
+
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng.order_mgr = MagicMock()
+    eng.order_mgr.close_position = MagicMock()
+    monkeypatch.setattr("config.STAR_SYMBOLS", set())
+
+    # (1) pnl +0.5% (below 1% threshold)
+    p1 = _make_long_position(age_min=35.0, entry=1.0, current_mark=1.005)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.005)
+    assert bot_engine.BotEngine._maybe_capture_small_tp(eng, p1) is False
+
+    # (2) age 25min (below 30min threshold)
+    p2 = _make_long_position(age_min=25.0, entry=1.0, current_mark=1.015)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.015)
+    assert bot_engine.BotEngine._maybe_capture_small_tp(eng, p2) is False
+
+    # (3) pnl +2.5% (trailing stop zone, not Area 5's job)
+    p3 = _make_long_position(age_min=35.0, entry=1.0, current_mark=1.025)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.025)
+    assert bot_engine.BotEngine._maybe_capture_small_tp(eng, p3) is False
+
+    assert eng.order_mgr.close_position.call_count == 0
+
+
+def test_auto_small_tp_skips_star_symbols(monkeypatch):
+    """STAR_SYMBOLS positions ride per Phase 46 policy — Area 5 must skip."""
+    from core import bot_engine
+
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng.order_mgr = MagicMock()
+    eng.order_mgr.close_position = MagicMock()
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.012)
+
+    # Pin ATOM/ARB as STAR
+    monkeypatch.setattr(
+        "config.STAR_SYMBOLS",
+        {"ATOM/USDT:USDT", "ARB/USDT:USDT"},
+    )
+
+    p = _make_long_position(age_min=35.0, entry=1.0, current_mark=1.012)
+    p.symbol = "ATOM/USDT:USDT"   # STAR symbol
+
+    fired = bot_engine.BotEngine._maybe_capture_small_tp(eng, p)
+    assert fired is False, "STAR symbol should be exempt from Area 5"
+    eng.order_mgr.close_position.assert_not_called()
+
+
+def test_auto_small_tp_skips_spot(monkeypatch):
+    """Spot positions keep existing logic — Area 5 is futures-only."""
+    from core import bot_engine
+
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng.order_mgr = MagicMock()
+    eng.order_mgr.close_position = MagicMock()
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.015)
+    monkeypatch.setattr("config.STAR_SYMBOLS", set())
+
+    p = _make_long_position(age_min=35.0, entry=1.0, current_mark=1.015)
+    p.market_type = "spot"   # spot, not futures
+
+    fired = bot_engine.BotEngine._maybe_capture_small_tp(eng, p)
+    assert fired is False, "spot should be exempt from Area 5"
+    eng.order_mgr.close_position.assert_not_called()

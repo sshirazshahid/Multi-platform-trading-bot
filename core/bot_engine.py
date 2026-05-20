@@ -3692,6 +3692,64 @@ class BotEngine:
         except Exception:
             return 0.0
 
+    def _maybe_capture_small_tp(self, p) -> bool:
+        """Area 5 — Deterministic small-TP capture.
+
+        Fires when:
+          - config.AUTO_SMALL_TP_ENABLED is True
+          - position is futures (spot keeps existing logic)
+          - symbol NOT in STAR_SYMBOLS (those ride per Phase 46)
+          - age >= AUTO_SMALL_TP_MIN_AGE_MIN
+          - pnl_frac in [AUTO_SMALL_TP_MIN_PNL_FRAC, AUTO_SMALL_TP_MAX_PNL_FRAC)
+
+        Action: market close via order_mgr.close_position with reason
+        'auto_small_tp_1pct'. Returns True iff a close was actually fired.
+
+        NOT a re-enable of Phase 39 disabled CLOSE — that was Claude's
+        discretionary, narrative-driven decision (1W/17L over 388 trades).
+        This is a deterministic threshold rule, equivalent in nature to a
+        take-profit limit order placed at entry+1%.
+        """
+        try:
+            from config import (
+                AUTO_SMALL_TP_ENABLED, AUTO_SMALL_TP_MIN_AGE_MIN,
+                AUTO_SMALL_TP_MIN_PNL_FRAC, AUTO_SMALL_TP_MAX_PNL_FRAC,
+                STAR_SYMBOLS,
+            )
+        except ImportError:
+            return False
+        if not AUTO_SMALL_TP_ENABLED:
+            return False
+        if getattr(p, "market_type", "") != "futures":
+            return False
+        if p.symbol in (STAR_SYMBOLS or set()):
+            return False
+        try:
+            age_min = float(p.duration_minutes)
+        except Exception:
+            return False
+        if age_min < AUTO_SMALL_TP_MIN_AGE_MIN:
+            return False
+
+        pnl_frac = self._unrealized_pnl_frac(p)
+        if not (AUTO_SMALL_TP_MIN_PNL_FRAC <= pnl_frac < AUTO_SMALL_TP_MAX_PNL_FRAC):
+            return False
+
+        # Resolve the exchange and fire close_position
+        ex = None
+        for ex_name, exchange in self.active_exchanges.items():
+            if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
+                ex = exchange
+                break
+        if ex is None:
+            return False
+
+        logger.info(
+            f"[AutoSmallTP] {p.symbol} {p.side.upper()} age={age_min:.0f}m "
+            f"pnl=+{pnl_frac*100:.2f}% — capturing at market")
+        self.order_mgr.close_position(ex, p, "auto_small_tp_1pct")
+        return True
+
     def _maybe_tighten_aged_position(self, p) -> bool:
         """Area 4 — Age-aware SL→breakeven tightener.
 
