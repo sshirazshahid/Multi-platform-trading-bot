@@ -350,3 +350,110 @@ def test_safe_cancel_order_reraises_unknown_errors(caplog):
         f"unknown errors must still log at ERROR; got: "
         f"{[(r.levelname, r.message) for r in caplog.records]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# AREA 4 — Age-aware SL→breakeven tightening
+# ---------------------------------------------------------------------------
+
+
+def _make_long_position(age_min: float, entry: float, current_mark: float):
+    """Build a minimal Position-like mock for Area 4/5 unit tests."""
+    p = MagicMock()
+    p.id = f"TEST-AREA4-{age_min}-{entry}-{current_mark}"
+    p.exchange = "binance"
+    p.symbol = "ARB/USDT:USDT"
+    p.side = "buy"
+    p.size = 50.0
+    p.entry_price = entry
+    p.stop_loss = entry * (1 - 0.015)   # 1.5% below entry (default SL)
+    p.take_profit = entry * 1.03
+    p.market_type = "futures"
+    p.leverage = 2
+    p.duration_minutes = age_min
+    return p
+
+
+def _make_short_position(age_min: float, entry: float, current_mark: float):
+    p = MagicMock()
+    p.id = f"TEST-AREA4-S-{age_min}-{entry}-{current_mark}"
+    p.exchange = "bybit"
+    p.symbol = "DOGE/USDT:USDT"
+    p.side = "sell"
+    p.size = 100.0
+    p.entry_price = entry
+    p.stop_loss = entry * (1 + 0.015)
+    p.take_profit = entry * 0.97
+    p.market_type = "futures"
+    p.leverage = 2
+    p.duration_minutes = age_min
+    return p
+
+
+def test_age_aware_tighten_fires_at_60min_in_profit(monkeypatch):
+    """Age 70min, pnl +0.8%, SL far from entry → _replace_exchange_sl called
+    with the breakeven price (entry × (1 + 2·fee + 0.0005))."""
+    from core import bot_engine
+    from config import FEE
+
+    # Long position +0.8% in profit at age 70min
+    entry = 1.00
+    current_mark = entry * 1.008  # +0.8%
+    p = _make_long_position(age_min=70.0, entry=entry, current_mark=current_mark)
+
+    # Wire up a minimal BotEngine-like object with just the method under test
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng._replace_exchange_sl = MagicMock(return_value=True)
+    eng._exchange_for = MagicMock(return_value=MagicMock())
+
+    # Mock pnl_frac computation: return +0.008 (+0.8%)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.008)
+
+    # Run the method under test (unbound; bind manually)
+    fired = bot_engine.BotEngine._maybe_tighten_aged_position(eng, p)
+
+    assert fired is True, "expected age-aware tightener to fire"
+    eng._replace_exchange_sl.assert_called_once()
+    # Verify the new SL is the breakeven price for a long
+    call_args = eng._replace_exchange_sl.call_args
+    new_sl_arg = call_args.args[2]
+    fee_rate = FEE.get("futures_taker", 0.0005)
+    expected = entry * (1 + 2 * fee_rate + 0.0005)
+    assert abs(new_sl_arg - expected) < 1e-6, (
+        f"expected new SL {expected:.6f}, got {new_sl_arg:.6f}"
+    )
+
+
+def test_age_aware_tighten_no_op_outside_band(monkeypatch):
+    """No-op conditions: age too young, in loss, above 2% profit, or SL already at/past BE."""
+    from core import bot_engine
+
+    eng = MagicMock(spec=bot_engine.BotEngine)
+    eng.active_exchanges = {"binance": MagicMock()}
+    eng._replace_exchange_sl = MagicMock(return_value=True)
+    eng._exchange_for = MagicMock(return_value=MagicMock())
+
+    # (1) age 45min — too young
+    p1 = _make_long_position(age_min=45.0, entry=1.0, current_mark=1.008)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.008)
+    assert bot_engine.BotEngine._maybe_tighten_aged_position(eng, p1) is False
+
+    # (2) pnl -0.5% — in loss
+    p2 = _make_long_position(age_min=70.0, entry=1.0, current_mark=0.995)
+    eng._unrealized_pnl_frac = MagicMock(return_value=-0.005)
+    assert bot_engine.BotEngine._maybe_tighten_aged_position(eng, p2) is False
+
+    # (3) pnl +2.5% — above trailing-stop activation zone
+    p3 = _make_long_position(age_min=70.0, entry=1.0, current_mark=1.025)
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.025)
+    assert bot_engine.BotEngine._maybe_tighten_aged_position(eng, p3) is False
+
+    # (4) SL already tighter than breakeven — refuse to widen
+    p4 = _make_long_position(age_min=70.0, entry=1.0, current_mark=1.008)
+    p4.stop_loss = 1.005  # already past breakeven; tightening would WIDEN
+    eng._unrealized_pnl_frac = MagicMock(return_value=0.008)
+    assert bot_engine.BotEngine._maybe_tighten_aged_position(eng, p4) is False
+
+    # No tightener calls in any of the above
+    assert eng._replace_exchange_sl.call_count == 0

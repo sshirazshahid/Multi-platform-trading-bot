@@ -3656,6 +3656,110 @@ class BotEngine:
             logger.debug(f"[ExScan] cache write failed: {_e}")
         return results
 
+    def _unrealized_pnl_frac(self, p) -> float:
+        """Compute unrealized PnL as a fraction (e.g. 0.012 = +1.2%) using
+        the current mark price from the exchange. Returns 0.0 on any error.
+
+        Notes:
+        - Fraction is computed against entry_price (unleveraged) so the
+          [0%, 2%) bands in Areas 4 + 5 refer to PRICE move, not equity move.
+          A +1% price move on a 2x position = +2% on equity but only +1% by
+          this fraction. This matches the existing SL/TP percentages.
+        """
+        ex = None
+        for ex_name, exchange in self.active_exchanges.items():
+            if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
+                ex = exchange
+                break
+        if ex is None:
+            return 0.0
+        try:
+            ticker = ex.fetch_ticker(p.symbol, p.market_type)
+            info = ticker.get("info", {}) or {}
+            mark = info.get("markPrice") or info.get("mark")
+            try:
+                price = float(mark) if mark else 0.0
+            except (TypeError, ValueError):
+                price = 0.0
+            if price <= 0:
+                price = float(ticker.get("last") or 0.0)
+            if price <= 0 or p.entry_price <= 0:
+                return 0.0
+            if p.side == "buy":
+                return (price - p.entry_price) / p.entry_price
+            else:
+                return (p.entry_price - price) / p.entry_price
+        except Exception:
+            return 0.0
+
+    def _maybe_tighten_aged_position(self, p) -> bool:
+        """Area 4 — Age-aware SL→breakeven tightener.
+
+        Fires when:
+          - config.AGE_AWARE_SL_ENABLED is True
+          - position is futures (spot has no leverage-side ghost problem)
+          - age >= AGE_AWARE_SL_MIN_AGE_MIN
+          - pnl_frac in [AGE_AWARE_SL_MIN_PNL_FRAC, AGE_AWARE_SL_MAX_PNL_FRAC)
+          - new breakeven SL is TIGHTER than current SL (never widens — Spec §2)
+
+        Action: replaces exchange-side SL with entry × (1 ± 2·fee_rate ± 0.0005).
+
+        Returns True iff an SL replacement actually fired.
+        """
+        try:
+            from config import (
+                AGE_AWARE_SL_ENABLED, AGE_AWARE_SL_MIN_AGE_MIN,
+                AGE_AWARE_SL_MIN_PNL_FRAC, AGE_AWARE_SL_MAX_PNL_FRAC,
+                FEE,
+            )
+        except ImportError:
+            return False
+        if not AGE_AWARE_SL_ENABLED:
+            return False
+        if getattr(p, "market_type", "") != "futures":
+            return False
+        try:
+            age_min = float(p.duration_minutes)
+        except Exception:
+            return False
+        if age_min < AGE_AWARE_SL_MIN_AGE_MIN:
+            return False
+
+        pnl_frac = self._unrealized_pnl_frac(p)
+        if not (AGE_AWARE_SL_MIN_PNL_FRAC <= pnl_frac < AGE_AWARE_SL_MAX_PNL_FRAC):
+            return False
+
+        # Breakeven SL — covers round-trip fee + 5bp buffer
+        rate = FEE.get("futures_taker", 0.0005)
+        if p.side == "buy":
+            new_sl = p.entry_price * (1 + 2 * rate + 0.0005)
+            # Refuse to widen: must be ABOVE current SL for a long
+            if new_sl <= float(p.stop_loss or 0):
+                return False
+        else:
+            new_sl = p.entry_price * (1 - 2 * rate - 0.0005)
+            # Refuse to widen: must be BELOW current SL for a short
+            if new_sl >= float(p.stop_loss or 0):
+                return False
+
+        # Replace the exchange-side SL
+        ex = None
+        for ex_name, exchange in self.active_exchanges.items():
+            if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():
+                ex = exchange
+                break
+        if ex is None:
+            return False
+        if not self._replace_exchange_sl(ex, p, new_sl):
+            return False
+        old_sl = p.stop_loss
+        p.stop_loss = new_sl
+        logger.info(
+            f"[AgeAwareSL] {p.symbol} {p.side.upper()} age={age_min:.0f}m "
+            f"pnl={pnl_frac*100:+.2f}% SL→breakeven "
+            f"({old_sl:.6g}→{new_sl:.6g})")
+        return True
+
     def _run_mcp_position_monitor(self):
         """Run MCP Brain position monitor — scans ALL positions across ALL exchanges.
         Merges bot-tracked positions with exchange-discovered positions (futures + spot).
