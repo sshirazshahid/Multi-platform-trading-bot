@@ -78,6 +78,19 @@ _SPEC12_NEUTRAL_REASONS = frozenset({
     "sl_placement_failed",
     "reconciled_from_exchange",
     "reconciled_no_context",
+    # 2026-05-24 — Infrastructure exits added after the audit found these
+    # were extending the 5-consec global halt streak. Safe only because
+    # Commit 1 (position_tracker._classify_conditional_fill) reclassifies
+    # real exchange-side SL fills to "stop_loss" first. The residual
+    # ghost_* are truly-unclassified events (no exchange-placed
+    # conditional, or fill outside the 50bps SL/TP band).
+    # sl_crossed_* fire when price moved between order placement and SL
+    # placement — also infrastructure, not signal failure. Phase 29
+    # cooldown is unaffected (wired through note_sl_hit on stop_loss).
+    "ghost_reconciled",
+    "ghost_sync",
+    "sl_crossed_at_placement",
+    "sl_crossed_during_placement",
 })
 _SPEC12_SCRATCH_PCT = 0.5
 
@@ -317,7 +330,13 @@ class RiskManager:
             # File format is a list of event dicts (see _write_review_flag).
             # Accept a bare dict for backwards compatibility.
             if isinstance(flag_data, list):
-                flag_state = flag_data[-1] if flag_data else {}
+                # 2026-05-24 — Anchor on the ORIGINAL halt event ([0]), not
+                # the latest append ([-1]). Audit entries appended by
+                # note_stale_data / note_order_rejection / outlier branch
+                # while halted would otherwise slide the cooldown anchor
+                # forward indefinitely, preventing auto-resume.
+                # Memory: stuck_halt_anchor_fix_2026_05_15.
+                flag_state = flag_data[0] if flag_data else {}
             elif isinstance(flag_data, dict):
                 flag_state = flag_data
             else:
@@ -429,6 +448,18 @@ class RiskManager:
             self._daily_pnl = 0.0
             self._trading_day = today
             self._opens_today = 0
+            # 2026-05-24 — Clear daily-loss halts on midnight rollover.
+            # _should_auto_resume's "daily" branch is dead code from here
+            # (date.today() == self._trading_day after the line above), so
+            # without this clear a bot with no open positions at UTC
+            # midnight stays halted until the next record_trade_pnl close.
+            if self._halted and "daily" in self._halt_reason:
+                logger.info(
+                    f"[Risk] Daily halt '{self._halt_reason}' cleared at "
+                    f"midnight rollover (new day {today.isoformat()})")
+                self._halted = False
+                self._halt_reason = ""
+                self._halt_time = 0.0
             self._save_state()
 
         if self._halted:
@@ -1126,6 +1157,11 @@ class RiskManager:
                 f"[Risk/Spec12] {symbol} paused {SPEC_SYMBOL_PAUSE_HOURS}h "
                 f"after {SPEC_SYMBOL_LOSSES_TO_PAUSE} consecutive losses"
             )
+            # 2026-05-24 — Clear the streak buffer so the next loss after
+            # the pause expires doesn't immediately re-pause via the
+            # stale [False, False] tail. Without this, the cooldown is
+            # effectively meaningless on a losing tape.
+            self._symbol_streaks[symbol] = []
 
         # Per-family pause
         # 2026-05-19: gated by HALT_MECHANISMS["family_pause"]
@@ -1140,6 +1176,8 @@ class RiskManager:
                 f"[Risk/Spec12] family '{key}' paused {SPEC_FAMILY_PAUSE_HOURS}h "
                 f"after {SPEC_FAMILY_LOSSES_TO_PAUSE} consecutive losses"
             )
+            # 2026-05-24 — Clear streak buffer (see symbol-pause block).
+            self._family_streaks[key] = []
 
         # 5 global consec → force observation + review
         # 2026-05-19: gated by HALT_MECHANISMS["spec12_streak_halt"]

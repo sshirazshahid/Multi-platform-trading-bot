@@ -171,6 +171,115 @@ def test_ghost_fallback_uses_mark_price(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 2026-05-24 — Reclassify exchange-side conditional fills (Commit 1).
+# These integration tests cover the two call sites in sync_with_exchanges
+# that should override the ghost_* close_reason with the real
+# "stop_loss" / "take_profit" reason when the fill price matches an
+# exchange-placed SL or TP within 50 bps.
+# ---------------------------------------------------------------------------
+
+
+def test_ghost_reconciled_reclassified_as_stop_loss(tmp_path, monkeypatch):
+    """Ledger path: GHOST detected, ledger returns exit price within 50bps
+    of pos.stop_loss with _exchange_sl=True → close_reason="stop_loss"."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr("config.GHOST_PENDING_REQUEUE", False)  # finalize on first pass
+
+    tracker = pt.PositionTracker()
+    p = pt.Position(
+        id="TEST-RECLASSIFY-SL-001",
+        exchange="bybit",
+        symbol="BNB/USDT:USDT",
+        side="sell",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=640.0,
+        size=0.1,
+        stop_loss=645.0,
+        take_profit=620.0,
+        paper_trade=False,
+        _exchange_sl=True,   # exchange-placed conditional, the case we target
+        _exchange_tp=True,
+    )
+    p.open_time = time.time() - 600
+    tracker._open[p.id] = p
+
+    # Ledger reports the SL fill at 644.8 — ~3bps below the configured SL
+    # of 645.0 (well inside the 50bps tolerance band).
+    fake_ex = MagicMock()
+    fake_ex.fetch_closed_pnl.return_value = [
+        {
+            "symbol": "BNB/USDT:USDT",
+            "side": "sell",
+            "exit_price": 644.8,
+            "realized_pnl": -0.48,
+            "close_time": time.time(),
+        }
+    ]
+    fake_ex.fetch_ticker.return_value = {"last": 644.8, "info": {"markPrice": "644.8"}}
+    fake_ex.fetch_positions.return_value = []
+    fake_ex.name = "bybit"
+
+    tracker.sync_with_exchanges({"bybit": fake_ex})
+
+    closed = [c for c in tracker._closed if c.id == "TEST-RECLASSIFY-SL-001"]
+    assert len(closed) == 1
+    assert closed[0].close_reason == "stop_loss", (
+        f"exchange-side SL fill should be reclassified from ghost_reconciled "
+        f"to stop_loss; got {closed[0].close_reason}"
+    )
+
+
+def test_ghost_sync_fallback_reclassified_as_take_profit(tmp_path, monkeypatch):
+    """Mark/ticker fallback path: GHOST detected, ledger empty,
+    mark_price within 50bps of pos.take_profit with _exchange_tp=True →
+    close_reason="take_profit" (was "ghost_sync" without the helper)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr("config.GHOST_PENDING_REQUEUE", False)
+
+    tracker = pt.PositionTracker()
+    p = pt.Position(
+        id="TEST-RECLASSIFY-TP-001",
+        exchange="binance",
+        symbol="AAVE/USDT:USDT",
+        side="buy",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=85.0,
+        size=0.5,
+        stop_loss=83.5,
+        take_profit=86.5,
+        paper_trade=False,
+        _exchange_sl=True,
+        _exchange_tp=True,
+    )
+    p.open_time = time.time() - 600
+    tracker._open[p.id] = p
+
+    # No ledger record (mimics a Binance income-ledger lag scenario).
+    # Mark price is 86.48 — ~2bps below TP, inside tolerance.
+    fake_ex = MagicMock()
+    fake_ex.fetch_closed_pnl.return_value = []
+    fake_ex.fetch_ticker.return_value = {
+        "last": 86.48,
+        "info": {"markPrice": "86.48"},
+    }
+    fake_ex.fetch_positions.return_value = []
+    fake_ex.name = "binance"
+
+    tracker.sync_with_exchanges({"binance": fake_ex})
+
+    closed = [c for c in tracker._closed if c.id == "TEST-RECLASSIFY-TP-001"]
+    assert len(closed) == 1
+    assert closed[0].close_reason == "take_profit", (
+        f"exchange-side TP fill (mark fallback) should be reclassified from "
+        f"ghost_sync to take_profit; got {closed[0].close_reason}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # AREA 2 — Log noise cleanup
 # ---------------------------------------------------------------------------
 

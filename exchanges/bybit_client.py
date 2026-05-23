@@ -300,6 +300,30 @@ class BybitClient(BaseExchange):
                 logger.debug(f"[Bybit] Leverage already {leverage}x for {symbol}")
                 return leverage
             logger.warning(f"[Bybit] set_leverage {symbol}: {e}")
+            # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
+            # Bybit caps per-symbol leverage by notional tier; without the
+            # ladder, any cap rejection returns 0, which order_manager treats
+            # as a fatal abort and skips the trade. Preserve venue-specific
+            # buyLeverage/sellLeverage params on each retry.
+            ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
+                      if x < leverage]
+            for lev in ladder:
+                try:
+                    self.exchange.set_leverage(
+                        lev, symbol,
+                        params={
+                            "buyLeverage":  str(lev),
+                            "sellLeverage": str(lev),
+                        }
+                    )
+                    logger.warning(
+                        f"[Bybit] Leverage CLAMPED {leverage}x → {lev}x "
+                        f"for {symbol} (exchange tier cap)")
+                    return lev
+                except Exception:
+                    continue
+            logger.error(
+                f"[Bybit] Could not set ANY leverage for {symbol}; aborting")
             return 0
         finally:
             self.switch_to_spot()

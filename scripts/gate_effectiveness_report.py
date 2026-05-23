@@ -223,7 +223,12 @@ def report_exit_reason_breakdown(c, since_ts: int) -> str:
         "Net PnL by exit_reason. The entry-staleness rule "
         "(`entry_invalidated`) and AGE_LOSS rule should produce small "
         "negatives or breakeven (cutting before bigger losses). "
-        "trailing_stop and mcp_take_profit should dominate the wins.",
+        "trailing_stop, mcp_take_profit, and (post-2026-05-24) "
+        "`take_profit` from exchange-side conditional fills should "
+        "dominate the wins. `stop_loss` and `take_profit` rows now "
+        "include both local-monitor closes and exchange-side "
+        "ghost-reclassified ones; ghost_reconciled / ghost_sync "
+        "should shrink toward zero post-fix.",
     )
     rows = c.execute("""
         SELECT exit_reason, COUNT(*) AS n,

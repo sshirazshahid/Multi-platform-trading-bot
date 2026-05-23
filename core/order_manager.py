@@ -1022,8 +1022,19 @@ class OrderManager:
         STOP_MARKET / TAKE_PROFIT_MARKET types with `stopPrice`. Bybit/Bitget
         keep the ccxt unified path (triggerPrice + stopLossPrice).
 
-        Fail-closed policy: if SL placement fails, the position is closed
-        immediately at market. No naked live positions, ever.
+        2026-05-21 FIX (Bybit 110092 / Bitget 45122 noise): pre-flight check —
+        when current mark has already crossed the SL threshold (e.g. short SL
+        at 0.1117 with mark at 0.1117), the exchange would correctly reject
+        the placement because the SL would trigger immediately. The fail-closed
+        path then market-closed the position with an EMERGENCY log + 5 debug
+        spam lines. The position would have closed via SL anyway, so we now
+        detect this pre-flight, log INFO, and close normally with reason
+        "sl_crossed_at_placement". A second guard in the except handler
+        catches the rare race past the pre-flight (price moves between check
+        and create_order) and downgrades those specific reject codes to INFO.
+
+        Fail-closed policy: if SL placement fails for any other reason, the
+        position is closed immediately at market. No naked live positions.
         """
         ex_lower = exchange.name.lower()
         close_side = "sell" if side == "buy" else "buy"
@@ -1033,6 +1044,36 @@ class OrderManager:
         sl_rounded = exchange.round_price(symbol, sl)
         tp_rounded = exchange.round_price(symbol, tp)
         size_rounded = exchange.round_quantity(symbol, size)
+
+        # 2026-05-21 pre-flight: mark has already crossed SL → exchange would
+        # reject (Bybit 110092 / Bitget 45122). The SL would have triggered
+        # anyway; close normally rather than fail-closed-EMERGENCY.
+        sl_already_crossed = False
+        try:
+            tkr = exchange.fetch_ticker(symbol, market_type)
+            last = float((tkr or {}).get("last") or (tkr or {}).get("close") or 0)
+        except Exception:
+            last = 0.0
+        if last > 0:
+            side_l = (side or "").lower()
+            if side_l == "buy" and sl_rounded >= last:
+                sl_already_crossed = True
+            elif side_l == "sell" and sl_rounded <= last:
+                sl_already_crossed = True
+        if sl_already_crossed:
+            logger.info(
+                f"[Orders] SL pre-flight: {symbol} {side.upper()} SL "
+                f"{sl_rounded:.6g} already on wrong side of mark {last:.6g} "
+                f"— closing {pos.id[:8]} normally (would-have-triggered).")
+            pos._exchange_sl = False
+            pos._exchange_tp = False
+            try:
+                self.close_position(exchange, pos, reason="sl_crossed_at_placement")
+            except Exception as close_err:
+                logger.error(
+                    f"[Orders] close_position failed after SL pre-flight for "
+                    f"{symbol}: {close_err}")
+            return
 
         # Stop-Loss — spec §14: failed SL must trigger emergency handling.
         # 2026-04-20: fail-closed. If SL cannot be attached, close the
@@ -1048,6 +1089,32 @@ class OrderManager:
                 f"[Orders] SL order on {exchange.name}: {symbol} "
                 f"@ {sl_rounded} (type={sl_type})")
         except Exception as e:
+            # 2026-05-21: catch the rare race past the pre-flight — mark moved
+            # between fetch_ticker and create_order. Bybit 110092 and Bitget
+            # 45122 both mean "SL on wrong side of mark"; close normally.
+            err_str = str(e)
+            is_crossed_race = (
+                "110092" in err_str
+                or "45122" in err_str
+                or "stop loss price please" in err_str.lower()
+                or "expect rising" in err_str.lower()
+                or "expect falling" in err_str.lower()
+            )
+            if is_crossed_race:
+                logger.info(
+                    f"[Orders] SL race-rejection on {exchange.name} {symbol}: "
+                    f"{err_str[:160]} — closing {pos.id[:8]} normally "
+                    f"(would-have-triggered).")
+                pos._exchange_sl = False
+                pos._exchange_tp = False
+                try:
+                    self.close_position(
+                        exchange, pos, reason="sl_crossed_during_placement")
+                except Exception as close_err:
+                    logger.error(
+                        f"[Orders] close_position failed after SL race-reject "
+                        f"for {symbol}: {close_err}")
+                return
             logger.error(
                 f"[Orders] EMERGENCY: SL order FAILED on {exchange.name} {symbol}: {e} "
                 f"— closing position {pos.id[:8]} at market (fail-closed policy).")
@@ -1223,9 +1290,19 @@ class OrderManager:
                 f"[Orders] [DRY] PARTIAL CLOSE {position.symbol} "
                 f"{close_pct:.0%} ({partial_size:.8f}) @ {price:.4f} | {reason}")
         else:
+            # 2026-05-24 — Futures partial close must carry reduceOnly=True.
+            # Without it, if position size races (e.g. exchange-side SL/TP
+            # fires between the read and this order), the partial close
+            # becomes an opposite-direction entry on Bybit/Bitget instead of
+            # reducing the position. Every other close path in this file
+            # passes reduceOnly; the partial path was the gap.
+            _params: dict = {}
+            if position.market_type == "futures":
+                _params["reduceOnly"] = True
             try:
                 exchange.create_order(
                     position.symbol, "market", close_side, partial_size,
+                    params=_params,
                     market_type=position.market_type)
             except Exception as e:
                 logger.error(f"[Orders] Partial close failed: {e}")
@@ -1514,7 +1591,13 @@ class OrderManager:
         populated). ``price`` is the actual exit price the tracker recorded.
         """
         is_win  = (pos.pnl or 0) > 0
-        pnl_pct = pos.pnl_pct or 0.0
+        # 2026-05-24 — Was `pos.pnl_pct or 0.0` which converts None → 0.0
+        # and trips the _SPEC12_SCRATCH_PCT (0.5%) gate in
+        # record_trade_result, silently neutralizing real losses on rows
+        # without a computed pnl_pct (e.g. ghost-reclassified SL fills
+        # with missing entry context). record_trade_result accepts None
+        # and treats it correctly.
+        pnl_pct = pos.pnl_pct
         close_side = "sell" if pos.side == "buy" else "buy"
         _is_paper = pos.paper_trade if hasattr(pos, "paper_trade") else self.dry_run
 
@@ -1571,6 +1654,15 @@ class OrderManager:
 
         # Warehouse trade-close update (spec §4, §6) — locate the row by
         # idempotency key and patch in exit fields + r_multiple.
+        #
+        # 2026-05-21: split into three try/except layers so that:
+        #   (1) trade_id_by_key miss surfaces as a WARNING with full context,
+        #       since it is the canonical leak signal (orphan OPEN warehouse
+        #       rows accumulate when this lookup silently returns None).
+        #   (2) record_trade_close failures warn separately.
+        #   (3) best-effort calibrator/attribution stay at debug — those are
+        #       not load-bearing for the close ledger.
+        tid = None
         try:
             from core.warehouse import get_warehouse
             wh = get_warehouse()
@@ -1580,22 +1672,39 @@ class OrderManager:
                 ts_entry=float(getattr(pos, "open_time", 0)),
                 side=pos.side,
             )
-            if tid:
-                # r_multiple = price move / stop distance (side-aware).
-                r_mult = None
-                sl = float(getattr(pos, "stop_loss", 0) or 0)
-                ep = float(pos.entry_price or 0)
-                xp = float(price or 0)
-                if sl > 0 and ep > 0 and xp > 0 and sl != ep:
-                    if pos.side == "buy":
-                        denom = ep - sl
-                        if denom > 0:
-                            r_mult = (xp - ep) / denom
-                    else:
-                        denom = sl - ep
-                        if denom > 0:
-                            r_mult = (ep - xp) / denom
-                ts_exit = float(getattr(pos, "close_time", 0) or time.time())
+        except Exception as _we:
+            logger.warning(
+                f"[Warehouse] trade_id_by_key raised for "
+                f"{pos.exchange}:{pos.symbol} {pos.side} "
+                f"open_time={getattr(pos, 'open_time', 0)}: {_we}"
+            )
+
+        if tid is None:
+            logger.warning(
+                f"[Warehouse] trade_id lookup MISS — warehouse row will stay OPEN. "
+                f"exchange={pos.exchange.lower()} symbol={pos.symbol} "
+                f"side={pos.side} open_time={getattr(pos, 'open_time', 0)} "
+                f"close_reason={reason}. "
+                f"Run scripts/backfill_warehouse_closes.py to repair."
+            )
+
+        if tid:
+            # r_multiple = price move / stop distance (side-aware).
+            r_mult = None
+            sl = float(getattr(pos, "stop_loss", 0) or 0)
+            ep = float(pos.entry_price or 0)
+            xp = float(price or 0)
+            if sl > 0 and ep > 0 and xp > 0 and sl != ep:
+                if pos.side == "buy":
+                    denom = ep - sl
+                    if denom > 0:
+                        r_mult = (xp - ep) / denom
+                else:
+                    denom = sl - ep
+                    if denom > 0:
+                        r_mult = (ep - xp) / denom
+            ts_exit = float(getattr(pos, "close_time", 0) or time.time())
+            try:
                 wh.record_trade_close(
                     trade_id=tid,
                     ts_exit=ts_exit,
@@ -1606,7 +1715,14 @@ class OrderManager:
                     exit_reason=reason,
                     fee=float(getattr(pos, "total_fees", 0.0)),
                 )
+            except Exception as _wce:
+                logger.warning(
+                    f"[Warehouse] record_trade_close failed for tid={tid} "
+                    f"{pos.symbol} {pos.side}: {_wce}"
+                )
 
+        if tid:
+            try:
                 # Phase 18 (2026-05-04): feed the ProbabilityCalibrator with
                 # this trade's (predicted_conf, actual_win) so the isotonic
                 # regression can fit on real data. Was dead until now —
@@ -1685,8 +1801,11 @@ class OrderManager:
                             f"exit_mid={getattr(pos, 'exit_mid', 0)})")
                 except Exception as _ae:
                     logger.debug(f"[Attribution] record skipped: {_ae}")
-        except Exception as _we:
-            logger.debug(f"[Warehouse] record_trade_close skipped: {_we}")
+            except Exception as _post_we:
+                # Catches calibrator/attribution failures outside their own
+                # inner try/excepts. record_trade_close has its own handler
+                # above and is not in this scope.
+                logger.debug(f"[Warehouse] post-close best-effort step failed: {_post_we}")
 
         # Post-mortem analysis
         try:

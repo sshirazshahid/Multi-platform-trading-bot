@@ -85,6 +85,36 @@ def test_cooldown_does_not_apply_to_daily_halt():
     assert rm._should_auto_resume() is False
 
 
+def test_daily_loss_halt_clears_on_midnight_rollover():
+    """2026-05-24 regression guard: a daily-loss halt with no open
+    positions across midnight must clear, not deadlock.
+
+    Bug: can_trade() updates self._trading_day = today BEFORE calling
+    _should_auto_resume(), so _should_auto_resume's check
+    `date.today() != self._trading_day` is dead code (always False
+    inside that path). A bot with daily-loss halt and zero open
+    positions at UTC midnight stays halted until the next
+    record_trade_pnl close — which never fires without trades.
+    """
+    from datetime import date, timedelta
+
+    rm = RiskManager()
+    rm._halted = True
+    rm._halt_reason = "daily loss (-20.00 USDT)"
+    rm._halt_time = _time.time() - 30 * 60  # 30 min ago
+    rm._trading_day = date.today() - timedelta(days=1)  # halted YESTERDAY
+    rm._start_balance = 400.0
+    rm._daily_pnl = -20.0
+
+    # can_trade should detect the midnight rollover and clear the halt.
+    rm.can_trade(open_position_count=0)
+
+    assert rm._halted is False, (
+        "Daily-loss halt must clear across the midnight rollover, even "
+        "with no open positions to drive record_trade_pnl."
+    )
+
+
 def test_cooldown_does_not_preempt_wr_recovery_path():
     """Fast WR recovery should still win if it fires before the cooldown."""
     rm = RiskManager()

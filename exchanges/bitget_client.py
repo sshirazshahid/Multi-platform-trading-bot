@@ -374,6 +374,23 @@ class BitgetClient(BaseExchange):
                 logger.debug(f"[Bitget] Leverage already {leverage}x for {symbol}")
                 return leverage
             logger.warning(f"[Bitget] set_leverage {symbol}: {e}")
+            # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
+            # Without the ladder, any cap rejection returns 0 → order_manager
+            # treats as fatal abort. Preserve marginCoin on each retry.
+            ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
+                      if x < leverage]
+            for lev in ladder:
+                try:
+                    self.exchange.set_leverage(
+                        lev, symbol, params={"marginCoin": "USDT"})
+                    logger.warning(
+                        f"[Bitget] Leverage CLAMPED {leverage}x → {lev}x "
+                        f"for {symbol} (exchange tier cap)")
+                    return lev
+                except Exception:
+                    continue
+            logger.error(
+                f"[Bitget] Could not set ANY leverage for {symbol}; aborting")
             return 0
         finally:
             self.switch_to_spot()

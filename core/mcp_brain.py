@@ -86,22 +86,24 @@ MAX_API_CALLS_HR = 25       # Rate budget: 25 calls/hour max
 
 _PORTFOLIO_SYSTEM_PROMPT = (
     "Crypto portfolio manager. 3 exchanges, real money. Maximize risk-adjusted returns.\n"
-    "RULES: Min 1.8:1 RR. 4h=direction,1h=confirm,15m=entry. "
+    "RULES: Min 1.2:1 RR. 4h=direction,1h=confirm,15m=entry. "
     "RSI>78/<22 on 4h=reversal risk. Skip only on clear conflicting signals.\n"
     "EXCHANGES: Binance/Bybit/Bitget=spot+futures.\n"
     "DISTRIBUTE trades across exchanges — use whichever has the best balance/liquidity. "
     "DO NOT default to one exchange. Check BAL line and spread positions.\n"
-    "LIMITS: Spot:SL>=2%,TP>=4%,side=buy. Futures:SL>=2.5%,TP>=5%,max 3x. Max 6/exchange,8 total,5% max size.\n"
+    "LIMITS: Spot side=buy. Futures use tiered 2-10x; executor chooses final size/leverage. "
+    "Max 6/exchange,8 total.\n"
     "ENTRY: Prefer 4h EMA aligned + 1h RSI confirming. Volume preferred but OPTIONAL "
     "in low-F&G/quiet regimes — trend+RSI alone can qualify. Do NOT hard-require vol>1x.\n"
-    "SIZING: size_pct = 1.5% risk / (sl_pct * leverage / 100). Cap at 1%. Max leverage 3x. Example: sl=3%, lev=3x → size=1%.\n"
-    "SL/TP: SL=max(2%,1.5*ATR_1h%). TP=2*SL. Min 2:1 R:R always.\n"
+    "FUTURES SCALP: target TP 1.8-2.0%, SL 1.2-1.6%, keep RR >=1.2. "
+    "Prefer small repeatable wins over stale 5% targets.\n"
+    "SIZING: suggest size_pct 1.0 only; executor overrides risk from live tiers.\n"
     "IMPORTANT: Empty actions=do nothing, but if ANY coin has score>=60 with trend+momentum "
     "aligned, PROPOSE it even in low-volume sessions. Bot idle >12h is worse than cautious loss.\n"
     "RESPOND ONLY WITH COMPACT JSON, no markdown.\n"
     '{"actions":[{"type":"OPEN","symbol":"SOL/USDT","exchange":"bitget",'
-    '"market_type":"futures","side":"buy","leverage":5,"size_pct":4.0,'
-    '"sl_pct":3.5,"tp_pct":8.0,"confidence":0.72,'
+    '"market_type":"futures","side":"buy","leverage":5,"size_pct":1.0,'
+    '"sl_pct":1.5,"tp_pct":1.8,"confidence":0.72,'
     '"reason":"3TF aligned","position_id":""}],'
     '"market_assessment":"one sentence","skip_reason":""}\n'
     "Keep reasons under 10 words."
@@ -1608,7 +1610,18 @@ class MCPBrain:
                 continue
             if len(rows) < 3:
                 continue
-            pnls = [float(r[0] or 0) for r in rows]
+            def _row_value(row, key, idx, default=0):
+                if isinstance(row, dict):
+                    return row.get(key, default)
+                try:
+                    return row[key]
+                except Exception:
+                    try:
+                        return row[idx]
+                    except Exception:
+                        return default
+
+            pnls = [float(_row_value(r, "realized_pnl", 0) or 0) for r in rows]
             wins = sum(1 for p in pnls if p > 0)
             wr = wins / len(pnls) * 100
             mean_pnl = sum(pnls) / len(pnls)
@@ -1838,27 +1851,74 @@ class MCPBrain:
                         algo = self._score_coin(coin, data, ei)
                         algo_conf = float(algo.get("confidence", 0) or 0)
                         _s = algo.get("score")
-                        algo_score = float(_s) if _s is not None else None
+                        # 2026-05-24 — _score_coin returns {score=0, layers_ok=0}
+                        # for regime exits (adx<15, bb_squeeze, extreme_vol, no_data).
+                        # Writing score=0 to the warehouse conflates "regime
+                        # rejected" with "genuinely scored 0" and poisons
+                        # per-score-band WR analytics. Only persist a score
+                        # when the algo actually evaluated past the regime
+                        # filters (layers_ok > 0).
+                        _layers_ok = int(algo.get("layers_ok", 0) or 0)
+                        algo_score = (
+                            float(_s) if (_s is not None and _layers_ok > 0)
+                            else None
+                        )
                     except Exception as _e:
                         logger.debug(f"[MCP-Blend] algo score failed for {coin}: {_e}")
                         algo_conf = None
 
             if algo_conf is not None:
-                final_conf = (claude_conf + algo_conf) / 2.0
-                reason = f"{reason} | blend(c={claude_conf:.2f},a={algo_conf:.2f})"
+                # 2026-05-22 — When algo_conf is *structurally* 0 (the 4
+                # required EMA/RSI/ADX gates failed → "no algo opinion")
+                # blending halves Claude's conviction unfairly. The signal
+                # isn't "low quality", it's "algo can't score this regime".
+                # In chop, this dropped blended conf to 0.28-0.31 and
+                # rejected every Claude-proposed trade for hours. Treat
+                # algo_conf==0 as "no opinion" → fall through to Claude.
+                # Any algo_conf > 0 means algo has a partial signal → blend.
+                # 2026-05-24 — Gated on config.SCALP_TIER_ENABLED so the
+                # kill switch restores the original (claude+algo)/2 blend.
+                import config as _cfg_blend
+                _scalp_blend_on = getattr(_cfg_blend, "SCALP_TIER_ENABLED", True)
+                if _scalp_blend_on and algo_conf <= 0.0:
+                    final_conf = claude_conf
+                    reason = f"{reason} | algo:no-opinion (using Claude alone)"
+                else:
+                    final_conf = (claude_conf + algo_conf) / 2.0
+                    reason = f"{reason} | blend(c={claude_conf:.2f},a={algo_conf:.2f})"
             else:
                 final_conf = claude_conf
+
+            # 2026-05-22 — Normalize Claude futures opens into the small-TP
+            # scalp band without creating an impossible R:R shape. The older
+            # TP-only clamp produced SL=2.5%, TP=2.0% actions, which the
+            # executor correctly blocked as 0.8R. Keep the action executable
+            # at ingestion so order manager, warehouse, and logs agree.
+            _market_type = (a.get("market_type", "futures") or "futures").lower()
+            _raw_tp = self._safe_float(a.get("tp_pct"), 1.8)
+            _raw_sl = self._safe_float(a.get("sl_pct"), 1.5)
+            # 2026-05-24 — Gated on config.SCALP_TIER_ENABLED. When off,
+            # Claude's tp_pct/sl_pct pass through unclamped (pre-May-22).
+            import config as _cfg_clamp
+            _scalp_clamp_on = getattr(_cfg_clamp, "SCALP_TIER_ENABLED", True)
+            if atype == "OPEN" and _market_type == "futures" and _scalp_clamp_on:
+                _claude_tp_clamped = min(2.0, max(1.8, _raw_tp))
+                _max_sl_for_rr = min(1.6, _claude_tp_clamped / 1.2)
+                _claude_sl_clamped = min(max(1.2, _raw_sl), _max_sl_for_rr)
+            else:
+                _claude_tp_clamped = _raw_tp
+                _claude_sl_clamped = _raw_sl
 
             actions.append({
                 "type":        atype,
                 "symbol":      a.get("symbol", ""),
                 "exchange":    (a.get("exchange") or "").lower(),
-                "market_type": a.get("market_type", "futures"),
+                "market_type": _market_type,
                 "side":        (a.get("side") or "").lower(),
                 "leverage":    self._safe_int(a.get("leverage"), 5),
                 "size_pct":    self._safe_float(a.get("size_pct"), 3.0),
-                "sl_pct":      self._safe_float(a.get("sl_pct"), 4.0),
-                "tp_pct":      self._safe_float(a.get("tp_pct"), 10.0),
+                "sl_pct":      _claude_sl_clamped,
+                "tp_pct":      _claude_tp_clamped,
                 "confidence":  final_conf,
                 "claude_confidence": claude_conf,
                 "algo_confidence":   algo_conf,
@@ -2906,14 +2966,27 @@ class MCPBrain:
             side = result["side"]
             from config import RISK as _RISK_CFG
             leverage = min(3, _RISK_CFG.get("futures_max_leverage", 3)) if best_mtype == "futures" else 1
+            # 2026-05-24 — Gated on config.SCALP_TIER_ENABLED. When off,
+            # the futures TP reverts to the pre-May-22 4.0% floor.
+            import config as _cfg_floor
+            _scalp_floor_on = getattr(_cfg_floor, "SCALP_TIER_ENABLED", True)
             if best_mtype == "spot":
                 if side == "sell":
                     continue  # Can't short on spot
                 sl_pct = max(result["sl_pct"], 2.0)
-                tp_pct = max(result["tp_pct"], 4.0)
+                # 2026-05-22: spot TP floor stays at 2.0% (round-trip
+                # spot fees on Binance ~0.20% leave room for a 2.0% TP).
+                # Previously 4.0% — too wide for the user's scalp directive.
+                tp_pct = max(result["tp_pct"], 2.0)
             else:
-                sl_pct = max(result["sl_pct"], 2.0)
-                tp_pct = max(result["tp_pct"], 4.0)
+                sl_pct = max(result["sl_pct"], 1.5)
+                if _scalp_floor_on:
+                    # 2026-05-22: futures TP clamped to user's scalp band
+                    # [1.0%, 2.0%]. Previously floored at 4.0% — too wide.
+                    tp_pct = min(2.0, max(1.0, result["tp_pct"]))
+                else:
+                    # Pre-2026-05-22 wide TP floor.
+                    tp_pct = max(result["tp_pct"], 4.0)
 
             # ── RISK-BASED SIZING v3 ───────────────────────────────
             # 2026-04-14 v3: 1.0% risk + $4 hard cap.

@@ -484,6 +484,34 @@ class BotEngine:
         except Exception:
             pass
 
+        # 5b) 2026-05-21 — stuck-OPEN warehouse rows older than 24h.
+        # When trade_id_by_key misses for any reason, _finalize_close
+        # can't patch the warehouse row to CLOSED. The bot still books
+        # the close into positions.json + risk + compliance correctly,
+        # but learning analytics (which read trades WHERE status='CLOSED')
+        # under-count by however many rows are stuck. Surface here so
+        # operator can run scripts/backfill_warehouse_closes.py.
+        # Excludes rows newer than 24h: those are genuinely-active
+        # positions held overnight, not leaks.
+        try:
+            import sqlite3 as _sq
+            import time as _time
+            con = _sq.connect("data/warehouse.sqlite")
+            cutoff = _time.time() - 24 * 3600
+            n_stuck = con.execute(
+                "SELECT COUNT(*) FROM trades WHERE status='OPEN' AND ts_entry < ?",
+                (cutoff,)).fetchone()[0]
+            con.close()
+            if n_stuck > 0:
+                findings.append(
+                    f"{n_stuck} warehouse trade row(s) stuck at status='OPEN' "
+                    f"and older than 24h — learning analytics under-counted "
+                    f"by {n_stuck} closes. Run "
+                    f"`python scripts/backfill_warehouse_closes.py --commit` "
+                    f"to repair.")
+        except Exception as _se:
+            logger.debug(f"[GateHealth] stuck-open check skipped: {_se}")
+
         # 6) Surface findings to operator
         if findings:
             logger.warning(f"[GateHealth] {len(findings)} finding(s):")
@@ -1326,9 +1354,11 @@ class BotEngine:
         # R:R is 2.37:1 and score 85+ now maps to AGGRESSIVE (10x) by user
         # directive. tier_cap still set by consec-loss throttle above.
 
-        # Try tiers highest → lowest (10x → 5x → 4x → 3x)
-        for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD"):
-            if tier_cap == "STANDARD" and tier_name != "STANDARD":
+        # Try tiers highest → lowest (10x → 5x → 4x → 3x → 2x SCALP)
+        # 2026-05-22: SCALP fallback for chop hours when blended conf is 0.40-0.55.
+        # Position size is 10% balance (vs 50% for higher tiers) so risk is contained.
+        for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD", "SCALP"):
+            if tier_cap == "STANDARD" and tier_name not in ("STANDARD", "SCALP"):
                 continue
 
             t = LEVERAGE_TIERS[tier_name]
@@ -2239,14 +2269,34 @@ class BotEngine:
         # only used as fallback when the algorithm doesn't send its own.
         leverage = tier_params["leverage"]
         size_pct = tier_params["size_pct"] * 100.0   # selector uses fraction; rest of fn uses %
-        algo_sl  = action.get("sl_pct", 0)
-        algo_tp  = action.get("tp_pct", 0)
-        if algo_sl > 0 and algo_tp > 0:
+        try:
+            algo_sl = float(action.get("sl_pct", 0) or 0)
+            algo_tp = float(action.get("tp_pct", 0) or 0)
+        except Exception:
+            algo_sl = 0.0
+            algo_tp = 0.0
+        _used_action_sltp = algo_sl > 0 and algo_tp > 0
+        if _used_action_sltp:
             sl_pct = algo_sl
             tp_pct = algo_tp
         else:
             sl_pct = tier_params["sl_pct"] * 100.0
             tp_pct = tier_params["tp_pct"] * 100.0
+
+        min_rr = RISK.get("min_rr_ratio", 1.8)
+        if _used_action_sltp:
+            _action_rr = tp_pct / sl_pct if sl_pct > 0 else 0
+            if _action_rr < min_rr:
+                _tier_sl = tier_params["sl_pct"] * 100.0
+                _tier_tp = tier_params["tp_pct"] * 100.0
+                _tier_rr = _tier_tp / _tier_sl if _tier_sl > 0 else 0
+                if _tier_rr >= min_rr:
+                    logger.info(
+                        f"[Claude] {symbol} action SL/TP R:R {_action_rr:.2f}:1 "
+                        f"below {min_rr:.1f}:1; using {tier_name} tier shape "
+                        f"(SL={_tier_sl:.2f}% TP={_tier_tp:.2f}%)")
+                    sl_pct = _tier_sl
+                    tp_pct = _tier_tp
 
         # Phase 28 (2026-05-05): asymmetric SHORT-side risk reduction.
         # Audit of 267 closed trades:
@@ -2272,7 +2322,6 @@ class BotEngine:
                 f"{_orig_size:.1f}%→{size_pct:.1f}% (Phase 28)")
 
         # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
-        min_rr = RISK.get("min_rr_ratio", 1.8)
         actual_rr = tp_pct / sl_pct if sl_pct > 0 else 0
         if actual_rr < min_rr:
             logger.info(
@@ -2344,14 +2393,19 @@ class BotEngine:
             logger.info(f"[Claude] Total {total_open}/{_max_positions} — full")
             return False
 
-        # No duplicate base asset on same exchange
+        # No duplicate base asset across ANY exchange.
+        # 2026-05-24 — Was filtered by exchange.name, which let the same
+        # base asset open on every venue in a single 5-min cycle. The
+        # May-13 BNB cascade (-$18.66) is exactly this pattern with three
+        # concurrent BNB opens. Memory: project_may13_cascade_fixes_2026_05_13.
         base_asset = symbol.split("/")[0]
-        all_open = self.tracker.get_open(exchange=exchange.name)
+        all_open = self.tracker.get_open()
         already_has = any(
             p.symbol.split("/")[0] == base_asset for p in all_open
         )
         if already_has:
-            logger.info(f"[Claude] {base_asset} already open on {ex_name} — skip")
+            logger.info(
+                f"[Claude] {base_asset} already open (any exchange) — skip")
             return False
 
         # Correlation check — prevent over-concentration in correlated assets

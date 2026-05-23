@@ -101,6 +101,42 @@ def match_ghost_ledger_record(pos, records):
     return exit_px, best
 
 
+# Tolerance band for matching a ghost fill to an exchange-side SL/TP trigger.
+# 50bps absorbs realistic slippage on conditional fills and the few-bps drift
+# between pos.stop_loss (rounded at placement) and the ledger exit_price.
+_CONDITIONAL_FILL_TOLERANCE = 0.005
+
+
+def _classify_conditional_fill(pos, exit_px):
+    """Return "stop_loss" / "take_profit" if `exit_px` matches an
+    exchange-placed conditional within 50bps; else None.
+
+    The ghost path is the *primary* exit route for SCALP-tier trades that
+    round-trip in seconds — the position vanishes from fetch_positions
+    between bot cycles, so the bot only learns about the close through
+    reconciliation. When the exchange-side SL or TP was the actual
+    trigger, the close should be labelled as such rather than as a
+    ghost. Reserves ghost_* for genuinely-unexpected fills (no flag set,
+    or exit price outside the band of both conditionals).
+
+    Local-monitor closes (`_exchange_sl=False`) are skipped — they
+    should already be routing through the normal `close_position` path
+    via the position monitor, not through sync_with_exchanges.
+    """
+    try:
+        ex_sl = bool(getattr(pos, "_exchange_sl", False))
+        sl = float(getattr(pos, "stop_loss", 0) or 0)
+        if ex_sl and sl > 0 and abs(exit_px - sl) / sl <= _CONDITIONAL_FILL_TOLERANCE:
+            return "stop_loss"
+        ex_tp = bool(getattr(pos, "_exchange_tp", False))
+        tp = float(getattr(pos, "take_profit", 0) or 0)
+        if ex_tp and tp > 0 and abs(exit_px - tp) / tp <= _CONDITIONAL_FILL_TOLERANCE:
+            return "take_profit"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return None
+
+
 @dataclass
 class Position:
     id:           str
@@ -668,6 +704,21 @@ class PositionTracker:
                         reconciled = True
                         resolved_src = "exchange_ledger"
                         close_reason = "ghost_reconciled"
+                        # 2026-05-24: If exit matches an exchange-placed
+                        # SL/TP within 50bps, relabel to stop_loss /
+                        # take_profit. Ghost path is the primary exit route
+                        # for SCALP-tier trades — keeping these as ghost_*
+                        # hides real exit attribution.
+                        real_reason = _classify_conditional_fill(pos, exit_px)
+                        if real_reason is not None:
+                            close_reason = real_reason
+                            logger.info(
+                                f"[Positions] ghost->{real_reason} "
+                                f"reclassified {pos.symbol} "
+                                f"side={pos.side} exit_px={exit_px:.6g} "
+                                f"sl={getattr(pos, 'stop_loss', 0):.6g} "
+                                f"tp={getattr(pos, 'take_profit', 0):.6g}"
+                            )
                         logger.info(
                             f"[Positions] GHOST reconciled via ledger: "
                             f"{pos.symbol} {pos.side.upper()} "
@@ -714,6 +765,21 @@ class PositionTracker:
                                 resolved_src = (
                                     "mark_price_fallback" if mark
                                     else "ticker_fallback")
+                                # 2026-05-24: Same reclassification as the
+                                # ledger path. If mark/ticker is within 50bps
+                                # of an exchange-placed SL/TP, the close was
+                                # really an SL/TP fill — relabel from
+                                # ghost_sync to stop_loss / take_profit.
+                                real_reason = _classify_conditional_fill(pos, tp)
+                                if real_reason is not None:
+                                    close_reason = real_reason
+                                    logger.info(
+                                        f"[Positions] ghost->{real_reason} "
+                                        f"reclassified {pos.symbol} "
+                                        f"side={pos.side} exit_px={tp:.6g} "
+                                        f"sl={getattr(pos, 'stop_loss', 0):.6g} "
+                                        f"tp={getattr(pos, 'take_profit', 0):.6g}"
+                                    )
                         except Exception:
                             pass
                     self._pending_ghost_reconcile.pop(pos.id, None)

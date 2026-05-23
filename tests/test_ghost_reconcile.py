@@ -46,6 +46,12 @@ class StubPos:
     size: float = 0.01
     entry_price: float = 70000.0
     open_time: float = 1000.0
+    # Exchange-side conditional fields (read by _classify_conditional_fill).
+    # Defaults keep older tests compatible — only the classification tests set them.
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
+    _exchange_sl: bool = False
+    _exchange_tp: bool = False
 
 
 # ── Bybit / Bitget happy path (exit_price present) ───────────────────────
@@ -267,3 +273,50 @@ def test_btc_ghost_now_reconciles_via_back_out(pt):
     exit_px, _ = pt.match_ghost_ledger_record(pos, records)
     # 43250 + (-2.07 / (0.0023 * 1)) = 43250 - 900 = 42350
     assert exit_px == pytest.approx(42350.0, rel=1e-4)
+
+
+# ── Exchange-side conditional fill reclassification (2026-05-24) ─────────
+#
+# When sync_with_exchanges detects a ghost AND the reconciled exit price
+# matches an exchange-placed SL or TP within 50bps, the close should be
+# labelled "stop_loss" / "take_profit" instead of "ghost_reconciled" /
+# "ghost_sync". Reserves ghost_* for genuinely-unexpected closes.
+
+def test_classify_exchange_sl_within_tolerance(pt):
+    """Buy with _exchange_sl=True, exit ~7bps below SL → stop_loss."""
+    pos = StubPos(_exchange_sl=True, stop_loss=70000.0)
+    assert pt._classify_conditional_fill(pos, 69995.0) == "stop_loss"
+
+
+def test_classify_exchange_tp_within_tolerance(pt):
+    """Buy with _exchange_tp=True, exit ~7bps below TP → take_profit."""
+    pos = StubPos(_exchange_tp=True, take_profit=71400.0)
+    assert pt._classify_conditional_fill(pos, 71350.0) == "take_profit"
+
+
+def test_classify_keeps_ghost_when_mid_range(pt):
+    """Both flags True, exit equidistant from SL and TP → None
+    (caller keeps the ghost_* label)."""
+    pos = StubPos(_exchange_sl=True, _exchange_tp=True,
+                  stop_loss=69000.0, take_profit=71000.0)
+    # exit at 70000 is 1.45% from SL and 1.41% from TP — neither within 50bps
+    assert pt._classify_conditional_fill(pos, 70000.0) is None
+
+
+def test_classify_skips_when_flag_false(pt):
+    """Local-monitor SL (_exchange_sl=False) at the SL level → None,
+    even when stop_loss attribute matches. We only reclassify
+    exchange-placed conditionals — local-monitor closes route through
+    the normal close_position path."""
+    pos = StubPos(_exchange_sl=False, stop_loss=70000.0)
+    assert pt._classify_conditional_fill(pos, 70000.0) is None
+
+
+def test_classify_handles_mark_price_path(pt):
+    """The two-pass-failed branch passes the mark/ticker fallback price
+    instead of the ledger exit. Helper still classifies correctly when
+    the fallback price lands near SL — covers the ghost_sync site."""
+    pos = StubPos(_exchange_sl=True, stop_loss=70000.0,
+                  side="sell")  # sell-side too
+    mark_price = 70030.0  # ~4bps above SL — short-side SL trigger price
+    assert pt._classify_conditional_fill(pos, mark_price) == "stop_loss"

@@ -6,13 +6,17 @@ docs/superpowers/specs/2026-05-18-bleed-fix-sprint-and-rebuild-design.md
 §7.2 / §7.4.
 
 Categorizes each CLOSED trade into one of seven buckets:
-    WIN         — mcp_take_profit, trailing_stop, partial_take_profit
+    WIN         — mcp_take_profit, trailing_stop, partial_take_profit,
+                  take_profit (exchange-side TP fill — 2026-05-24
+                  reclassified from ghost_reconciled / ghost_sync per
+                  core.position_tracker._classify_conditional_fill)
     GHOST       — ghost_sync, ghost_reconciled, ghost_force_close,
                   ghost_reroute_exhausted (Patch #1)
     AGE         — AGE_LIMIT, AGE_LOSS, STALE, plus *_post_grace siblings
                   (Patch #3 audit signal)
     SOFT_OTHER  — systematic_close, sl_failed, sl_placement_failed
-    SL          — stop_loss
+    SL          — stop_loss (includes 2026-05-24 reclassified exchange-side
+                  SL fills — was previously routed to GHOST)
     AGE_TEXT    — any other exit_reason containing "age" or "cutoff"
                   (free-text variants)
     OTHER       — everything else
@@ -30,7 +34,14 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 
-WIN = ("mcp_take_profit", "trailing_stop", "partial_take_profit")
+WIN = (
+    "mcp_take_profit",
+    "trailing_stop",
+    "partial_take_profit",
+    # 2026-05-24 — reclassified exchange-side TP fill from the ghost path.
+    # See core.position_tracker._classify_conditional_fill.
+    "take_profit",
+)
 GHOST = (
     "ghost_sync",
     "ghost_reconciled",

@@ -570,6 +570,30 @@ LEVERAGE_TIERS = {
         "requires_peak_hour":     True,
         "requires_btc_aligned":   True,
     },
+    # 2026-05-22 — SCALP tier added per user directive: "Higher trades,
+    # small TPs. Even 1-2 USDT or 1-2% gain per trade (FUTURES)". This is
+    # the LOW-CONVICTION FALLBACK: when no higher tier qualifies (typical
+    # in chop where blended confidence sits at 0.30-0.50), SCALP catches
+    # the signal at small size + tight TP so the bot stays active without
+    # taking high-conviction-tier risk.
+    #
+    # Sizing math @ $400 equity:
+    #   10% × 2x × 1.5% SL = 0.30% balance/loss = ~$1.20 per SL hit
+    #   10% × 2x × 1.8% TP = 0.36% balance/win  = ~$1.44 per TP hit
+    # Lands directly in the user's "1-2 USDT per trade" bracket.
+    # R:R = 1.2 → clears the global min_rr_ratio gate after fees.
+    # Reaches that WR comfortably based on prior 0.55-conf cohort (60% WR).
+    "SCALP": {
+        "leverage":               2,
+        "size_pct":               0.10,    # 10% of balance per trade
+        "sl_pct":                 0.015,   # 1.5% price (same as other tiers)
+        "tp_pct":                 0.018,   # 1.8% price = 1.2:1 R:R (small, fast)
+        "min_confidence":         0.40,
+        "requires_whitelist":     False,
+        "requires_allowed_hour":  True,
+        "requires_peak_hour":     False,
+        "requires_btc_aligned":   False,
+    },
 }
 
 # 2026-04-29: raised in lockstep with the L99→2 + size_pct=0.50 sizing
@@ -912,23 +936,21 @@ CELL_FILTER = {
 # AAVE}, kept {SOL, XRP}. Re-evaluate after 50+ post-restart trades using
 # `python scripts/diagnostic_report.py --since 2026-04-28`.
 # Phase 39 (2026-05-09): re-enabled from 421-trade all-time analysis.
-# These symbols are net-negative across all strategies combined, with severe
-# outlier losses. Net PnL / WR:
+# These symbols WERE net-negative across all strategies combined:
 #   APT/USDT:USDT   n=4   -$12.97  25% WR  (single -$7.35 outlier)
 #   SOL/USDT:USDT   n=18  -$11.02  22% WR
 #   XRP/USDT:USDT   n=11   -$7.38   9% WR
 #   ETH/USDT:USDT   n=15   -$6.47  47% WR  (asymmetric R:R, winners small)
 #   DOGE/USDT:USDT  n=18   -$3.71  56% WR  (wins small, losses large)
 #   BTC/USDT:USDT   n=12   -$2.07  33% WR
-# AutoMutator's runtime blacklist (consec-loss based) still operates on top.
-BLACKLIST_HARD: set = {
-    "SOL/USDT:USDT",
-    "XRP/USDT:USDT",
-    "APT/USDT:USDT",
-    "ETH/USDT:USDT",
-    "DOGE/USDT:USDT",
-    "BTC/USDT:USDT",
-}
+#
+# 2026-05-21 (UNBLOCK_ALL): User directive — "Clear all blacklist and blocked
+# coins". Cleared per user, conflicts with Phase 39 evidence. AutoMutator's
+# runtime blacklist (consec-loss based) still operates on top, as do
+# per-trade gates (Phase 23 calibrator hard-refuse <40%, Phase 27 graduated
+# EV per cell, Phase 29 post-SL cooldown). Spec §12 GLOBAL halt + drawdown
+# halt + daily loss circuit breaker also remain.
+BLACKLIST_HARD: set = set()
 
 # Hour gating (UTC)
 #
@@ -988,10 +1010,35 @@ BLACKLIST_HARD: set = {
 #   H05: BLOCKED → ALLOWED (filtered: +$2.40 / 78% WR — was unfiltered -$19.12)
 #   H22: BLOCKED → ALLOWED (filtered: -$0.35 / 62% WR — was unfiltered -$35.81)
 # Real catastrophic losers (kept blocked): H00, H09, H19, H21, H23
-ALLOWED_HOURS_UTC = {1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22}
-PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # H05 promoted (78% WR)
-WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17, 22}
-BLOCKED_HOURS_UTC = {0, 9, 19, 21, 23}
+# 2026-05-21 (UNBLOCK_ALL): User directive — "Clear all blacklist and
+# blocked coins". All 24 hours allowed; PEAK/WARMUP retained as sizing
+# hints only (not entry gates). Reversible via config edit.
+ALLOWED_HOURS_UTC = set(range(24))
+PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
+WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17, 22}  # sizing hint: half-size
+BLOCKED_HOURS_UTC = set()
+
+# 2026-05-24 — Kill switch for the 2026-05-22 throughput-raise stack.
+# Default ON. Flip to false via env to revert: drops SCALP tier, restores
+# the pre-UNBLOCK_ALL blacklist + hour gates, and disables the mcp_brain
+# Claude-clamp / blend-fallthrough changes. See core/mcp_brain.py gates.
+#
+# Used when the reclassified ghost data (Commit 1) shows the SCALP cohort
+# is genuinely catastrophic rather than an attribution artifact.
+SCALP_TIER_ENABLED = (os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false")
+
+if not SCALP_TIER_ENABLED:
+    LEVERAGE_TIERS.pop("SCALP", None)
+    # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade
+    # all-time analysis. Net-negative across all strategies combined.
+    BLACKLIST_HARD = {
+        "APT/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
+        "ETH/USDT:USDT", "DOGE/USDT:USDT", "BTC/USDT:USDT",
+    }
+    # Phase-44 (2026-05-10) BLOCKED_HOURS_UTC — REAL-trade filter
+    # catastrophic losers retained from Phase 39.
+    BLOCKED_HOURS_UTC = {0, 9, 19, 21, 23}
+    ALLOWED_HOURS_UTC = set(range(24)) - BLOCKED_HOURS_UTC
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals

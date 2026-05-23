@@ -40,6 +40,58 @@ def _seed_risk_state(tmp_path) -> None:
     )
 
 
+def test_ghost_and_sl_placement_reasons_are_neutral_for_spec12(tmp_path, monkeypatch):
+    """2026-05-24 — Infrastructure exits must NOT extend the Spec §12
+    streak.
+
+    After 2026-05-24 Commit 1, real exchange-side SL fills via the
+    ghost path are reclassified to `stop_loss` (which IS non-neutral
+    and correctly contributes to the streak). The residual
+    `ghost_reconciled` / `ghost_sync` rows are genuinely-unclassified
+    infrastructure events (truly-unexpected closes, fills outside the
+    50bps SL/TP band). They — plus `sl_crossed_at_placement` /
+    `sl_crossed_during_placement` (price moved between order place and
+    SL place, infrastructure) — must be in `_SPEC12_NEUTRAL_REASONS`.
+
+    Conflicts with the May-13 cooldown intent? No: the May-13 fix
+    wired Phase 29 cooldown via `note_sl_hit` (only on `stop_loss`).
+    `_SPEC12_NEUTRAL_REASONS` is a different mechanism — it gates
+    `record_trade_result`'s streak. Independent.
+    """
+    monkeypatch.chdir(tmp_path)
+    _seed_risk_state(tmp_path)
+    import config
+    monkeypatch.setitem(config.HALT_MECHANISMS, "spec12_streak_halt", True)
+
+    from core.risk_manager import RiskManager, _SPEC12_NEUTRAL_REASONS
+
+    for reason in ("ghost_reconciled", "ghost_sync",
+                   "sl_crossed_at_placement", "sl_crossed_during_placement"):
+        assert reason in _SPEC12_NEUTRAL_REASONS, (
+            f"{reason!r} must be in _SPEC12_NEUTRAL_REASONS so "
+            f"infrastructure exits do not falsely trigger the 5-consec "
+            f"global halt."
+        )
+
+    rm = RiskManager()
+    for i, reason in enumerate(("ghost_reconciled", "ghost_sync",
+                                  "sl_crossed_at_placement",
+                                  "sl_crossed_during_placement",
+                                  "ghost_reconciled")):
+        rm.record_trade_result(
+            symbol=f"X{i}/USDT:USDT",
+            family="claude_portfolio",
+            is_win=False,
+            pnl_usd=-0.50,
+            pnl_pct=-1.5,
+            reason=reason,
+        )
+    assert not getattr(rm, "is_halted", False), (
+        "5 consecutive infrastructure-exit losses must NOT trip Spec §12. "
+        f"halt_reason={rm.halt_reason!r}"
+    )
+
+
 def test_five_consecutive_losses_writes_review_required(tmp_path, monkeypatch):
     """Synthesize 5 sequential loss rows; assert is_halted=True AND
     review_required.json appears.

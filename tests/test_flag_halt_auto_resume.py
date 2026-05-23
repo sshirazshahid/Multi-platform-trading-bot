@@ -104,6 +104,52 @@ def test_unparseable_flag_keeps_halted_safely():
     # (after that the corrupt file gets deleted on auto-resume).
 
 
+def test_flag_anchor_on_oldest_not_newest_entry():
+    """2026-05-24 regression guard: _honour_review_flag_if_present must
+    anchor the halt timestamp on flag_data[0] (the ORIGINAL halt event),
+    not flag_data[-1] (the most recent audit append).
+
+    Bug: while halted, note_stale_data / note_order_rejection / outlier
+    branch append fresh entries to the list. Using [-1] slides the
+    anchor forward on every append, so the 4-hour cooldown never
+    elapses and the bot stays halted indefinitely.
+
+    Fix:                              risk_manager.py:320 → flag_data[0]
+    Originally tracked in memory:     stuck_halt_anchor_fix_2026_05_15
+    """
+    import json
+    from core.risk_manager import SPEC12_AUTO_RESUME_COOLDOWN_MIN, RiskManager
+
+    cooldown_sec = SPEC12_AUTO_RESUME_COOLDOWN_MIN * 60
+    p = Path("data/review_required.json")
+
+    # Original halt: outside cooldown — should auto-resume.
+    # Recent audit append: inside cooldown — must NOT prevent resume.
+    p.write_text(json.dumps([
+        {
+            "ts": time.time() - cooldown_sec - 60,  # OLDEST — original
+            "reason": "outlier_loss(-22.20 USD beyond cap)",
+            "action": "manual_review",
+        },
+        {
+            "ts": time.time() - 60,                  # NEWEST — recent
+            "reason": "stale_data audit append",
+            "action": "audit_only",
+        },
+    ]))
+
+    rm = RiskManager()
+    assert rm._halted is True
+
+    rm.can_trade(open_position_count=0)
+
+    assert rm._halted is False, (
+        "Flag halt must resume because the ORIGINAL halt timestamp is "
+        "outside the cooldown — newer audit appends must not block resume."
+    )
+    assert not Path("data/review_required.json").exists()
+
+
 def test_outlier_threshold_size_at_new_sizing(monkeypatch):
     """Sanity-check the bug premise: at $400 × 50% × 2x × 1.5% SL the
     expected loss is $6; the new $15 outlier threshold must NOT fire on a
