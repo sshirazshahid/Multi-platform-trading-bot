@@ -5,6 +5,8 @@ Pakistan note: Set BINANCE_TESTNET=false in .env — testnet is geo-blocked.
 DRY_RUN=true still prevents real trades on the live endpoint.
 """
 
+import threading
+
 import ccxt
 from loguru import logger
 
@@ -27,6 +29,16 @@ class BinanceClient(BaseExchange):
                  testnet: bool = None):
         self._connected = False
         self._is_oneway = True  # Instance variable — safe for multi-profile
+        # 2026-05-24 — Reentrant lock guarding self.exchange.options["defaultType"].
+        # The bot has multiple concurrent threads hitting this client:
+        # _sltp_monitor_loop (10s daemon), schedule.run_pending portfolio
+        # cycle (5min), and a ThreadPoolExecutor(max_workers=8) for SL/TP
+        # checks. Without serialization, thread A can set "future" then
+        # thread B sets "spot" before A's ccxt call fires → A's call goes
+        # to spot, returning wrong prices/balances/order routing. RLock
+        # is reentrant so any nested switch-using call within the same
+        # thread will not self-deadlock.
+        self._defaultType_lock = threading.RLock()
         super().__init__(
             api_key = (api_key or BINANCE_API_KEY  or "").strip(),
             secret  = (secret  or BINANCE_SECRET_KEY or "").strip(),
@@ -129,88 +141,93 @@ class BinanceClient(BaseExchange):
                     limit: int = 100, market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        if market_type == "futures":
-            self.switch_to_futures()
-        else:
-            self.switch_to_spot()
-        try:
-            result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
-        except Exception as e:
-            if "-1021" in str(e):
-                self._resync_clock()
-                try:
-                    result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
-                except Exception:
-                    result = []
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
             else:
-                result = []
-        finally:
-            self.switch_to_spot()
+                self.switch_to_spot()
+            try:
+                result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
+            except Exception as e:
+                if "-1021" in str(e):
+                    self._resync_clock()
+                    try:
+                        result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
+                    except Exception:
+                        result = []
+                else:
+                    result = []
+            finally:
+                self.switch_to_spot()
         return result
 
     def fetch_ticker(self, symbol: str, market_type: str = "spot") -> dict:
         if not self._ok():
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-        else:
-            self.switch_to_spot()
-        try:
-            result = super().fetch_ticker(symbol, market_type)
-        except Exception as e:
-            if "-1021" in str(e):
-                self._resync_clock()
-                try:
-                    result = super().fetch_ticker(symbol, market_type)
-                except Exception:
-                    result = {}
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
             else:
-                result = {}
-        finally:
-            self.switch_to_spot()
+                self.switch_to_spot()
+            try:
+                result = super().fetch_ticker(symbol, market_type)
+            except Exception as e:
+                if "-1021" in str(e):
+                    self._resync_clock()
+                    try:
+                        result = super().fetch_ticker(symbol, market_type)
+                    except Exception:
+                        result = {}
+                else:
+                    result = {}
+            finally:
+                self.switch_to_spot()
         return result
 
     def fetch_balance(self, market_type: str = "spot") -> dict:
         if not self._ok():
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-        try:
-            bal = super().fetch_balance(market_type)
-        except Exception as e:
-            if "-1021" in str(e):
-                self._resync_clock()
-                try:
-                    bal = super().fetch_balance(market_type)
-                except Exception:
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                bal = super().fetch_balance(market_type)
+            except Exception as e:
+                if "-1021" in str(e):
+                    self._resync_clock()
+                    try:
+                        bal = super().fetch_balance(market_type)
+                    except Exception:
+                        bal = {}
+                else:
                     bal = {}
-            else:
-                bal = {}
-        finally:
-            self.switch_to_spot()
+            finally:
+                self.switch_to_spot()
         return bal
 
     def fetch_order_book(self, symbol: str, limit: int = 20,
                          market_type: str = "spot") -> dict:
         if not self._ok():
             return {"bids": [], "asks": []}
-        if market_type == "futures":
-            self.switch_to_futures()
-        try:
-            return super().fetch_order_book(symbol, limit, market_type)
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_order_book(symbol, limit, market_type)
+            finally:
+                self.switch_to_spot()
 
     def fetch_open_orders(self, symbol: str,
                           market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        if market_type == "futures":
-            self.switch_to_futures()
-        try:
-            return super().fetch_open_orders(symbol, market_type)
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_open_orders(symbol, market_type)
+            finally:
+                self.switch_to_spot()
 
     def create_order(self, symbol: str, order_type: str, side: str,
                      amount: float, price: float = None,
@@ -218,43 +235,45 @@ class BinanceClient(BaseExchange):
         if not self._ok():
             logger.warning("[Binance] create_order skipped — not connected.")
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
 
-        # Strip positionSide if Binance is in One-Way mode
-        _params = dict(params or {})
-        if self._is_oneway and "positionSide" in _params:
-            del _params["positionSide"]
+            # Strip positionSide if Binance is in One-Way mode
+            _params = dict(params or {})
+            if self._is_oneway and "positionSide" in _params:
+                del _params["positionSide"]
 
-        try:
-            order = super().create_order(symbol, order_type, side, amount,
-                                         price, _params, market_type)
-            return order
-        except Exception as e:
-            err = str(e)
-            if ("-4061" in err or "position side does not match" in err) and not self._is_oneway:
-                self._is_oneway = True
-                logger.info("[Binance] ONE-WAY mode detected. Retrying...")
-                clean = {k: v for k, v in _params.items() if k != "positionSide"}
-                try:
-                    order = super().create_order(symbol, order_type, side, amount,
-                                                 price, clean, market_type)
-                    return order
-                except Exception:
-                    raise
-            raise
-        finally:
-            self.switch_to_spot()
+            try:
+                order = super().create_order(symbol, order_type, side, amount,
+                                             price, _params, market_type)
+                return order
+            except Exception as e:
+                err = str(e)
+                if ("-4061" in err or "position side does not match" in err) and not self._is_oneway:
+                    self._is_oneway = True
+                    logger.info("[Binance] ONE-WAY mode detected. Retrying...")
+                    clean = {k: v for k, v in _params.items() if k != "positionSide"}
+                    try:
+                        order = super().create_order(symbol, order_type, side, amount,
+                                                     price, clean, market_type)
+                        return order
+                    except Exception:
+                        raise
+                raise
+            finally:
+                self.switch_to_spot()
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
         """Returns actually-applied leverage; 0 if exchange not ready."""
         if not self._ok():
             return 0
-        self.switch_to_futures()
-        try:
-            return super().set_leverage(symbol, leverage)
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            self.switch_to_futures()
+            try:
+                return super().set_leverage(symbol, leverage)
+            finally:
+                self.switch_to_spot()
 
     def transfer(self, amount: float, from_account: str = "spot",
                  to_account: str = "futures") -> bool:

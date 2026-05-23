@@ -20,6 +20,7 @@ Fix has two layers:
 """
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock
 
 
@@ -34,6 +35,9 @@ def _make_stub(client_cls):
     c._ready = lambda: True
     c.switch_to_futures = lambda: None
     c.switch_to_spot = lambda: None
+    # 2026-05-24 — BinanceClient now holds a defaultType lock acquired in
+    # every switch-using method; harmless on Bybit/Bitget stubs.
+    c._defaultType_lock = threading.RLock()
     return c
 
 

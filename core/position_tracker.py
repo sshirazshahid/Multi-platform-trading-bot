@@ -350,6 +350,15 @@ class PositionTracker:
         # ledger writes appear within 15-30s of the actual fill.
         # Map: position_id -> first_seen_ts.
         self._pending_ghost_reconcile: dict[str, float] = {}
+        # 2026-05-24 — Dedup keys seeded by the ghost loop after a
+        # successful ledger reconcile. Keys carry the LEDGER ct
+        # (not now()), so reconcile_closed_pnl can dedup the same fill
+        # against its own ct-bucketed existing_keys check. Without
+        # this, ghost-closed positions get re-imported as
+        # `reconciled_from_exchange` because pos.close_time=now() lands
+        # in a different 10-min bucket than the ledger's actual ct.
+        # Set of (exchange_lower, symbol, side, int(ledger_ct // 600)).
+        self._ghost_just_closed_dedup_keys: set = set()
         self._load()
 
     def add(self, position: Position):
@@ -704,6 +713,18 @@ class PositionTracker:
                         reconciled = True
                         resolved_src = "exchange_ledger"
                         close_reason = "ghost_reconciled"
+                        # 2026-05-24 — Seed reconcile_closed_pnl dedup
+                        # with the LEDGER ct (best["close_time"]). The
+                        # default existing_keys check uses pos.close_time
+                        # which the upcoming tracker.close() sets to now(),
+                        # so a fill that occurred hours ago would slot in
+                        # a different 10-min bucket and get re-imported.
+                        _ledger_ct = float((best or {}).get("close_time", 0) or 0)
+                        if _ledger_ct > 0:
+                            self._ghost_just_closed_dedup_keys.add(
+                                (pos.exchange.lower(), pos.symbol,
+                                 pos.side, int(_ledger_ct // 600))
+                            )
                         # 2026-05-24: If exit matches an exchange-placed
                         # SL/TP within 50bps, relabel to stop_loss /
                         # take_profit. Ghost path is the primary exit route
@@ -841,6 +862,14 @@ class PositionTracker:
                     existing_keys.add(
                         (p.exchange.lower(), p.symbol, p.side,
                          int(p.close_time // 600)))
+            # 2026-05-24 — Merge ghost-just-closed dedup keys (seeded with
+            # LEDGER ct, not now()) so reconcile doesn't double-import a
+            # fill the ghost loop just reconciled in the same sync pass.
+            # Without this, every ghost_reconciled creates a duplicate
+            # `reconciled_from_exchange` row whose ct lands in a different
+            # 10-min bucket than pos.close_time (= now()).
+            existing_keys.update(self._ghost_just_closed_dedup_keys)
+            self._ghost_just_closed_dedup_keys.clear()
             # Also collect (exchange, symbol, side) for live tracked positions
             # so we can skip importing a reconcile record when the bot will
             # book the same close itself via the ghost-sync path. Without
@@ -868,7 +897,32 @@ class PositionTracker:
                     continue
                 sym = r.get("symbol", "")
                 ex_lower = str(r.get("exchange", ex_name)).lower()
-                side = (r.get("side") or "buy") or "buy"
+                # 2026-05-24 — Binance income ledger returns side=None
+                # (the underlying API doesn't carry side). The previous
+                # `(r.get("side") or "buy") or "buy"` defaulted EVERY
+                # Binance short close to "buy", poisoning per-side WR
+                # stats (SHORT_SIDE_FILTER, Phase 27, AutoMutator).
+                # Now: when side is None, check both buy/sell variants
+                # against live_keys / existing_keys; if neither matches,
+                # skip the import entirely rather than fabricate a side.
+                # Dollar PnL for the genuinely-orphan minority is lost,
+                # but per-side analytics stay clean.
+                raw_side = r.get("side")
+                if raw_side is None:
+                    sides_to_check = ("buy", "sell")
+                    if any((ex_lower, sym, s) in live_keys
+                           for s in sides_to_check):
+                        continue
+                    if any((ex_lower, sym, s, int(ct // 600)) in existing_keys
+                           for s in sides_to_check):
+                        continue
+                    logger.debug(
+                        f"[Reconcile] Skipping {ex_name} no-side record "
+                        f"for {sym} @ ct={ct} — side unknown and no "
+                        f"buy/sell variant matched tracked/closed positions."
+                    )
+                    continue
+                side = raw_side
                 # Skip if a live tracked position with the same identity
                 # exists — the live close path (sync_with_exchange →
                 # tracker.close → _finalize_close) will produce the

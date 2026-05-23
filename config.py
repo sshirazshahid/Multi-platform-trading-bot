@@ -1280,8 +1280,14 @@ SPOT_PORTFOLIO = {
 # signs docs/CONTROLLED_LIVE_CHECKLIST.md.
 # ==============================================================
 CAPITAL_ALLOCATION = {
-    "enabled":                    False,  # hard-off for rebuild phase
-    "recommendation_only":        True,   # emits to jsonl, never executes
+    # 2026-05-24 — User directive (AskUserQuestion answer): enable real
+    # spot accumulation. Baseline-write fix (capital_allocator.py)
+    # makes the feature actually fire. Conservative caps remain:
+    # threshold_usd 10.0 (won't sweep tiny amounts), max_transfer_pct
+    # 0.20 (≤20% of futures wallet per cycle), min_transfer_usdt 5.0.
+    # On a $400 wallet, max sweep per 15-min cycle is ~$80.
+    "enabled":                    True,
+    "recommendation_only":        False,  # real transfers (futures→spot)
     "cycle_interval_min":         15,
     "accumulation_threshold_usd": 10.0,
     "spot_targets":               {"BTC": 0.50, "ETH": 0.50},

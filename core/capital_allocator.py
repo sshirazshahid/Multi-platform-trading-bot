@@ -84,8 +84,23 @@ class CapitalAllocator:
                 usdt_free = float(futures_bal.get("USDT", {}).get("free", 0)
                                   if isinstance(futures_bal.get("USDT"), dict) else 0)
 
-                # Track accumulated profit
-                baseline = self._state.get("baselines", {}).get(ex_name, usdt_free)
+                # 2026-05-24 — Seed baseline on first observation. Previously
+                # `self._state.get("baselines", {}).get(ex_name, usdt_free)`
+                # defaulted to the CURRENT free on every call, producing
+                # profit=0 forever because nothing wrote to baselines{}.
+                # The feature was permanently inert. Now: if no baseline
+                # exists, write the current free and skip this cycle so a
+                # future increase can be detected as profit.
+                baselines = self._state.setdefault("baselines", {})
+                if ex_name not in baselines:
+                    baselines[ex_name] = usdt_free
+                    self._save_state()
+                    logger.debug(
+                        f"[CapAlloc] Seeded baseline {ex_name}=${usdt_free:.2f}; "
+                        f"no action this cycle"
+                    )
+                    continue
+                baseline = baselines[ex_name]
                 profit = usdt_free - baseline
                 if profit < threshold:
                     continue
@@ -247,6 +262,22 @@ class CapitalAllocator:
                     logger.info(
                         f"[CapAlloc] Transferred ${action['amount_usdt']:.2f} "
                         f"futures→spot on {action['exchange']}")
+                    # 2026-05-24 — Reset baseline to post-transfer free so
+                    # the next cycle doesn't re-sweep the same profit
+                    # window. Refetch fresh; the transfer may have settled
+                    # slightly differently than `amount_usdt`.
+                    try:
+                        post = exchange.fetch_balance("futures") or {}
+                        usdt_post = float(
+                            post.get("USDT", {}).get("free", 0)
+                            if isinstance(post.get("USDT"), dict) else 0
+                        )
+                        self._state.setdefault("baselines", {})[action["exchange"]] = usdt_post
+                    except Exception as _e:
+                        logger.debug(
+                            f"[CapAlloc] post-transfer baseline refetch "
+                            f"failed: {_e}"
+                        )
                 self._record_action(action, success=success)
                 return success
 
