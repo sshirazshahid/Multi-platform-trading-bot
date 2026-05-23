@@ -15,6 +15,12 @@ __pycache__/
 venv/
 env/
 
+# Secrets & local config (NEVER commit — contains live API keys)
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
 # Tool configurations
 .idea/
 .vscode/
