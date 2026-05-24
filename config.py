@@ -584,11 +584,18 @@ LEVERAGE_TIERS = {
     # R:R = 1.2 → clears the global min_rr_ratio gate after fees.
     # Reaches that WR comfortably based on prior 0.55-conf cohort (60% WR).
     "SCALP": {
+        # 2026-05-24 math tune — see realized-R diagnostic.
+        # size_pct 0.10 → 0.075: 25% bleed-velocity reduction (also lifts
+        #   to keep "1-2 USDT per trade" target intact: 7.5% × 2x × 1.5%
+        #   = ~$0.90 per SL hit on $400 wallet).
+        # min_confidence 0.40 → 0.50: tighten entry quality bar.
+        #   gate_effectiveness §1 showed score band 75-79 (≈ conf 0.40-0.50)
+        #   at 23.5% WR — anti-monotonic worst cohort. Cutting it.
         "leverage":               2,
-        "size_pct":               0.10,    # 10% of balance per trade
+        "size_pct":               0.075,
         "sl_pct":                 0.015,   # 1.5% price (same as other tiers)
         "tp_pct":                 0.018,   # 1.8% price = 1.2:1 R:R (small, fast)
-        "min_confidence":         0.40,
+        "min_confidence":         0.50,
         "requires_whitelist":     False,
         "requires_allowed_hour":  True,
         "requires_peak_hour":     False,
@@ -1368,14 +1375,27 @@ GHOST_LEDGER_WINDOW_H = 24       # was 6; widen to catch lagged ledger writes
 GHOST_PENDING_REQUEUE = True     # two-pass reconcile: ghost_sync upgrades on next sync
 
 # Area 4 — Age-aware SL→breakeven tightening
+# 2026-05-24 — Raised min profit threshold from 0.0001 (essentially any
+# positive tick) to 0.005 (0.5% profit). Per realized-R diagnostic, the
+# original threshold was clipping winners at micro-profit and getting
+# wick-knocked at breakeven before reaching configured TP (1.8%).
+# Raising the floor lets each winner build a real cushion before its SL
+# gets ratcheted to entry.
 AGE_AWARE_SL_ENABLED      = True
 AGE_AWARE_SL_MIN_AGE_MIN  = 60   # fire at age >= 60 min
-# Profit band [low, high) — exclusive on high to leave [1%, 2%) to Area 5
-AGE_AWARE_SL_MIN_PNL_FRAC = 0.0001  # > 0 (strictly in profit)
+# Profit band [low, high). Was [0.0001, 0.02]; now [0.005, 0.02].
+AGE_AWARE_SL_MIN_PNL_FRAC = 0.005   # >= 0.5% (was 0.0001 — too aggressive)
 AGE_AWARE_SL_MAX_PNL_FRAC = 0.02    # < 2% (trailing stop owns above)
 
 # Area 5 — Deterministic small-TP capture
-AUTO_SMALL_TP_ENABLED        = True
-AUTO_SMALL_TP_MIN_AGE_MIN    = 30   # fire at age >= 30 min
+# 2026-05-24 — DISABLED per realized-R diagnostic. Memory
+# project_trailing_clips_winners_2026_04_21 confirmed: when this fires
+# at 1.0% profit, it clips winners at 56% of the SCALP-tier configured
+# TP (1.8%). 50 trailing-wins @ $0.57 vs 4 full-TPs @ $2.84 in the
+# pre-fix sample — 5× R loss. With this off, trades reach configured
+# TP via the normal order_manager.check_sl_tp path, restoring the
+# 1.2:1 R:R the SCALP tier was designed for.
+AUTO_SMALL_TP_ENABLED        = False
+AUTO_SMALL_TP_MIN_AGE_MIN    = 30   # fire at age >= 30 min (vestigial when disabled)
 AUTO_SMALL_TP_MIN_PNL_FRAC   = 0.01 # >= +1.0%
 AUTO_SMALL_TP_MAX_PNL_FRAC   = 0.02 # < +2% (trailing stop owns above)

@@ -575,8 +575,15 @@ def test_age_aware_tighten_no_op_outside_band(monkeypatch):
 
 def test_auto_small_tp_fires_at_1pct_after_30min(monkeypatch):
     """Futures position age 35min pnl +1.2% → close_position called with
-    reason='auto_small_tp_1pct'."""
+    reason='auto_small_tp_1pct'.
+
+    2026-05-24 — AUTO_SMALL_TP_ENABLED was disabled in config as part
+    of the realized-R math tune (it clipped winners at 56% of the
+    configured 1.8% SCALP TP). Force-enable for this test so the
+    code path remains exercised."""
     from core import bot_engine
+
+    monkeypatch.setattr("config.AUTO_SMALL_TP_ENABLED", True)
 
     eng = MagicMock(spec=bot_engine.BotEngine)
     eng.active_exchanges = {"binance": MagicMock()}
