@@ -290,8 +290,13 @@ MIN_OOS = {"futures": 200, "spot": 100}
 MIN_OOS_WR = 0.55
 MIN_AUC = 0.60
 MIN_WR_UPLIFT = 1.5
-MIN_DSR = 0.0
-MAX_PBO = 1.0
+# 2026-05-25 — honest thresholds (no-edge-forensics). The previous values
+# (MIN_DSR=0.0, MAX_PBO=1.0) rubber-stamped a maximally-overfit model
+# (the live ensemble had DSR=0.0008, PBO=1.0 and was PROMOTED). A Deflated
+# Sharpe floor > 0 and a PBO ceiling < 1.0 are the minimum bar for a model
+# whose backtest edge is more likely real than a selection artifact.
+MIN_DSR = 0.10
+MAX_PBO = 0.5
 
 LATEST_TEMPLATE = "ensemble_{market}_latest.json"
 AUDIT_LOG = Path("data/models/audit.jsonl")
