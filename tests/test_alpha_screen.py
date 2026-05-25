@@ -58,7 +58,28 @@ def test_bh_fdr_basic():
 
 
 def test_dsr_for_alpha_uses_trials():
+    # n_trials>=2 both sides (stat_tests clamps n_trials to >=2), strict
+    # inequality so a regression that drops the trials arg would FAIL.
     r = np.full(300, 0.005) + np.random.default_rng(2).normal(0, 0.01, 300)
-    d_low = screen.dsr_for_returns(r, n_trials=1)
+    d_low = screen.dsr_for_returns(r, n_trials=2)
     d_high = screen.dsr_for_returns(r, n_trials=500)
-    assert d_low >= d_high  # more trials deflates the probability
+    assert d_low > d_high  # more trials strictly deflates the probability
+
+
+def test_bh_fdr_rejects_up_to_largest_passing_rank():
+    # 0.01<=0.0167, 0.02<=0.0333, 0.5>0.05 -> reject the first two
+    assert screen.fdr_bh([0.01, 0.02, 0.5], q=0.05) == [True, True, False]
+    # flags come back in INPUT order, not sorted order
+    assert screen.fdr_bh([0.5, 0.01, 0.02], q=0.05) == [False, True, True]
+
+
+def test_pbo_over_alphas_guards_and_union_aligns():
+    # < 2 alphas or empty -> neutral 0.5
+    assert screen.pbo_over_alphas({"a": pd.Series([0.1, 0.2])}) == 0.5
+    assert screen.pbo_over_alphas({}) == 0.5
+    # two alphas on partially-overlapping grids -> union>=16, fillna(0), runs
+    rng = np.random.default_rng(0)
+    a = pd.Series(rng.normal(0, 0.01, 20), index=range(20))
+    b = pd.Series(rng.normal(0, 0.01, 20), index=range(10, 30))
+    val = screen.pbo_over_alphas({"a": a, "b": b}, n_partitions=16)
+    assert 0.0 <= val <= 1.0
