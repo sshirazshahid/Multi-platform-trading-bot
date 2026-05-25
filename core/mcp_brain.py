@@ -463,6 +463,43 @@ def fetch_orderbook_depth(coins: list) -> dict:
     return data
 
 
+def fetch_open_interest(coins: list) -> dict:
+    """Fetch Open Interest trend from Binance futures (public endpoint).
+
+    2026-05-25 (no-edge-forensics): OI was the one microstructure data gap.
+    OI + price direction is a clean futures signal — rising price + rising OI
+    = real trend (new money); rising price + falling OI = short-covering
+    (likely to fade). Returns oi_delta_pct over the last ~6h so the Claude
+    prompt can use it as qualitative entry-timing context. Deliberately NOT
+    wired into the deterministic algo score (that would change WR and needs
+    validation per the WR-floor rule); this is prompt/instrumentation only.
+    """
+    data = {}
+    for coin in coins[:10]:  # per-symbol endpoint — limit like orderbook
+        sym = f"{coin}USDT"
+        try:
+            resp = _http_get(
+                f"https://fapi.binance.com/futures/data/openInterestHist"
+                f"?symbol={sym}&period=1h&limit=7",
+                timeout=5)
+            if not isinstance(resp, list) or len(resp) < 2:
+                continue
+            oi_first = float(resp[0].get("sumOpenInterest", 0) or 0)
+            oi_last = float(resp[-1].get("sumOpenInterest", 0) or 0)
+            if oi_first <= 0:
+                continue
+            delta_pct = (oi_last - oi_first) / oi_first
+            data[coin] = {
+                "oi_current": oi_last,
+                "oi_delta_pct": round(delta_pct, 4),  # >0 = OI rising (new money)
+                "oi_trend": "rising" if delta_pct > 0.01
+                            else ("falling" if delta_pct < -0.01 else "flat"),
+            }
+        except Exception:
+            continue
+    return data
+
+
 def compute_technicals(sparkline: list) -> dict:
     """Compute RSI, EMA, Bollinger Bands, and support/resistance from hourly sparkline."""
     if not sparkline or len(sparkline) < 30:
@@ -1000,15 +1037,17 @@ class MCPBrain:
         fng_data = {}
         funding_data = {}
         orderbook_data = {}
+        oi_data = {}
         sources_ok = 0
 
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        with ThreadPoolExecutor(max_workers=7) as pool:
             f1 = pool.submit(fetch_crypto_com, coins)
             f2 = pool.submit(fetch_coingecko, coins)
             f3 = pool.submit(fetch_news)
             f4 = pool.submit(fetch_fear_greed)
             f5 = pool.submit(fetch_funding_rates, coins)
             f6 = pool.submit(fetch_orderbook_depth, coins)
+            f7 = pool.submit(fetch_open_interest, coins)
             for name, fut, target in [
                 ("crypto.com", f1, "crypto"),
                 ("coingecko", f2, "gecko"),
@@ -1016,6 +1055,7 @@ class MCPBrain:
                 ("fng", f4, "fng"),
                 ("funding", f5, "funding"),
                 ("orderbook", f6, "orderbook"),
+                ("open_interest", f7, "oi"),
             ]:
                 try:
                     result = fut.result(timeout=15)
@@ -1033,6 +1073,8 @@ class MCPBrain:
                         funding_data = result if isinstance(result, dict) else {}
                     elif target == "orderbook":
                         orderbook_data = result if isinstance(result, dict) else {}
+                    elif target == "oi":
+                        oi_data = result if isinstance(result, dict) else {}
                 except Exception:
                     pass
 
@@ -1059,6 +1101,7 @@ class MCPBrain:
             "fng": fng_data,
             "funding": funding_data,
             "orderbook": orderbook_data,
+            "oi": oi_data,
             "technicals": technicals,
             "sources_ok": sources_ok,
             "prices": current_prices,
@@ -1765,6 +1808,7 @@ class MCPBrain:
             ei = exchange_indicators.get(coin, {})
             fr_d = data.get("funding", {}).get(coin, {})
             ob = data.get("orderbook", {}).get(coin, {})
+            oi_d = data.get("oi", {}).get(coin, {})
 
             line = f"\n{coin} ${price:.6g}"
             if gecko:
@@ -1793,6 +1837,12 @@ class MCPBrain:
             if ob:
                 line += (f"\n  OB: imb={ob.get('imbalance',0):+.3f} "
                          f"spread={ob.get('spread_pct',0):.4f}%")
+            if oi_d:
+                # OI context for entry timing: rising OI + price up = real
+                # trend (new money); falling OI + price up = short-covering
+                # (fade risk). 2026-05-25 — prompt context only, not scored.
+                line += (f"\n  OI: {oi_d.get('oi_trend','?')} "
+                         f"({oi_d.get('oi_delta_pct',0)*100:+.1f}% 6h)")
 
             coin_lines.append(line)
 

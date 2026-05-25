@@ -390,6 +390,23 @@ class UniverseFilter:
     MIN_DEPTH_USD      = 2_000     # $2k (was $5k) — fits typical USDT perp book depth
     ATR_PERIOD         = 14        # periods for ATR calculation
 
+    # 2026-05-25 — Range-stability / chop filter (freqtrade-inspired, no-edge
+    # forensics). The bot is a trend engine; the existing instantaneous ATR
+    # check cannot distinguish a trending market from chop with the same ATR.
+    # The forensics found the bot bleeds in chop (its EMA/ADX gates pass in
+    # whipsaw that still loses). These two DAILY-candle measures filter chop
+    # at the universe stage — a dynamic quality gate (UNBLOCK_ALL-safe: no
+    # symbol/hour blacklist, just a property test on current market state).
+    #   - Kaufman efficiency ratio: |net move| / sum(|bar moves|) over N days.
+    #     ~1.0 = clean trend, ~0 = chop. Reject below MIN_TREND_EFFICIENCY.
+    #   - Range-of-change: (HH-LL)/LL over N days. Reject dead/flat coins
+    #     below MIN_RANGE_OF_CHANGE (a trend engine has nothing to grab).
+    # Conservative floors — only remove the worst chop/dead coins so trade
+    # frequency isn't gutted. Tunable; disable via RANGE_STABILITY_FILTER off.
+    RANGE_LOOKBACK_DAYS   = 10
+    MIN_RANGE_OF_CHANGE   = 0.02   # <2% span over 10d = dead/rangebound
+    MIN_TREND_EFFICIENCY  = 0.20   # <0.20 ER = severe chop (no net direction)
+
     def __init__(self):
         self._cache: dict[str, dict] = {}   # symbol -> {result, ts}
         self._cache_ttl = 300               # 5 min cache
@@ -433,6 +450,22 @@ class UniverseFilter:
             reasons.append(f"too_calm:ATR={atr_pct*100:.2f}%<{self.MIN_ATR_PCT*100:.1f}%")
         elif atr_pct > self.MAX_ATR_PCT:
             reasons.append(f"too_volatile:ATR={atr_pct*100:.1f}%>{self.MAX_ATR_PCT*100:.0f}%")
+
+        # 5. Range-stability / chop check (2026-05-25, daily candles).
+        # Gated so it can be disabled in one place if it over-filters.
+        try:
+            from config import RANGE_STABILITY_FILTER_ENABLED as _rsf
+        except ImportError:
+            _rsf = True
+        if _rsf:
+            roc, eff = self._check_range_stability(exchange, symbol, market_type)
+            # roc==0 / eff==0 means no data → neutral (don't reject on missing data)
+            if 0 < roc < self.MIN_RANGE_OF_CHANGE:
+                reasons.append(
+                    f"dead_range:{roc*100:.1f}%<{self.MIN_RANGE_OF_CHANGE*100:.0f}%")
+            if 0 < eff < self.MIN_TREND_EFFICIENCY:
+                reasons.append(
+                    f"chop:ER={eff:.2f}<{self.MIN_TREND_EFFICIENCY:.2f}")
 
         ok = len(reasons) == 0
         result = {
@@ -518,6 +551,35 @@ class UniverseFilter:
             return atr / last_close if last_close > 0 else 0.0
         except Exception:
             return 0.0
+
+    def _check_range_stability(self, exchange, symbol: str,
+                               market_type: str) -> tuple:
+        """Return (range_of_change, trend_efficiency) over RANGE_LOOKBACK_DAYS
+        daily candles. (0.0, 0.0) on missing data → caller treats as neutral.
+
+        range_of_change = (highest_high - lowest_low) / lowest_low
+            freqtrade RangeStabilityFilter — small = dead/flat coin.
+        trend_efficiency = |close[-1]-close[0]| / sum(|close[i]-close[i-1]|)
+            Kaufman efficiency ratio — ~0 = chop, ~1 = clean trend.
+        """
+        try:
+            candles = exchange.fetch_ohlcv(
+                symbol, timeframe="1d", limit=self.RANGE_LOOKBACK_DAYS + 1,
+                market_type=market_type)
+            if not candles or len(candles) < 3:
+                return (0.0, 0.0)
+            highs = [float(c[2]) for c in candles]
+            lows = [float(c[3]) for c in candles]
+            closes = [float(c[4]) for c in candles]
+            hh, ll = max(highs), min(lows)
+            roc = (hh - ll) / ll if ll > 0 else 0.0
+            net = abs(closes[-1] - closes[0])
+            path = sum(abs(closes[i] - closes[i - 1])
+                       for i in range(1, len(closes)))
+            eff = (net / path) if path > 0 else 0.0
+            return (roc, eff)
+        except Exception:
+            return (0.0, 0.0)
 
     def rank(self, exchange, symbol: str, market_type: str = "spot") -> float:
         """Composite score 0-100 for symbol quality.

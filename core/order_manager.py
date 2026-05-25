@@ -954,7 +954,14 @@ class OrderManager:
                 model_version=str(model_version) if model_version else None,
             )
         except Exception as _we:
-            logger.debug(f"[Warehouse] record_trade_open skipped: {_we}")
+            # 2026-05-25 — Bug 3 fix: was logger.debug, so a transient
+            # SQLite lock / disk error here produced a stuck-OPEN warehouse
+            # row with ZERO operator visibility (the close path logs the
+            # resulting trade_id MISS at warning, but you couldn't correlate
+            # it without debug logging). Promote to warning for symmetry.
+            logger.warning(
+                f"[Warehouse] record_trade_open FAILED "
+                f"(row will be untrackable at close): {_we}")
 
         # Place SL/TP orders on the exchange for real protection.
         # 2026-04-16 (post-audit): use pos.size (the tracker's canonical size,

@@ -617,6 +617,27 @@ class PositionTracker:
             )
             with self._lock:
                 self._open[pid] = pos
+            # 2026-05-25 — Bug 2 fix (no-edge-forensics audit): MANUAL/
+            # RECONCILE imports were added to _open WITHOUT a warehouse
+            # record_trade_open. When they later close via _finalize_close,
+            # trade_id_by_key() finds no row → the close update is skipped →
+            # the warehouse row stays OPEN forever (~57 stuck-OPEN rows).
+            # Create the OPEN row now so the close can patch it. Idempotent.
+            try:
+                from core.warehouse import get_warehouse as _gw
+                from config import OPERATING_MODE as _mode
+                _gw().record_trade_open(
+                    exchange=ex_name, symbol=sym, side=side,
+                    ts_entry=float(pos.open_time),
+                    entry_px=entry, size=size, leverage=lev,
+                    market_type="futures",
+                    strategy_family=strat,
+                    mode=_mode,
+                )
+            except Exception as _we:
+                logger.warning(
+                    f"[Positions] import record_trade_open FAILED {sym} "
+                    f"(close will not reconcile to warehouse): {_we}")
             _msg = (
                 f"[Positions] {_log_label}: {sym} {side.upper()} "
                 f"on {ex_name} @ {entry:.4f} size={size:.6f} lev={lev}x | id={pid}"
@@ -862,6 +883,18 @@ class PositionTracker:
                     existing_keys.add(
                         (p.exchange.lower(), p.symbol, p.side,
                          int(p.close_time // 600)))
+                # 2026-05-25 — Bug 5 fix: also seed the open_time bucket.
+                # on_close fires OUTSIDE the lock (line ~401), so a ghost
+                # reconciled in the same pass can have its dedup key cleared
+                # before the next cycle. A ghost close's pos.close_time is
+                # set to now() but the ledger ct (used to seed the dedup key)
+                # was hours earlier — different 600s buckets. Seeding BOTH
+                # close_time and open_time buckets catches the ledger-ct-
+                # based key regardless of which timestamp the duplicate uses.
+                if getattr(p, "open_time", 0):
+                    existing_keys.add(
+                        (p.exchange.lower(), p.symbol, p.side,
+                         int(float(p.open_time) // 600)))
             # 2026-05-24 — Merge ghost-just-closed dedup keys (seeded with
             # LEDGER ct, not now()) so reconcile doesn't double-import a
             # fill the ghost loop just reconciled in the same sync pass.
@@ -1000,6 +1033,42 @@ class PositionTracker:
                     self._closed.append(pos)
                     existing_keys.add(k)
                 imported += 1
+                # 2026-05-25 — Bug 1 fix (no-edge-forensics audit): this
+                # reconcile path appended directly to _closed and NEVER
+                # fired on_close, so ~89 reconciled_* trades existed in
+                # positions.json with no warehouse row at all — invisible
+                # to learning_engine / WR aggregations. Write a complete
+                # open+close warehouse row here directly. These positions
+                # were never opened through open_position(), so there is no
+                # pre-existing OPEN row to patch — record_trade_open is
+                # idempotent (INSERT OR IGNORE on exch+sym+ts_entry+side)
+                # and returns the id for the close update.
+                try:
+                    from core.warehouse import get_warehouse as _gw
+                    from config import OPERATING_MODE as _mode
+                    _wh = _gw()
+                    _tid = _wh.record_trade_open(
+                        exchange=ex_lower, symbol=sym, side=side,
+                        ts_entry=float(pos.open_time),
+                        entry_px=entry if entry > 0 else 0.0,
+                        size=size if size > 0 else 0.0,
+                        leverage=leverage,
+                        market_type="futures",
+                        strategy_family="reconciled_exchange",
+                        mode=_mode,
+                    )
+                    if _tid and _tid > 0:
+                        _wh.record_trade_close(
+                            trade_id=_tid,
+                            ts_exit=ct,
+                            exit_px=exit_p if exit_p > 0 else 0.0,
+                            realized_pnl=pnl,
+                            exit_reason=pos.close_reason,
+                        )
+                except Exception as _whe:
+                    logger.warning(
+                        f"[Reconcile] warehouse write FAILED for {sym} "
+                        f"(row will be invisible to learning): {_whe}")
                 logger.warning(
                     f"[Reconcile] IMPORTED closed trade: {sym} {side.upper()} "
                     f"on {ex_lower} pnl={pnl:+.4f} USDT "

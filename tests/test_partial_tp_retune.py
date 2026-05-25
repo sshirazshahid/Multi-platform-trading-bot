@@ -20,10 +20,13 @@ def test_partial_tp_default_first_take_at_pct_is_035():
     assert PARTIAL_TP["first_take_at_pct"] == 0.35
 
 
-def test_partial_tp_default_first_take_size_is_06():
-    """Retune value pinned at 0.6 (was 0.5 before 2026-05-19)."""
+def test_partial_tp_default_first_take_size_is_03():
+    """2026-05-25 retune: 0.6 → 0.3. The no-edge-forensics swarm traced
+    realized R:R 0.63 to booking 60% of every winner at 0.42 R; lowering
+    to 0.3 lets 70% ride to full TP. See test_partial_tp_retune_2026_05_25
+    + memory no-edge-forensics-2026-05-25."""
     from config import PARTIAL_TP
-    assert PARTIAL_TP["first_take_size"] == 0.6
+    assert PARTIAL_TP["first_take_size"] == 0.3
 
 
 # -- Behavior tests via the extracted _should_fire_partial_tp helper --
@@ -39,7 +42,8 @@ def _stub_position(side, entry, tp, partial_taken=False):
 
 
 def test_partial_fires_at_35pct_long():
-    """Long: entry=100, tp=105. Price at 101.75 (35% of TP distance) fires partial with size=0.6."""
+    """Long: entry=100, tp=105. Price at 101.75 (35% of TP distance) fires
+    partial with size=0.3 (2026-05-25 retune; was 0.6)."""
     from config import PARTIAL_TP
     from core.order_manager import _should_fire_partial_tp
 
@@ -47,7 +51,7 @@ def test_partial_fires_at_35pct_long():
     should_fire, take_sz, partial_level = _should_fire_partial_tp(
         pos, 101.75, PARTIAL_TP)
     assert should_fire is True
-    assert take_sz == 0.6
+    assert take_sz == 0.3
     assert abs(partial_level - 101.75) < 1e-9
 
 
@@ -60,7 +64,7 @@ def test_partial_fires_at_35pct_short():
     should_fire, take_sz, partial_level = _should_fire_partial_tp(
         pos, 98.25, PARTIAL_TP)
     assert should_fire is True
-    assert take_sz == 0.6
+    assert take_sz == 0.3
     assert abs(partial_level - 98.25) < 1e-9
 
 

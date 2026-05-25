@@ -1025,6 +1025,16 @@ PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
 WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17, 22}  # sizing hint: half-size
 BLOCKED_HOURS_UTC = set()
 
+# 2026-05-25 — Range-stability / chop filter (no-edge-forensics bundle).
+# When True, UniverseFilter rejects dead-range and severe-chop coins at the
+# universe stage using daily-candle range-of-change + Kaufman efficiency
+# ratio. The bot is a trend engine that bleeds in chop; this is a dynamic
+# quality gate (NOT a symbol/hour blacklist — UNBLOCK_ALL-safe). Disable
+# here in one line if it over-filters and trade frequency drops too far.
+RANGE_STABILITY_FILTER_ENABLED = (
+    os.getenv("RANGE_STABILITY_FILTER_ENABLED", "true").lower() != "false"
+)
+
 # 2026-05-24 — Kill switch for the 2026-05-22 throughput-raise stack.
 # Default ON. Flip to false via env to revert: drops SCALP tier, restores
 # the pre-UNBLOCK_ALL blacklist + hour gates, and disables the mcp_brain
@@ -1233,10 +1243,21 @@ ENABLE_REBALANCE = False
 # 120-240min bleed band (-$23.63 / 30d).
 # Rollback: revert both values to 0.5, restart bot. Sub-1-minute reversal.
 # Spec: docs/superpowers/specs/2026-05-19-sweet-spot-partial-tp-retune-design.md
+#
+# 2026-05-25 — first_take_size 0.6 → 0.3. The 5-agent forensic swarm
+# (memory: no-edge-forensics-2026-05-25) traced the realized R:R of 0.63
+# (vs configured 1.2) to THIS line: booking 60% of every winner at
+# first_take_at_pct (= +0.63% on a 1.8% TP = 0.42 R) then breakevening
+# the rest mechanically caps blended R at ~0.63 under any realistic
+# continuation. avg_win was $0.41 vs avg_loss $0.79 (win/loss ratio
+# 0.526). Lowering the early book to 30% lets 70% of each winner ride to
+# the full TP, lifting avg_win toward ~$0.65 (expectancy -$0.24 → -$0.13
+# per trade). first_take_at_pct stays at 0.35 so the early-win capture in
+# the 30-60min cell is preserved, just smaller. Rollback: set back to 0.6.
 PARTIAL_TP = {
     "enabled": True,
     "first_take_at_pct": 0.35,
-    "first_take_size": 0.6,
+    "first_take_size": 0.3,
     "move_sl_to_breakeven": True,
 }
 

@@ -152,6 +152,12 @@ def main() -> int:
         help="Max acceptable hold duration to consider a close a match. "
              "Defaults to 24h.",
     )
+    ap.add_argument(
+        "--force-ambiguous", action="store_true",
+        help="Also commit matches for symbols with >1 OPEN row. These are "
+             "FIFO-by-time pairings that may misassign side/exchange because "
+             "the close log line carries neither. Default: skip them.",
+    )
     args = ap.parse_args()
 
     # 1. Collect close events from every bot log on disk.
@@ -181,8 +187,22 @@ def main() -> int:
         return 0
 
     # 3. Pair events ↔ open rows (FIFO by ts_entry).
+    # 2026-05-25 — Bug 4 fix: parsed close events carry NO side/exchange
+    # (the [LIVE] CLOSED log line omits them — see LINE_RE), so find_match
+    # pairs purely on symbol+time. When 2+ OPEN rows share a symbol within
+    # overlapping windows (e.g. a long on Binance + a short on Bybit, or
+    # the cross-exchange same-symbol case), FIFO-by-time can attach a close
+    # to the WRONG side/exchange row, silently corrupting realized_pnl on
+    # --commit. Detect symbols with >1 OPEN row and route their matches to
+    # a separate "ambiguous" bucket that is NOT committed unless the
+    # operator passes --force-ambiguous.
+    from collections import Counter
+    _sym_counts = Counter(r["symbol"] for r in open_rows)
+    _ambiguous_syms = {s for s, c in _sym_counts.items() if c > 1}
+
     used: set[int] = set()
     matches: list[tuple[dict, dict]] = []
+    ambiguous: list[tuple[dict, dict]] = []
     unmatched: list[dict] = []
     max_hold_sec = int(args.max_hold_hours * 3600)
     for row in open_rows:
@@ -191,7 +211,10 @@ def main() -> int:
             unmatched.append(row)
             continue
         used.add(idx)
-        matches.append((row, events[idx]))
+        if row["symbol"] in _ambiguous_syms:
+            ambiguous.append((row, events[idx]))
+        else:
+            matches.append((row, events[idx]))
 
     # 4. Report.
     print()
@@ -220,6 +243,23 @@ def main() -> int:
             print(f"  id={row['id']:>5}  {row['symbol']:<24}  {row['side']:<7}  {ot}")
         if len(unmatched) > 20:
             print(f"  ... and {len(unmatched) - 20} more")
+
+    if ambiguous:
+        print()
+        print(f"AMBIGUOUS matches ({len(ambiguous)}) — symbol has >1 OPEN "
+              f"row; close log lacks side/exchange so FIFO pairing may "
+              f"misassign. {'WILL commit (--force-ambiguous)' if args.force_ambiguous else 'SKIPPED — re-run with --force-ambiguous to apply'}:")
+        for row, ev in ambiguous[:20]:
+            ot = datetime.fromtimestamp(
+                float(row["ts_entry"]), tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%SZ")
+            print(f"  id={row['id']:>5}  {row['symbol']:<24}  "
+                  f"{row['side']:<7}  {row.get('exchange','?'):<8}  {ot}  "
+                  f"net={ev['realized_pnl']:+.4f}")
+        if len(ambiguous) > 20:
+            print(f"  ... and {len(ambiguous) - 20} more")
+        if args.force_ambiguous:
+            matches = matches + ambiguous
 
     # 5. Commit (or stop).
     if not args.commit:
