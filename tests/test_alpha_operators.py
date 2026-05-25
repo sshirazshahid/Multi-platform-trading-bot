@@ -44,11 +44,16 @@ def test_decay_linear_weights_recent_more():
     assert abs(op.decay_linear(df, 3).loc[2, "A"] - 1.5) < 1e-9
 
 
-def test_correlation_runs_and_is_bounded():
-    a = _df()[["A"]]
-    b = _df()[["B"]]
+def test_correlation_per_column_on_matching_symbols():
+    # Real usage: correlation(open, volume, d) — both frames carry the SAME
+    # symbol columns, so rolling().corr() pairs them per column.
+    a = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                      "B": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
+    b = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],   # tracks A: +corr
+                      "B": [6.0, 5.0, 4.0, 3.0, 2.0, 1.0]})   # opposes B: -corr
     c = op.correlation(a, b, 4)
-    assert c.loc[5, "A"] <= 1.0 and c.loc[5, "A"] >= -1.0
+    assert c.loc[5, "A"] > 0.99
+    assert c.loc[5, "B"] < -0.99
 
 
 def test_signed_power_preserves_sign():
