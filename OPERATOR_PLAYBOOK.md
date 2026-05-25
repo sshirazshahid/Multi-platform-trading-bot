@@ -18,7 +18,7 @@
 
 **Won't (be honest with yourself):**
 - Make you rich
-- Generate consistent alpha — at $791 capital with 0.1% fees, the realistic ceiling is ±2%/month
+- Generate consistent alpha — at $791 capital with 0.1% fees, the realistic ceiling is ±2%/month. This is now **proven, not assumed** — see "What the alpha search proved" below.
 - Run forever without supervision — you need to check on it
 - Predict the market — it follows rules, not crystal balls
 
@@ -106,6 +106,43 @@ At $791 capital, **realistic** outcomes per month:
 | **Bad month** | 5% | −$25 to −$60 (−3–8%, halt fires) |
 
 **Translation:** half the months will likely be flat-to-positive, half will be flat-to-negative, with occasional bigger swings. If you cannot tolerate the bad-month scenario, **don't run the bot**.
+
+---
+
+## What the alpha search proved (2026-05-25) — why this is bleed-control, not alpha
+
+I ran a systematic, **pre-registered** search for a real price/volume trading edge
+across the **entire canonical formulaic-alpha literature** — **443 published alphas**
+from the three most-cited libraries (WorldQuant's "101 Formulaic Alphas", Guotai-Junan's
+GTJA-191, and Microsoft Qlib's Alpha158) — over **3 years of real 1-hour data** for 32
+crypto pairs, scored through an honest gate: out-of-sample only, deflated for all 886
+effective trials, with overfit (PBO) and false-discovery (FDR) controls. The pass bar
+and gates were locked *before* running so the result can't be massaged.
+
+**Result: NO_EDGE — zero of 443 alphas survived.** The single best signal explained
+almost nothing (information ratio 0.37 in-sample, ≈0 out-of-sample), and the overfit
+probability was 0.67 — i.e. the "best" backtest alpha reliably did *worse* than average
+out-of-sample. That is the textbook signature of no real edge. (Run it yourself anytime:
+`python scripts/run_alpha_search.py` → `reports/alpha_search_<date>.md`.)
+
+**What this means for you, the operator:**
+- The bot **cannot predict price direction from price/volume history.** This is not a
+  tuning gap — the entire published price/volume playbook is dead on this universe and
+  account size. Adding more indicators or "strategies" of the same kind will not help.
+- The bot's honest job is **capital preservation / bleed-control**: small, gated,
+  stop-loss-protected positions that lose slowly when wrong — not a money machine. This
+  is *why* the realistic ceiling above stays ±2%/month.
+- **Do not** buy or bolt on more technical-indicator "alpha" products. They are the same
+  information class that just failed 443 different ways.
+- The **only** untested path to a real edge is a genuinely *new* information source —
+  order-book microstructure / open-interest / funding — which the bot is now collecting
+  forward but does not yet have enough history to test. Until that proves out, treat any
+  profit as noise and any loss as expected variance, and keep the capital-preservation
+  caps tight.
+
+**Bottom line for this section:** the question "can this bot make money from price
+patterns?" has been answered rigorously — **no.** Run it as a controlled, capital-
+preserving experiment, not an income source.
 
 ---
 
