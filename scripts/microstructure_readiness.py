@@ -1,12 +1,15 @@
 """How many LABELED candidates carry forward-collected microstructure yet?
 
-Microstructure features (oi_delta_6h, depth_ratio, basis_bps, and populated
-ob_imbalance/funding_rate) only populate from 2026-05-25 forward via
-mcp_brain._microstructure_features. A retrain on them is worth running once
-enough labeled candidates carry a populated `ob_imbalance` (the forward-only
-marker). Target >= ~500. When READY, the retrain step appends the pending
-keys (scripts/train_models._MICROSTRUCTURE_FEATURES_PENDING) to FEATURE_KEYS
-AND retrains in the same change (FEATURE_KEYS + model move together).
+NOTE: ob_imbalance + funding_rate were ALREADY captured historically (and
+already in the model — they did not produce edge). The genuinely-NEW
+features added 2026-05-25 are oi_delta_6h, depth_ratio, basis_bps, populated
+forward via mcp_brain._microstructure_features. `oi_delta_6h` is the
+unambiguous forward-only marker (absent from all historical candidates).
+
+A retrain is worth running once >= ~500 labeled candidates carry a populated
+oi_delta_6h. When READY, the retrain step appends the pending keys
+(scripts/train_models._MICROSTRUCTURE_FEATURES_PENDING) to FEATURE_KEYS AND
+retrains in the same change (FEATURE_KEYS + model artifact move together).
 
 Read-only.
 """
@@ -32,11 +35,10 @@ def main() -> int:
     labeled_micro = c.execute(
         "SELECT COUNT(*) FROM candidates cd JOIN labels l "
         "  ON l.candidate_id = cd.id "
-        "WHERE cd.features_json LIKE '%\"ob_imbalance\"%' "
-        "  AND cd.features_json NOT LIKE '%\"ob_imbalance\": 0.0%'").fetchone()[0]
+        "WHERE cd.features_json LIKE '%\"oi_delta_6h\"%'").fetchone()[0]
     c.close()
-    print(f"candidates with microstructure captured: {total_micro}")
-    print(f"LABELED candidates with populated ob_imbalance: {labeled_micro} / target {TARGET}")
+    print(f"candidates with microstructure captured (oi_delta_6h): {total_micro}")
+    print(f"LABELED candidates with oi_delta_6h: {labeled_micro} / target {TARGET}")
     if labeled_micro >= TARGET:
         print("READY — append _MICROSTRUCTURE_FEATURES_PENDING to FEATURE_KEYS "
               "and retrain (same change). The honest gate decides edge.")
