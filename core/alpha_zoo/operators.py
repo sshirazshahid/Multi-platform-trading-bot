@@ -39,6 +39,11 @@ def ts_sum(df: pd.DataFrame, d: int) -> pd.DataFrame:
     return df.rolling(int(d), min_periods=int(d)).sum()
 
 
+def product(df: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Time-series product over the trailing `d` bars (Kakushadze `product`)."""
+    return df.rolling(int(d), min_periods=int(d)).apply(np.prod, raw=True)
+
+
 def sma(df: pd.DataFrame, d: int) -> pd.DataFrame:
     return df.rolling(int(d), min_periods=int(d)).mean()
 

@@ -26,6 +26,7 @@ UNARY = [
     lambda d: op.ts_argmin(d, 5), lambda d: op.ts_rank(d, 5),
     lambda d: op.decay_linear(d, 5), lambda d: op.rank(d),
     lambda d: op.scale(d), lambda d: op.signed_power(d, 0.5),
+    lambda d: op.product(d, 5),
 ]
 
 

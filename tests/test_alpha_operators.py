@@ -66,3 +66,9 @@ def test_scale_normalizes_abs_sum():
     df = pd.DataFrame({"A": [1.0, 2.0], "B": [1.0, 2.0]})
     out = op.scale(df, 1.0)
     assert abs(out.loc[0].abs().sum() - 1.0) < 1e-9
+
+
+def test_product_is_rolling_product():
+    df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0]})
+    assert np.isnan(op.product(df, 2).loc[0, "A"])
+    assert op.product(df, 2).loc[3, "A"] == 12.0  # 3 * 4
