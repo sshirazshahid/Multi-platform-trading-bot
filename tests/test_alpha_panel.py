@@ -25,7 +25,7 @@ def test_build_panel_aligns_symbols_and_derives_fields():
     assert np.allclose(p.fields["vwap"].values, p.fields["close"].values)
     # forward 24-bar return present for all but last 24 rows
     assert p.fwd_ret.iloc[:-24].notna().all().all()
-    assert p.fwd_ret.iloc[-1].isna().all()
+    assert p.fwd_ret.iloc[-24:].isna().all().all()
 
 
 def test_adv_is_rolling_dollar_volume():
