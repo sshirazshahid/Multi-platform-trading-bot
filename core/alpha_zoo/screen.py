@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.stats import kurtosis as _kurtosis
-from scipy.stats import norm, spearmanr
+from scipy.stats import norm
 from scipy.stats import skew as _skew
 
 from core.stat_tests import deflated_sharpe, pbo, sharpe
@@ -25,20 +25,31 @@ def cross_sectional_ic(signal: pd.DataFrame, fwd_ret: pd.DataFrame,
     """Per-bar Spearman rank-correlation of `signal` vs `fwd_ret` across symbols.
 
     A bar with fewer than `min_width` symbols valid in BOTH frames yields NaN.
+
+    Vectorized: Spearman == Pearson of cross-sectional ranks. Both frames are
+    masked to the per-bar intersection of finite values BEFORE ranking, so the
+    ranks (and thus the correlation) are computed over exactly that
+    intersection — identical to a per-bar spearmanr on the masked subset, but
+    without the 2.6M-call Python loop on a full-history panel. A zero-variance
+    bar yields a 0/0 -> NaN (matching the old explicit guard).
     """
-    out = np.full(len(signal), np.nan)
-    s_vals = signal.to_numpy(dtype=float)
-    f_vals = fwd_ret.to_numpy(dtype=float)
-    for t in range(s_vals.shape[0]):
-        s_row, f_row = s_vals[t], f_vals[t]
-        mask = np.isfinite(s_row) & np.isfinite(f_row)
-        if int(mask.sum()) < int(min_width):
-            continue
-        if np.all(s_row[mask] == s_row[mask][0]):
-            continue  # zero-variance signal -> undefined corr
-        rho, _ = spearmanr(s_row[mask], f_row[mask])
-        out[t] = rho
-    return pd.Series(out, index=signal.index)
+    s = signal.to_numpy(dtype=float)
+    f = fwd_ret.to_numpy(dtype=float)
+    m = np.isfinite(s) & np.isfinite(f)
+    n = m.sum(axis=1).astype(float)
+    rank_s = pd.DataFrame(np.where(m, s, np.nan)).rank(axis=1).to_numpy()
+    rank_f = pd.DataFrame(np.where(m, f, np.nan)).rank(axis=1).to_numpy()
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cnt = np.where(n > 0, n, np.nan)
+        mean_s = (np.where(m, rank_s, 0.0).sum(axis=1) / cnt)[:, None]
+        mean_f = (np.where(m, rank_f, 0.0).sum(axis=1) / cnt)[:, None]
+        rc = np.where(m, rank_s - mean_s, 0.0)
+        fc = np.where(m, rank_f - mean_f, 0.0)
+        cov = (rc * fc).sum(axis=1)
+        denom = np.sqrt((rc * rc).sum(axis=1) * (fc * fc).sum(axis=1))
+        ic = cov / denom
+    ic = np.where(n >= int(min_width), ic, np.nan)
+    return pd.Series(ic, index=signal.index)
 
 
 def ir(ic: pd.Series) -> float:
