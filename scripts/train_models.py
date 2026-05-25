@@ -63,13 +63,18 @@ FEATURE_KEYS = [
     "ema20_above_50_1h",
     "funding_rate",
     "ob_imbalance",
-    # 2026-05-25 — microstructure forward-collection (no-edge-forensics).
-    # Populated from this date forward via mcp_brain._microstructure_features;
-    # historical candidates coerce to 0.0 (neutral) via _coerce(feats.get(k)).
-    "oi_delta_6h",
-    "depth_ratio",
-    "basis_bps",
 ]
+# 2026-05-25 — microstructure forward-collection. The new features
+# (oi_delta_6h, depth_ratio, basis_bps) are CAPTURED into candidate
+# features_json now (mcp_brain._microstructure_features) but are
+# DELIBERATELY NOT in FEATURE_KEYS yet: the live model artifact was trained
+# on the current 15-key vector, and ShadowPredictor / model-gate build their
+# inference vector from FEATURE_KEYS — adding keys while an older model is
+# loaded causes a feature-count mismatch that breaks inference (13 shadow
+# tests). Append these 3 keys HERE in the same change that retrains on the
+# accumulated microstructure data (trigger: scripts/microstructure_readiness.py).
+# FEATURE_KEYS and the model artifact MUST move together.
+_MICROSTRUCTURE_FEATURES_PENDING = ["oi_delta_6h", "depth_ratio", "basis_bps"]
 # Hyperparameter grids (kept small so the multiple-comparisons penalty in
 # Deflated Sharpe stays defensible).
 LR_C_GRID = [0.05, 0.5, 5.0]
