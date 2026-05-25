@@ -72,3 +72,33 @@ def test_product_is_rolling_product():
     df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0]})
     assert np.isnan(op.product(df, 2).loc[0, "A"])
     assert op.product(df, 2).loc[3, "A"] == 12.0  # 3 * 4
+
+
+def test_sma_m_is_recursive_ewm():
+    df = pd.DataFrame({"A": [1.0, 1.0, 1.0, 10.0]})
+    # alpha = M/N = 1/2 ; y3 = 0.5*10 + 0.5*1 = 5.5
+    assert abs(op.sma_m(df, 2, 1).loc[3, "A"] - 5.5) < 1e-9
+
+
+def test_wma_weights_recent_more():
+    df = pd.DataFrame({"A": [0.0, 0.0, 1.0]})
+    # weights 0.9**[2,1,0] = [0.81,0.9,1.0] normalized; only newest is nonzero
+    assert abs(op.wma(df, 3).loc[2, "A"] - 1.0 / (0.81 + 0.9 + 1.0)) < 1e-9
+
+
+def test_count_rolling_true():
+    df = pd.DataFrame({"A": [1.0, -1.0, 2.0, 3.0]})
+    out = op.count(df > 0, 3)
+    assert out.loc[3, "A"] == 2.0  # last 3 = [-1,2,3] -> 2 positive
+
+
+def test_highday_lowday():
+    df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 2.0]})
+    assert op.highday(df, 4).loc[3, "A"] == 1.0   # max(=3) at pos 2 -> 3-2 = 1 bar ago
+    assert op.lowday(df, 4).loc[3, "A"] == 3.0     # min(=1) at pos 0 -> 3-0 = 3 bars ago
+
+
+def test_regbeta_recovers_slope():
+    b = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
+    a = 2.0 * b + 5.0
+    assert abs(op.regbeta(a, b, 4).loc[5, "A"] - 2.0) < 1e-9

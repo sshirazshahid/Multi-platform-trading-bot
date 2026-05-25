@@ -121,3 +121,60 @@ def elem_min(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
 
 def elem_max(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
     return a.where(a > b, b)
+
+
+# ── GTJA-191 extras (backward-only) ──────────────────────────────────────
+def sma_m(df: pd.DataFrame, n: int, m: int) -> pd.DataFrame:
+    """GTJA SMA(X,N,M): recursive Y_t=(M*X_t+(N-M)*Y_{t-1})/N = EWM(alpha=M/N)."""
+    return df.ewm(alpha=float(m) / float(n), adjust=False).mean()
+
+
+def wma(df: pd.DataFrame, d: int) -> pd.DataFrame:
+    """GTJA WMA(X,N): weights 0.9**i by age (i=bars ago), normalized to sum 1."""
+    d = int(d)
+    w = 0.9 ** np.arange(d)[::-1]   # oldest -> 0.9**(d-1), newest -> 0.9**0
+    w = w / w.sum()
+    return df.rolling(d, min_periods=d).apply(lambda a: float(np.dot(a, w)), raw=True)
+
+
+def count(cond: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Rolling count of True over the trailing `d` bars (cond is boolean)."""
+    return cond.astype(float).rolling(int(d), min_periods=int(d)).sum()
+
+
+def highday(df: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Bars since the max within the trailing `d`-window (0 = today is the max)."""
+    return (int(d) - 1) - ts_argmax(df, d)
+
+
+def lowday(df: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Bars since the min within the trailing `d`-window (0 = today is the min)."""
+    return (int(d) - 1) - ts_argmin(df, d)
+
+
+def regbeta(a: pd.DataFrame, b: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Rolling OLS slope of `a` on `b` over `d` bars = cov(a,b,d) / var(b,d)."""
+    d = int(d)
+    cov = a.rolling(d, min_periods=d).cov(b)
+    var = b.rolling(d, min_periods=d).var(ddof=1)
+    return cov / var
+
+
+def regresi(a: pd.DataFrame, b: pd.DataFrame, d: int) -> pd.DataFrame:
+    """Rolling OLS residual (current bar) of `a` regressed on `b` over `d` bars."""
+    d = int(d)
+    beta = regbeta(a, b, d)
+    intercept = a.rolling(d, min_periods=d).mean() - beta * b.rolling(d, min_periods=d).mean()
+    return a - (intercept + beta * b)
+
+
+def iif(cond: pd.DataFrame, a, b) -> pd.DataFrame:
+    """Ternary (cond ? a : b) over panels; a/b may be DataFrame or scalar.
+
+    Lookahead-safe: purely elementwise (no time axis). NaN in `cond` resolves
+    to False (-> the `b` branch); during warmup both branches are NaN anyway.
+    """
+    av = a.to_numpy() if isinstance(a, pd.DataFrame) else a
+    bv = b.to_numpy() if isinstance(b, pd.DataFrame) else b
+    return pd.DataFrame(np.where(cond.to_numpy(), av, bv),
+                        index=cond.index, columns=cond.columns)

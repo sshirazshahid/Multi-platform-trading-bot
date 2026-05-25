@@ -27,6 +27,9 @@ UNARY = [
     lambda d: op.decay_linear(d, 5), lambda d: op.rank(d),
     lambda d: op.scale(d), lambda d: op.signed_power(d, 0.5),
     lambda d: op.product(d, 5),
+    lambda d: op.sma_m(d, 5, 2), lambda d: op.wma(d, 5),
+    lambda d: op.highday(d, 5), lambda d: op.lowday(d, 5),
+    lambda d: op.count(d > 0, 5),
 ]
 
 
@@ -51,5 +54,17 @@ def test_correlation_is_backward_only():
     a2.iloc[C:] *= 999.0
     b2.iloc[C:] *= 999.0
     out2 = op.correlation(a2, b2, 6)
+    assert np.allclose(out1.iloc[:C].to_numpy(), out2.iloc[:C].to_numpy(),
+                       equal_nan=True)
+
+
+def test_regbeta_is_backward_only():
+    a, b = _df(), _df()
+    C = 50
+    out1 = op.regbeta(a, b, 8)
+    a2, b2 = a.copy(), b.copy()
+    a2.iloc[C:] *= 999.0
+    b2.iloc[C:] *= 999.0
+    out2 = op.regbeta(a2, b2, 8)
     assert np.allclose(out1.iloc[:C].to_numpy(), out2.iloc[:C].to_numpy(),
                        equal_nan=True)
