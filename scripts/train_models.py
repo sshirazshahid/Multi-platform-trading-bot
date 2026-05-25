@@ -63,6 +63,12 @@ FEATURE_KEYS = [
     "ema20_above_50_1h",
     "funding_rate",
     "ob_imbalance",
+    # 2026-05-25 — microstructure forward-collection (no-edge-forensics).
+    # Populated from this date forward via mcp_brain._microstructure_features;
+    # historical candidates coerce to 0.0 (neutral) via _coerce(feats.get(k)).
+    "oi_delta_6h",
+    "depth_ratio",
+    "basis_bps",
 ]
 # Hyperparameter grids (kept small so the multiple-comparisons penalty in
 # Deflated Sharpe stays defensible).

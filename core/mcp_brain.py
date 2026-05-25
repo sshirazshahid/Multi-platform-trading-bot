@@ -500,6 +500,39 @@ def fetch_open_interest(coins: list) -> dict:
     return data
 
 
+def _microstructure_features(coin: str, data: dict) -> dict:
+    """Extract scalp-relevant microstructure features for `coin` from the
+    already-fetched `data` dict. Returns only keys whose source is present
+    (absent -> omitted, so load_dataset's _coerce maps them to a neutral
+    0.0). Every feature is defined so 0.0 is its neutral/missing value.
+    Never raises."""
+    import math as _math
+    out: dict = {}
+    try:
+        fr = (data.get("funding") or {}).get(coin) or {}
+        if "funding_rate" in fr:
+            out["funding_rate"] = float(fr["funding_rate"])
+        mark = float(fr.get("mark_price", 0) or 0)
+        index = float(fr.get("index_price", 0) or 0)
+        if mark > 0 and index > 0:
+            out["basis_bps"] = (mark - index) / index * 1e4
+
+        ob = (data.get("orderbook") or {}).get(coin) or {}
+        if "imbalance" in ob:
+            out["ob_imbalance"] = float(ob["imbalance"])
+        bid = float(ob.get("bid_depth_usd", 0) or 0)
+        ask = float(ob.get("ask_depth_usd", 0) or 0)
+        if bid > 0 and ask > 0:
+            out["depth_ratio"] = _math.log(bid / ask)
+
+        oi = (data.get("oi") or {}).get(coin) or {}
+        if "oi_delta_pct" in oi:
+            out["oi_delta_6h"] = float(oi["oi_delta_pct"])
+    except Exception:
+        return {}
+    return out
+
+
 def compute_technicals(sparkline: list) -> dict:
     """Compute RSI, EMA, Bollinger Bands, and support/resistance from hourly sparkline."""
     if not sparkline or len(sparkline) < 30:
@@ -2886,6 +2919,7 @@ class MCPBrain:
                     feat["p_win_gbm"]      = mscore["p_win_gbm"]
                     feat["p_win_ensemble"] = mscore["p_win_ensemble"]
                     feat["model_version"]  = mscore["model_version"]
+                    feat.update(_microstructure_features(coin, data))  # 2026-05-25 microstructure capture
                     cand_id = wh.record_candidate(
                         exchange="*",  # exchange picked later
                         symbol=f"{coin}/USDT",
