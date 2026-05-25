@@ -49,3 +49,40 @@ def test_run_search_writes_report(tmp_path):
     assert md and js
     loaded = json.loads(js[0].read_text())
     assert loaded["verdict"] == result["verdict"]
+
+
+def _planted_panel(n=1200, n_sym=20, horizon=24, beta=1.0, seed=7):
+    """Panel where 10-bar momentum linearly predicts the forward return."""
+    rng = np.random.default_rng(seed)
+    raw = {}
+    for sym in [f"S{i}/USDT" for i in range(n_sym)]:
+        ret = rng.normal(0, 0.01, n)
+        close = 100 * np.exp(np.cumsum(ret))
+        raw[sym] = pd.DataFrame({
+            "ts": np.arange(1_700_000_000, 1_700_000_000 + n * 3600, 3600),
+            "open": close, "high": close * 1.001, "low": close * 0.999,
+            "close": close, "volume": rng.uniform(500, 1500, n),
+        })
+    p = build_panel(raw, timeframe="1h", horizon=horizon)
+    mom = p.fields["close"].pct_change(10)
+    z = mom.sub(mom.mean(axis=1), axis=0).div(mom.std(axis=1) + 1e-9, axis=0)
+    noise = pd.DataFrame(rng.normal(0, 1.0, p.fwd_ret.shape),
+                         index=p.fwd_ret.index, columns=p.symbols)
+    planted = (beta * z + noise).where(z.notna())
+    planted.iloc[-horizon:] = np.nan
+    p.fwd_ret.iloc[:, :] = planted.values
+    return p
+
+
+def test_run_search_reaches_edge_found_on_planted_signal():
+    # Exercises the EDGE_FOUND branch end-to-end: a real planted momentum
+    # factor must survive all four gates; an unrelated decoy must not.
+    p = _planted_panel()
+    registry = [
+        AlphaDef("MOM10", "Qlib", lambda pl: pl.fields["close"].pct_change(10)),
+        AlphaDef("VOL_DECOY", "Qlib", lambda pl: op.rank(pl.fields["volume"])),
+    ]
+    result = run_search(p, registry)
+    assert result["verdict"] == "EDGE_FOUND", result["table"]
+    assert "MOM10" in result["survivors"]
+    assert "VOL_DECOY" not in result["survivors"]

@@ -14,9 +14,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.stats import kurtosis as _kurtosis
-from scipy.stats import norm
+from scipy.stats import norm, spearmanr
 from scipy.stats import skew as _skew
-from scipy.stats import spearmanr
 
 from core.stat_tests import deflated_sharpe, pbo, sharpe
 
