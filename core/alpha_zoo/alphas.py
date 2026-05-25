@@ -19,26 +19,14 @@ Grow toward the full zoo by appending GTJA-191 (source="GTJA") and Qlib158
 """
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
-
 import numpy as np
 import pandas as pd
 
 from core.alpha_zoo import operators as op
-from core.alpha_zoo.panel import Panel
+from core.alpha_zoo.alphas_gtja import GTJA_ALPHAS
+from core.alpha_zoo.registry import AlphaDef
 
 _IND = ["indneutralize->identity"]  # crypto has no industry map; degrade to identity
-
-
-@dataclass
-class AlphaDef:
-    id: str
-    source: str                       # 'K101' | 'GTJA' | 'Qlib' | 'FF'
-    fn: Callable[[Panel], pd.DataFrame] | None
-    computable: bool = True
-    needs: list[str] = field(default_factory=list)
-    reason_if_dropped: str = ""
 
 
 def _iif(cond: pd.DataFrame, a, b) -> pd.DataFrame:
@@ -725,7 +713,7 @@ def _build_k101() -> list[AlphaDef]:
     return out
 
 
-ALPHAS: list[AlphaDef] = _build_k101()
+ALPHAS: list[AlphaDef] = _build_k101() + GTJA_ALPHAS
 
 
 def computable_alphas() -> list[AlphaDef]:
