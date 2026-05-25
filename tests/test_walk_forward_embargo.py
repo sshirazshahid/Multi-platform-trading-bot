@@ -40,3 +40,11 @@ def test_embargo_at_horizon_purges_overlap():
             gap = te[0] - tr[-1]
             assert gap >= horizon, (
                 f"embargo>=horizon must purge; gap={gap} < horizon={horizon}")
+
+
+def test_trainer_clamps_embargo_to_label_horizon():
+    """train_models must never run CV with embargo < label_horizon_bars."""
+    from scripts.train_models import _effective_embargo
+    assert _effective_embargo(requested=24, label_horizon=96) == 96   # clamp up
+    assert _effective_embargo(requested=120, label_horizon=96) == 120  # keep
+    assert _effective_embargo(requested=96, label_horizon=96) == 96    # equal

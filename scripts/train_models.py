@@ -86,6 +86,29 @@ def _coerce(v) -> float:
         return 0.0
 
 
+def _effective_embargo(requested: int, label_horizon: int) -> int:
+    """Walk-forward embargo must be >= the label's forward horizon, else
+    training rows within `label_horizon` bars of a test fold carry labels
+    that peek into the test window (de Prado purging). 2026-05-25: the live
+    ensemble was trained with embargo=24 < horizon=96 — the leak that let an
+    overfit model (PBO=1.0) show an inflated OOS-WR. Clamp up, never down."""
+    return max(int(requested), int(label_horizon))
+
+
+def _load_label_horizon(market: str, default: int = 96) -> int:
+    """Largest label_horizon_bars for this market from the warehouse labels."""
+    import sqlite3
+    try:
+        c = sqlite3.connect("data/warehouse.sqlite")
+        row = c.execute(
+            "SELECT MAX(label_horizon_bars) FROM labels WHERE market_type=?",
+            (market,)).fetchone()
+        c.close()
+        return int(row[0]) if row and row[0] else default
+    except Exception:
+        return default
+
+
 def load_dataset(market_type: str, warehouse=None):
     """Returns (X, y, ts, syms). Prefers `labels JOIN candidates`; falls back
     to `candidates JOIN trades` if the labels table is empty for this market.
@@ -268,6 +291,14 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     if n_total == 0:
         print(f"ABORT: no rows for market={market}")
         return None
+
+    # 2026-05-25 — clamp embargo >= label horizon (purge label leakage).
+    _horizon = _load_label_horizon(market)
+    _embargo_in = embargo_bars
+    embargo_bars = _effective_embargo(embargo_bars, _horizon)
+    if embargo_bars != _embargo_in:
+        print(f"embargo clamped {_embargo_in} -> {embargo_bars} "
+              f"(label horizon={_horizon}) to prevent CV leakage")
     n_pos = int(y.sum())
     n_neg = int(n_total - n_pos)
     print(f"data source: {source}")
