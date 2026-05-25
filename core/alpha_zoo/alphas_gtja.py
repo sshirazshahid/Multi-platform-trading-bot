@@ -472,3 +472,431 @@ GTJA_ALPHAS.extend([
     AlphaDef("G049", "GTJA", _g49),
     AlphaDef("G050", "GTJA", _g50),
 ])
+
+
+# ── Batch 051-095 ─────────────────────────────────────────────────────────
+def _g51(p):
+    # condition1 = (HIGH+LOW) <= (DELAY(HIGH,1)+DELAY(LOW,1))
+    # condition2 = (HIGH+LOW) >= (DELAY(HIGH,1)+DELAY(LOW,1))
+    # part = MAX(ABS(HIGH-DELAY(HIGH,1)), ABS(LOW-DELAY(LOW,1)))
+    # SUM(condition1?0:part, 12) / (SUM(condition1?0:part,12) + SUM(condition2?0:part,12))
+    h, l = p.fields["high"], p.fields["low"]
+    dh1, dl1 = op.delay(h, 1), op.delay(l, 1)
+    cond1 = (h + l) <= (dh1 + dl1)
+    cond2 = (h + l) >= (dh1 + dl1)
+    part = op.elem_max(op.abs_(h - dh1), op.abs_(l - dl1))
+    p1 = op.ts_sum(op.iif(~cond1, part, 0.0), 12)
+    p2 = op.ts_sum(op.iif(~cond2, part, 0.0), 12)
+    return p1 / (p1 + p2)
+
+
+def _g52(p):
+    # SUM(MAX(0, HIGH-DELAY((HIGH+LOW+CLOSE)/3,1)),26) /
+    # SUM(MAX(0, DELAY((HIGH+LOW+CLOSE)/3,1)-LOW),26) * 100
+    h, l, c = p.fields["high"], p.fields["low"], p.fields["close"]
+    pivot = op.delay((h + l + c) / 3, 1)
+    num = op.ts_sum(op.elem_max(h - pivot, pd.DataFrame(0.0, index=h.index, columns=h.columns)), 26)
+    den = op.ts_sum(op.elem_max(pivot - l, pd.DataFrame(0.0, index=h.index, columns=h.columns)), 26)
+    return num / den * 100
+
+
+def _g53(p):
+    # COUNT(CLOSE > DELAY(CLOSE,1), 12) / 12 * 100
+    c = p.fields["close"]
+    return op.count(c > op.delay(c, 1), 12) / 12 * 100
+
+
+def _g54(p):
+    # -1 * RANK(STD(ABS(CLOSE-OPEN)+(CLOSE-OPEN), 10) + CORR(CLOSE,OPEN,10))
+    c, o = p.fields["close"], p.fields["open"]
+    inner = op.abs_(c - o) + (c - o)
+    return -1 * op.rank(op.stddev(inner, 10) + op.correlation(c, o, 10))
+
+
+def _g55(p):
+    # SUM(
+    #   16*(CLOSE-DELAY(CLOSE,1)+(CLOSE-OPEN)/2+DELAY(CLOSE,1)-DELAY(OPEN,1)) /
+    #   (part1>part2 & part1>part3 ? part1+part2/2+part4/4 :
+    #    (part2>part3 & part2>part1 ? part2+part1/2+part4/4 : part3+part4/4))
+    #   * MAX(part1, part2)
+    # , 20)
+    # where part1=ABS(HIGH-DELAY(CLOSE,1)), part2=ABS(LOW-DELAY(CLOSE,1)),
+    #       part3=ABS(HIGH-DELAY(LOW,1)),   part4=ABS(DELAY(CLOSE,1)-DELAY(OPEN,1))
+    c, o, h, l = p.fields["close"], p.fields["open"], p.fields["high"], p.fields["low"]
+    dc1, do1, dl1 = op.delay(c, 1), op.delay(o, 1), op.delay(l, 1)
+    part1 = op.abs_(h - dc1)
+    part2 = op.abs_(l - dc1)
+    part3 = op.abs_(h - dl1)
+    part4 = op.abs_(dc1 - do1)
+    var1 = part1 + part2 / 2 + part4 / 4
+    var2 = part2 + part1 / 2 + part4 / 4
+    var3 = part3 + part4 / 4
+    denom = op.iif((part1 > part2) & (part1 > part3), var1,
+                   op.iif((part2 > part3) & (part2 > part1), var2, var3))
+    numer = 16 * (c - dc1 + (c - o) / 2 + dc1 - do1)
+    return op.ts_sum(numer / denom * op.elem_max(part1, part2), 20)
+
+
+def _g56(p):
+    # (RANK(OPEN-TSMIN(OPEN,12)) < RANK(RANK(CORR(SUM((HIGH+LOW)/2,19),SUM(MEAN(VOLUME,40),19),13))^5))
+    # boolean result → cast to float
+    o, h, l, v = p.fields["open"], p.fields["high"], p.fields["low"], p.fields["volume"]
+    lhs = op.rank(o - op.ts_min(o, 12))
+    rhs = op.rank(op.rank(op.correlation(op.ts_sum((h + l) / 2, 19),
+                                          op.ts_sum(op.sma(v, 40), 19), 13)) ** 5)
+    return (lhs < rhs).astype(float)
+
+
+def _g57(p):
+    # SMA((CLOSE-TSMIN(LOW,9))/(TSMAX(HIGH,9)-TSMIN(LOW,9))*100, 3, 1)
+    c, h, l = p.fields["close"], p.fields["high"], p.fields["low"]
+    lmin9 = op.ts_min(l, 9)
+    hmax9 = op.ts_max(h, 9)
+    return op.sma_m((c - lmin9) / (hmax9 - lmin9) * 100, 3, 1)
+
+
+def _g58(p):
+    # COUNT(CLOSE > DELAY(CLOSE,1), 20) / 20 * 100
+    c = p.fields["close"]
+    return op.count(c > op.delay(c, 1), 20) / 20 * 100
+
+
+def _g59(p):
+    # SUM(CLOSE=DELAY(CLOSE,1)?0:CLOSE-(CLOSE>DELAY(CLOSE,1)?MIN(LOW,DELAY(CLOSE,1)):MAX(HIGH,DELAY(CLOSE,1))), 20)
+    c, l, h = p.fields["close"], p.fields["low"], p.fields["high"]
+    dc1 = op.delay(c, 1)
+    term = op.iif(c > dc1, c - op.elem_min(l, dc1), op.iif(c < dc1, c - op.elem_max(h, dc1), 0.0))
+    return op.ts_sum(term, 20)
+
+
+def _g60(p):
+    # SUM(((CLOSE-LOW)-(HIGH-CLOSE))/(HIGH-LOW)*VOLUME, 20)
+    c, l, h, v = p.fields["close"], p.fields["low"], p.fields["high"], p.fields["volume"]
+    return op.ts_sum(((c - l) - (h - c)) / (h - l) * v, 20)
+
+
+def _g61(p):
+    # MAX(RANK(DECAYLINEAR(DELTA(VWAP,1),12)),
+    #     RANK(DECAYLINEAR(RANK(CORR(LOW,MEAN(VOLUME,80),8)),17))) * -1
+    vwap, l, v = p.fields["vwap"], p.fields["low"], p.fields["volume"]
+    left = op.rank(op.decay_linear(op.delta(vwap, 1), 12))
+    right = op.rank(op.decay_linear(op.rank(op.correlation(l, op.sma(v, 80), 8)), 17))
+    return op.elem_max(left, right) * -1
+
+
+def _g62(p):
+    # -1 * CORR(HIGH, RANK(VOLUME), 5)
+    h, v = p.fields["high"], p.fields["volume"]
+    return -1 * op.correlation(h, op.rank(v), 5)
+
+
+def _g63(p):
+    # SMA(MAX(CLOSE-DELAY(CLOSE,1),0),6,1) / SMA(ABS(CLOSE-DELAY(CLOSE,1)),6,1) * 100
+    c = p.fields["close"]
+    diff = c - op.delay(c, 1)
+    zero = pd.DataFrame(0.0, index=c.index, columns=c.columns)
+    return op.sma_m(op.elem_max(diff, zero), 6, 1) / op.sma_m(op.abs_(diff), 6, 1) * 100
+
+
+def _g64(p):
+    # MAX(RANK(DECAYLINEAR(CORR(RANK(VWAP),RANK(VOLUME),4),4)),
+    #     RANK(DECAYLINEAR(TSMAX(CORR(RANK(CLOSE),RANK(MEAN(VOLUME,60)),4),13),14))) * -1
+    c, vwap, v = p.fields["close"], p.fields["vwap"], p.fields["volume"]
+    left = op.rank(op.decay_linear(op.correlation(op.rank(vwap), op.rank(v), 4), 4))
+    right = op.rank(op.decay_linear(op.ts_max(op.correlation(op.rank(c), op.rank(op.sma(v, 60)), 4), 13), 14))
+    return op.elem_max(left, right) * -1
+
+
+def _g65(p):
+    # MEAN(CLOSE,6) / CLOSE
+    c = p.fields["close"]
+    return op.sma(c, 6) / c
+
+
+def _g66(p):
+    # (CLOSE-MEAN(CLOSE,6))/MEAN(CLOSE,6)*100
+    c = p.fields["close"]
+    m6 = op.sma(c, 6)
+    return (c - m6) / m6 * 100
+
+
+def _g67(p):
+    # SMA(MAX(CLOSE-DELAY(CLOSE,1),0),24,1) / SMA(ABS(CLOSE-DELAY(CLOSE,1)),24,1) * 100
+    c = p.fields["close"]
+    diff = c - op.delay(c, 1)
+    zero = pd.DataFrame(0.0, index=c.index, columns=c.columns)
+    return op.sma_m(op.elem_max(diff, zero), 24, 1) / op.sma_m(op.abs_(diff), 24, 1) * 100
+
+
+def _g68(p):
+    # SMA(((HIGH+LOW)/2-(DELAY(HIGH,1)+DELAY(LOW,1))/2)*(HIGH-LOW)/VOLUME, 15, 2)
+    h, l, v = p.fields["high"], p.fields["low"], p.fields["volume"]
+    mid_diff = (h + l) / 2 - (op.delay(h, 1) + op.delay(l, 1)) / 2
+    return op.sma_m(mid_diff * (h - l) / v, 15, 2)
+
+
+def _g69(p):
+    # DTM = OPEN<=DELAY(OPEN,1)?0:MAX(HIGH-OPEN, OPEN-DELAY(OPEN,1))
+    # DBM = OPEN>=DELAY(OPEN,1)?0:MAX(OPEN-LOW, OPEN-DELAY(OPEN,1))
+    # SUM(DTM,20)>SUM(DBM,20) → (DTM_sum-DBM_sum)/DTM_sum
+    # SUM(DTM,20)==SUM(DBM,20) → 0
+    # else → (DTM_sum-DBM_sum)/DBM_sum
+    o, h, l = p.fields["open"], p.fields["high"], p.fields["low"]
+    do1 = op.delay(o, 1)
+    zero = pd.DataFrame(0.0, index=o.index, columns=o.columns)
+    dtm = op.iif(o <= do1, zero, op.elem_max(h - o, o - do1))
+    dbm = op.iif(o >= do1, zero, op.elem_max(o - l, o - do1))
+    s_dtm = op.ts_sum(dtm, 20)
+    s_dbm = op.ts_sum(dbm, 20)
+    diff = s_dtm - s_dbm
+    return op.iif(s_dtm > s_dbm, diff / s_dtm,
+                  op.iif(s_dtm == s_dbm, zero, diff / s_dbm))
+
+
+def _g70(p):
+    # STD(AMOUNT, 6)   — AMOUNT proxied as close * volume
+    c, v = p.fields["close"], p.fields["volume"]
+    amount = c * v
+    return op.stddev(amount, 6)
+
+
+def _g71(p):
+    # (CLOSE-MEAN(CLOSE,24))/MEAN(CLOSE,24)*100
+    c = p.fields["close"]
+    m24 = op.sma(c, 24)
+    return (c - m24) / m24 * 100
+
+
+def _g72(p):
+    # SMA((TSMAX(HIGH,6)-CLOSE)/(TSMAX(HIGH,6)-TSMIN(LOW,6))*100, 15, 1)
+    c, h, l = p.fields["close"], p.fields["high"], p.fields["low"]
+    hmax6 = op.ts_max(h, 6)
+    lmin6 = op.ts_min(l, 6)
+    return op.sma_m((hmax6 - c) / (hmax6 - lmin6) * 100, 15, 1)
+
+
+def _g73(p):
+    # -1*TSRANK(DECAYLINEAR(DECAYLINEAR(CORR(CLOSE,VOLUME,10),16),4),5)
+    # - RANK(DECAYLINEAR(CORR(VWAP,MEAN(VOLUME,30),4),3))
+    c, v, vwap = p.fields["close"], p.fields["volume"], p.fields["vwap"]
+    left = -1 * op.ts_rank(op.decay_linear(op.decay_linear(op.correlation(c, v, 10), 16), 4), 5)
+    right = op.rank(op.decay_linear(op.correlation(vwap, op.sma(v, 30), 4), 3))
+    return left - right
+
+
+def _g74(p):
+    # RANK(CORR(SUM(LOW*0.35+VWAP*0.65,20), SUM(MEAN(VOLUME,40),20), 7))
+    # + RANK(CORR(RANK(VWAP), RANK(VOLUME), 6))
+    l, vwap, v = p.fields["low"], p.fields["vwap"], p.fields["volume"]
+    left = op.rank(op.correlation(op.ts_sum(l * 0.35 + vwap * 0.65, 20),
+                                   op.ts_sum(op.sma(v, 40), 20), 7))
+    right = op.rank(op.correlation(op.rank(vwap), op.rank(v), 6))
+    return left + right
+
+
+def _g76(p):
+    # STD(ABS((CLOSE/DELAY(CLOSE,1)-1))/VOLUME, 20) / MEAN(ABS((CLOSE/DELAY(CLOSE,1)-1))/VOLUME, 20)
+    c, v = p.fields["close"], p.fields["volume"]
+    x = op.abs_((c / op.delay(c, 1)) - 1) / v
+    return op.stddev(x, 20) / op.sma(x, 20)
+
+
+def _g77(p):
+    # MIN(RANK(DECAYLINEAR(((H+L)/2+H)-(VWAP+H),20)),
+    #     RANK(DECAYLINEAR(CORR((H+L)/2, MEAN(VOLUME,40),3),6)))
+    h, l, vwap, v = p.fields["high"], p.fields["low"], p.fields["vwap"], p.fields["volume"]
+    inner = ((h + l) / 2 + h) - (vwap + h)  # simplifies to (h+l)/2 - vwap; kept verbatim
+    left = op.rank(op.decay_linear(inner, 20))
+    right = op.rank(op.decay_linear(op.correlation((h + l) / 2, op.sma(v, 40), 3), 6))
+    return op.elem_min(left, right)
+
+
+def _g78(p):
+    # ((HIGH+LOW+CLOSE)/3 - MA((HIGH+LOW+CLOSE)/3,12)) /
+    # (0.015 * MEAN(ABS(CLOSE - MEAN((HIGH+LOW+CLOSE)/3,12)), 12))
+    c, h, l = p.fields["close"], p.fields["high"], p.fields["low"]
+    tp = (h + l + c) / 3
+    ma_tp = op.sma(tp, 12)
+    return (tp - ma_tp) / (0.015 * op.sma(op.abs_(c - ma_tp), 12))
+
+
+def _g79(p):
+    # SMA(MAX(CLOSE-DELAY(CLOSE,1),0),12,1) / SMA(ABS(CLOSE-DELAY(CLOSE,1)),12,1) * 100
+    c = p.fields["close"]
+    diff = c - op.delay(c, 1)
+    zero = pd.DataFrame(0.0, index=c.index, columns=c.columns)
+    return op.sma_m(op.elem_max(diff, zero), 12, 1) / op.sma_m(op.abs_(diff), 12, 1) * 100
+
+
+def _g80(p):
+    # (VOLUME-DELAY(VOLUME,5))/DELAY(VOLUME,5)*100
+    v = p.fields["volume"]
+    dv5 = op.delay(v, 5)
+    return (v - dv5) / dv5 * 100
+
+
+def _g81(p):
+    # SMA(VOLUME, 21, 2)
+    v = p.fields["volume"]
+    return op.sma_m(v, 21, 2)
+
+
+def _g82(p):
+    # SMA((TSMAX(HIGH,6)-CLOSE)/(TSMAX(HIGH,6)-TSMIN(LOW,6))*100, 20, 1)
+    c, h, l = p.fields["close"], p.fields["high"], p.fields["low"]
+    hmax6 = op.ts_max(h, 6)
+    lmin6 = op.ts_min(l, 6)
+    return op.sma_m((hmax6 - c) / (hmax6 - lmin6) * 100, 20, 1)
+
+
+def _g83(p):
+    # -1 * RANK(COVARIANCE(RANK(HIGH), RANK(VOLUME), 5))
+    h, v = p.fields["high"], p.fields["volume"]
+    return -1 * op.rank(op.covariance(op.rank(h), op.rank(v), 5))
+
+
+def _g84(p):
+    # SUM(CLOSE>DELAY(CLOSE,1)?VOLUME:(CLOSE<DELAY(CLOSE,1)?-VOLUME:0), 20)
+    c, v = p.fields["close"], p.fields["volume"]
+    dc1 = op.delay(c, 1)
+    term = op.iif(c > dc1, v, op.iif(c < dc1, -v, 0.0))
+    return op.ts_sum(term, 20)
+
+
+def _g85(p):
+    # TSRANK(VOLUME/MEAN(VOLUME,20),20) * TSRANK(-1*DELTA(CLOSE,7),8)
+    c, v = p.fields["close"], p.fields["volume"]
+    return op.ts_rank(v / op.sma(v, 20), 20) * op.ts_rank(-1 * op.delta(c, 7), 8)
+
+
+def _g86(p):
+    # part1 = (DELAY(CLOSE,20)-DELAY(CLOSE,10))/10
+    # part2 = (DELAY(CLOSE,10)-CLOSE)/10
+    # (part1-part2)>0.25 ? -1 : ((part1-part2)<0 ? 1 : -1*(CLOSE-DELAY(CLOSE,1)))
+    c = p.fields["close"]
+    part1 = (op.delay(c, 20) - op.delay(c, 10)) / 10
+    part2 = (op.delay(c, 10) - c) / 10
+    diff = part1 - part2
+    return op.iif(diff > 0.25, -1.0,
+                  op.iif(diff < 0, 1.0, -1 * (c - op.delay(c, 1))))
+
+
+def _g87(p):
+    # (RANK(DECAYLINEAR(DELTA(VWAP,4),7))
+    #  + TSRANK(DECAYLINEAR((LOW-VWAP)/(OPEN-(HIGH+LOW)/2),11),7)) * -1
+    # Note: (LOW*0.9+LOW*0.1) = LOW; simplified to LOW-VWAP
+    vwap, l, o, h = p.fields["vwap"], p.fields["low"], p.fields["open"], p.fields["high"]
+    left = op.rank(op.decay_linear(op.delta(vwap, 4), 7))
+    right = op.ts_rank(op.decay_linear((l - vwap) / (o - (h + l) / 2), 11), 7)
+    return (left + right) * -1
+
+
+def _g88(p):
+    # (CLOSE-DELAY(CLOSE,20))/DELAY(CLOSE,20)*100
+    c = p.fields["close"]
+    dc20 = op.delay(c, 20)
+    return (c - dc20) / dc20 * 100
+
+
+def _g89(p):
+    # 2*(SMA(CLOSE,13,2)-SMA(CLOSE,27,2)-SMA(SMA(CLOSE,13,2)-SMA(CLOSE,27,2),10,2))
+    c = p.fields["close"]
+    fast = op.sma_m(c, 13, 2)
+    slow = op.sma_m(c, 27, 2)
+    diff = fast - slow
+    return 2 * (diff - op.sma_m(diff, 10, 2))
+
+
+def _g90(p):
+    # RANK(CORR(RANK(VWAP), RANK(VOLUME), 5)) * -1
+    vwap, v = p.fields["vwap"], p.fields["volume"]
+    return op.rank(op.correlation(op.rank(vwap), op.rank(v), 5)) * -1
+
+
+def _g91(p):
+    # (RANK(CLOSE-TSMAX(CLOSE,5)) * RANK(CORR(MEAN(VOLUME,40),LOW,5))) * -1
+    c, v, l = p.fields["close"], p.fields["volume"], p.fields["low"]
+    return op.rank(c - op.ts_max(c, 5)) * op.rank(op.correlation(op.sma(v, 40), l, 5)) * -1
+
+
+def _g92(p):
+    # MAX(RANK(DECAYLINEAR(DELTA(CLOSE*0.35+VWAP*0.65,2),3)),
+    #     TSRANK(DECAYLINEAR(ABS(CORR(MEAN(VOLUME,180),CLOSE,13)),5),15)) * -1
+    c, vwap, v = p.fields["close"], p.fields["vwap"], p.fields["volume"]
+    left = op.rank(op.decay_linear(op.delta(c * 0.35 + vwap * 0.65, 2), 3))
+    right = op.ts_rank(op.decay_linear(op.abs_(op.correlation(op.sma(v, 180), c, 13)), 5), 15)
+    return op.elem_max(left, right) * -1
+
+
+def _g93(p):
+    # SUM(OPEN>=DELAY(OPEN,1)?0:MAX(OPEN-LOW,OPEN-DELAY(OPEN,1)), 20)
+    o, l = p.fields["open"], p.fields["low"]
+    do1 = op.delay(o, 1)
+    zero = pd.DataFrame(0.0, index=o.index, columns=o.columns)
+    term = op.iif(o >= do1, zero, op.elem_max(o - l, o - do1))
+    return op.ts_sum(term, 20)
+
+
+def _g94(p):
+    # SUM(CLOSE>DELAY(CLOSE,1)?VOLUME:(CLOSE<DELAY(CLOSE,1)?-VOLUME:0), 30)
+    c, v = p.fields["close"], p.fields["volume"]
+    dc1 = op.delay(c, 1)
+    term = op.iif(c > dc1, v, op.iif(c < dc1, -v, 0.0))
+    return op.ts_sum(term, 30)
+
+
+def _g95(p):
+    # STD(AMOUNT, 20)   — AMOUNT proxied as close * volume
+    c, v = p.fields["close"], p.fields["volume"]
+    amount = c * v
+    return op.stddev(amount, 20)
+
+
+GTJA_ALPHAS.extend([
+    AlphaDef("G051", "GTJA", _g51),
+    AlphaDef("G052", "GTJA", _g52),
+    AlphaDef("G053", "GTJA", _g53),
+    AlphaDef("G054", "GTJA", _g54),
+    AlphaDef("G055", "GTJA", _g55),
+    AlphaDef("G056", "GTJA", _g56),
+    AlphaDef("G057", "GTJA", _g57),
+    AlphaDef("G058", "GTJA", _g58),
+    AlphaDef("G059", "GTJA", _g59),
+    AlphaDef("G060", "GTJA", _g60),
+    AlphaDef("G061", "GTJA", _g61),
+    AlphaDef("G062", "GTJA", _g62),
+    AlphaDef("G063", "GTJA", _g63),
+    AlphaDef("G064", "GTJA", _g64),
+    AlphaDef("G065", "GTJA", _g65),
+    AlphaDef("G066", "GTJA", _g66),
+    AlphaDef("G067", "GTJA", _g67),
+    AlphaDef("G068", "GTJA", _g68),
+    AlphaDef("G069", "GTJA", _g69),
+    AlphaDef("G070", "GTJA", _g70, needs=["amount~close*volume"]),
+    AlphaDef("G071", "GTJA", _g71),
+    AlphaDef("G072", "GTJA", _g72),
+    AlphaDef("G073", "GTJA", _g73),
+    AlphaDef("G074", "GTJA", _g74),
+    AlphaDef("G075", "GTJA", None, computable=False, needs=["benchmark"],
+             reason_if_dropped="needs benchmark index BANCHMARKINDEXCLOSE/OPEN (no crypto equivalent)"),
+    AlphaDef("G076", "GTJA", _g76),
+    AlphaDef("G077", "GTJA", _g77),
+    AlphaDef("G078", "GTJA", _g78),
+    AlphaDef("G079", "GTJA", _g79),
+    AlphaDef("G080", "GTJA", _g80),
+    AlphaDef("G081", "GTJA", _g81),
+    AlphaDef("G082", "GTJA", _g82),
+    AlphaDef("G083", "GTJA", _g83),
+    AlphaDef("G084", "GTJA", _g84),
+    AlphaDef("G085", "GTJA", _g85),
+    AlphaDef("G086", "GTJA", _g86),
+    AlphaDef("G087", "GTJA", _g87),
+    AlphaDef("G088", "GTJA", _g88),
+    AlphaDef("G089", "GTJA", _g89),
+    AlphaDef("G090", "GTJA", _g90),
+    AlphaDef("G091", "GTJA", _g91),
+    AlphaDef("G092", "GTJA", _g92),
+    AlphaDef("G093", "GTJA", _g93),
+    AlphaDef("G094", "GTJA", _g94),
+    AlphaDef("G095", "GTJA", _g95, needs=["amount~close*volume"]),
+])
