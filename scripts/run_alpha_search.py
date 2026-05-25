@@ -123,7 +123,7 @@ def _write_report(result: dict, report_dir: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     stamp = date.today().isoformat()
     (report_dir / f"alpha_search_{stamp}.json").write_text(
-        json.dumps(result, indent=2, default=float))
+        json.dumps(result, indent=2, default=float), encoding="utf-8")
     lines = [
         f"# Alpha Search — {stamp}", "",
         f"**Verdict:** {result['verdict']}",
@@ -141,7 +141,7 @@ def _write_report(result: dict, report_dir: Path) -> None:
         lines.append(
             f"| {r['id']} | {r['source']} | {r['ir_is']} | {r['category']} | "
             f"{r['oos_sharpe']} | {r['dsr']} | {r['fdr_p']} | {r['survivor']} |")
-    (report_dir / f"alpha_search_{stamp}.md").write_text("\n".join(lines))
+    (report_dir / f"alpha_search_{stamp}.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def _load_live_panel(timeframe: str = "1h") -> Panel:
