@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import date
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from core.alpha_zoo import alphas as alpha_mod
 from core.alpha_zoo import screen
@@ -26,7 +31,6 @@ PBO_MAX = 0.50        # Stage-2 overfit ceiling
 FDR_Q = 0.05          # Benjamini-Hochberg level
 PBO_PARTITIONS = 16
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_DIR = ROOT / "reports"
 
 
