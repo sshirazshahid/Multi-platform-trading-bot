@@ -224,9 +224,13 @@ def test_promotion_gate_refuses_low_wr_uplift(tmp_path: Path, monkeypatch):
     assert "wr_uplift" in audit_line["reason"]
 
 
-def test_promotion_gate_promotes_with_strong_uplift(tmp_path: Path, monkeypatch):
-    """Mirror of the deployed ensemble's profile (rounded):
-    AUC=0.76, oos_wr=0.71, base_rate=0.14 → uplift=5.0 — must promote."""
+def test_promotion_gate_rejects_overfit_despite_strong_uplift(tmp_path: Path, monkeypatch):
+    """2026-05-25 (no-edge-forensics): this is the deployed ensemble's exact
+    profile — oos_wr 0.71, uplift ~5x — BUT deflated_sharpe=0.0 and pbo=1.0.
+    The old permissive gate (MIN_DSR=0.0, MAX_PBO=1.0) PROMOTED it; that was
+    the bug that put an overfit mirage live. The honest gate must REJECT it:
+    a high WR-uplift coexisting with PBO=1.0 / DSR=0 is the textbook signature
+    of selection overfit, not edge."""
     from core import promotion_gate as pg
 
     monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
@@ -236,20 +240,22 @@ def test_promotion_gate_promotes_with_strong_uplift(tmp_path: Path, monkeypatch)
     row = {
         "model_version": "real_like_deployed",
         "oos_wr": 0.71,
-        "deflated_sharpe": 0.0,        # DSR permissive — known broken
-        "pbo": 1.0,                    # PBO permissive — known broken
+        "deflated_sharpe": 0.0,        # zero risk-adjusted edge
+        "pbo": 1.0,                    # maximal overfit probability
         "artifact_path": str(art),
     }
     promote = pg.promote_if_eligible(row, market_type="futures",
                                      models_dir=tmp_path)
-    assert promote is True
+    assert promote is False, "overfit profile (PBO=1.0/DSR=0) must be rejected"
     audit_line = json.loads(
         (tmp_path / "audit.jsonl").read_text().strip().splitlines()[0]
     )
     diag = audit_line
-    assert diag["promote"] is True
+    assert diag["promote"] is False
+    # uplift is still computed and large — proving the gate rejected on
+    # PBO/DSR, not on a weak uplift.
     assert diag["wr_uplift"] >= 5.0, (
-        f"deployed-like profile must show ≥5x uplift, got {diag['wr_uplift']}")
+        f"profile still shows ≥5x uplift, got {diag['wr_uplift']}")
 
 
 def test_promotion_gate_legacy_artifact_without_wr_train_passes(
@@ -287,9 +293,10 @@ def test_module_constants_match_documented_intent():
     assert pg.MIN_OOS_WR == 0.55
     assert pg.MIN_AUC == 0.60
     assert pg.MIN_WR_UPLIFT == 1.5
-    # DSR / PBO permissive — see docstring for the rationale.
-    assert pg.MIN_DSR == 0.0
-    assert pg.MAX_PBO == 1.0
+    # 2026-05-25 — DSR/PBO tightened to honest floors (was 0.0 / 1.0, which
+    # rubber-stamped the overfit live ensemble). See no-edge-forensics.
+    assert pg.MIN_DSR == 0.10
+    assert pg.MAX_PBO == 0.5
 
 
 def test_load_model_bundle_recovers_after_retry_window(tmp_path: Path, monkeypatch):
