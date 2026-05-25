@@ -61,26 +61,34 @@ def test_expectancy_whitelist_emptied_phase33():
 # ─── Static lists confirmed clear ─────────────────────────────────────
 
 
-def test_blacklist_hard_evidence_based():
-    """Phase 39 (2026-05-09): BLACKLIST_HARD re-enabled from 421-trade data."""
+def test_blacklist_hard_empty_under_unblock_all():
+    """2026-05-21 UNBLOCK_ALL: BLACKLIST_HARD cleared per user directive
+    ("Clear all blacklist and blocked coins"). This SUPERSEDES the Phase-39
+    (2026-05-09) re-enablement that the prior version of this test pinned —
+    Phase 39 re-added {SOL,XRP,APT,ETH,DOGE,BTC}, then UNBLOCK_ALL removed
+    them again and the test was never updated. Matches this file's own
+    docstring (line 7) + memory feedback_unblock_all_trades_2026_04_28.
+    NOTE: the SCALP_TIER_ENABLED=false kill switch restores the Phase-39
+    set; this asserts the DEFAULT (SCALP on) state."""
     from config import BLACKLIST_HARD
-    expected = {"SOL/USDT:USDT", "XRP/USDT:USDT", "APT/USDT:USDT",
-                "ETH/USDT:USDT", "DOGE/USDT:USDT", "BTC/USDT:USDT"}
-    assert expected == BLACKLIST_HARD, f"BLACKLIST_HARD mismatch: got {BLACKLIST_HARD}"
+    assert BLACKLIST_HARD == set(), (
+        f"UNBLOCK_ALL requires empty BLACKLIST_HARD; got {BLACKLIST_HARD}")
 
 
-def test_allowed_hours_evidence_based():
-    """Phase 39: 7 catastrophic loss hours blocked from 421-trade data."""
+def test_allowed_hours_all_open_under_unblock_all():
+    """UNBLOCK_ALL: all 24 hours allowed, none blocked (supersedes Phase
+    39/44 hour gating). Kill-switch restores Phase-44 gates when SCALP off."""
     from config import ALLOWED_HOURS_UTC, BLOCKED_HOURS_UTC
-    assert len(ALLOWED_HOURS_UTC) == 19  # Phase 44: H05+H22 unblocked
-    assert len(BLOCKED_HOURS_UTC) == 5  # Phase 44: H05+H22 unblocked
+    assert len(ALLOWED_HOURS_UTC) == 24
+    assert len(BLOCKED_HOURS_UTC) == 0
 
 
-def test_blocked_hours_are_catastrophic_losers():
-    """Phase 39: blocked hours have combined -$107+ loss all-time."""
+def test_no_blocked_hours_under_unblock_all():
+    """UNBLOCK_ALL: BLOCKED_HOURS_UTC empty. PEAK/WARMUP retained as sizing
+    hints only (not entry gates)."""
     from config import BLOCKED_HOURS_UTC
-    catastrophic = {0, 9, 19, 21, 23}  # Phase 44: H05/H22 unblocked
-    assert catastrophic == BLOCKED_HOURS_UTC, f"BLOCKED_HOURS_UTC mismatch: got {BLOCKED_HOURS_UTC}"
+    assert BLOCKED_HOURS_UTC == set(), (
+        f"UNBLOCK_ALL requires empty BLOCKED_HOURS_UTC; got {BLOCKED_HOURS_UTC}")
 
 
 def test_shorts_require_btc_bear_off():

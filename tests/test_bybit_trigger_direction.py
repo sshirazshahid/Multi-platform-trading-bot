@@ -50,11 +50,22 @@ def om(monkeypatch) -> OrderManager:
 
 
 def _make_exchange(name: str) -> MagicMock:
-    """Mock exchange that passes pre-flight checks but records create_order."""
+    """Mock exchange that passes pre-flight checks but records create_order.
+
+    2026-05-25 — must provide a realistic fetch_ticker. The SL pre-flight
+    added 2026-05-21 (order_manager.py:1055, project_breakeven_fail_closed_
+    kills_winners_2026_04_25) reads ticker["last"] and closes instead of
+    placing if the SL is already on the wrong side of mark. An unconfigured
+    MagicMock's __float__ defaults to 1.0, so a buy-side SL=95 read as
+    "crossed" (95 >= 1) and the position was closed before any SL/TP order
+    was recorded. Positions here use entry=100, so mark=100 keeps SL/TP on
+    the correct sides (buy SL 95 < 100 < TP 110; sell TP 90 < 100 < SL 105).
+    """
     ex = MagicMock()
     ex.name = name
     ex.round_price.side_effect = lambda sym, p: p
     ex.round_quantity.side_effect = lambda sym, q: q
+    ex.fetch_ticker.return_value = {"last": 100.0, "close": 100.0}
     return ex
 
 
