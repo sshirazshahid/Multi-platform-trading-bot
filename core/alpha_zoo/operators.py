@@ -168,6 +168,11 @@ def regresi(a: pd.DataFrame, b: pd.DataFrame, d: int) -> pd.DataFrame:
     return a - (intercept + beta * b)
 
 
+def quantile(df: pd.DataFrame, d: int, q: float) -> pd.DataFrame:
+    """Rolling `q`-quantile over the trailing `d` bars (Qlib QTLU/QTLD)."""
+    return df.rolling(int(d), min_periods=int(d)).quantile(float(q))
+
+
 def iif(cond: pd.DataFrame, a, b) -> pd.DataFrame:
     """Ternary (cond ? a : b) over panels; a/b may be DataFrame or scalar.
 

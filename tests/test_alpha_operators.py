@@ -102,3 +102,8 @@ def test_regbeta_recovers_slope():
     b = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
     a = 2.0 * b + 5.0
     assert abs(op.regbeta(a, b, 4).loc[5, "A"] - 2.0) < 1e-9
+
+
+def test_quantile_rolling_median():
+    df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    assert op.quantile(df, 5, 0.5).loc[4, "A"] == 3.0   # median of 1..5

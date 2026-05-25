@@ -29,7 +29,7 @@ UNARY = [
     lambda d: op.product(d, 5),
     lambda d: op.sma_m(d, 5, 2), lambda d: op.wma(d, 5),
     lambda d: op.highday(d, 5), lambda d: op.lowday(d, 5),
-    lambda d: op.count(d > 0, 5),
+    lambda d: op.count(d > 0, 5), lambda d: op.quantile(d, 5, 0.8),
 ]
 
 

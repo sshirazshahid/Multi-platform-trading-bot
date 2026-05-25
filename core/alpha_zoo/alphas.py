@@ -24,6 +24,7 @@ import pandas as pd
 
 from core.alpha_zoo import operators as op
 from core.alpha_zoo.alphas_gtja import GTJA_ALPHAS
+from core.alpha_zoo.alphas_qlib import QLIB_ALPHAS
 from core.alpha_zoo.registry import AlphaDef
 
 _IND = ["indneutralize->identity"]  # crypto has no industry map; degrade to identity
@@ -713,7 +714,7 @@ def _build_k101() -> list[AlphaDef]:
     return out
 
 
-ALPHAS: list[AlphaDef] = _build_k101() + GTJA_ALPHAS
+ALPHAS: list[AlphaDef] = _build_k101() + GTJA_ALPHAS + QLIB_ALPHAS
 
 
 def computable_alphas() -> list[AlphaDef]:
