@@ -171,47 +171,31 @@ class BitgetClient(BaseExchange):
     def transfer(self, amount: float, from_account: str = "spot",
                  to_account: str = "futures") -> bool:
         """Transfer USDT between Bitget spot and futures (USDT-M) accounts.
-        Bitget v2 API uses fromType/toType with specific account type strings."""
+
+        Uses ccxt's native transfer() with *unified* account names; ccxt maps
+        "swap" -> Bitget's "usdt_futures" internally. Do not pass the
+        exchange-native string ("usdt-futures") or use the low-level
+        request(api="private") path — both break on ccxt 4.5 (the latter
+        raises KeyError 'r' because bitget.sign() expects `api` as a list)."""
         if not self._ok():
             return False
 
-        # Bitget v2 account types
-        _ACC_MAP = {
+        # bot account vocabulary -> ccxt unified account names
+        _UNIFIED = {
             "spot": "spot",
-            "futures": "usdt-futures",
-            "mix_usdt": "usdt-futures",
+            "futures": "swap",
+            "mix_usdt": "swap",
+            "swap": "swap",
         }
-        from_type = _ACC_MAP.get(from_account, from_account)
-        to_type   = _ACC_MAP.get(to_account, to_account)
+        from_type = _UNIFIED.get(from_account, from_account)
+        to_type   = _UNIFIED.get(to_account, to_account)
 
-        # Method 1: ccxt transfer with Bitget-specific params
         try:
-            self.exchange.transfer("USDT", amount, from_type, to_type, {
-                "fromAccountType": from_type,
-                "toAccountType": to_type,
-            })
+            self.exchange.transfer("USDT", amount, from_type, to_type)
             logger.info(f"[Bitget] Transferred {amount:.4f} USDT {from_account} -> {to_account}")
             return True
-        except Exception as e1:
-            logger.debug(f"[Bitget] Transfer method 1: {e1}")
-
-        # Method 2: Use ccxt request() with Bitget v2 transfer endpoint
-        try:
-            self.exchange.request(
-                "api/v2/spot/wallet/transfer",
-                api="private",
-                method="POST",
-                params={
-                    "fromType": from_type,
-                    "toType": to_type,
-                    "amount": str(amount),
-                    "coin": "USDT",
-                },
-            )
-            logger.info(f"[Bitget] Transferred {amount:.4f} USDT {from_account} -> {to_account} (v2)")
-            return True
-        except Exception as e2:
-            logger.warning(f"[Bitget] Transfer failed: {e2}")
+        except Exception as e:
+            logger.warning(f"[Bitget] Transfer failed: {e}")
             return False
 
     # ── fetch_ohlcv ───────────────────────────────────────────────────
