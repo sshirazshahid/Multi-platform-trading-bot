@@ -1744,7 +1744,8 @@ class BotEngine:
             return False
 
         # (B) CONTROLLED_LIVE requires the env latch in addition to config.
-        if OPERATING_MODE == "CONTROLLED_LIVE" and not CONTROLLED_LIVE_ENABLED:
+        from core.live_gate import live_latch_permits_execution
+        if not live_latch_permits_execution(OPERATING_MODE, CONTROLLED_LIVE_ENABLED):
             logger.error(
                 "[Mode] OPERATING_MODE=CONTROLLED_LIVE but CONTROLLED_LIVE_ENABLED "
                 "env var is not 'true'. Refusing to place live orders. Aborting."

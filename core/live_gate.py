@@ -91,3 +91,18 @@ def enforce_controlled_live_gate(operating_mode: str,
         raise SystemExit(
             "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: " + msg
         )
+
+
+def live_latch_permits_execution(operating_mode: str,
+                                 controlled_live_enabled: bool) -> bool:
+    """Latch 2 of the CONTROLLED_LIVE double-latch (the env-var latch).
+
+    Real-order execution is permitted UNLESS we are in CONTROLLED_LIVE without
+    the `CONTROLLED_LIVE_ENABLED` env latch set. PAPER places paper orders
+    regardless; OBSERVATION is blocked by a separate upstream gate, so this
+    latch alone does not block it. Latch 1 (a signed checklist) is enforced
+    separately by `enforce_controlled_live_gate` at startup.
+    """
+    if (operating_mode or "").upper() == "CONTROLLED_LIVE" and not controlled_live_enabled:
+        return False
+    return True

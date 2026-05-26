@@ -28,7 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ccxt  # noqa: E402
 
 from core.alpha_zoo.screen import (  # noqa: E402
-    cross_sectional_ic, dsr_for_returns, fdr_bh, ir, long_short_returns, sharpe_pvalue,
+    cross_sectional_ic,
+    dsr_for_returns,
+    fdr_bh,
+    ir,
+    long_short_returns,
+    sharpe_pvalue,
 )
 from core.stat_tests import sharpe  # noqa: E402
 

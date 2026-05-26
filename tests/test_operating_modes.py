@@ -14,6 +14,7 @@ import pytest
 from core.live_gate import (
     enforce_controlled_live_gate,
     is_checklist_signed,
+    live_latch_permits_execution,
 )
 
 
@@ -108,3 +109,35 @@ def test_enforce_controlled_live_signed_passes(tmp_path):
     today = date.today().isoformat()
     _write(f, f"Signed-By: Owner {today}\n")
     enforce_controlled_live_gate("CONTROLLED_LIVE", path=f)  # no raise
+
+
+# ── live_latch_permits_execution (Latch 2: CONTROLLED_LIVE_ENABLED env) ──
+# Latch 1 (checklist) is covered above. Latch 2 is the second latch the bot
+# requires before placing REAL orders: OPERATING_MODE=CONTROLLED_LIVE alone is
+# not enough — the CONTROLLED_LIVE_ENABLED env flag must also be true. These
+# tests pin the double-latch so neither half can silently arm live trading.
+
+def test_latch_blocks_controlled_live_without_env():
+    """The halt case: CONTROLLED_LIVE but env latch off → execution refused."""
+    assert live_latch_permits_execution("CONTROLLED_LIVE", False) is False
+
+
+def test_latch_arms_controlled_live_with_env():
+    assert live_latch_permits_execution("CONTROLLED_LIVE", True) is True
+
+
+def test_latch_paper_unaffected():
+    """PAPER places paper orders regardless of the live env flag."""
+    assert live_latch_permits_execution("PAPER", False) is True
+    assert live_latch_permits_execution("PAPER", True) is True
+
+
+def test_latch_is_case_insensitive():
+    """Mode comparison must not be defeated by casing."""
+    assert live_latch_permits_execution("controlled_live", False) is False
+
+
+def test_latch_observation_permitted_here():
+    """OBSERVATION is blocked upstream (separate gate); this latch alone
+    does not block it — documents the division of responsibility."""
+    assert live_latch_permits_execution("OBSERVATION", False) is True
