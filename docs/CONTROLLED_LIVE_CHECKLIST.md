@@ -71,4 +71,10 @@ Example (remove the `<!-- -->` and replace the placeholder values):
 $2 max loss/trade, 2h hold minimum. Root causes fixed: leverage hardcode,
 early closes, R:R ratio.*
 
-Signed-By: SyedShirazShahid 2026-04-15
+<!-- REVOKED 2026-05-26 (audit): live sign-off withdrawn — acceptance criteria
+     now FAIL. 30d expectancy is NEGATIVE (~-$0.45/trade), profit factor < 1.0,
+     win rate 44% vs 67-81% breakeven (realized R:R 0.24-0.49), and a 443-alpha
+     falsification search found no predictive edge (PBO 0.67, IR 0.37).
+     Do NOT re-sign until 30d paper expectancy > 0 AND an out-of-sample edge is
+     demonstrated. Reverse by uncommenting a fresh, correctly-dated line below.
+     Prior signature: Signed-By: SyedShirazShahid 2026-04-15 -->
