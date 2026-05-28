@@ -14,10 +14,11 @@ from pathlib import Path
 
 def test_age_cuts_applied_to_risk_profile():
     from config import RISK
-    assert RISK["max_position_age_hours"] == 1.25, \
-        f"max_position_age_hours should be 1.25 (75min); got {RISK['max_position_age_hours']}"
-    assert RISK["max_stale_hours"] == 1.0
-    assert RISK["max_loss_age_hours"] == 0.75
+    # 2026-05-28: relaxed for 15m-1h candle entries
+    assert RISK["max_position_age_hours"] == 4.0, \
+        f"max_position_age_hours should be 4.0; got {RISK['max_position_age_hours']}"
+    assert RISK["max_stale_hours"] == 3.0
+    assert RISK["max_loss_age_hours"] == 1.5
 
 
 def test_age_cuts_preserve_30_60min_sweet_spot():
@@ -57,12 +58,16 @@ def test_lock_fraction_high_tiers_preserved():
 # ── 4. MAKER_ONLY ────────────────────────────────────────────────
 
 
-def test_maker_only_config_present_default_off():
+def test_maker_only_config_present_default_on():
+    # 2026-05-28: default flipped ON per operator directive (informed consent),
+    # after research/scalp_edge_finding_2026_05_28.md found taker fees the
+    # single largest controllable drag. SL placement is unaffected (separate
+    # order_manager path). Revert with MAKER_ONLY_ENABLED=false.
     from config import MAKER_ONLY
     assert "enabled" in MAKER_ONLY
     assert "max_wait_sec" in MAKER_ONLY
-    assert MAKER_ONLY["enabled"] is False, \
-        "Default MUST be False — opt-in only after operator review"
+    assert MAKER_ONLY["enabled"] is True, \
+        "Default flipped ON 2026-05-28 (operator directive); MAKER_ONLY_ENABLED=false reverts"
 
 
 def test_smart_executor_supports_maker_only():
@@ -92,12 +97,12 @@ def test_phase15_full_set_summary():
     """Sanity: every Phase 15 knob is present with the expected value."""
     from config import MAKER_ONLY, RISK
     expected = {
-        "max_position_age_hours": 1.25,
-        "max_stale_hours": 1.0,
-        "max_loss_age_hours": 0.75,
+        "max_position_age_hours": 4.0,
+        "max_stale_hours": 3.0,
+        "max_loss_age_hours": 1.5,
         "trailing_activation": 0.012,
         "trailing_distance": 0.008,
     }
     for k, v in expected.items():
         assert RISK[k] == v, f"RISK[{k}] expected {v}, got {RISK[k]}"
-    assert MAKER_ONLY["enabled"] is False
+    assert MAKER_ONLY["enabled"] is True  # 2026-05-28: default flipped ON (operator directive)

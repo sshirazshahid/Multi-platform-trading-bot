@@ -213,8 +213,52 @@ PAIR_OVERRIDES = {
 # to take the fee saving once convinced the missed-fill cost is less
 # than the fee saving on the trades that DO fill.
 MAKER_ONLY = {
-    "enabled":      os.getenv("MAKER_ONLY_ENABLED", "false").lower() == "true",
+    # 2026-05-28: default flipped ON. The scalp-edge study (research/
+    # scalp_edge_finding_2026_05_28.md) found taker fees are the single
+    # largest controllable drag — taker round-trip 0.12% vs maker ~0.04%
+    # roughly halves the per-trade bleed (-0.09% -> ~0% on the best cohorts).
+    # Honest caveat: maker limit entries are adversely selected (filled on
+    # losers, skipped on the bounce), so this SLOWS the bleed, does not
+    # reverse it. SL placement is unaffected (separate order_manager path,
+    # always a stop/market order) — the fail-closed per-trade floor stays.
+    # Revert with MAKER_ONLY_ENABLED=false.
+    "enabled":      os.getenv("MAKER_ONLY_ENABLED", "true").lower() == "true",
     "max_wait_sec": int(os.getenv("MAKER_ONLY_MAX_WAIT_SEC", "120")),
+}
+
+# ==============================================================
+# SCALP MODE — 15-60 minute VWAP-centric entries (2026-05-27)
+# ==============================================================
+# Evidence: 454-trade dataset shows 15-60m holds = 63.8% WR (+$4.41)
+# vs 0-15m = 32.3% WR (-$41.10) and >60m = 35-38% WR.
+# VWAP + Long = 61.9% WR — strongest signal in the dataset.
+# B1 MACD (25% WR) and B3 15m timing (35% WR) are anti-predictive.
+SCALP_MODE = {
+    "enabled":           os.getenv("SCALP_MODE_ENABLED", "true").lower() == "true",
+    "entry_threshold":   int(os.getenv("SCALP_ENTRY_THRESHOLD", "65")),
+    # 2026-05-28: tightened SL/TP for $1-2/trade target at $130+ notional.
+    # Old 1.0/1.8 produced $0.62/$1.12 per trade at $62 notional — too small.
+    # New 0.8/1.3 at $136 notional (35% × 3x × $130 pocket):
+    #   TP hit: $136 × 1.3% = $1.77   SL hit: $136 × 0.8% = $1.09
+    #   R:R = 1.625:1, clears min_rr_ratio 1.2:1
+    "sl_pct":            float(os.getenv("SCALP_SL_PCT", "0.8")),
+    "tp_pct":            float(os.getenv("SCALP_TP_PCT", "1.3")),
+    # 2026-05-28: raised for 15m-1h candle entries; 60min/45min was killing winners
+    "time_wall_min":     int(os.getenv("SCALP_TIME_WALL_MIN", "180")),
+    "stale_close_min":   int(os.getenv("SCALP_STALE_MIN", "120")),
+    "stale_min_profit":  float(os.getenv("SCALP_STALE_PROFIT", "0.3")),
+    "trailing_enabled":  os.getenv("SCALP_TRAILING", "false").lower() == "true",
+    "longs_only":        os.getenv("SCALP_LONGS_ONLY", "true").lower() == "true",
+    "min_atr_pct":       float(os.getenv("SCALP_MIN_ATR", "0.8")),
+    "max_spread_bps":    float(os.getenv("SCALP_MAX_SPREAD_BPS", "10")),
+    "vwap_distance_max_pct": float(os.getenv("SCALP_VWAP_MAX", "0.3")),
+    "peak_hours":        {22, 23, 0},
+    "partial_tp": {
+        "enabled":       True,
+        "fraction":      0.5,
+        "at_pct":        1.0,
+        "move_sl_to_be": True,
+    },
 }
 
 # ==============================================================
@@ -469,23 +513,17 @@ RISK = {
     "max_drawdown_pct":     0.08,
     "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
     # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h.
-    # 2026-05-03 (Phase 15) — fresh 30d hold-time analysis on 186 futures
-    # trades shows even sharper edge collapse than Phase 14 saw:
-    #   <60min:   +$5.10 / 56 trades / WR ~70%   ← profitable
-    #   1-2h:     -$1.85 / 52 trades / WR 40%    ← marginal bleed
-    #   2-4h:    -$24.88 / 47 trades / WR 28%    ← HEAVY BLEED
-    #   4-8h:    -$11.46 / 27 trades / WR 37%
-    #   >8h:     -$13.56 /  4 trades / WR  0%
-    # >60min cohort sums to -$51.75 across 130 trades. Cutting hard at
-    # 75min preserves ALL profitable cells (the 30-60min sweet spot
-    # at +$3.71 / 23 trades / 70% WR / R:R 1.8 is intact) while
-    # eliminating the 2-4h bleed entirely.
-    # Winners still exit naturally via mcp_take_profit / trailing.
-    # Age cutoffs only fire on flat or losing positions that haven't
-    # resolved within the empirical edge window.
-    "max_position_age_hours": 1.25,   # was 4 — empirical edge expires at 60min, 15min buffer
-    "max_stale_hours":       1.0,     # was 2.0 — flat positions cut at 60min
-    "max_loss_age_hours":    0.75,    # was 1.5 — losing positions cut at 45min
+    # 2026-05-03 (Phase 15) — hold-time analysis on 186 trades.
+    # 2026-05-28 — RELAXED for 15m-1h candle trading. The 1.0h stale kill
+    # was prematurely closing profitable positions (+0.28% XRP, +0.05% SOL)
+    # before TP could hit. 15m-1h entries typically need 1-3h to reach a
+    # 2-3% TP target. Raised limits to give winners room to run:
+    #   - max_position_age: 4h (was 1.25h) — hard ceiling
+    #   - max_stale: 3h (was 1h) — flat-only, profitable trades exempt
+    #   - max_loss_age: 1.5h (was 0.75h) — losers still cut, but not at 45m
+    "max_position_age_hours": 4.0,    # hard ceiling — force-close losing positions
+    "max_stale_hours":       3.0,     # flat positions (-0.3% to 0%) cut; profitable exempt
+    "max_loss_age_hours":    1.5,     # losing positions cut at 90min
     "max_loss_age_pct":      0.3,     # threshold for what counts as "losing" (unchanged)
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
@@ -584,17 +622,16 @@ LEVERAGE_TIERS = {
     # R:R = 1.2 → clears the global min_rr_ratio gate after fees.
     # Reaches that WR comfortably based on prior 0.55-conf cohort (60% WR).
     "SCALP": {
-        # 2026-05-24 math tune — see realized-R diagnostic.
-        # size_pct 0.10 → 0.075: 25% bleed-velocity reduction (also lifts
-        #   to keep "1-2 USDT per trade" target intact: 7.5% × 2x × 1.5%
-        #   = ~$0.90 per SL hit on $400 wallet).
-        # min_confidence 0.40 → 0.50: tighten entry quality bar.
-        #   gate_effectiveness §1 showed score band 75-79 (≈ conf 0.40-0.50)
-        #   at 23.5% WR — anti-monotonic worst cohort. Cutting it.
-        "leverage":               2,
-        "size_pct":               0.075,
-        "sl_pct":                 0.015,   # 1.5% price (same as other tiers)
-        "tp_pct":                 0.018,   # 1.8% price = 1.2:1 R:R (small, fast)
+        # 2026-05-28 tune — size_pct 0.16→0.35, SL/TP matched to SCALP_MODE.
+        # Evidence: 123 recent trades, 0 TP hits. Old notional $62 too small
+        # for $1-2/trade target. New sizing @ $130 pocket:
+        #   35% × 3x × 0.8% SL = 0.84% balance/loss = ~$1.09 per SL hit
+        #   35% × 3x × 1.3% TP = 1.37% balance/win  = ~$1.77 per TP hit
+        #   R:R = 1.625:1. At 55% WR: EV = +$0.48/trade.
+        "leverage":               3,
+        "size_pct":               0.35,
+        "sl_pct":                 0.008,   # 0.8% price (matches SCALP_MODE)
+        "tp_pct":                 0.013,   # 1.3% price = 1.625:1 R:R
         "min_confidence":         0.50,
         "requires_whitelist":     False,
         "requires_allowed_hour":  True,
@@ -1020,10 +1057,34 @@ BLACKLIST_HARD: set = set()
 # 2026-05-21 (UNBLOCK_ALL): User directive — "Clear all blacklist and
 # blocked coins". All 24 hours allowed; PEAK/WARMUP retained as sizing
 # hints only (not entry gates). Reversible via config edit.
-ALLOWED_HOURS_UTC = set(range(24))
-PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
-WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 17, 22}  # sizing hint: half-size
+#
+# 2026-05-27 (454-trade hardening): H17 (30 trades, 27% WR, -$34.94) and
+# H00 (35 trades, 26% WR, -$20.76) are catastrophic — noted for sizing.
+# 2026-05-27 (UNBLOCK directive): owner says don't block correctly-analyzed
+# trades. Hours cleared; WEEKDAY_CONFIDENCE_MULT handles day-level risk.
 BLOCKED_HOURS_UTC = set()
+ALLOWED_HOURS_UTC = set(range(24)) - BLOCKED_HOURS_UTC
+PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
+WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 22}  # sizing hint: half-size (H17 removed)
+
+# ── Kronos-inspired temporal awareness (2026-05-27) ────────────
+# Day-of-week confidence multiplier. 459-trade data (all-time):
+#   Mon 19% WR -$39, Tue 36% WR -$67 → catastrophic
+#   Thu 45% WR +$4.28, Sun 51% WR -$6 → best
+# Inspired by Kronos foundation model's calendar embeddings (hour/weekday/month).
+# Multiplier applied to MCP Brain confidence AFTER scoring. 1.0 = neutral.
+# strftime %w: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+WEEKDAY_CONFIDENCE_MULT = {
+    # 2026-05-27 (UNBLOCK directive): soft sizing hints only, floor at 0.85
+    # so weekday never tanks confidence enough to block a valid trade.
+    0: 1.00,   # Sun: 51% WR, near-breakeven — neutral
+    1: 0.85,   # Mon: 19% WR, -$39 — mild penalty (was 0.50, too aggressive)
+    2: 0.85,   # Tue: 36% WR, -$67 — mild penalty (was 0.65)
+    3: 0.90,   # Wed: 28% WR, +$0.86 — slight penalty
+    4: 1.10,   # Thu: 45% WR, +$4.28 — slight boost (best day)
+    5: 1.00,   # Fri: 46% WR, -$2.92 — neutral
+    6: 1.00,   # Sat: 43% WR, +$0.59 — neutral
+}
 
 # 2026-05-25 — Range-stability / chop filter (no-edge-forensics bundle).
 # When True, UniverseFilter rejects dead-range and severe-chop coins at the
@@ -1070,9 +1131,21 @@ BTC_TREND_EMA_PERIOD    = 200
 # -$54 vs 210 longs net -$4. Filter blocks SELL when BTC is up-aligned on
 # both 4h and 1h EMA20>EMA50. Idiosyncratic bearish news on the symbol
 # overrides the block. Toggle off via env or by setting `enabled=False`.
+#
+# 2026-05-27 (454-trade hardening): shorts are 2.5x worse than longs.
+# Raised thresholds: min_mcp_score=75, min_confidence=0.70.
 SHORT_SIDE_FILTER = {
-    "enabled": os.getenv("SHORT_SIDE_FILTER_ENABLED", "true").lower() == "true",
+    # 2026-05-27 (UNBLOCK directive): if MCP Brain scored it, don't second-guess.
+    "enabled":        os.getenv("SHORT_SIDE_FILTER_ENABLED", "false").lower() == "true",
+    "min_mcp_score":  float(os.getenv("SHORT_MIN_MCP_SCORE", "75")),
+    "min_confidence": float(os.getenv("SHORT_MIN_CONFIDENCE", "0.70")),
 }
+
+# 2026-05-27 (454-trade hardening): min hold time gate.
+# Trades closed <15 min = 43% of total, 31% WR, -$41.25. Only profitable
+# bucket is 15m-1h (64% WR, +$4.41). Guard in position monitor.
+MIN_HOLD_CLOSE_MINUTES   = int(os.getenv("MIN_HOLD_CLOSE_MINUTES", "15"))
+MIN_HOLD_STRONG_CONF     = float(os.getenv("MIN_HOLD_STRONG_CONF", "0.80"))
 
 # ==============================================================
 # BLACKLISTING
@@ -1364,25 +1437,32 @@ MCP_TP_PROXIMITY_THRESHOLD: float = 0.7
 MCP_TP_GRACE_SEC: int = 1800
 
 # 2026-05-19 — User directive: "Don't halt or pause when losing trades."
-# All nine loss-driven halt/pause mechanisms disabled. Flip any individual
-# key to True to re-enable just that mechanism; restart bot to apply.
-# Nuclear restore: set every value to True, restart. Sub-1-minute reversal.
-#
-# Per-position SL/TP still placed on every entry (Patches #0/#2/#3 from
-# bleed-fix sprint verify exchange-side SL alive). Exchange-side liquidation
+# HALT_MECHANISMS dict removed 2026-05-27. All nine loss-driven halt/pause
+# mechanisms were permanently disabled (all False). Gate checks in
+# risk_manager and auto_mutator have been removed to match.
+# Per-position SL/TP still placed on every entry. Exchange-side liquidation
 # still applies (not bot's control).
-#
-# Risk register: docs/superpowers/specs/2026-05-19-disable-halts-and-verify-tiered-leverage-design.md §7
-HALT_MECHANISMS = {
-    "daily_pnl_halt":           False,  # A: was True (gates core/risk_manager.py:~901)
-    "drawdown_halt":            False,  # B: was True (gates core/risk_manager.py:~914)
-    "spec12_streak_halt":       False,  # C: was True (gates core/risk_manager.py:~1132)
-    "symbol_pause":             False,  # D: was True (gates core/risk_manager.py:~1109)
-    "family_pause":             False,  # E: was True (gates core/risk_manager.py:~1120)
-    "outlier_loss_flag":        False,  # F: was True (gates core/risk_manager.py:~1158)
-    "auto_mutator_blacklist":   False,  # G: was True (gates core/auto_mutator.py:~187, ~216)
-    "auto_mutator_short_block": False,  # H1: was True (gates core/auto_mutator.py:~238)
-    "auto_mutator_leverage_cap": False, # H2: was True (gates core/auto_mutator.py:~252)
+
+# ==============================================================
+# DAILY-LOSS CIRCUIT BREAKER (2026-05-28) — opt-in, SOFT, auto-resetting
+# ==============================================================
+# The user-requested replacement for the removed global halts. This is NOT a
+# halt: when today's realized loss exceeds `max_loss_pct` of start-of-day
+# balance, RiskManager.can_trade() refuses only NEW entries for the rest of the
+# UTC day, then AUTO-RESETS at the day rollover (in lockstep with the existing
+# trade-count cap). It does NOT switch OPERATING_MODE, does NOT write
+# review_required.json, does NOT stop the process, and does NOT touch existing
+# positions (their fail-closed per-trade SLs still protect them). Fails OPEN
+# (does not block) if start-of-day balance is unknown.
+# Rationale: under the confirmed no-edge regime (research/scalp_edge_finding_
+# 2026_05_28.md) the bot bleeds ~$0.25/trade with no portfolio-level floor;
+# this caps a single bad day without re-imposing the halt the user removed.
+# Default ON at 2% (looser than the old 1% halt — fires on a bad day, not on
+# routine bleed). Disable with DAILY_LOSS_BREAKER_ENABLED=false; tune with
+# DAILY_LOSS_BREAKER_PCT.
+DAILY_LOSS_BREAKER = {
+    "enabled":      os.getenv("DAILY_LOSS_BREAKER_ENABLED", "true").lower() == "true",
+    "max_loss_pct": float(os.getenv("DAILY_LOSS_BREAKER_PCT", "0.02")),
 }
 
 # ==============================================================
@@ -1420,3 +1500,94 @@ AUTO_SMALL_TP_ENABLED        = False
 AUTO_SMALL_TP_MIN_AGE_MIN    = 30   # fire at age >= 30 min (vestigial when disabled)
 AUTO_SMALL_TP_MIN_PNL_FRAC   = 0.01 # >= +1.0%
 AUTO_SMALL_TP_MAX_PNL_FRAC   = 0.02 # < +2% (trailing stop owns above)
+
+# ==============================================================
+# DATA FEEDS — External enrichment for MCP Brain scoring
+# 2026-05-27: New data sources to address anti-predictive score problem.
+#
+# Architecture: core/data_coordinator.py orchestrates all feeds on
+# independent TTLs. Each feed is fail-open (API down = neutral signal).
+# mcp_brain.py calls coordinator.get_market_context(coin) once per
+# scoring cycle. The coordinator runs feeds in background threads.
+#
+# Kill switch: set any *_enabled key to False to disable a feed.
+# All weights/thresholds are tunable without code changes.
+# ==============================================================
+DATA_FEEDS = {
+    # ── Master switches ────────────────────────────────────────────
+    "funding_enabled":      True,
+    "oi_enabled":           True,
+    "orderbook_enabled":    True,
+    "news_enabled":         True,
+    "smart_money_enabled":  True,
+
+    # ── Cache TTLs (seconds) ───────────────────────────────────────
+    # Each feed refreshes independently at its own cadence.
+    # Staleness threshold = TTL * staleness_multiplier.
+    "funding_ttl":          300,    # 5 min (FR settles 3x/day but predicted rate drifts)
+    "oi_ttl":               180,    # 3 min (OI updates every ~10s on Binance)
+    "orderbook_ttl":        60,     # 1 min (most volatile source)
+    "news_ttl":             600,    # 10 min (news doesn't move faster than this)
+    "smart_money_ttl":      900,    # 15 min (on-chain aggregate, slow-moving)
+    "staleness_multiplier": 2.0,    # >2x TTL = data marked stale, use neutral defaults
+    "max_workers":          5,      # ThreadPoolExecutor workers for parallel refresh
+
+    # ── Scoring weights (MCP Brain bonus points) ───────────────────
+    # B11: Funding rate alignment bonus
+    #   FR z-score aligns with proposed side (extreme neg FR + long = bonus)
+    "b11_funding_enabled":     True,
+    "b11_funding_points":      7,       # points awarded when FR aligns
+    "b11_fr_zscore_threshold": 1.5,     # |z| must exceed this to qualify
+
+    # B12: OI-price divergence confirmation bonus
+    #   "continuation" signal when entering WITH the trend
+    "b12_oi_enabled":          True,
+    "b12_oi_points":           8,       # points for continuation signal
+    "b12_oi_conviction_min":   0.3,     # minimum conviction to award
+
+    # B13: Smart money alignment bonus
+    #   Coin in top-20 smart money inflow AND proposed side = buy
+    "b13_smart_money_enabled": True,
+    "b13_smart_money_points":  5,       # points when smart money confirms
+
+    # ── VETO gates (block entry, not just reduce score) ────────────
+    # V1: OI exhaustion veto — price up + OI down with high conviction
+    #   Blocks LONG entries when the move is short-covering, not new money
+    "v1_oi_exhaustion_veto":           True,
+    "v1_oi_exhaustion_conviction_min": 0.5,
+
+    # V2: News veto — negative-impact news on specific coin in last 2h
+    "v2_news_veto":                    True,
+
+    # V3: Slippage veto — estimated slippage > threshold
+    "v3_slippage_veto":                True,
+    "v3_slippage_max_bps":             30.0,    # max 30 bps slippage
+
+    # V4: Social FOMO veto — extreme hype + positive sentiment = crowded
+    #   Reduces position size by multiplier rather than hard block
+    "v4_fomo_size_reduction":          True,
+    "v4_fomo_size_multiplier":         0.5,     # half size on FOMO signal
+
+    # ── Enhanced B6 (replaces existing microstructure bonus) ────────
+    # When data_feeds are active, B6 uses the enhanced orderbook feed
+    # (imbalance momentum, depth ratio, slippage) instead of the basic
+    # Binance depth fetch. Falls back to legacy B6 when orderbook feed
+    # is disabled or stale.
+    "enhanced_b6_enabled":  True,
+    "enhanced_b6_points":   7,      # was 5 in legacy B6
+
+    # ── Short-side filter integration ──────────────────────────────
+    # Short side uses STRICTER thresholds on data feed signals
+    "short_side_stricter_feeds":  True,
+    "short_fr_zscore_threshold":  1.0,  # lower bar = more shorts filtered
+}
+
+# Convenience: per-feed env-var overrides for operational toggling
+# without editing config.py. Set FEED_FUNDING_ENABLED=false etc.
+for _feed_key in ("funding", "oi", "orderbook", "news", "smart_money"):
+    _env_key = f"FEED_{_feed_key.upper()}_ENABLED"
+    _env_val = os.getenv(_env_key, "").strip().lower()
+    if _env_val == "false":
+        DATA_FEEDS[f"{_feed_key}_enabled"] = False
+    elif _env_val == "true":
+        DATA_FEEDS[f"{_feed_key}_enabled"] = True

@@ -18,39 +18,6 @@ from loguru import logger
 
 from config import RISK
 
-HALT_COOLDOWN_MIN  = 15     # minutes to pause before checking recovery
-RECOVERY_WR_MIN    = 60.0   # win rate % to auto-resume
-RECOVERY_LOOKBACK  = 5      # number of recent trades to check
-
-# Spec §12 5-consec-loss halt → guarded auto-resume after a hard cooldown.
-# 4 hours is long enough that the regime that caused the streak has likely shifted;
-# short enough that a truly autonomous bot doesn't sit idle. On resume the streak is
-# cleared (stale) and the review flag is deleted so future halts can re-trigger.
-SPEC12_AUTO_RESUME_COOLDOWN_MIN = 240
-
-# Drawdown halt → time-based escape. Without this, the bot deadlocks: WR-based
-# and DD-based recovery both need trades, but trades are blocked while halted,
-# so the only exit was the midnight new-day reset. Real losing streaks are
-# already caught by Spec §12 (5 consec global losses, 4h cooldown) independent
-# of the drawdown gate. On resume we reset peak_balance to the current
-# effective balance — otherwise the next losing trade would re-trip the
-# drawdown immediately. daily_pnl is NOT reset: the daily-loss
-# circuit-breaker is a separate constraint that must run independently.
-#
-# 2026-05-05 (Phase 25): reduced 240→60min. At a $568 account size, 4h of
-# downtime per drawdown trip is structurally too long — user reported
-# "HALTED again" after ~12min of bot uptime because the loaded peak was
-# stale ($653 from a prior session). Spec §12 still independently caches
-# real losing-streak halts at 240min. The drawdown halt is best treated
-# as a slow-bleed circuit-breaker, not a long pause.
-DRAWDOWN_HALT_COOLDOWN_MIN = 60
-
-# Phase 38 (2026-05-06): disable drawdown circuit-breaker per operator directive
-# "Trade with confidence 24x7 — don't halt on drawdown."
-# Spec §12 (consecutive-loss streaks) still operates independently.
-# Set True to re-enable the drawdown halt.
-DRAWDOWN_HALT_ENABLED = False
-
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
 # 2 consecutive losses on a symbol → pause that symbol 6h.
@@ -130,19 +97,8 @@ def load_age_cutoffs(path: Path | str | None = None) -> dict | None:
 class RiskManager:
 
     def _notify_halt(self, subject: str, body: str) -> None:
-        """Lazy-load the notifier and emit a halt alert (2026-05-03).
-
-        Bug fix: prior code logged halt events but never sent the user
-        a notification. Now operator gets an email/Telegram alert when
-        the bot enters any halted state (daily loss / drawdown / Spec §12).
-        Failures are swallowed — notifier outage must NEVER block halt
-        propagation.
-        """
-        try:
-            from utils.notifier import TelegramNotifier
-            TelegramNotifier().error(f"{subject}\n\n{body}")
-        except Exception:
-            pass
+        """No-op — halts removed (2026-05-27). Kept for signature compat."""
+        pass
 
     def __init__(self):
         self.max_position_pct   = RISK["max_position_pct"]
@@ -165,9 +121,6 @@ class RiskManager:
         # forever, drawdown halts every restart" anti-pattern.
         self._peak_stale_flag: bool = False
         self._trading_day:   date  = date.today()
-        self._halted:        bool  = False
-        self._halt_reason:   str   = ""
-        self._halt_time:     float = 0.0
         self._recent_results: list = []   # last N trades: True=win, False=loss
         self._trade_history:  list = []   # Kelly: (win, pnl_pct)
         # Tracks the last balance reading for the 30%-down-spike guard in
@@ -207,9 +160,8 @@ class RiskManager:
     def _save_state(self):
         """Persist risk state for dashboard + resume on restart."""
         state = {
-            "is_halted": self._halted,
-            "halt_reason": self._halt_reason,
-            "halt_time": self._halt_time,
+            "is_halted": False,
+            "halt_reason": "",
             "daily_pnl": round(self._daily_pnl, 4),
             "max_drawdown_pct": round(
                 (self._peak_balance - ((self._start_balance or self._peak_balance) + self._daily_pnl))
@@ -233,14 +185,7 @@ class RiskManager:
             pass
 
     def _load_state(self):
-        """Load persisted risk state on startup. Handles same-day resume vs new-day reset.
-
-        The Spec §12 review-flag is honoured authoritatively: it is checked
-        AFTER the risk_state.json branches AND on every early-return path
-        (missing file, corrupt JSON, invalid trading_day). This guarantees a
-        bot whose `risk_state.json` was lost cannot accidentally come up
-        unhalted while `data/review_required.json` still sits on disk.
-        """
+        """Load persisted risk state on startup. Handles same-day resume vs new-day reset."""
         path = Path("data/risk_state.json")
         if not path.exists():
             self._honour_review_flag_if_present()
@@ -273,7 +218,7 @@ class RiskManager:
         self._global_streak = list(state.get("global_streak", []))
 
         if saved_day == date.today():
-            # Same-day restart: restore daily PnL, halt state, peak
+            # Same-day restart: restore daily PnL, peak
             self._daily_pnl = state.get("daily_pnl", 0.0)
             self._trading_day = saved_day
             self._peak_balance = state.get("peak_balance", 0.0)
@@ -283,98 +228,34 @@ class RiskManager:
             if self._peak_balance > 0:
                 self._peak_stale_flag = True
             # Restore start_balance so drawdown math survives process restart.
-            # Without this, (self._start_balance or self._peak_balance) in the
-            # DD resume / daily-loss paths falls through to peak, which nullifies
-            # peak-reset and mis-scales the daily-loss limit until bot_engine
-            # re-calls set_start_balance.
             self._start_balance = state.get("start_balance", 0.0)
-            self._halted = state.get("is_halted", False)
-            self._halt_reason = state.get("halt_reason", "")
-            self._halt_time = state.get("halt_time", 0.0)
             # Restore today's open count so the daily-trade cap survives a
             # mid-day process restart. Default 0 for files saved by older
             # builds that lacked this counter.
             self._opens_today = int(state.get("trades_today", 0) or 0)
             logger.info(
                 f"[Risk] Resumed same-day state: daily_pnl={self._daily_pnl:+.4f}, "
-                f"trades={len(self._trade_history)}, halted={self._halted}")
+                f"trades={len(self._trade_history)}")
         else:
             # New day: reset daily counters but keep trade history
             self._daily_pnl = 0.0
             self._trading_day = date.today()
-            self._halted = False
-            self._halt_reason = ""
             self._opens_today = 0
             logger.info(
                 f"[Risk] New day — daily counters reset. "
                 f"Carried over {len(self._trade_history)} trade history entries")
 
-        # Spec §12: review_required.json is the authoritative halt record on
-        # both same-day AND new-day branches. See _honour_review_flag_if_present.
+        # Cleanup: delete stale review_required.json if present
         self._honour_review_flag_if_present()
 
     def _honour_review_flag_if_present(self) -> None:
-        """If `data/review_required.json` exists, override in-memory halt state
-        from it. Runs after every `_load_state` branch (including early
-        returns) so a missing/corrupt risk_state.json cannot wipe a valid
-        halt that the flag still attests to.
-
-        Fix 1A: same-day AND new-day AND missing-state-file paths all hit this.
-        Fix 1D: emits a WARNING with elapsed minutes + remaining cooldown.
-        """
-        if not _REVIEW_FLAG_PATH.exists():
-            return
-
-        try:
-            flag_data = json.loads(_REVIEW_FLAG_PATH.read_text(encoding="utf-8"))
-            # File format is a list of event dicts (see _write_review_flag).
-            # Accept a bare dict for backwards compatibility.
-            if isinstance(flag_data, list):
-                # 2026-05-24 — Anchor on the ORIGINAL halt event ([0]), not
-                # the latest append ([-1]). Audit entries appended by
-                # note_stale_data / note_order_rejection / outlier branch
-                # while halted would otherwise slide the cooldown anchor
-                # forward indefinitely, preventing auto-resume.
-                # Memory: stuck_halt_anchor_fix_2026_05_15.
-                flag_state = flag_data[0] if flag_data else {}
-            elif isinstance(flag_data, dict):
-                flag_state = flag_data
-            else:
-                flag_state = {}
-            if not isinstance(flag_state, dict):
-                flag_state = {}
-            flag_ts = float(flag_state.get("ts", 0.0) or 0.0)
-            flag_reason = str(flag_state.get("reason", "unknown"))
-            flag_action = str(flag_state.get("action", ""))
-        except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
-            logger.warning(
-                f"[Risk] review_required.json present but unreadable "
-                f"({e}) — failing safe (halted)")
-            flag_ts = _time.time()
-            flag_reason = "review_flag_unreadable"
-            flag_action = "force_observation_mode"
-
-        elapsed_min = (_time.time() - flag_ts) / 60 if flag_ts > 0 else 0
-        remaining_min = max(0.0, SPEC12_AUTO_RESUME_COOLDOWN_MIN - elapsed_min)
-
-        # Reconstruct halt state from the flag. Use a reason string that
-        # `_should_auto_resume` recognises so the cooldown check fires.
-        # Fix 1C: _halted=True is paired with _halt_time set in the same block.
-        self._halted = True
-        self._halt_time = flag_ts or _time.time()
-        if "consecutive" in flag_reason or "global" in flag_reason:
-            self._halt_reason = "spec12:consec_global_losses"
-        else:
-            # Outlier losses and manual review flags are also honoured —
-            # treat as halted until the operator removes the flag.
-            self._halt_reason = f"spec12:flag:{flag_action or 'review_required'}"
-
-        # Fix 1D: WARNING so operators can see Spec §12 state at startup.
-        logger.warning(
-            f"[Risk/Spec12] review_required.json present "
-            f"(reason='{flag_reason}', action='{flag_action}', "
-            f"age={elapsed_min:.1f}min, cooldown remaining={remaining_min:.1f}min). "
-            f"Halt restored from flag — risk_state.json value ignored.")
+        """Delete stale review_required.json on startup (halts removed)."""
+        if _REVIEW_FLAG_PATH.exists():
+            try:
+                _REVIEW_FLAG_PATH.unlink()
+                logger.info("[Risk] Deleted stale review_required.json (halts disabled)")
+            except Exception as e:
+                logger.debug(f"[Risk] Could not delete review flag: {e}")
 
     # Phase 29 (2026-05-05) — post-SL cooldown helpers ─────────────────
     # freqtrade-style CooldownPeriod + StoplossGuard (per-pair-side).
@@ -448,31 +329,29 @@ class RiskManager:
             self._daily_pnl = 0.0
             self._trading_day = today
             self._opens_today = 0
-            # 2026-05-24 — Clear daily-loss halts on midnight rollover.
-            # _should_auto_resume's "daily" branch is dead code from here
-            # (date.today() == self._trading_day after the line above), so
-            # without this clear a bot with no open positions at UTC
-            # midnight stays halted until the next record_trade_pnl close.
-            if self._halted and "daily" in self._halt_reason:
-                logger.info(
-                    f"[Risk] Daily halt '{self._halt_reason}' cleared at "
-                    f"midnight rollover (new day {today.isoformat()})")
-                self._halted = False
-                self._halt_reason = ""
-                self._halt_time = 0.0
             self._save_state()
 
-        if self._halted:
-            # Check if we should auto-resume
-            if self._should_auto_resume():
-                old = self._halt_reason
-                self._halted      = False
-                self._halt_reason = ""
-                logger.info(f"[Risk] AUTO-RESUMED after '{old}'")
-                self._save_state()
-            else:
-                logger.debug(f"[Risk] Trading PAUSED — {self._halt_reason}")
+        # 2026-05-28 — SOFT daily-loss circuit breaker (opt-in replacement for
+        # the removed global halts; config.DAILY_LOSS_BREAKER). Blocks only NEW
+        # entries once today's realized loss exceeds max_loss_pct of start-of-day
+        # balance, then auto-resets at the rollover above. NOT a halt: no mode
+        # switch, no review flag, no process stop; existing positions keep their
+        # fail-closed SLs. Fails OPEN when start balance is unknown.
+        try:
+            from config import DAILY_LOSS_BREAKER as _DLB
+        except Exception:
+            _DLB = {}
+        if _DLB.get("enabled") and self._start_balance > 0:
+            loss_budget = abs(float(_DLB.get("max_loss_pct", 0.02))) * self._start_balance
+            if loss_budget > 0 and self._daily_pnl <= -loss_budget:
+                logger.warning(
+                    f"[Risk] Daily-loss breaker tripped: today {self._daily_pnl:+.2f} USDT "
+                    f"<= -{loss_budget:.2f} ({float(_DLB.get('max_loss_pct', 0.02)) * 100:.1f}% "
+                    f"of {self._start_balance:.2f}) — refusing NEW entries until the day "
+                    f"rolls over. Existing positions keep their SLs; auto-resets next day."
+                )
                 return False
+
         if open_position_count >= self.max_open_positions:
             logger.debug(
                 f"[Risk] Max open positions ({self.max_open_positions}) reached.")
@@ -501,97 +380,6 @@ class RiskManager:
             self._opens_today = 0
         self._opens_today += 1
         self._save_state()
-
-    def _should_auto_resume(self) -> bool:
-        """Smart recovery: resume when conditions improve."""
-        # Spec §12: 5-global-consecutive-loss halt.
-        # Fully autonomous — no human intervention required. Wait a hard cooldown
-        # (SPEC12_AUTO_RESUME_COOLDOWN_MIN) so the losing regime has time to shift,
-        # then clear the stale streak and delete the review flag so future halts
-        # can retrigger cleanly.
-        # Spec §12 / flag-based halts: any halt_reason starting "spec12:" is
-        # backed by data/review_required.json on disk. Originally only the
-        # "consec_global_losses" flavour had auto-resume — a bug, because
-        # _honour_review_flag_if_present builds reasons like
-        # "spec12:flag:manual_review" for outlier-loss and operator-review
-        # halts, leaving them with NO auto-resume path. The bot got stuck
-        # halted until a human deleted the flag file. 2026-04-29: fixed.
-        if self._halt_reason.startswith("spec12"):
-            elapsed_min = (_time.time() - self._halt_time) / 60
-            if elapsed_min < SPEC12_AUTO_RESUME_COOLDOWN_MIN:
-                remaining = SPEC12_AUTO_RESUME_COOLDOWN_MIN - elapsed_min
-                logger.debug(
-                    f"[Risk] {self._halt_reason} cooldown — {remaining:.0f} min "
-                    f"left before auto-resume.")
-                return False
-            # Cooldown elapsed. Delete the flag FIRST; only clear in-memory
-            # halt if the unlink succeeds. Prevents the class of bugs where
-            # `_halted=False` got saved to risk_state.json while the flag
-            # file persisted on disk (silent unlink failure on Windows under
-            # AV/file-lock left stale state).
-            if _REVIEW_FLAG_PATH.exists():
-                try:
-                    _REVIEW_FLAG_PATH.unlink()
-                except Exception as e:
-                    logger.error(
-                        f"[Risk] auto-resume BLOCKED — could not delete "
-                        f"{_REVIEW_FLAG_PATH}: {e}. Staying halted to avoid "
-                        f"silent wipe. Remove the file manually to resume.")
-                    return False
-            # Clear the consec-global streak so a stale streak from before the
-            # halt can't immediately re-fire Spec §12 on the next loss. Safe
-            # for non-consec_global flag halts too (outlier_loss, manual_review)
-            # — they care about the flag file, not the streak.
-            self._global_streak = []
-            logger.warning(
-                f"[Risk] {self._halt_reason} auto-resume after "
-                f"{SPEC12_AUTO_RESUME_COOLDOWN_MIN}min cooldown — flag deleted.")
-            return True
-
-        # Daily loss resets at midnight
-        if "daily" in self._halt_reason and date.today() != self._trading_day:
-            return True
-
-        # Drawdown: require cooldown first
-        elapsed = (_time.time() - self._halt_time) / 60
-        if elapsed < HALT_COOLDOWN_MIN:
-            return False
-
-        # Check recent win rate
-        if len(self._recent_results) >= RECOVERY_LOOKBACK:
-            recent = self._recent_results[-RECOVERY_LOOKBACK:]
-            wr = sum(1 for r in recent if r) / len(recent) * 100
-            if wr >= RECOVERY_WR_MIN:
-                logger.info(f"[Risk] Recovery: last {RECOVERY_LOOKBACK} trades WR={wr:.0f}%")
-                return True
-
-        # Check drawdown recovered to safe level (less than half of max drawdown threshold)
-        if self._peak_balance > 0:
-            effective_balance = (self._start_balance or self._peak_balance) + self._daily_pnl
-            current_dd = (self._peak_balance - effective_balance) / self._peak_balance
-            safe_dd = self.max_drawdown_pct * 0.5  # Must recover to half the DD threshold
-            if current_dd <= safe_dd and self._daily_pnl > 0:
-                logger.info(
-                    f"[Risk] Recovery: drawdown {current_dd*100:.1f}% < "
-                    f"safe level {safe_dd*100:.1f}%, daily PnL={self._daily_pnl:+.4f}")
-                return True
-
-        # Drawdown halt time-based escape — mirrors Spec §12 pattern. If WR/DD
-        # recovery never materialised (common, since both need trades), reset
-        # peak to current effective balance after the cooldown and resume.
-        # Real losing streaks still caught by Spec §12 independently.
-        if "drawdown" in self._halt_reason and elapsed >= DRAWDOWN_HALT_COOLDOWN_MIN:
-            effective = (self._start_balance or self._peak_balance) + self._daily_pnl
-            if effective > 0:
-                old_peak = self._peak_balance
-                self._peak_balance = effective
-                logger.warning(
-                    f"[Risk] Drawdown halt cooldown elapsed "
-                    f"({DRAWDOWN_HALT_COOLDOWN_MIN}min). Peak reset "
-                    f"${old_peak:.2f} → ${effective:.2f}, resuming.")
-                return True
-
-        return False
 
     # ── Position sizing ──────────────────────────────────────────────
 
@@ -884,9 +672,6 @@ class RiskManager:
         if today != self._trading_day:
             self._daily_pnl   = 0.0
             self._trading_day = today
-            if self._halted and "daily" in self._halt_reason:
-                self._halted      = False
-                self._halt_reason = ""
             logger.info("[Risk] Daily PnL reset (new day)")
 
         self._daily_pnl += pnl
@@ -926,43 +711,6 @@ class RiskManager:
         if effective_balance > self._peak_balance:
             self._peak_balance = effective_balance
 
-        daily_loss_limit = (self._start_balance or balance) * self.max_daily_loss_pct
-
-        # Daily loss circuit-breaker
-        # Gated by HALT_MECHANISMS["daily_pnl_halt"] (2026-05-19)
-        from config import HALT_MECHANISMS as _HM
-        if (_HM.get("daily_pnl_halt", True)
-                and self._daily_pnl < -daily_loss_limit
-                and not self._halted):
-            self._halted      = True
-            self._halt_reason = f"daily loss ({self._daily_pnl:+.4f} USDT)"
-            self._halt_time   = _time.time()
-            msg = (f"[Risk] DAILY LOSS LIMIT: {self._daily_pnl:.4f} USDT. "
-                   "Paused — will auto-resume when PnL recovers.")
-            logger.warning(msg)
-            self._notify_halt("DAILY LOSS HALT", msg)
-            self._save_state()
-            return
-
-        # Max drawdown circuit-breaker (with smart recovery)
-        # Phase 38: gated by DRAWDOWN_HALT_ENABLED (operator can disable)
-        # 2026-05-19: also gated by HALT_MECHANISMS["drawdown_halt"]
-        if (_HM.get("drawdown_halt", True)
-                and DRAWDOWN_HALT_ENABLED and self._peak_balance > 0):
-            drawdown = (self._peak_balance - effective_balance) / self._peak_balance
-            if drawdown >= self.max_drawdown_pct and not self._halted:
-                self._halted      = True
-                self._halt_reason = (
-                    f"drawdown {drawdown*100:.1f}% "
-                    f"(peak ${self._peak_balance:.2f})")
-                self._halt_time = _time.time()
-                msg = (f"[Risk] DRAWDOWN {drawdown*100:.1f}% from peak "
-                       f"${self._peak_balance:.2f}. Paused — "
-                       f"will auto-resume when WR>={RECOVERY_WR_MIN:.0f}% "
-                       f"or PnL positive.")
-                logger.warning(msg)
-                self._notify_halt("DRAWDOWN HALT", msg)
-
         self._save_state()
 
     def set_start_balance(self, balance: float):
@@ -974,22 +722,14 @@ class RiskManager:
             # Phase 34: do NOT advance peak from startup `balance` —
             # it includes unrealized P&L. Peak only advances via
             # record_trade_pnl (realized).
-            # Keep _daily_pnl as loaded from state
-            # Keep _halted as loaded (daily loss halt still valid same day)
             logger.info(
                 f"[Risk] Starting balance: {balance:.4f} USDT "
                 f"(resumed: daily_pnl={self._daily_pnl:+.4f}, "
-                f"peak=${self._peak_balance:.2f}, halted={self._halted})")
+                f"peak=${self._peak_balance:.2f})")
         else:
             # New day or first run: fresh slate
             self._peak_balance = balance
             self._daily_pnl = 0.0
-            if self._halted:
-                logger.warning(
-                    f"[Risk] Clearing previous halt ('{self._halt_reason}') on restart. "
-                    f"Fresh peak = ${balance:.2f}")
-                self._halted = False
-                self._halt_reason = ""
             logger.info(f"[Risk] Starting balance: {balance:.4f} USDT (peak reset)")
 
     def update_current_balance(self, balance: float):
@@ -1062,10 +802,8 @@ class RiskManager:
         # downstream 30%-drop guard, just doesn't advance peak.
 
     def resume_trading(self):
-        """Manually resume trading after a halt."""
-        self._halted      = False
-        self._halt_reason = ""
-        logger.warning("[Risk] Trading manually resumed after halt.")
+        """No-op — halts removed (2026-05-27). Kept for API compat."""
+        pass
 
     # ── Spec §12 per-symbol / per-family pauses ──────────────────────
 
@@ -1142,12 +880,11 @@ class RiskManager:
             _F12S = True
             _F12F = True
 
-        # 2026-05-19: outer gate on all four loss-streak / outlier sites
-        from config import HALT_MECHANISMS as _HM2
+        # 2026-05-27: HALT_MECHANISMS removed (all values were False = disabled).
+        # Gate checks replaced with False to preserve disabled behavior.
 
-        # Per-symbol pause
-        # 2026-05-19: gated by HALT_MECHANISMS["symbol_pause"]
-        if (_HM2.get("symbol_pause", True)
+        # Per-symbol pause (disabled — was gated by HALT_MECHANISMS["symbol_pause"])
+        if (False  # symbol_pause disabled
                 and _F12S and len(sym_hist) >= SPEC_SYMBOL_LOSSES_TO_PAUSE
                 and not any(sym_hist[-SPEC_SYMBOL_LOSSES_TO_PAUSE:])
         ):
@@ -1163,9 +900,8 @@ class RiskManager:
             # effectively meaningless on a losing tape.
             self._symbol_streaks[symbol] = []
 
-        # Per-family pause
-        # 2026-05-19: gated by HALT_MECHANISMS["family_pause"]
-        if (_HM2.get("family_pause", True)
+        # Per-family pause (disabled — was gated by HALT_MECHANISMS["family_pause"])
+        if (False  # family_pause disabled
                 and _F12F and len(fam_hist) >= SPEC_FAMILY_LOSSES_TO_PAUSE
                 and not any(fam_hist[-SPEC_FAMILY_LOSSES_TO_PAUSE:])
         ):
@@ -1179,28 +915,14 @@ class RiskManager:
             # 2026-05-24 — Clear streak buffer (see symbol-pause block).
             self._family_streaks[key] = []
 
-        # 5 global consec → force observation + review
-        # 2026-05-19: gated by HALT_MECHANISMS["spec12_streak_halt"]
-        if (_HM2.get("spec12_streak_halt", True)
+        # 5 global consec (disabled — was gated by HALT_MECHANISMS["spec12_streak_halt"])
+        if (False  # spec12_streak_halt disabled
                 and len(self._global_streak) >= SPEC_GLOBAL_LOSSES_TO_REVIEW
                 and not any(self._global_streak[-SPEC_GLOBAL_LOSSES_TO_REVIEW:])
         ):
-            self._write_review_flag(
-                reason=f"{SPEC_GLOBAL_LOSSES_TO_REVIEW} consecutive global losses",
-                action="force_observation_mode",
-            )
-            err_msg = (
+            logger.error(
                 f"[Risk/Spec12] {SPEC_GLOBAL_LOSSES_TO_REVIEW} consecutive losses — "
-                f"review flag written; bot_engine will refuse to open new trades "
-                f"until OPERATING_MODE is manually cleared"
-            )
-            logger.error(err_msg)
-            self._halted = True
-            self._halt_reason = f"spec12:{SPEC_GLOBAL_LOSSES_TO_REVIEW}_consec_global_losses"
-            self._halt_time = now
-            self._notify_halt(
-                f"SPEC §12 HALT: {SPEC_GLOBAL_LOSSES_TO_REVIEW} CONSECUTIVE LOSSES",
-                err_msg,
+                f"logged for audit (halts disabled)"
             )
 
         # Outlier loss
@@ -1208,8 +930,8 @@ class RiskManager:
             from config import MAX_LOSS_PER_TRADE_USD as _max_loss
         except ImportError:
             _max_loss = 2.0
-        # 2026-05-19: gated by HALT_MECHANISMS["outlier_loss_flag"]
-        if _HM2.get("outlier_loss_flag", True) and pnl_usd < -abs(_max_loss):
+        # Outlier loss flag (disabled — was gated by HALT_MECHANISMS["outlier_loss_flag"])
+        if False and pnl_usd < -abs(_max_loss):  # outlier_loss_flag disabled
             self._write_review_flag(
                 reason=f"outlier_loss({pnl_usd:+.2f} USD beyond ${_max_loss:.2f} cap)",
                 action="manual_review",
@@ -1347,11 +1069,11 @@ class RiskManager:
 
     @property
     def is_halted(self) -> bool:
-        return self._halted
+        return False
 
     @property
     def halt_reason(self) -> str:
-        return self._halt_reason
+        return ""
 
     @property
     def daily_pnl(self) -> float:

@@ -32,6 +32,20 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _force_taker_path(monkeypatch):
+    """These tests pin the TAKER limit→timeout→cancel→market double-fill guard.
+    MAKER_ONLY (default ON since 2026-05-28) deliberately SKIPS the market
+    fallback instead, and overrides the test's short limit_timeout_sec with its
+    120s wait window. Force maker-only OFF so this guard is tested deterministically
+    regardless of the global default."""
+    monkeypatch.setattr(
+        "config.MAKER_ONLY", {"enabled": False, "max_wait_sec": 120}, raising=False
+    )
+
 
 def _make_executor():
     """Build a SmartExecutor with mocked _record_stat and orderbook."""
