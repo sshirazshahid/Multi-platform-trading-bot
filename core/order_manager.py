@@ -539,6 +539,36 @@ class OrderManager:
 
     # ── Open position ─────────────────────────────────────────────────
 
+    @staticmethod
+    def _interpret_execution_result(order, intended_size):
+        """Map a SmartExecutor return into (outcome, fill_size).
+
+        outcome:
+          'filled'    -> a position exists; place SL/TP on fill_size.
+          'no_fill'   -> nothing opened (skip / empty / missing id); register
+                         nothing. Prevents the phantom-position bug where the
+                         old check keyed only on order['id'] (a maker SKIP
+                         returns the cancelled limit id, looking like a fill).
+          'uncertain' -> cancel+verify both failed; do NOT register (the
+                         ghost-reconciler adopts any real fill on the next cycle).
+
+        Sizes to the ACTUAL fill only for an explicit 'partial_maker'; every
+        other fill keeps the intended size (unchanged behavior for normal fills).
+        """
+        if not order:
+            return ("no_fill", 0.0)
+        status = (order.get("status") or "").lower()
+        if status == "skipped_maker_only":
+            return ("no_fill", 0.0)
+        if status == "uncertain":
+            return ("uncertain", 0.0)
+        if not order.get("id"):
+            return ("no_fill", 0.0)
+        if status == "partial_maker":
+            filled = float(order.get("filled") or 0)
+            return ("filled", filled) if filled > 0 else ("no_fill", 0.0)
+        return ("filled", float(intended_size))
+
     def open_position(self, exchange: BaseExchange, symbol: str, side: str,
                       market_type: str, strategy: str, size: float,
                       sl: float, tp: float, leverage: int = 1,
@@ -836,9 +866,24 @@ class OrderManager:
                         exchange, symbol, side, size,
                         market_type, params)
 
-                if not order or not order.get("id"):
-                    logger.warning(f"[Orders] {symbol}: exchange returned empty order — skipping")
+                _outcome, _fill_sz = self._interpret_execution_result(order, size)
+                if _outcome != "filled":
+                    if _outcome == "uncertain":
+                        logger.warning(
+                            f"[Orders] {symbol}: executor UNCERTAIN (cancel+verify both "
+                            f"failed) — NOT registering a position; ghost-reconciler will "
+                            f"adopt any real fill next cycle. order={order}")
+                    else:
+                        logger.info(
+                            f"[Orders] {symbol}: no fill "
+                            f"({(order or {}).get('status') or 'empty'}) — no position opened")
                     return None
+                if 0 < _fill_sz < size:
+                    logger.warning(
+                        f"[Orders] {symbol}: partial fill {_fill_sz}/{size} — sizing "
+                        f"position + SL/TP to the actual fill.")
+                    size = _fill_sz
+                    pos.size = _fill_sz
                 pos.order_id   = order.get("id")
                 pos.id         = pos.order_id or pos.id
                 fill_price     = order.get("average") or order.get("price") or fill_price
@@ -884,9 +929,18 @@ class OrderManager:
                             exchange, symbol, side, size,
                             market_type, {},
                         )
-                        if not order or not order.get("id"):
-                            logger.warning(f"[Orders] {symbol}: one-way retry returned empty order")
+                        _o2, _f2 = self._interpret_execution_result(order, size)
+                        if _o2 != "filled":
+                            logger.info(
+                                f"[Orders] {symbol}: one-way retry no fill "
+                                f"({(order or {}).get('status') or 'empty'}) — skipping")
                             return None
+                        if 0 < _f2 < size:
+                            logger.warning(
+                                f"[Orders] {symbol}: one-way partial fill {_f2}/{size} "
+                                f"— sizing position + SL/TP to the actual fill.")
+                            size = _f2
+                            pos.size = _f2
                         pos.order_id    = order.get("id")
                         pos.id          = pos.order_id or pos.id
                         fill_price      = order.get("average") or order.get("price") or fill_price
@@ -920,6 +974,20 @@ class OrderManager:
                     return None
 
         self.tracker.add(pos)
+
+        # Tag scalp positions for downstream routing (time wall, stale close,
+        # trailing skip). Derived from TP distance vs entry; no caller changes
+        # needed. Also stores tp_pct so the time-wall fallback check can match.
+        try:
+            from config import SCALP_MODE as _SM_tag
+            if _SM_tag.get("enabled", False) and fill_price > 0 and tp > 0:
+                _tp_dist_pct = abs(tp - fill_price) / fill_price * 100.0
+                _scalp_tp_pct = _SM_tag.get("tp_pct", 1.8)
+                if abs(_tp_dist_pct - _scalp_tp_pct) < 0.5:
+                    pos._scalp = True
+                    pos.tp_pct = round(_tp_dist_pct, 3)
+        except Exception:
+            pass
 
         # Daily open counter — feeds RiskManager.can_trade()'s per-day cap.
         # Wired here (and not earlier) so failed orders don't burn the
@@ -1575,17 +1643,6 @@ class OrderManager:
         return self._calibrator_instance
 
     def _finalize_close(self, pos: Position, price: float, reason: str) -> None:
-        # Phase 29 (2026-05-05) — record stop_loss exits for the post-SL
-        # cooldown / StoplossGuard layers in RiskManager. Runs FIRST so
-        # ledger is updated even if downstream notifier/warehouse code
-        # raises. freqtrade pattern: revenge re-entry on a freshly-stopped
-        # pair-side is the dominant pattern in the audit's $-78 stop_loss
-        # bleed; cooldown breaks it.
-        if reason == "stop_loss":
-            try:
-                self.risk.note_sl_hit(pos.symbol, pos.side)
-            except Exception as _e:
-                logger.debug(f"[Risk29] note_sl_hit failed: {_e}")
         """Post-close hooks fired by PositionTracker.on_close after EVERY
         close (normal exit, ghost-sync, ghost-reconciled, ghost_force_close,
         STALE, AGE_LIMIT, fail-closed). Centralising here is the fix for the
@@ -1597,6 +1654,17 @@ class OrderManager:
         ``pos`` is the closed Position (entry fields preserved, exit fields
         populated). ``price`` is the actual exit price the tracker recorded.
         """
+        # Phase 29 (2026-05-05) — record stop_loss exits for the post-SL
+        # cooldown / StoplossGuard layers in RiskManager. Runs FIRST so
+        # ledger is updated even if downstream notifier/warehouse code
+        # raises. freqtrade pattern: revenge re-entry on a freshly-stopped
+        # pair-side is the dominant pattern in the audit's $-78 stop_loss
+        # bleed; cooldown breaks it.
+        if reason == "stop_loss":
+            try:
+                self.risk.note_sl_hit(pos.symbol, pos.side)
+            except Exception as _e:
+                logger.debug(f"[Risk29] note_sl_hit failed: {_e}")
         is_win  = (pos.pnl or 0) > 0
         # 2026-05-24 — Was `pos.pnl_pct or 0.0` which converts None → 0.0
         # and trips the _SPEC12_SCRATCH_PCT (0.5%) gate in
@@ -1851,7 +1919,6 @@ class OrderManager:
             # at 07:51AM it reached back to yesterday 07:51AM and blended
             # today+yesterday trades, making the email diverge from the
             # dashboard by up to 2× the daily PnL.
-            import time as _t
             import datetime as _dt
             _today = _dt.date.today()
             _midnight = _dt.datetime(
@@ -2036,9 +2103,19 @@ class OrderManager:
         for pos in positions:
             if pos.market_type != market_type:
                 continue
-            # Skip if exchange is already handling both SL and TP
-            if getattr(pos, '_exchange_sl', False) and getattr(pos, '_exchange_tp', False):
-                continue
+            # Flag: exchange holds both SL and TP conditionals. We still
+            # need to run trailing-stop advancement, age limits, hard max
+            # loss, and entry-invalidation on these positions — only the
+            # direct price-vs-SL/TP trigger checks are redundant (the
+            # exchange fires those). Prior code `continue`-d here, which
+            # silently skipped all local monitoring for LIVE futures
+            # positions — trailing never advanced the SL, age limits
+            # never fired, and the 3% hard-max-loss circuit breaker was
+            # bypassed.
+            _exchange_handles_sltp = (
+                getattr(pos, '_exchange_sl', False)
+                and getattr(pos, '_exchange_tp', False)
+            )
             ticker = exchange.fetch_ticker(pos.symbol, market_type)
             price  = ticker.get("last")
             if not price:
@@ -2089,9 +2166,71 @@ class OrderManager:
             except ImportError:
                 pass
 
-            should_trail, trail_reason, updated_sl = self.trailing.update(
-                pos, price
-            )
+            # ── SCALP TIME WALL (v4: hard 60-min close) ──────────────
+            try:
+                from config import SCALP_MODE as _SM_tw
+            except ImportError:
+                _SM_tw = {}
+            if _SM_tw.get("enabled", False):
+                _is_scalp = getattr(pos, "_scalp", False) or (
+                    hasattr(pos, "tp_pct") and pos.tp_pct and abs(float(pos.tp_pct) - _SM_tw.get("tp_pct", 1.3)) < 0.5
+                )
+                if _is_scalp:
+                    _tw_min = _SM_tw.get("time_wall_min", 60)
+                    _pos_age_min = 0
+                    try:
+                        if hasattr(pos, "open_time") and pos.open_time:
+                            from datetime import datetime, timezone
+                            _ot = pos.open_time if isinstance(pos.open_time, datetime) else datetime.fromisoformat(str(pos.open_time))
+                            _pos_age_min = (datetime.now(timezone.utc) - _ot.replace(tzinfo=timezone.utc if _ot.tzinfo is None else _ot.tzinfo)).total_seconds() / 60
+                    except Exception:
+                        pass
+                    if _pos_age_min >= _tw_min:
+                        logger.warning(
+                            f"[Orders] SCALP_TIME_WALL: {pos.symbol} age={_pos_age_min:.0f}m >= {_tw_min}m — force-closing")
+                        self.close_position(exchange, pos, "scalp_time_wall")
+                        continue
+
+                    # Scalp stale close: flat positions at 45 min
+                    _stale_min = _SM_tw.get("stale_close_min", 45)
+                    _stale_profit = _SM_tw.get("stale_min_profit", 0.3)
+                    if _pos_age_min >= _stale_min:
+                        _net_pct = 0
+                        try:
+                            if hasattr(pos, "pnl_pct"):
+                                _net_pct = float(pos.pnl_pct or 0)
+                            elif hasattr(pos, "unrealized_pnl_pct"):
+                                _net_pct = float(pos.unrealized_pnl_pct or 0)
+                        except Exception:
+                            pass
+                        if _net_pct < _stale_profit:
+                            logger.info(
+                                f"[Orders] SCALP_STALE: {pos.symbol} age={_pos_age_min:.0f}m pnl={_net_pct:+.2f}% < {_stale_profit}% — closing")
+                            self.close_position(exchange, pos, "scalp_stale_close")
+                            continue
+
+            # ── TRAILING STOP ─────────────────────────────────────────
+            # Skip trailing for scalp trades (v4: trailing clips winners at 0.67R)
+            try:
+                from config import SCALP_MODE as _SM_trail
+            except ImportError:
+                _SM_trail = {}
+            _skip_trail_for_scalp = False
+            if _SM_trail.get("enabled", False) and not _SM_trail.get("trailing_enabled", True):
+                _is_scalp_trail = getattr(pos, "_scalp", False) or (
+                    hasattr(pos, "tp_pct") and pos.tp_pct and abs(float(pos.tp_pct) - _SM_trail.get("tp_pct", 1.3)) < 0.5
+                )
+                if _is_scalp_trail:
+                    _skip_trail_for_scalp = True
+
+            if _skip_trail_for_scalp:
+                updated_sl = pos.stop_loss
+                should_trail = False
+                trail_reason = "scalp_trail_skipped"
+            else:
+                should_trail, trail_reason, updated_sl = self.trailing.update(
+                    pos, price
+                )
             if should_trail:
                 logger.info(
                     f"[Orders] TRAILING STOP: {pos.symbol} "
@@ -2164,7 +2303,11 @@ class OrderManager:
                     f"(SL={effective_sl}, TP={pos.take_profit}) — "
                     f"skipping SL/TP trigger this cycle (age/hard-loss still active)")
 
-            if _sltp_valid and pos.side == "buy":
+            # Skip direct SL/TP price-trigger checks when the exchange
+            # holds both conditionals — the exchange fires them on its own.
+            # All OTHER monitoring (trailing, age limit, hard max loss,
+            # entry invalidation) still runs above and below this block.
+            if _sltp_valid and not _exchange_handles_sltp and pos.side == "buy":
                 if price <= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED. SL hit = close.
                     # No widening, no MCP hold consultation. Discipline > hope.
@@ -2195,7 +2338,7 @@ class OrderManager:
                 # retrace case, and MCP advice now only applies to exits below
                 # the planned TP line (loss-cut / breakeven).
 
-            elif _sltp_valid and pos.side == "sell":
+            elif _sltp_valid and not _exchange_handles_sltp and pos.side == "sell":
                 if price >= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED for shorts too.
                     logger.warning(
@@ -2337,11 +2480,15 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — cutting before mid-hold bleed worsens")
                 _try_soft_close(self, pos, "AGE_LOSS", proceed_fn=_close)
                 continue
-            elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.3:
+            elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.0:
+                # 2026-05-28: only STALE-close flat/losing positions.
+                # Profitable trades (net_pct > 0) should run to TP, not get
+                # killed as "stale". The old range [-0.3, +0.3] was prematurely
+                # closing winners (XRP +0.28%, SOL +0.05% killed today).
                 logger.warning(
                     f"[Orders] STALE: {pos.symbol} {pos.side} "
                     f"open {age_hours:.1f}h (stale limit {max_stale_h}h), "
-                    f"net={net_pct:+.2f}% — near breakeven, freeing capital")
+                    f"net={net_pct:+.2f}% — flat/slight loss, freeing capital")
                 _try_soft_close(self, pos, "STALE", proceed_fn=_close)
                 continue
 

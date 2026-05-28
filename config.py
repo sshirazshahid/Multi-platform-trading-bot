@@ -213,22 +213,23 @@ PAIR_OVERRIDES = {
 # to take the fee saving once convinced the missed-fill cost is less
 # than the fee saving on the trades that DO fill.
 MAKER_ONLY = {
-    # Default OFF. 2026-05-28: a flip to default-ON was attempted, then REVERTED
-    # after verification found two blockers:
-    #   (1) NOT SAFELY WIRED — the maker-only SKIP path is not integrated with
-    #       order_manager. order_manager.py:839 keys only on order["id"], not
-    #       status, so a timed-out/skipped maker entry (which returns the
-    #       cancelled limit id) is mis-handled as a fill — likely a phantom /
-    #       naked (SL-less) position on every maker timeout, the exact class the
-    #       fail-closed floor exists to prevent.
-    #   (2) NO EV BENEFIT — the scalp-edge study
+    # Default OFF — but now SAFE to enable (2026-05-29 integration landed).
+    # History: a 2026-05-28 flip to default-ON was reverted on two blockers:
+    #   (1) NOT SAFELY WIRED — RESOLVED 2026-05-29. The executor now reports a
+    #       partial maker fill as 'partial_maker' (never a silent skip), and
+    #       order_manager._interpret_execution_result maps executor returns so a
+    #       skip/uncertain opens NO position (no phantom — the old code keyed
+    #       only on order["id"]) and a partial fill is sized to the actual fill
+    #       (SL/TP cover the real position). Tests: tests/test_maker_only_integration.py.
+    #   (2) NO EV BENEFIT — STILL TRUE. The scalp-edge study
     #       (research/scalp_edge_finding_2026_05_28.md) showed maker limit
     #       entries are adversely selected (filled on losers, skipped on the
-    #       bounce), so maker-only does NOT improve EV (negative across 3yr folds).
-    # Net: flipping it would add live-path bug risk for no EV benefit. Enabling
-    # it safely requires the executor<->order_manager skip integration (scoped
-    # future work). Opt-in remains available for experimentation only:
-    # MAKER_ONLY_ENABLED=true (NOT recommended until the integration lands).
+    #       bounce); maker-only EV is negative across 3yr folds.
+    # So it is now SAFE but still not EV-improving, and because paper bypasses
+    # the executor, default-on would make PAPER soaks optimistic vs live (paper
+    # takes entries live would skip). Default stays OFF for those reasons; enable
+    # for LIVE fee-saving experiments with MAKER_ONLY_ENABLED=true (now safe), and
+    # watch the realized maker-fill rate + fees — that is the only way to judge it.
     "enabled":      os.getenv("MAKER_ONLY_ENABLED", "false").lower() == "true",
     "max_wait_sec": int(os.getenv("MAKER_ONLY_MAX_WAIT_SEC", "120")),
 }

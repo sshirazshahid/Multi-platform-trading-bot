@@ -216,6 +216,8 @@ class SmartExecutor:
 
             # Re-check the order's true status. If it filled during the
             # timeout window, return without placing a market order.
+            filled_qty = 0.0
+            status = {}
             try:
                 status = exchange.exchange.fetch_order(order_id, symbol)
                 state = (status.get("status") or "").lower()
@@ -239,6 +241,24 @@ class SmartExecutor:
                     return {"status": "uncertain", "id": order_id,
                             "symbol": symbol, "amount": amount,
                             "_executor_warning": "cancel+verify both failed"}
+
+            # Partial fill below the 95% "treat as filled" bar above: a real,
+            # smaller position now exists (cancel removed only the unfilled
+            # remainder). Report it as a fill so the CALLER sizes the SL to the
+            # actual fill — NEVER skip while a naked partial sits on the book.
+            # Mode-agnostic: also stops a taker market top-up from double-filling
+            # on top of a partial.
+            if filled_qty > 0:
+                fill_price = float(
+                    status.get("average") or status.get("price") or entry_price)
+                logger.warning(
+                    f"[Executor] {symbol}: partial fill {filled_qty}/{amount} at "
+                    f"timeout — reporting partial_maker (caller sizes SL to fill).")
+                self._record_stat("maker_partial_fill")
+                return {"status": "partial_maker", "id": order_id,
+                        "symbol": symbol, "amount": filled_qty, "filled": filled_qty,
+                        "average": fill_price, "price": fill_price,
+                        "_executor_warning": "partial_fill_at_timeout"}
 
             if _maker_only:
                 logger.info(
