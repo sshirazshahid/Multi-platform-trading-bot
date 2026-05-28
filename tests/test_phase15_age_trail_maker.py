@@ -58,16 +58,17 @@ def test_lock_fraction_high_tiers_preserved():
 # ── 4. MAKER_ONLY ────────────────────────────────────────────────
 
 
-def test_maker_only_config_present_default_on():
-    # 2026-05-28: default flipped ON per operator directive (informed consent),
-    # after research/scalp_edge_finding_2026_05_28.md found taker fees the
-    # single largest controllable drag. SL placement is unaffected (separate
-    # order_manager path). Revert with MAKER_ONLY_ENABLED=false.
+def test_maker_only_config_present_default_off():
+    # Default MUST be False. A 2026-05-28 flip to default-ON was reverted:
+    # the maker-only SKIP path is not integrated with order_manager (phantom/
+    # naked-position risk) and the scalp-edge study showed no EV benefit.
+    # Opt-in only via env (MAKER_ONLY_ENABLED=true), not recommended until the
+    # executor<->order_manager integration lands.
     from config import MAKER_ONLY
     assert "enabled" in MAKER_ONLY
     assert "max_wait_sec" in MAKER_ONLY
-    assert MAKER_ONLY["enabled"] is True, \
-        "Default flipped ON 2026-05-28 (operator directive); MAKER_ONLY_ENABLED=false reverts"
+    assert MAKER_ONLY["enabled"] is False, \
+        "Default MUST be False — unsafe skip-integration + no EV benefit (see config note)"
 
 
 def test_smart_executor_supports_maker_only():
@@ -105,4 +106,4 @@ def test_phase15_full_set_summary():
     }
     for k, v in expected.items():
         assert RISK[k] == v, f"RISK[{k}] expected {v}, got {RISK[k]}"
-    assert MAKER_ONLY["enabled"] is True  # 2026-05-28: default flipped ON (operator directive)
+    assert MAKER_ONLY["enabled"] is False  # default OFF (2026-05-28 flip reverted: unsafe + no EV benefit)
