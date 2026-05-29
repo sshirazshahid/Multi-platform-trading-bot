@@ -1,0 +1,476 @@
+"""
+core/backtester.py — Walk-forward backtester with 70/30 train/test split.
+
+TRAIN / TEST SPLIT:
+  70% of candles  -> training window  (strategy is "fitted" on this data)
+  30% of candles  -> test window      (out-of-sample evaluation)
+
+  This mirrors the standard ML practice of never evaluating a strategy on
+  the same data it was developed on.  The printed result shows BOTH periods
+  so you can compare in-sample vs out-of-sample performance.
+
+  Example with 200 candles:
+    Train: candles 0-139  (first 70%)
+    Test:  candles 140-199 (last 30%)
+
+  Why this matters:
+    A strategy that looks great on all historical data might be curve-fitted.
+    If test performance is significantly worse than train performance, the
+    strategy is likely overfit and should not be traded live.
+"""
+
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+from loguru import logger
+
+TRAIN_RATIO = 0.70   # 70% train, 30% test
+
+
+@dataclass
+class SplitResult:
+    """Result for one window (train or test)."""
+    window:        str    # "train" or "test"
+    candles:       int
+    total_trades:  int
+    wins:          int
+    losses:        int
+    win_rate:      float
+    total_pnl:     float
+    max_drawdown:  float
+    sharpe_ratio:  float
+    sortino_ratio: float
+    avg_trade_pct: float
+    best_trade:    float
+    worst_trade:   float
+    turnover:      float          # number of round-trip trades / initial capital
+    equity_curve:  list = field(default_factory=list)  # [(trade_idx, balance)]
+
+
+@dataclass
+class BacktestResult:
+    """Combined result with train/test split + overall summary."""
+    symbol:        str
+    strategy:      str
+    timeframe:     str
+    # Overall (combined) -- kept for backward compatibility
+    total_trades:  int
+    wins:          int
+    losses:        int
+    win_rate:      float
+    total_pnl:     float
+    max_drawdown:  float
+    sharpe_ratio:  float
+    sortino_ratio: float
+    avg_trade_pct: float
+    best_trade:    float
+    worst_trade:   float
+    turnover:      float
+    equity_curve:  list = field(default_factory=list)
+    # Split details
+    train: SplitResult = field(default=None)
+    test:  SplitResult = field(default=None)
+    overfit_warning: bool = False
+    split_note: str = ""
+    # Live-gating fields
+    approved: bool = False
+    reject_reason: str = ""
+    profit_factor: float = 0.0
+
+
+SLIPPAGE_PCT = 0.0005  # 0.05% slippage per side
+
+
+class Backtester:
+
+    def __init__(self, sl_pct: float = 0.040, tp_pct: float = 0.100,
+                 fee_pct: float = 0.0007, initial_balance: float = 1000.0,
+                 leverage: int = 1):
+        self.sl_pct          = sl_pct   # 4% SL matches futures config
+        self.tp_pct          = tp_pct   # 10% TP matches futures config
+        self.fee_pct         = fee_pct
+        self.initial_balance = initial_balance
+        self.leverage        = leverage
+
+    # ------------------------------------------------------------------ #
+    # Public entry point                                                   #
+    # ------------------------------------------------------------------ #
+
+    def run(self, strategy, df: pd.DataFrame, symbol: str) -> BacktestResult:
+        """
+        Run backtest with 70/30 train/test split.
+        Prints a detailed comparison of in-sample vs out-of-sample results.
+        """
+        n          = len(df)
+        split_idx  = int(n * TRAIN_RATIO)
+
+        # Minimum candles needed for a meaningful split
+        if n < 100:
+            logger.warning(
+                f"[Backtest] Only {n} candles available. "
+                "Recommend 200+ for reliable train/test split.")
+
+        df_train = df.iloc[:split_idx].copy()
+        df_test  = df.iloc[split_idx:].copy()
+
+        logger.info(
+            f"[Backtest] {symbol} | {strategy.name} | split=70/30 | "
+            f"train={len(df_train)} candles | test={len(df_test)} candles")
+
+        # Run both windows
+        train_trades = self._run_window(strategy, df_train, "train")
+        test_trades  = self._run_window(strategy, df_test,  "test")
+        all_trades   = train_trades + test_trades
+
+        # Build split summaries
+        train_result = self._summarize("train", df_train, train_trades)
+        test_result  = self._summarize("test",  df_test,  test_trades)
+        overall      = self._summarize("overall", df, all_trades)
+
+        # Overfit detection
+        overfit = False
+        overfit_note = ""
+        if (train_result.total_trades >= 5 and test_result.total_trades >= 3):
+            wr_drop = train_result.win_rate - test_result.win_rate
+            train_result.total_pnl - test_result.total_pnl
+            if wr_drop > 20:
+                overfit = True
+                overfit_note = (
+                    f"OVERFIT WARNING: Win rate dropped {wr_drop:.0f}pp from train ({train_result.win_rate:.1f}%) "
+                    f"to test ({test_result.win_rate:.1f}%). Strategy may be curve-fitted.")
+            elif wr_drop > 10:
+                overfit_note = (
+                    f"MILD DEGRADATION: WR dropped {wr_drop:.0f}pp train→test. "
+                    "Monitor carefully in live trading.")
+            else:
+                overfit_note = (
+                    f"ROBUST: WR delta train→test = {wr_drop:.0f}pp. "
+                    "Strategy generalises well out-of-sample.")
+
+        # Profit factor (total wins / total losses)
+        all_wins = sum(t["pnl"] for t in all_trades if t["pnl"] > 0)
+        all_loss = abs(sum(t["pnl"] for t in all_trades if t["pnl"] <= 0)) or 0.001
+        pf = round(all_wins / all_loss, 3)
+
+        result = BacktestResult(
+            symbol=symbol,
+            strategy=strategy.name,
+            timeframe="?",
+            total_trades=overall.total_trades,
+            wins=overall.wins,
+            losses=overall.losses,
+            win_rate=overall.win_rate,
+            total_pnl=overall.total_pnl,
+            max_drawdown=overall.max_drawdown,
+            sharpe_ratio=overall.sharpe_ratio,
+            sortino_ratio=overall.sortino_ratio,
+            avg_trade_pct=overall.avg_trade_pct,
+            best_trade=overall.best_trade,
+            worst_trade=overall.worst_trade,
+            turnover=overall.turnover,
+            equity_curve=overall.equity_curve,
+            train=train_result,
+            test=test_result,
+            overfit_warning=overfit,
+            split_note=overfit_note,
+            profit_factor=pf,
+        )
+
+        # ── Live-gate: approve or reject ──
+        result.approved, result.reject_reason = self._check_approval(result)
+
+        self._print_result(result)
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Run one window                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _run_window(self, strategy, df: pd.DataFrame,
+                     window_name: str) -> list:
+        """Execute strategy signals on a DataFrame window. Returns trade list."""
+        trades      = []
+        balance     = self.initial_balance
+        in_trade    = False
+        entry_price = 0.0
+        entry_side  = ""
+        sl = tp     = 0.0
+        warmup      = 50     # candles needed to warm up indicators
+
+        for i in range(warmup, len(df)):
+            window = df.iloc[:i].copy()
+            candle = df.iloc[i]
+            high, low, close = float(candle["high"]), float(candle["low"]), float(candle["close"])
+
+            if in_trade:
+                pnl_pct = 0.0
+                reason  = None
+                lev = self.leverage
+                if entry_side == "buy":
+                    if low <= sl:
+                        pnl_pct, reason = -(self.sl_pct * lev + 2 * self.fee_pct), "stop_loss"
+                        exit_price = sl * (1 + SLIPPAGE_PCT)  # slippage on SL price
+                    elif high >= tp:
+                        pnl_pct, reason = self.tp_pct * lev - 2 * self.fee_pct, "take_profit"
+                        exit_price = tp * (1 - SLIPPAGE_PCT)  # slippage on TP price
+                else:
+                    if high >= sl:
+                        pnl_pct, reason = -(self.sl_pct * lev + 2 * self.fee_pct), "stop_loss"
+                        exit_price = sl * (1 - SLIPPAGE_PCT)
+                    elif low <= tp:
+                        pnl_pct, reason = self.tp_pct * lev - 2 * self.fee_pct, "take_profit"
+                        exit_price = tp * (1 + SLIPPAGE_PCT)
+
+                if reason:
+                    trade_pnl = balance * 0.05 * pnl_pct
+                    balance  += trade_pnl
+                    trades.append({
+                        "window":   window_name,
+                        "side":     entry_side,
+                        "entry":    entry_price,
+                        "exit":     exit_price,
+                        "pnl_pct":  pnl_pct,
+                        "pnl":      trade_pnl,
+                        "reason":   reason,
+                    })
+                    in_trade = False
+
+            else:
+                try:
+                    result = strategy.generate_signal(window)
+                    signal = result[0] if isinstance(result, tuple) else result
+                except Exception:
+                    signal = None
+
+                if signal in ("buy", "sell"):
+                    in_trade   = True
+                    entry_side = signal
+                    # Apply slippage to entry fill price
+                    if signal == "buy":
+                        entry_price = close * (1 + SLIPPAGE_PCT)
+                        sl = entry_price * (1 - self.sl_pct)
+                        tp = entry_price * (1 + self.tp_pct)
+                    else:
+                        entry_price = close * (1 - SLIPPAGE_PCT)
+                        sl = entry_price * (1 + self.sl_pct)
+                        tp = entry_price * (1 - self.tp_pct)
+
+        return trades
+
+    # ------------------------------------------------------------------ #
+    # Summarise a list of trades into a SplitResult                       #
+    # ------------------------------------------------------------------ #
+
+    def _summarize(self, window: str, df: pd.DataFrame,
+                    trades: list) -> SplitResult:
+        total = len(trades)
+        if total == 0:
+            return SplitResult(
+                window=window, candles=len(df),
+                total_trades=0, wins=0, losses=0, win_rate=0.0,
+                total_pnl=0.0, max_drawdown=0.0, sharpe_ratio=0.0,
+                sortino_ratio=0.0, avg_trade_pct=0.0,
+                best_trade=0.0, worst_trade=0.0,
+                turnover=0.0, equity_curve=[],
+            )
+
+        wins   = [t for t in trades if t["pnl"] > 0]
+        losses = [t for t in trades if t["pnl"] <= 0]
+
+        # Equity curve for drawdown
+        balance     = self.initial_balance
+        peak        = balance
+        max_dd      = 0.0
+        equity_curve = [(0, self.initial_balance)]
+        for idx, t in enumerate(trades):
+            balance += t["pnl"]
+            equity_curve.append((idx + 1, round(balance, 4)))
+            peak     = max(peak, balance)
+            dd       = (peak - balance) / max(peak, 1e-8) * 100
+            max_dd   = max(max_dd, dd)
+
+        total_pnl   = sum(t["pnl"]     for t in trades)
+        pnls        = [t["pnl_pct"]    for t in trades]
+        avg_pct     = sum(pnls) / total * 100
+        best        = max(pnls)  * 100
+        worst       = min(pnls)  * 100
+
+        mean_r = np.mean(pnls)
+        std_r  = np.std(pnls)
+        sharpe = (mean_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
+
+        # Sortino ratio: uses downside deviation only (negative returns)
+        downside = [r for r in pnls if r < 0]
+        downside_std = np.std(downside) if len(downside) > 1 else 0.0
+        sortino = (mean_r / downside_std * (252 ** 0.5)) if downside_std > 0 else 0.0
+
+        # Turnover: total notional traded / initial balance
+        total_notional = sum(abs(t.get("pnl", 0)) for t in trades)
+        turnover = total_notional / self.initial_balance if self.initial_balance > 0 else 0.0
+
+        return SplitResult(
+            window=window,
+            candles=len(df),
+            total_trades=total,
+            wins=len(wins),
+            losses=len(losses),
+            win_rate=round(len(wins) / total * 100, 2),
+            total_pnl=round(total_pnl, 4),
+            max_drawdown=round(max_dd, 2),
+            sharpe_ratio=round(sharpe, 3),
+            sortino_ratio=round(sortino, 3),
+            avg_trade_pct=round(avg_pct, 3),
+            best_trade=round(best, 3),
+            worst_trade=round(worst, 3),
+            turnover=round(turnover, 4),
+            equity_curve=equity_curve,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Formatted output                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _print_result(self, r: BacktestResult):
+        SEP = "=" * 62
+
+        logger.info(SEP)
+        logger.info(f"  BACKTEST RESULT  --  {r.symbol}  |  {r.strategy}")
+        logger.info("  Train/Test Split: 70% train / 30% test")
+        logger.info(SEP)
+
+        def _row(label, train_val, test_val, overall_val):
+            logger.info(f"  {label:<22} {str(train_val):>12}  {str(test_val):>10}  {str(overall_val):>10}")
+
+        logger.info("  {:<22} {:>12}  {:>10}  {:>10}".format(
+            "", "TRAIN (70%)", "TEST (30%)", "OVERALL"))
+        logger.info("  " + "-" * 58)
+
+        tr = r.train
+        te = r.test
+
+        _row("Candles",       tr.candles,         te.candles,         tr.candles + te.candles)
+        _row("Total Trades",  tr.total_trades,    te.total_trades,    r.total_trades)
+        _row("Wins / Losses", f"{tr.wins}/{tr.losses}",
+                               f"{te.wins}/{te.losses}",
+                               f"{r.wins}/{r.losses}")
+        _row("Win Rate",
+             f"{tr.win_rate:.1f}%",
+             f"{te.win_rate:.1f}%",
+             f"{r.win_rate:.1f}%")
+        _row("Total PnL",
+             f"{tr.total_pnl:+.4f}",
+             f"{te.total_pnl:+.4f}",
+             f"{r.total_pnl:+.4f}")
+        _row("Max Drawdown",
+             f"{tr.max_drawdown:.2f}%",
+             f"{te.max_drawdown:.2f}%",
+             f"{r.max_drawdown:.2f}%")
+        _row("Sharpe Ratio",
+             f"{tr.sharpe_ratio:.3f}",
+             f"{te.sharpe_ratio:.3f}",
+             f"{r.sharpe_ratio:.3f}")
+        _row("Sortino Ratio",
+             f"{tr.sortino_ratio:.3f}",
+             f"{te.sortino_ratio:.3f}",
+             f"{r.sortino_ratio:.3f}")
+        _row("Turnover",
+             f"{tr.turnover:.4f}",
+             f"{te.turnover:.4f}",
+             f"{r.turnover:.4f}")
+        _row("Avg Trade",
+             f"{tr.avg_trade_pct:+.3f}%",
+             f"{te.avg_trade_pct:+.3f}%",
+             f"{r.avg_trade_pct:+.3f}%")
+        _row("Best Trade",
+             f"{tr.best_trade:+.3f}%",
+             f"{te.best_trade:+.3f}%",
+             f"{r.best_trade:+.3f}%")
+        _row("Worst Trade",
+             f"{tr.worst_trade:+.3f}%",
+             f"{te.worst_trade:+.3f}%",
+             f"{r.worst_trade:+.3f}%")
+
+        logger.info(SEP)
+        if r.split_note:
+            prefix = "  ⚠ " if r.overfit_warning else "  ✓ "
+            logger.info(f"{prefix}{r.split_note}")
+        if r.approved:
+            logger.info(f"  APPROVED for live trading (PF={r.profit_factor:.2f})")
+        else:
+            logger.info(f"  REJECTED: {r.reject_reason}")
+        logger.info(SEP)
+
+    # ------------------------------------------------------------------ #
+    # Live-gate approval                                                    #
+    # ------------------------------------------------------------------ #
+
+    MIN_TRADES    = 5     # Need at least 5 trades in test window
+    MIN_WIN_RATE  = 35.0  # Minimum 35% WR on TEST (out-of-sample)
+    MIN_PF        = 1.0   # Profit factor >= 1.0 (at least break-even)
+    MAX_DD        = 30.0  # Max drawdown < 30%
+
+    def _check_approval(self, r: BacktestResult) -> tuple:
+        """Check if backtest passes minimum criteria for live trading.
+        Uses TEST window (out-of-sample) when available — never approve on train alone."""
+        test = r.test
+        if test and test.total_trades >= 3:
+            # Evaluate on out-of-sample data
+            if test.win_rate < self.MIN_WIN_RATE:
+                return False, f"test WR {test.win_rate:.0f}% < {self.MIN_WIN_RATE:.0f}%"
+            if test.total_pnl < 0:
+                return False, f"test PnL negative ({test.total_pnl:+.4f})"
+        if r.total_trades < self.MIN_TRADES:
+            return False, f"too few trades ({r.total_trades})"
+        if r.win_rate < self.MIN_WIN_RATE:
+            return False, f"WR {r.win_rate:.0f}% < {self.MIN_WIN_RATE:.0f}%"
+        if r.profit_factor < self.MIN_PF:
+            return False, f"PF {r.profit_factor:.2f} < {self.MIN_PF:.2f}"
+        if r.max_drawdown > self.MAX_DD:
+            return False, f"DD {r.max_drawdown:.1f}% > {self.MAX_DD:.1f}%"
+        if r.overfit_warning:
+            return False, "overfit detected (WR drops train→test)"
+        return True, "passed"
+
+    # ------------------------------------------------------------------ #
+    # Convenience: validate a strategy+symbol before going live            #
+    # ------------------------------------------------------------------ #
+
+    def validate_before_live(self, strategy, exchange, symbol: str,
+                             timeframe: str = "1h", limit: int = 500,
+                             market_type: str = "futures") -> BacktestResult:
+        """Fetch OHLCV from exchange, run full backtest, return result with approved flag.
+
+        Usage in bot_engine:
+            result = backtester.validate_before_live(strategy, exchange, symbol)
+            if not result.approved:
+                logger.info("Backtest rejected: %s", result.reject_reason)
+                continue
+        """
+        try:
+            raw = exchange.fetch_ohlcv(symbol, timeframe, limit=limit,
+                                       market_type=market_type)
+            if not raw or len(raw) < 100:
+                r = BacktestResult(
+                    symbol=symbol, strategy=getattr(strategy, "name", "?"),
+                    timeframe=timeframe, total_trades=0, wins=0, losses=0,
+                    win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
+                    sortino_ratio=0, avg_trade_pct=0, best_trade=0,
+                    worst_trade=0, turnover=0,
+                    reject_reason=f"insufficient data ({len(raw) if raw else 0} candles)")
+                return r
+            df = pd.DataFrame(
+                raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df.set_index("timestamp", inplace=True)
+            return self.run(strategy, df, symbol)
+        except Exception as e:
+            logger.debug(f"[Backtest] validate_before_live failed: {e}")
+            r = BacktestResult(
+                symbol=symbol, strategy=getattr(strategy, "name", "?"),
+                timeframe=timeframe, total_trades=0, wins=0, losses=0,
+                win_rate=0, total_pnl=0, max_drawdown=0, sharpe_ratio=0,
+                sortino_ratio=0, avg_trade_pct=0, best_trade=0,
+                worst_trade=0, turnover=0,
+                reject_reason=f"error: {str(e)[:100]}")
+            return r

@@ -1,1 +1,1 @@
-# research package
+# research/__init__.py

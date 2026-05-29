@@ -1,23 +1,32 @@
 """
-strategies/base_strategy.py — Abstract base for all trading strategies.
+strategies/base_strategy.py — Abstract base class for all trading strategies.
 
-FIX: get_dataframe() requires >= 30 candles (not 2 — useless for indicators).
-     Insufficient data logged at DEBUG, not WARNING, to avoid log spam.
-FIX: get_usdt_balance() checks paper wallet first (DRY RUN / multi-profile),
-     falls back to exchange balance only in LIVE mode.
+KEY FIX: get_usdt_balance() now checks for a paper wallet on the order_manager
+first. In DRY RUN / multi-profile mode the strategy's order_manager carries a
+ProfileWallet (or VirtualWallet) with the paper balance. Only if no paper
+wallet is present does it fall back to the real exchange balance API.
+
+FIX: get_dataframe() now requires >= 30 candles (was 2 — useless for indicators).
+     Logged at DEBUG level so it doesn't spam the log for unavailable symbols.
 """
 
 from abc import ABC, abstractmethod
+
 import pandas as pd
 from loguru import logger
-from exchanges.base     import BaseExchange
-from core.order_manager import OrderManager
-from core.risk_manager  import RiskManager
 
-MIN_CANDLES = 30  # Minimum candles needed for any indicator to be meaningful
+from core.order_manager import OrderManager
+from core.risk_manager import RiskManager
+from exchanges.base import BaseExchange
+
+# Minimum candles needed to compute any indicator reliably
+MIN_CANDLES = 30
 
 
 class BaseStrategy(ABC):
+
+    # Class-level OHLCV cache — shared across all strategies, set by BotEngine
+    _ohlcv_cache = None
 
     def __init__(self, order_manager: OrderManager, risk_manager: RiskManager,
                  name: str, market_type: str = "spot"):
@@ -28,7 +37,6 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def generate_signal(self, df: pd.DataFrame):
-        """Return "buy", "sell", or None."""
         ...
 
     @abstractmethod
@@ -36,57 +44,123 @@ class BaseStrategy(ABC):
         ...
 
     def get_dataframe(self, exchange: BaseExchange, symbol: str,
-                      timeframe: str, limit: int) -> pd.DataFrame | None:
-        raw = exchange.fetch_ohlcv(symbol, timeframe, limit, self.market_type)
+                      timeframe: str, limit: int):
+        # Use OHLCV cache if available (avoids redundant exchange API calls)
+        if self._ohlcv_cache:
+            raw = self._ohlcv_cache.get(exchange, symbol, timeframe, limit, self.market_type)
+        else:
+            raw = exchange.fetch_ohlcv(symbol, timeframe, limit, self.market_type)
         if not raw or len(raw) < MIN_CANDLES:
+            # Downgraded to DEBUG — this is expected for illiquid/new symbols
+            # and should not clutter the main INFO log
             logger.debug(
-                f"[{self.name}] Insufficient OHLCV for {symbol} "
+                f"[{self.name}] Insufficient OHLCV data for {symbol} "
                 f"({len(raw) if raw else 0} candles, need {MIN_CANDLES}) — skipped")
             return None
         df = pd.DataFrame(
-            raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
+        )
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df.set_index("timestamp", inplace=True)
         return df
 
     def get_usdt_balance(self, exchange: BaseExchange) -> float:
         """
-        Return USDT balance for position sizing.
+        Return the USDT balance to use for position sizing.
 
         Priority:
-          1. Paper wallet on order_manager (DRY RUN / multi-profile)
+          1. Paper wallet on the order_manager (DRY RUN / multi-profile)
           2. Real exchange balance (LIVE mode)
         """
+
+        # ── 1. Paper wallet ───────────────────────────────────────────
         wallet = getattr(self.order_manager, "wallet", None)
         if wallet is not None:
             ex_name = getattr(exchange, "name", "binance").lower()
             try:
                 bal = wallet.balance(ex_name)
                 if bal and bal > 0:
+                    logger.debug(
+                        f"[{self.name}] Paper wallet {ex_name} "
+                        f"{self.market_type}: {bal:.4f} USDT"
+                    )
                     return float(bal)
             except Exception:
                 pass
 
-        # Live balance fallback
-        def _read(bal_data):
-            if not bal_data: return 0.0
+        # ── 2. Real exchange balance ──────────────────────────────────
+        def _read_usdt(bal_data, ex_name_hint: str = ""):
+            if not bal_data:
+                return 0.0
+            ex_lower = ex_name_hint.lower()
+
+            # Bybit Unified Account: balance is in info.result.list[0].totalEquity
+            if ex_lower == "bybit":
+                try:
+                    lst = bal_data.get("info", {}).get("result", {}).get("list", [{}])
+                    if lst:
+                        for key in ("totalEquity", "totalWalletBalance"):
+                            val = lst[0].get(key)
+                            if val:
+                                v = float(val)
+                                if v > 0:
+                                    return v
+                except Exception:
+                    pass
+                # Bybit fallback: ccxt total.USDT
+                usdt = bal_data.get("USDT") or {}
+                if isinstance(usdt, dict):
+                    val = usdt.get("total")
+                    if val is not None:
+                        try:
+                            v = float(val)
+                            if v > 0:
+                                return v
+                        except (TypeError, ValueError):
+                            pass
+
+            # Standard ccxt (Binance, Bitget)
             usdt = bal_data.get("USDT")
             if isinstance(usdt, dict):
                 v = usdt.get("free") or usdt.get("total") or 0.0
                 if v: return float(v)
-            free = bal_data.get("free", {})
-            if isinstance(free, dict) and free.get("USDT"):
-                return float(free["USDT"])
+            free_d = bal_data.get("free", {})
+            if isinstance(free_d, dict):
+                v = free_d.get("USDT", 0.0)
+                if v: return float(v)
+            total_d = bal_data.get("total", {})
+            if isinstance(total_d, dict):
+                v = total_d.get("USDT", 0.0)
+                if v: return float(v)
             return 0.0
 
         try:
-            return _read(exchange.fetch_balance(self.market_type)) or 0.0
-        except Exception as e:
-            logger.debug(f"[{self.name}] Balance fetch: {e}")
+            ex_name = getattr(exchange, "name", "")
+            bal_data = exchange.fetch_balance(self.market_type)
+            primary  = _read_usdt(bal_data, ex_name)
+
+            if primary > 0:
+                logger.debug(
+                    f"[{self.name}] {exchange.name} {self.market_type}: "
+                    f"{primary:.4f} USDT")
+                return primary
+
+            # NO FALLBACK: If this market type has $0, return $0.
+            # The old code checked the OTHER account and said "will auto-transfer"
+            # but the transfer never happened → DCA spam, failed orders.
+            # Rule: spot=0 → return 0. futures=0 → return 0. Period.
+            logger.debug(
+                f"[{self.name}] {exchange.name} {self.market_type}=0 USDT — skipping")
             return 0.0
 
-    def log_signal(self, symbol: str, signal: str, price: float, extra: str = ""):
+        except Exception as e:
+            logger.debug(f"[{self.name}] Balance fetch on {exchange.name}: {e}")
+            return 0.0
+
+    def log_signal(self, symbol: str, signal: str, price: float,
+                   extra: str = ""):
         if signal:
             logger.info(
                 f"[{self.name}] SIGNAL {signal.upper()} | "
-                f"{symbol} @ {price:.6g} {extra}")
+                f"{symbol} @ {price:.4f} {extra}"
+            )

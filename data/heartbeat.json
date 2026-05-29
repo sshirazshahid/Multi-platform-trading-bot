@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-05-29T03:05:16.754514+00:00",
+  "uptime_seconds": 24076,
+  "cycle_count": 236,
+  "open_positions": 0,
+  "per_exchange_positions": {
+    "binance": 0,
+    "bybit": 0,
+    "bitget": 0
+  },
+  "last_trade_time": null,
+  "active_exchanges": [
+    "binance",
+    "bybit",
+    "bitget"
+  ],
+  "halted_exchanges": [],
+  "api_latency_ms": {
+    "binance": 200.0,
+    "bybit": 123.0,
+    "bitget": 327.0
+  },
+  "is_halted": false,
+  "halt_reason": null,
+  "daily_pnl": -9.00079995,
+  "spot_manager_active": true,
+  "capital_allocator_active": true,
+  "memory_mb": 37.8
+}

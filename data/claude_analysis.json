@@ -1,0 +1,141 @@
+{
+  "market_bias": "bullish",
+  "market_note": "Extreme Fear F&G=9 \u2014 historical buy opportunity | BlackRock: accumulation phase",
+  "risk_multiplier": 1.26,
+  "coins": {
+    "BTC": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -2.7755575615628914e-17,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.102
+    },
+    "ETH": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -2.7755575615628914e-17,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.102
+    },
+    "BNB": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -0.2,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.072
+    },
+    "SOL": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": 0.0,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.102
+    },
+    "XRP": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -0.2,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.072
+    },
+    "ADA": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -0.6000000000000001,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.012
+    },
+    "DOGE": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -0.5,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.027
+    },
+    "AVAX": {
+      "action": "skip",
+      "confidence_adj": 0.8,
+      "reason": "no technicals, research neutral",
+      "scores": {
+        "goldman": -0.2,
+        "morgan_stanley": 0.0,
+        "bridgewater": 0.0,
+        "jpmorgan": 0.5,
+        "blackrock": 0.3,
+        "citadel": 0.0,
+        "harvard": 0.0,
+        "bain": 0.0
+      },
+      "composite": 0.072
+    }
+  },
+  "best_trade": "none",
+  "avoid": [],
+  "advice": "Extreme Fear \u2014 8 frameworks favor accumulation. Goldman top: ETH. Bain pick: Ethereum (ETH). Buy spot longs, use Citadel entry levels.",
+  "generated_at": "2026-04-03T11:25:16.421014",
+  "call_number": 63,
+  "source": "embedded"
+}
