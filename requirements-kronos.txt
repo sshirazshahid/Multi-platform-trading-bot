@@ -1,0 +1,10 @@
+# Kronos foundation-model evaluation deps (SEPARATE from the bot runtime requirements.txt).
+# Do NOT merge into requirements.txt — the bot runtime must not depend on torch/Kronos.
+# torch is intentionally omitted: it is environment-provided (a CUDA build is already installed
+# locally). Install with:  python -m pip install -r requirements-kronos.txt
+#
+# numpy / pandas are already bot runtime deps (not re-pinned here to avoid conflicts).
+einops==0.8.1
+safetensors==0.6.2
+tqdm
+huggingface_hub>=1.5.0,<2.0   # NOT the repo's 0.33.1 pin — that conflicts with local transformers/diffusers

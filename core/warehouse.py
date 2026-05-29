@@ -219,6 +219,14 @@ class Warehouse:
                 conn.execute("ALTER TABLE trades ADD COLUMN model_version TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Phase (2026-05-29): per-trade execution fill type
+            # ('maker' | 'taker' | 'maker_partial') so the maker-only soak can be
+            # evaluated on ground truth instead of aggregate counters. NULL on
+            # legacy rows and on paper (no real fill).
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN fill_type TEXT")
+            except sqlite3.OperationalError:
+                pass
             # Phase 13.5b: predictions.candidate_id added for clean
             # predictions→trades join. NULL on legacy rows.
             try:
@@ -324,6 +332,7 @@ class Warehouse:
         mode: str = "PAPER",
         mcp_score: float | None = None,
         model_version: str | None = None,
+        fill_type: str | None = None,
     ) -> int:
         """Insert an OPEN trade row. Idempotent on (exchange, symbol, ts_entry, side)."""
         try:
@@ -331,13 +340,13 @@ class Warehouse:
                 """INSERT OR IGNORE INTO trades(
                     candidate_id, ts_entry, exchange, symbol, market_type,
                     side, strategy_family, entry_px, size, leverage,
-                    fee, slippage, status, mode, mcp_score, model_version)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    fee, slippage, status, mode, mcp_score, model_version, fill_type)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (candidate_id, ts_entry, exchange, symbol, market_type,
                  side, strategy_family, entry_px, size, leverage,
-                 fee, slippage, "OPEN", mode, mcp_score, model_version),
+                 fee, slippage, "OPEN", mode, mcp_score, model_version, fill_type),
             )
-            if cur.lastrowid:
+            if cur.rowcount > 0:
                 return int(cur.lastrowid)
             # Already inserted — look it up
             got = self._conn().execute(

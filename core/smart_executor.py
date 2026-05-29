@@ -183,6 +183,8 @@ class SmartExecutor:
                             f"[Executor] {symbol}: limit FILLED @ {fill_price:.6f} "
                             f"(saved vs market)")
                         self._record_stat("limit_fills")
+                        if isinstance(status, dict):
+                            status["_fill_type"] = "maker"
                         return status
                 except Exception:
                     pass
@@ -229,6 +231,8 @@ class SmartExecutor:
                         f"@ {fill_price:.6f} (cancel was {'rejected' if cancel_failed else 'accepted'} "
                         f"because order already filled) — NO market fallback")
                     self._record_stat("limit_fills")
+                    if isinstance(status, dict):
+                        status["_fill_type"] = "maker"
                     return status
             except Exception as verify_err:
                 # Verification failed too — fall through to market only if
@@ -258,6 +262,7 @@ class SmartExecutor:
                 return {"status": "partial_maker", "id": order_id,
                         "symbol": symbol, "amount": filled_qty, "filled": filled_qty,
                         "average": fill_price, "price": fill_price,
+                        "_fill_type": "maker_partial",
                         "_executor_warning": "partial_fill_at_timeout"}
 
             if _maker_only:
@@ -393,6 +398,8 @@ class SmartExecutor:
                 market_type=market_type,
             )
             self._record_stat("market_fallbacks")
+            if isinstance(order, dict):
+                order["_fill_type"] = "taker"
             return order
         except Exception as e:
             logger.error(f"[Executor] Market order failed {symbol}: {e}")

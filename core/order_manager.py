@@ -811,6 +811,10 @@ class OrderManager:
             confidence=_conf_in,
         )
 
+        # Execution fill type ('maker'|'taker'|'maker_partial'); None in dry-run
+        # (no real fill) and tagged by the executor on the live path below.
+        _fill_type: str | None = None
+
         if self.dry_run:
             ok = self.wallet.on_open(
                 exchange.name, symbol, side,
@@ -886,6 +890,7 @@ class OrderManager:
                     pos.size = _fill_sz
                 pos.order_id   = order.get("id")
                 pos.id         = pos.order_id or pos.id
+                _fill_type     = order.get("_fill_type")
                 fill_price     = order.get("average") or order.get("price") or fill_price
                 pos.entry_price = float(fill_price)
                 # Recalculate entry_fee based on actual fill price
@@ -1020,6 +1025,7 @@ class OrderManager:
                 mode=_mode,
                 mcp_score=float(mcp_score) if mcp_score is not None else None,
                 model_version=str(model_version) if model_version else None,
+                fill_type=_fill_type,
             )
         except Exception as _we:
             # 2026-05-25 — Bug 3 fix: was logger.debug, so a transient

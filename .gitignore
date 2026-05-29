@@ -38,6 +38,33 @@ logs/
 # Generated reports
 reports/
 
+# Kronos foundation-model eval (weights + cloned source; vendored model code IS committed)
+models/kronos/
+.kronos_src/
+vendor/kronos/**/__pycache__/
+
+# Derivs harvester forward-accumulation store (grows over time; runtime data)
+data/derivs_history.jsonl
+
+# Transient agent / tool state (Ruflo swarm, worktrees, vector + agent DBs)
+.claude-flow/
+.swarm/
+.claude/worktrees/
+.pytest_tmp/
+agentdb.rvf
+agentdb.rvf.lock
+ruvector.db
+
+# SQLite transient files + backups (never commit — DB internals / large)
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite.bak*
+data/*.sqlite-bak*
+
+# Regenerable runtime caches / trained-model artifacts
+data/ohlcv_cache/
+data/models/
+
 # CI artifacts
 htmlcov/
 .coverage
