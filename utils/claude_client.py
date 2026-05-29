@@ -26,6 +26,21 @@ _last_error: str = ""  # last failure reason — read by callers for diagnostics
 MAX_CLI_RETRIES = 2       # 1 original + 1 retry
 CLI_BACKOFF_BASE = 2.0    # seconds
 
+# Owner directive (2026-05-29): keep Opus's answers as short / to-the-point as
+# possible. Appended to the system prompt of EVERY call (additive, so it never
+# clobbers a caller's --system-prompt). Brevity is orthogonal to --effort max
+# (depth of thinking) and also speeds generation (fewer output tokens). Phrased
+# to PRESERVE required JSON structure — terse, not truncated.
+_BREVITY_DIRECTIVE = (
+    "BREVITY IS MANDATORY. Answer in the absolute fewest words that fully address "
+    "the request — default to 1-3 sentences. Do NOT use headers, section titles, or "
+    "bullet lists unless explicitly asked. No preamble, no restating the question, "
+    "no background, no caveats, no closing summary, no commentary or explanation "
+    "unless explicitly requested, no markdown code fences. If a specific output "
+    "format (e.g. JSON) is required, return ONLY that structure — complete, with "
+    "nothing before or after it."
+)
+
 # ── Audit log ──────────────────────────────────────────────────────────
 AUDIT_DIR = Path("data/claude_audit")
 
@@ -99,7 +114,8 @@ def call_claude_cli(
         "--model", model,
         "--max-turns", "1",             # single response, no tool use
         "--no-session-persistence",     # don't save session to disk
-        "--effort", effort,             # low=fast classification, high=deep analysis
+        "--effort", effort,             # low=fast classification, high/max=deep analysis
+        "--append-system-prompt", _BREVITY_DIRECTIVE,  # owner directive: terse answers
     ]
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
