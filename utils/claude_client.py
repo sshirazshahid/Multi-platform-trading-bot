@@ -68,9 +68,9 @@ def _check_claude_code() -> bool:
 def call_claude_cli(
     prompt: str,
     system_prompt: str = "",
-    model: str = "sonnet",
+    model: str = "claude-opus-4-8",
     timeout: int = 120,
-    effort: str = "low",
+    effort: str = "max",
 ) -> str | None:
     """
     Call Claude via the Claude Code CLI in non-interactive mode.
@@ -79,6 +79,15 @@ def call_claude_cli(
     Returns the response text, or None on any failure.
     """
     global _last_error
+    # Owner directive (2026-05-29): force EVERY bot Claude call to Opus 4.8 at
+    # max effort, regardless of the model/effort each caller passed (older
+    # callers still request "sonnet"/"haiku"/"low"). Escape hatch via env:
+    #   BOT_CLAUDE_MODEL / BOT_CLAUDE_EFFORT  (e.g. if Opus is rate-limited).
+    # Note: --effort max is the deepest (slowest) level; there is NO headless
+    # "fast mode" flag in the CLI (fast mode is interactive-only via /fast), so
+    # speed and max-effort are opposing knobs — effort is the only speed lever.
+    model = os.getenv("BOT_CLAUDE_MODEL", "claude-opus-4-8")
+    effort = os.getenv("BOT_CLAUDE_EFFORT", "max")
     if not _check_claude_code():
         _last_error = "CLI binary not found or not runnable"
         return None
@@ -220,20 +229,24 @@ def call_claude_cli(
 def call_claude(
     prompt: str,
     system_prompt: str = "",
-    model: str = "sonnet",
+    model: str = "claude-opus-4-8",
     timeout: int = 120,
-    effort: str = "low",
+    effort: str = "max",
     **_kwargs,
 ) -> str | None:
     """
-    Call Claude via CLI only (Opus 4.7). No API fallback.
+    Call Claude via CLI only (Opus 4.8). No API fallback.
+
+    NOTE: model/effort passed here are overridden inside call_claude_cli to
+    Opus 4.8 + max effort (owner directive); pass BOT_CLAUDE_MODEL /
+    BOT_CLAUDE_EFFORT env vars to change that.
 
     Args:
         prompt:        The user message / analysis prompt.
         system_prompt: Optional system-level instructions.
-        model:         CLI model name ("sonnet", "opus", "haiku").
+        model:         CLI model name (forced to claude-opus-4-8).
         timeout:       Timeout in seconds.
-        effort:        CLI effort level ("low", "medium", "high").
+        effort:        CLI effort level (low|medium|high|xhigh|max; forced to max).
 
     Returns:
         Response text, or None on failure.
