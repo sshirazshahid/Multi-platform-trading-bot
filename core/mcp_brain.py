@@ -431,7 +431,7 @@ def fetch_orderbook_depth(coins: list) -> dict:
         sym = f"{coin}USDT"
         try:
             resp = _http_get(
-                f"https://api.binance.com/api/v3/depth?symbol={sym}&limit=20",
+                f"https://fapi.binance.com/fapi/v1/depth?symbol={sym}&limit=20",
                 timeout=5)
             bids = resp.get("bids", [])
             asks = resp.get("asks", [])
@@ -850,6 +850,18 @@ class MCPBrain:
         # Cache raw data for reuse between entry/position analysis
         self._cached_data = {}
         self._cache_time = 0
+
+        # ── Data Coordinator (2026-05-27) ──────────────────────────────
+        # External data feeds: funding rate history, OI time-series,
+        # enhanced orderbook, news sentiment, smart money flow.
+        # Lazy-initialized; fail-open if coordinator can't load.
+        self._data_coordinator = None
+        try:
+            from core.data_coordinator import get_coordinator
+            self._data_coordinator = get_coordinator()
+            logger.info("[MCP-Brain] Data Coordinator attached")
+        except Exception as e:
+            logger.warning(f"[MCP-Brain] Data Coordinator unavailable: {e}")
 
         # Load persisted state from last session
         self._load_state()
@@ -1604,6 +1616,25 @@ class MCPBrain:
         # Merge news context into data
         if news_context:
             data["news_context"] = news_context
+
+        # ── Refresh Data Coordinator feeds (2026-05-27) ───────────────
+        # Runs in parallel threads; each feed respects its own TTL.
+        # Non-blocking: if a feed is slow, stale data is used.
+        if self._data_coordinator is not None:
+            try:
+                coin_bases = [c.split("/")[0].upper() for c in coins]
+                self._data_coordinator.set_coins(coin_bases)
+                # Compute 6h price changes for OI divergence signal
+                _price_changes = {}
+                for c in coin_bases[:10]:
+                    gecko = data.get("gecko", {}).get(c, {})
+                    chg = gecko.get("change_24h", 0)
+                    if chg:
+                        _price_changes[c] = float(chg) / 100.0 / 4.0  # rough 6h
+                self._data_coordinator.set_price_changes(_price_changes)
+                self._data_coordinator.refresh()
+            except Exception as _dc_err:
+                logger.debug(f"[MCP-Brain] DataCoordinator refresh: {_dc_err}")
 
         # Fetch multi-TF exchange indicators
         exchange_indicators = self._fetch_exchange_indicators(coins)
@@ -2482,7 +2513,7 @@ class MCPBrain:
         bonus_count = 0
         bonus_reasons = []
 
-        # B1: 1h MACD histogram confirms momentum direction AND accelerating
+        # B1: MACD — REMOVED (v4: anti-predictive, 25% WR when active)
         macd_hist = ei_1h.get("macd_hist", 0)
         macd_rising = ei_1h.get("macd_hist_rising", False)
         if side == "buy":
@@ -2490,31 +2521,29 @@ class MCPBrain:
         else:
             b1 = macd_hist < 0 and not macd_rising
         if b1:
-            bonus_count += 1
-            score += 12
-            bonus_reasons.append(f"macd={'+'if macd_hist>0 else '-'}{abs(macd_hist):.4f}")
+            # v4: score += 0 (was +12), bonus_count NOT incremented
+            bonus_reasons.append(f"macd_logged={'+'if macd_hist>0 else '-'}{abs(macd_hist):.4f}")
 
-        # B2: 4h EMA 20 slope (was REQUIRED in v3, now BONUS)
+        # B2: 4h EMA 20 slope (was REQUIRED in v3, now BONUS — v4: reweighted +8→+3)
         ema20_slope_4h = ei_4h.get("ema20_slope", 0)
         if side == "buy" and ema20_slope_4h > 0:
             bonus_count += 1
-            score += 8
+            score += 3
             bonus_reasons.append("4h_slope_up")
         elif side == "sell" and ema20_slope_4h < 0:
             bonus_count += 1
-            score += 8
+            score += 3
             bonus_reasons.append("4h_slope_dn")
 
-        # B3: 15m EMA alignment or fresh crossover (entry timing)
+        # B3: 15m timing — REMOVED (v4: zero WR delta, pure noise)
         if ei_15m:
             if side == "buy":
                 b3 = ei_15m.get("ema20_above_50", False) or ei_15m.get("ema_cross_up", False)
             else:
                 b3 = not ei_15m.get("ema20_above_50", True) or ei_15m.get("ema_cross_down", False)
             if b3:
-                bonus_count += 1
-                score += 10
-                bonus_reasons.append("15m_timing")
+                # v4: score += 0 (was +10), bonus_count NOT incremented
+                bonus_reasons.append("15m_timing_logged")
 
         # B4: 1h volume >= 1.2x average (participation)
         vol_1h = ei_1h.get("vol_ratio", 0)
@@ -2534,27 +2563,72 @@ class MCPBrain:
             bonus_reasons.append("structure")
 
         # B6: Funding + orderbook combined (microstructure edge)
+        # 2026-05-27: Enhanced version uses DataCoordinator orderbook feed
+        # when available (imbalance momentum + depth ratio). Falls back to
+        # legacy Binance depth fetch otherwise.
         funding_rate = fr.get("funding_rate", 0)
         imb = ob.get("imbalance", 0)
         micro_ok = False
-        if side == "buy" and funding_rate <= 0.0003 and imb > 0.05:
-            micro_ok = True
-        elif side == "sell" and funding_rate >= -0.0003 and imb < -0.05:
-            micro_ok = True
+        _b6_pts = 7  # legacy points (v4: reweighted +5→+7)
+        _b6_label = f"micro(f={funding_rate*100:+.3f}%,ob={imb:+.2f})"
+
+        # Try enhanced orderbook feed first
+        _enhanced_b6_used = False
+        try:
+            _df_cfg_b6 = {}
+            try:
+                from config import DATA_FEEDS as _df_cfg_b6
+            except (ImportError, AttributeError):
+                pass
+            if (_df_cfg_b6.get("enhanced_b6_enabled", True)
+                    and self._data_coordinator is not None):
+                _ob_ctx = self._data_coordinator.get_market_context(
+                    coin).orderbook
+                if _ob_ctx and not _ob_ctx.get("stale", True):
+                    _enh_imb = _ob_ctx.get("imbalance", 0)
+                    _imb_mom = _ob_ctx.get("imbalance_momentum", 0)
+                    _depth_log = _ob_ctx.get("depth_ratio_log", 0)
+                    if side == "buy":
+                        # Buy: want bid-heavy book + positive imbalance momentum
+                        micro_ok = (funding_rate <= 0.0003
+                                    and _enh_imb > 0.05
+                                    and (_imb_mom > 0 or _depth_log > 0.1))
+                    elif side == "sell":
+                        micro_ok = (funding_rate >= -0.0003
+                                    and _enh_imb < -0.05
+                                    and (_imb_mom < 0 or _depth_log < -0.1))
+                    if micro_ok:
+                        _b6_pts = int(_df_cfg_b6.get("enhanced_b6_points", 7))
+                        _b6_label = (
+                            f"micro+(imb={_enh_imb:+.3f},"
+                            f"mom={_imb_mom:+.3f},"
+                            f"f={funding_rate*100:+.3f}%)")
+                    _enhanced_b6_used = True
+        except Exception:
+            pass
+
+        # Legacy fallback
+        if not _enhanced_b6_used and not micro_ok:
+            if side == "buy" and funding_rate <= 0.0003 and imb > 0.05:
+                micro_ok = True
+            elif side == "sell" and funding_rate >= -0.0003 and imb < -0.05:
+                micro_ok = True
+
         if micro_ok:
             bonus_count += 1
-            score += 5
-            bonus_reasons.append(f"micro(f={funding_rate*100:+.3f}%,ob={imb:+.2f})")
+            score += _b6_pts
+            bonus_reasons.append(_b6_label)
 
         # B7: VWAP confirmation — price above VWAP for longs, below for shorts
+        # v4: reweighted +5→+15 (VWAP proximity is the strongest scalp signal)
         pvw = ei_1h.get("price_vs_vwap", 0)
         if side == "buy" and 0.05 < pvw < 2.0:
             bonus_count += 1
-            score += 5
+            score += 15
             bonus_reasons.append(f"vwap=+{pvw:.2f}%")
         elif side == "sell" and -2.0 < pvw < -0.05:
             bonus_count += 1
-            score += 5
+            score += 15
             bonus_reasons.append(f"vwap={pvw:.2f}%")
 
         # ═══ SMART MONEY / ICT BONUS CONDITIONS (2026-04-16) ═══════
@@ -2639,8 +2713,155 @@ class MCPBrain:
             # B10 to True.
         if b10:
             bonus_count += 1
-            score += 8
+            score += 10  # v4: reweighted +8→+10
             bonus_reasons.append(f"smc_conf={smc_conf_1h:.0f}")
+
+        # ═══ DATA-FEED BONUS CONDITIONS + VETO GATES (2026-05-27) ═════
+        # New signals from core/data_coordinator.py that address the
+        # anti-predictive score problem. Each is independently switchable
+        # via config.DATA_FEEDS.
+        _veto_reason = None
+        try:
+            _df_cfg = {}
+            try:
+                from config import DATA_FEEDS as _df_cfg
+            except (ImportError, AttributeError):
+                pass
+
+            _mctx = None
+            if self._data_coordinator is not None:
+                _mctx = self._data_coordinator.get_market_context(coin)
+
+            if _mctx is not None:
+                # ── B11: Funding Rate Alignment (+7 pts) ──────────────
+                # FR z-score aligns with proposed side:
+                #   Extreme neg FR (shorts crowded) + long entry = bonus
+                #   Extreme pos FR (longs crowded) + short entry = bonus
+                if _df_cfg.get("b11_funding_enabled", True):
+                    _fr = _mctx.funding
+                    if _fr and not _fr.get("stale", True):
+                        _fr_z = _fr.get("fr_zscore", 0.0)
+                        _fr_signal = _fr.get("fr_side_signal", "neutral")
+                        _z_thresh = _df_cfg.get("b11_fr_zscore_threshold", 1.5)
+                        # For shorts, use stricter threshold if configured
+                        if side == "sell" and _df_cfg.get("short_side_stricter_feeds"):
+                            _z_thresh = _df_cfg.get("short_fr_zscore_threshold", 1.0)
+                        b11 = False
+                        if (side == "buy" and _fr_signal == "bullish"
+                                and abs(_fr_z) >= _z_thresh):
+                            b11 = True
+                        elif (side == "sell" and _fr_signal == "bearish"
+                              and abs(_fr_z) >= _z_thresh):
+                            b11 = True
+                        if b11:
+                            _pts = int(_df_cfg.get("b11_funding_points", 7))
+                            bonus_count += 1
+                            score += _pts
+                            bonus_reasons.append(
+                                f"fr_z={_fr_z:+.1f}({_fr_signal})")
+
+                # ── B12: OI-Price Divergence Confirmation (+8 pts) ────
+                # "continuation" signal = new money backing the move.
+                # Awards bonus when OI confirms the price trend direction.
+                if _df_cfg.get("b12_oi_enabled", True):
+                    _oi = _mctx.open_interest
+                    if _oi and not _oi.get("stale", True):
+                        _div = _oi.get("oi_price_divergence", "unknown")
+                        _conv = _oi.get("oi_conviction", 0.0)
+                        _conv_min = _df_cfg.get("b12_oi_conviction_min", 0.3)
+                        b12 = False
+                        if _div == "continuation" and _conv >= _conv_min:
+                            # Trend continuation: new money entering
+                            b12 = True
+                        elif (_div == "capitulation" and side == "buy"
+                              and _conv >= _conv_min):
+                            # Longs capitulating = bounce likely = bullish
+                            b12 = True
+                        elif (_div == "building" and side == "sell"
+                              and _conv >= _conv_min):
+                            # New shorts building = bearish continuation
+                            b12 = True
+                        if b12:
+                            _pts = int(_df_cfg.get("b12_oi_points", 8))
+                            bonus_count += 1
+                            score += _pts
+                            bonus_reasons.append(
+                                f"oi_{_div}(c={_conv:.2f})")
+
+                # ── B13: Smart Money Alignment (+5 pts) ───────────────
+                # Coin is in top-20 smart money inflow on Binance Web3.
+                # Only awards for buys (smart money accumulation = bullish).
+                if _df_cfg.get("b13_smart_money_enabled", True):
+                    _sm = _mctx.smart_money
+                    if _sm and not _sm.get("stale", True):
+                        if _sm.get("smart_money_inflow", False):
+                            b13 = False
+                            if side == "buy":
+                                b13 = True  # smart money buying = bullish
+                            elif (side == "sell"
+                                  and _sm.get("crowd_signal") == "panic"):
+                                b13 = True  # retail panic + short = contrarian
+                            if b13:
+                                _pts = int(_df_cfg.get(
+                                    "b13_smart_money_points", 5))
+                                bonus_count += 1
+                                score += _pts
+                                _smr = _sm.get("smart_money_rank", "?")
+                                bonus_reasons.append(
+                                    f"smart_money(rank={_smr})")
+
+                # ═══ VETO GATES ═══════════════════════════════════════
+
+                # V1: OI Exhaustion Veto — blocks longs when move is
+                # short-covering (price up + OI down with high conviction)
+                if _df_cfg.get("v1_oi_exhaustion_veto", True):
+                    _oi = _mctx.open_interest
+                    if _oi and not _oi.get("stale", True):
+                        _div = _oi.get("oi_price_divergence", "unknown")
+                        _conv = _oi.get("oi_conviction", 0.0)
+                        _v1_min = _df_cfg.get(
+                            "v1_oi_exhaustion_conviction_min", 0.5)
+                        if (_div == "exhaustion" and side == "buy"
+                                and _conv >= _v1_min):
+                            _veto_reason = (
+                                f"V1_oi_exhaustion(div={_div},c={_conv:.2f})")
+                        elif (_div == "building" and side == "buy"
+                              and _conv >= _v1_min):
+                            # New shorts building while we want to go long
+                            _veto_reason = (
+                                f"V1_oi_building(div={_div},c={_conv:.2f})")
+
+                # V2: News Veto — negative-impact news in last 2h
+                if (_df_cfg.get("v2_news_veto", True)
+                        and _veto_reason is None):
+                    _news = _mctx.news
+                    if _news and not _news.get("stale", True):
+                        if _news.get("has_veto_news", False):
+                            _veto_reason = (
+                                f"V2_news_veto({_news.get('veto_reason', '?')[:50]})")
+
+                # V3: Slippage Veto — estimated slippage too high
+                if (_df_cfg.get("v3_slippage_veto", True)
+                        and _veto_reason is None):
+                    _ob = _mctx.orderbook
+                    if _ob and not _ob.get("stale", True):
+                        _max_bps = _df_cfg.get("v3_slippage_max_bps", 30.0)
+                        if side == "buy":
+                            _slip = _ob.get("slippage_buy_bps", 0.0)
+                        else:
+                            _slip = _ob.get("slippage_sell_bps", 0.0)
+                        if _slip > _max_bps:
+                            _veto_reason = (
+                                f"V3_slippage({_slip:.1f}bps>{_max_bps:.0f})")
+
+        except Exception as _feed_err:
+            # Data feed scoring failed — continue with base score
+            logger.debug(f"[MCP-Score] data feed scoring error: {_feed_err}")
+
+        # If any VETO gate fired, return zero score
+        if _veto_reason is not None:
+            _zero["reason"] = f"veto:{_veto_reason}"
+            return _zero
 
         layers_ok = req_pass + bonus_count
 
@@ -2709,25 +2930,11 @@ class MCPBrain:
         if sl_pct_pre_vol > 0:
             tp_pct = tp_pct * (sl_pct / sl_pct_pre_vol)
 
-        # ── Phase 15.3 Layer D: confidence-scaled SL ──────────────
-        # High-conviction entries get wider SL (more room to breathe);
-        # low-conviction entries get tighter SL (cut losses fast).
-        # `score` accumulates 50 (base) → ~101 in _score_coin; entry
-        # gate is score >= 65, so the live distribution sits 65-101.
-        # Thresholds calibrated to that range:
-        #   score >= 85: high conviction → SL × 1.2, breathing room
-        #   score 70-84: normal             → SL × 1.0
-        #   score < 70:  marginal-quality    → SL × 0.8, cut losses fast
-        try:
-            _score_val = float(score) if score is not None else 70.0
-        except Exception:
-            _score_val = 70.0
-        if _score_val >= 85:
-            _conf_mult = 1.2
-        elif _score_val < 70:
-            _conf_mult = 0.8
-        else:
-            _conf_mult = 1.0
+        # ── Phase 15.3 Layer D: confidence-scaled SL — DISABLED (v4) ──
+        # 454-trade data: MCP score is anti-predictive (r=-0.285).
+        # score>=85 entries are the WORST performers — widening SL
+        # by 1.2x maximizes loss. All SL now uniform.
+        _conf_mult = 1.0
         sl_pct_pre_conf = sl_pct
         sl_pct = max(1.5, sl_pct * _conf_mult)
         if sl_pct_pre_conf > 0:
@@ -2789,6 +2996,46 @@ class MCPBrain:
         # (2026-04-17: stepped from 0.04 → 0.08 at user request; saturates at 4 bonuses)
         confidence = min(0.95, 0.66 + bonus_count * 0.08)
 
+        # ── V4: Social FOMO size reduction (2026-05-27) ───────────────
+        # Extreme hype + positive sentiment = retail FOMO = crowded trade.
+        # Instead of blocking, reduce the effective confidence (which
+        # controls position sizing downstream via leverage-tier selection).
+        _fomo_mult = 1.0
+        try:
+            _df_cfg2 = {}
+            try:
+                from config import DATA_FEEDS as _df_cfg2
+            except (ImportError, AttributeError):
+                pass
+            if (_df_cfg2.get("v4_fomo_size_reduction", True)
+                    and self._data_coordinator is not None):
+                _mctx2 = self._data_coordinator.get_market_context(coin)
+                if _mctx2 is not None:
+                    _sm2 = _mctx2.smart_money
+                    if _sm2 and not _sm2.get("stale", True):
+                        if _sm2.get("crowd_signal") == "fomo":
+                            _fomo_mult = _df_cfg2.get(
+                                "v4_fomo_size_multiplier", 0.5)
+                            bonus_reasons.append(
+                                f"fomo_reduce(x{_fomo_mult})")
+        except Exception:
+            pass
+
+        # ── Kronos-inspired: weekday confidence multiplier ────────────
+        # Calendar temporal awareness (Kronos uses hour/weekday/month embeddings).
+        # 459-trade data: Mon 19% WR, Tue 36% WR → catastrophic weekdays.
+        _weekday_mult = 1.0
+        try:
+            from config import WEEKDAY_CONFIDENCE_MULT
+            _dow = datetime.now(timezone.utc).weekday()
+            # Python weekday(): 0=Mon..6=Sun → strftime %w: 0=Sun..6=Sat
+            _dow_strftime = (_dow + 1) % 7
+            _weekday_mult = WEEKDAY_CONFIDENCE_MULT.get(_dow_strftime, 1.0)
+            if _weekday_mult != 1.0:
+                bonus_reasons.append(f"dow={_dow_strftime}(x{_weekday_mult})")
+        except (ImportError, Exception):
+            pass
+
         reason = " | ".join(req_reasons + bonus_reasons)
         return {
             "score": score,
@@ -2796,8 +3043,146 @@ class MCPBrain:
             "side": side,
             "sl_pct": round(sl_pct, 2),
             "tp_pct": round(tp_pct, 2),
-            "confidence": round(confidence, 2),
+            "confidence": round(confidence * _fomo_mult * _weekday_mult, 2),
             "reason": reason,
+            "_fomo_mult": _fomo_mult,  # passthrough for logging
+            "_weekday_mult": _weekday_mult,
+        }
+
+    def _score_coin_scalp(self, coin: str, data: dict, ei: dict) -> dict:
+        """Scalp-optimized scoring for 15-60 min holds, longs-only, VWAP-centric."""
+        try:
+            from config import SCALP_MODE as _SM
+        except ImportError:
+            _SM = {}
+
+        ei_4h = ei.get("4h", {})
+        ei_1h = ei.get("1h", {})
+        fr = data.get("funding", {}).get(coin, {}) if data.get("funding") else {}
+        ob = data.get("orderbook", {}).get(coin, {}) if data.get("orderbook") else {}
+
+        sl_pct = _SM.get("sl_pct", 1.0)
+        tp_pct = _SM.get("tp_pct", 1.8)
+        _zero = {"score": 0, "side": "buy", "layers_ok": 0, "confidence": 0,
+                 "sl_pct": sl_pct, "tp_pct": tp_pct, "reason": "", "_scalp": True}
+
+        if not ei_4h or not ei_1h:
+            _zero["reason"] = "no_data"
+            return _zero
+
+        # === VETO GATES ===
+        atr_1h_pct = ei_1h.get("atr_pct", 0)
+        if atr_1h_pct < _SM.get("min_atr_pct", 0.8):
+            _zero["reason"] = f"scalp_veto:quiet(atr={atr_1h_pct:.2f}%)"
+            return _zero
+
+        adx_4h = ei_4h.get("adx", 0)
+        if adx_4h < 15:
+            _zero["reason"] = f"scalp_veto:ranging(4h_adx={adx_4h:.0f})"
+            return _zero
+
+        ema20_above_50_4h = ei_4h.get("ema20_above_50", False)
+        side = "buy" if ema20_above_50_4h else "sell"
+
+        if _SM.get("longs_only", True) and side == "sell":
+            _zero["reason"] = "scalp_veto:shorts_disabled"
+            return _zero
+
+        # === REQUIRED (all 4) ===
+        req_pass = 0
+        req_reasons = []
+
+        pvw = abs(ei_1h.get("price_vs_vwap", 99))
+        if pvw <= _SM.get("vwap_distance_max_pct", 0.3):
+            req_pass += 1
+            req_reasons.append(f"vwap_near={pvw:.2f}%")
+
+        rsi_1h = ei_1h.get("rsi", 50)
+        if 40 <= rsi_1h <= 60:
+            req_pass += 1
+            req_reasons.append(f"rsi={rsi_1h:.0f}")
+
+        adx_1h = ei_1h.get("adx", 0)
+        if adx_1h >= 20:
+            req_pass += 1
+            req_reasons.append(f"adx={adx_1h:.0f}")
+
+        if atr_1h_pct >= _SM.get("min_atr_pct", 0.8):
+            req_pass += 1
+            req_reasons.append(f"atr={atr_1h_pct:.2f}%")
+
+        if req_pass < 4:
+            _zero["reason"] = f"scalp_req_fail({req_pass}/4:{','.join(req_reasons)})"
+            return _zero
+
+        # === BONUS CONDITIONS ===
+        score = 50
+        bonus_count = 0
+        bonus_reasons = []
+
+        # B_VWAP (+15): near VWAP and approaching from below (longs)
+        pvw_signed = ei_1h.get("price_vs_vwap", 0)
+        if side == "buy" and -0.2 <= pvw_signed <= 0.15:
+            bonus_count += 1
+            score += 15
+            bonus_reasons.append(f"vwap_prime={pvw_signed:+.2f}%")
+
+        # B_OB (+10): orderbook bid-heavy
+        imb = ob.get("imbalance", 0) if ob else 0
+        if side == "buy" and imb > 0.10:
+            bonus_count += 1
+            score += 10
+            bonus_reasons.append(f"ob_bid={imb:+.2f}")
+
+        # B_VOL (+8): volume surge
+        vol_ratio = ei_1h.get("vol_ratio", 0)
+        if vol_ratio >= 1.5:
+            bonus_count += 1
+            score += 8
+            bonus_reasons.append(f"vol={vol_ratio:.1f}x")
+
+        # B_STRUCTURE (+8): at demand zone
+        smc_d = ei_1h.get("smc_detail", {}) or {}
+        sd_data = smc_d.get("sd", {}) or {}
+        price_val = ei_1h.get("price", 0) or 1
+        if side == "buy":
+            for z in (sd_data.get("demand_zones") or []):
+                if len(z) >= 2:
+                    zone_top = max(z[0], z[1])
+                    dist = abs(price_val - zone_top) / price_val * 100
+                    if dist <= 0.5:
+                        bonus_count += 1
+                        score += 8
+                        bonus_reasons.append(f"demand_zone(d={dist:.2f}%)")
+                        break
+
+        # B_FUNDING (+7): negative funding favors longs
+        funding_rate = fr.get("funding_rate", 0) if fr else 0
+        if side == "buy" and funding_rate < 0:
+            bonus_count += 1
+            score += 7
+            bonus_reasons.append(f"funding={funding_rate*100:+.3f}%")
+
+        # B_SESSION (+5): peak hours
+        from datetime import datetime, timezone
+        utc_hour = datetime.now(timezone.utc).hour
+        if utc_hour in _SM.get("peak_hours", {22, 23, 0}):
+            bonus_count += 1
+            score += 5
+            bonus_reasons.append(f"peak_h{utc_hour}")
+
+        layers_ok = req_pass + bonus_count
+        confidence = min(0.95, 0.66 + bonus_count * 0.08)
+
+        return {
+            "score": score,
+            "layers_ok": layers_ok,
+            "side": side,
+            "sl_pct": round(sl_pct, 2),
+            "tp_pct": round(tp_pct, 2),
+            "confidence": round(confidence, 2),
+            "reason": " | ".join(req_reasons + bonus_reasons),
+            "_scalp": True,
         }
 
     def _algorithmic_portfolio(self, coins, data, exchange_indicators,
@@ -2844,7 +3229,15 @@ class MCPBrain:
             ei = exchange_indicators.get(coin, {})
             if not ei:
                 continue  # No indicator data
-            result = self._score_coin(coin, data, ei)
+            # Scalp mode routing (v4)
+            try:
+                from config import SCALP_MODE as _SM_route
+            except ImportError:
+                _SM_route = {"enabled": False}
+            if _SM_route.get("enabled", False) and hasattr(self, '_score_coin_scalp'):
+                result = self._score_coin_scalp(coin, data, ei)
+            else:
+                result = self._score_coin(coin, data, ei)
 
             # ── Calibrated p_win blend (Phase 6) ─────────────────────
             # Build the model-input feature dict from the snapshot keys the
@@ -2887,7 +3280,14 @@ class MCPBrain:
             except ImportError:
                 MODEL_GATE = {"enabled": False, "shadow_only": True,
                               "threshold_futures": 0.55, "threshold_spot": 0.58}
-            rule_gate = result["score"] >= 66 and result["layers_ok"] >= 6
+            if result.get("_scalp"):
+                try:
+                    from config import SCALP_MODE as _SM_gate
+                except ImportError:
+                    _SM_gate = {}
+                rule_gate = result["score"] >= _SM_gate.get("entry_threshold", 65) and result["layers_ok"] >= 4
+            else:
+                rule_gate = result["score"] >= 66 and result["layers_ok"] >= 6
             model_gate_active = (
                 MODEL_GATE.get("enabled", False)
                 and not MODEL_GATE.get("shadow_only", False)
@@ -2920,6 +3320,30 @@ class MCPBrain:
                     feat["p_win_ensemble"] = mscore["p_win_ensemble"]
                     feat["model_version"]  = mscore["model_version"]
                     feat.update(_microstructure_features(coin, data))  # 2026-05-25 microstructure capture
+                    # 2026-05-27: capture data-feed enrichment features for model training
+                    try:
+                        if self._data_coordinator is not None:
+                            _wh_ctx = self._data_coordinator.get_market_context(coin)
+                            if _wh_ctx.funding:
+                                feat["fr_zscore"] = _wh_ctx.funding.get("fr_zscore", 0)
+                                feat["fr_side_signal"] = _wh_ctx.funding.get("fr_side_signal", "neutral")
+                            if _wh_ctx.open_interest:
+                                feat["oi_delta_6h_pct"] = _wh_ctx.open_interest.get("oi_delta_6h_pct", 0)
+                                feat["oi_divergence"] = _wh_ctx.open_interest.get("oi_price_divergence", "unknown")
+                                feat["oi_conviction"] = _wh_ctx.open_interest.get("oi_conviction", 0)
+                            if _wh_ctx.orderbook:
+                                feat["ob_imb_momentum"] = _wh_ctx.orderbook.get("imbalance_momentum", 0)
+                                feat["ob_spread_bps"] = _wh_ctx.orderbook.get("spread_bps", 0)
+                                feat["ob_slippage_bps"] = _wh_ctx.orderbook.get(
+                                    "slippage_buy_bps" if result.get("side") == "buy" else "slippage_sell_bps", 0)
+                            if _wh_ctx.smart_money:
+                                feat["smart_money_inflow"] = 1 if _wh_ctx.smart_money.get("smart_money_inflow") else 0
+                                feat["crowd_signal"] = _wh_ctx.smart_money.get("crowd_signal", "neutral")
+                            if _wh_ctx.news:
+                                feat["news_sentiment"] = _wh_ctx.news.get("sentiment_score", 0)
+                                feat["news_veto"] = 1 if _wh_ctx.news.get("has_veto_news") else 0
+                    except Exception:
+                        pass  # fail-open: missing enrichment features = neutral in model
                     cand_id = wh.record_candidate(
                         exchange="*",  # exchange picked later
                         symbol=f"{coin}/USDT",
@@ -3050,27 +3474,33 @@ class MCPBrain:
             side = result["side"]
             from config import RISK as _RISK_CFG
             leverage = min(3, _RISK_CFG.get("futures_max_leverage", 3)) if best_mtype == "futures" else 1
-            # 2026-05-24 — Gated on config.SCALP_TIER_ENABLED. When off,
-            # the futures TP reverts to the pre-May-22 4.0% floor.
-            import config as _cfg_floor
-            _scalp_floor_on = getattr(_cfg_floor, "SCALP_TIER_ENABLED", True)
-            if best_mtype == "spot":
-                if side == "sell":
-                    continue  # Can't short on spot
-                sl_pct = max(result["sl_pct"], 2.0)
-                # 2026-05-22: spot TP floor stays at 2.0% (round-trip
-                # spot fees on Binance ~0.20% leave room for a 2.0% TP).
-                # Previously 4.0% — too wide for the user's scalp directive.
-                tp_pct = max(result["tp_pct"], 2.0)
+
+            if result.get("_scalp"):
+                # Scalp trades use fixed SL/TP from config, bypass all clamping
+                sl_pct = result["sl_pct"]
+                tp_pct = result["tp_pct"]
             else:
-                sl_pct = max(result["sl_pct"], 1.5)
-                if _scalp_floor_on:
-                    # 2026-05-22: futures TP clamped to user's scalp band
-                    # [1.0%, 2.0%]. Previously floored at 4.0% — too wide.
-                    tp_pct = min(2.0, max(1.0, result["tp_pct"]))
+                # 2026-05-24 — Gated on config.SCALP_TIER_ENABLED. When off,
+                # the futures TP reverts to the pre-May-22 4.0% floor.
+                import config as _cfg_floor
+                _scalp_floor_on = getattr(_cfg_floor, "SCALP_TIER_ENABLED", True)
+                if best_mtype == "spot":
+                    if side == "sell":
+                        continue  # Can't short on spot
+                    sl_pct = max(result["sl_pct"], 2.0)
+                    # 2026-05-22: spot TP floor stays at 2.0% (round-trip
+                    # spot fees on Binance ~0.20% leave room for a 2.0% TP).
+                    # Previously 4.0% — too wide for the user's scalp directive.
+                    tp_pct = max(result["tp_pct"], 2.0)
                 else:
-                    # Pre-2026-05-22 wide TP floor.
-                    tp_pct = max(result["tp_pct"], 4.0)
+                    sl_pct = max(result["sl_pct"], 1.5)
+                    if _scalp_floor_on:
+                        # 2026-05-22: futures TP clamped to user's scalp band
+                        # [1.0%, 2.0%]. Previously floored at 4.0% — too wide.
+                        tp_pct = min(2.0, max(1.0, result["tp_pct"]))
+                    else:
+                        # Pre-2026-05-22 wide TP floor.
+                        tp_pct = max(result["tp_pct"], 4.0)
 
             # ── RISK-BASED SIZING v3 ───────────────────────────────
             # 2026-04-14 v3: 1.0% risk + $4 hard cap.
@@ -3084,10 +3514,18 @@ class MCPBrain:
             from config import MAX_LOSS_PER_TRADE_USD
             MAX_LOSS_USD = MAX_LOSS_PER_TRADE_USD  # $2.00 from config
 
-            # Get total portfolio value for dollar-cap conversion
+            # Get total portfolio value for dollar-cap conversion.
+            # Unified exchanges (Bybit) store the same balance in both
+            # spot and futures — only count spot to avoid double-counting.
+            _unified = {"bybit"}
             total_bal = sum(
-                b.get("futures", 0) + b.get("spot", 0)
-                for b in exchange_balances.values()
+                b.get("spot", 0) + b.get("futures", 0)
+                for ex, b in exchange_balances.items()
+                if ex not in _unified
+            ) + sum(
+                b.get("spot", 0)
+                for ex, b in exchange_balances.items()
+                if ex in _unified
             )
 
             size_pct = RISK_PER_TRADE_PCT * 100.0 / (sl_pct * leverage)

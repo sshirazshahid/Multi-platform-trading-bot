@@ -129,12 +129,13 @@ def test_conf_scaled_layer_present_in_mcp_brain():
     assert "_conf_mult" in src
 
 
-def test_conf_scaled_thresholds_match_score_distribution():
-    """Score >= 85 → 1.2x, score < 70 → 0.8x, else 1.0x.
-    Calibrated to the 65-101 entry-gate range."""
+def test_conf_scaled_disabled_in_v4():
+    """v4 (2026-05-27): confidence-scaled SL DISABLED. MCP score is
+    anti-predictive (r=-0.285), so widening SL for score>=85 entries
+    maximized loss. _conf_mult is now always 1.0."""
     src = open("core/mcp_brain.py", encoding="utf-8").read()
-    assert "_score_val >= 85" in src
-    assert "_score_val < 70" in src
+    assert "_conf_mult = 1.0" in src
+    assert "DISABLED (v4)" in src
 
 
 def test_conf_scaled_preserves_rr_ratio():

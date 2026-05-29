@@ -21,6 +21,7 @@ def test_short_blocked_when_btc_aligned_up():
     d = evaluate(
         side="sell", symbol="APT/USDT:USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is True
     assert "btc_aligned_up" in d.reason
@@ -30,6 +31,7 @@ def test_short_allowed_when_btc_4h_down():
     d = evaluate(
         side="sell", symbol="ETH/USDT",
         btc_4h_uptrend=False, btc_1h_uptrend=True,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is False
 
@@ -38,6 +40,7 @@ def test_short_allowed_when_btc_1h_down():
     d = evaluate(
         side="sell", symbol="ETH/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=False,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is False
 
@@ -47,6 +50,7 @@ def test_short_allowed_when_btc_trends_unavailable():
     d = evaluate(
         side="sell", symbol="ETH/USDT",
         btc_4h_uptrend=None, btc_1h_uptrend=None,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is False
 
@@ -82,9 +86,32 @@ def test_extract_btc_trends_missing_keys():
     assert extract_btc_trends({"BTC": {"4h": {}, "1h": {}}}) == (None, None)
 
 
+def test_short_blocked_when_score_too_low():
+    """v4: shorts without mcp_score >= 75 are blocked (fail-closed)."""
+    d = evaluate(
+        side="sell", symbol="ETH/USDT",
+        btc_4h_uptrend=False, btc_1h_uptrend=False,
+        mcp_score=50, confidence=0.80,
+    )
+    assert d.block is True
+    assert "short_score_too_low" in d.reason
+
+
+def test_short_blocked_when_confidence_too_low():
+    """v4: shorts without confidence >= 0.70 are blocked (fail-closed)."""
+    d = evaluate(
+        side="sell", symbol="ETH/USDT",
+        btc_4h_uptrend=False, btc_1h_uptrend=False,
+        mcp_score=80, confidence=0.40,
+    )
+    assert d.block is True
+    assert "short_conf_too_low" in d.reason
+
+
 def test_case_insensitive_side():
     d = evaluate(
         side="SELL", symbol="ETH/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is True

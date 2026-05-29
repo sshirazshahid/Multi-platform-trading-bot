@@ -32,7 +32,7 @@ Backup:     data/knowledge_model.bak.json   (before each write)
 import json
 import shutil
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -246,7 +246,7 @@ class KnowledgeModel:
         for t in trades:
             ot = t.get("open_time", 0)
             if ot:
-                h = datetime.fromtimestamp(ot).hour
+                h = datetime.fromtimestamp(ot, tz=timezone.utc).hour
                 hour_buckets[h]["net_pnl"]    += t.get("pnl") or 0.0   # dollar ledger
                 hour_buckets[h]["total_fees"] += t.get("total_fees") or 0.0
                 if t.get("pnl_pct") is None:

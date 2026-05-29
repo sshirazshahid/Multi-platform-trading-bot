@@ -1,0 +1,274 @@
+{
+  "research_date": "2026-05-27",
+  "methodology": "CoinDesk API (spot toplist, futures instruments, funding rates, news), Crypto.com tickers, web search for trends/listings",
+  "exchange_coverage": {
+    "binance_perp_count": 497,
+    "bybit_perp_count": 500,
+    "overlap_count": 446
+  },
+  "category_a_high_conviction": [
+    {
+      "ticker": "HYPE",
+      "name": "Hyperliquid",
+      "exchanges": ["binance", "bybit"],
+      "why": "Dominant DEX perps platform, $29B peak 24h volume, $61+ price, whale activity, strong narrative. Funding deeply negative on Bybit (-0.037%) = longs get paid.",
+      "funding_rate_binance": -0.000145,
+      "funding_rate_bybit": -0.000368,
+      "risk": "medium-high",
+      "daily_volume_est_usd": "900M+"
+    },
+    {
+      "ticker": "SUI",
+      "name": "Sui",
+      "exchanges": ["binance", "bybit"],
+      "why": "CME futures launched May 2026, Grayscale Trust S-1 filing, 21Shares 2x ETF. Institutional bid tightening. Strong technical setup.",
+      "funding_rate_binance": -0.0000358,
+      "funding_rate_bybit": 0.0001,
+      "risk": "medium",
+      "daily_volume_est_usd": "500M+"
+    },
+    {
+      "ticker": "PEPE",
+      "name": "Pepe",
+      "exchanges": ["binance", "bybit"],
+      "why": "Top meme coin by volume, high volatility ideal for scalping. Funding flipping between positive/negative = active two-way flow.",
+      "funding_rate_binance": 0.0000348,
+      "funding_rate_bybit": -0.0000716,
+      "risk": "high",
+      "daily_volume_est_usd": "400M+"
+    },
+    {
+      "ticker": "TAO",
+      "name": "Bittensor",
+      "exchanges": ["binance", "bybit"],
+      "why": "AI narrative leader, +16% weekly gain in flat market. Decentralized AI compute is 2026 mega-theme.",
+      "funding_rate_binance": 0.00004,
+      "funding_rate_bybit": 0.00005,
+      "risk": "medium",
+      "daily_volume_est_usd": "200M+"
+    },
+    {
+      "ticker": "PENDLE",
+      "name": "Pendle",
+      "exchanges": ["binance", "bybit"],
+      "why": "DeFi yield tokenization. Extremely negative funding (-0.055% Binance, -0.041% Bybit) = massive short bias, longs get paid heavily.",
+      "funding_rate_binance": -0.000554,
+      "funding_rate_bybit": -0.000412,
+      "risk": "medium-high",
+      "daily_volume_est_usd": "150M+"
+    },
+    {
+      "ticker": "TON",
+      "name": "Toncoin",
+      "exchanges": ["binance", "bybit"],
+      "why": "Telegram ecosystem token. Deeply negative funding (-0.057% Binance, -0.012% Bybit) = shorts dominant, long funding income opportunity.",
+      "funding_rate_binance": -0.000571,
+      "funding_rate_bybit": -0.000122,
+      "risk": "medium",
+      "daily_volume_est_usd": "300M+"
+    },
+    {
+      "ticker": "NEAR",
+      "name": "NEAR Protocol",
+      "exchanges": ["binance", "bybit"],
+      "why": "AI + chain abstraction narrative. Positive funding (0.01% both) = healthy long sentiment. Near breakout per analyst consensus.",
+      "funding_rate_binance": 0.0001,
+      "funding_rate_bybit": 0.0001,
+      "risk": "medium",
+      "daily_volume_est_usd": "200M+"
+    },
+    {
+      "ticker": "ONDO",
+      "name": "Ondo Finance",
+      "exchanges": ["binance", "bybit"],
+      "why": "RWA (Real World Assets) leader. Tokenized treasuries narrative. Stable positive funding = healthy long sentiment.",
+      "funding_rate_binance": 0.0000383,
+      "funding_rate_bybit": 0.00005,
+      "risk": "medium",
+      "daily_volume_est_usd": "200M+"
+    },
+    {
+      "ticker": "RENDER",
+      "name": "Render",
+      "exchanges": ["binance", "bybit"],
+      "why": "Decentralized GPU rendering for AI. Positive stable funding (0.005%). AI infra narrative.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "medium",
+      "daily_volume_est_usd": "150M+"
+    },
+    {
+      "ticker": "KAS",
+      "name": "Kaspa",
+      "exchanges": ["binance", "bybit"],
+      "why": "High-throughput L1. Near breakout setup per analyst consensus. Good liquidity on both exchanges.",
+      "funding_rate_binance": "N/A",
+      "funding_rate_bybit": "N/A",
+      "risk": "medium",
+      "daily_volume_est_usd": "100M+"
+    }
+  ],
+  "category_b_emerging": [
+    {
+      "ticker": "NXPC",
+      "name": "Nexpace (MapleStory Universe)",
+      "exchanges": ["binance", "bybit"],
+      "why": "Gaming token with 850K+ active wallets. Binance Pay integration at 20M merchants. $10M buyback. Recent listing with high attention.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "high",
+      "daily_volume_est_usd": "50M+"
+    },
+    {
+      "ticker": "SXT",
+      "name": "Space and Time",
+      "exchanges": ["binance", "bybit"],
+      "why": "Data infrastructure for institutions. Grayscale/Microsoft/Chainlink partnerships. Virtual Vaults product. Recent listing.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "high",
+      "daily_volume_est_usd": "40M+"
+    },
+    {
+      "ticker": "KAITO",
+      "name": "Kaito",
+      "exchanges": ["binance", "bybit"],
+      "why": "AI-powered crypto intelligence platform. Strong positive funding = bullish market positioning.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "high",
+      "daily_volume_est_usd": "60M+"
+    },
+    {
+      "ticker": "GENSYN",
+      "name": "Gensyn",
+      "exchanges": ["binance", "bybit"],
+      "why": "Decentralized AI compute training. Brand new listing. Had extremely negative funding in first 24h (shorts piled in), now normalizing.",
+      "funding_rate_binance": -0.0000295,
+      "funding_rate_bybit": 0.00005,
+      "risk": "very high",
+      "daily_volume_est_usd": "30M+"
+    },
+    {
+      "ticker": "HYPER",
+      "name": "Hyper (Bitcoin Hyper)",
+      "exchanges": ["binance", "bybit"],
+      "why": "Bitcoin L2 for fast/cheap BTC transactions. Top Binance listing candidate. Strong narrative around BTC ecosystem expansion.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "high",
+      "daily_volume_est_usd": "80M+"
+    },
+    {
+      "ticker": "VIRTUAL",
+      "name": "Virtuals Protocol",
+      "exchanges": ["binance", "bybit"],
+      "why": "AI agent framework for creating autonomous agents. AI agent narrative is 2026 mega-theme.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.0000161,
+      "risk": "high",
+      "daily_volume_est_usd": "100M+"
+    },
+    {
+      "ticker": "HAEDAL",
+      "name": "Haedal",
+      "exchanges": ["binance", "bybit"],
+      "why": "Liquid staking on Sui. Brand new listing, strong positive funding. Rides the SUI narrative.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.00005,
+      "risk": "very high",
+      "daily_volume_est_usd": "25M+"
+    },
+    {
+      "ticker": "INIT",
+      "name": "Initia",
+      "exchanges": ["binance", "bybit"],
+      "why": "Modular blockchain infrastructure. New Binance listing. Cosmos ecosystem play.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": 0.0000372,
+      "risk": "high",
+      "daily_volume_est_usd": "50M+"
+    },
+    {
+      "ticker": "HUMA",
+      "name": "Huma Finance",
+      "exchanges": ["binance", "bybit"],
+      "why": "PayFi (payment finance) protocol. Recent listing. Divergent funding: Binance +0.005% vs Bybit -0.019% = cross-exchange opportunity.",
+      "funding_rate_binance": 0.00005,
+      "funding_rate_bybit": -0.000192,
+      "risk": "very high",
+      "daily_volume_est_usd": "30M+"
+    }
+  ],
+  "category_c_funding_rate_plays": [
+    {
+      "ticker": "PENDLE",
+      "note": "MOST EXTREME: Binance -0.055%, Bybit -0.041%. Shorts paying ~0.17%/day to stay short. Longs collect this. Potential mean-reversion squeeze.",
+      "binance_fr": -0.000554,
+      "bybit_fr": -0.000412
+    },
+    {
+      "ticker": "TON",
+      "note": "VERY NEGATIVE: Binance -0.057%, Bybit -0.012%. Huge divergence = cross-exchange arb potential. Long Binance + short Bybit collects ~0.045% per 8h.",
+      "binance_fr": -0.000571,
+      "bybit_fr": -0.000122
+    },
+    {
+      "ticker": "SEI",
+      "note": "DEEPLY NEGATIVE: Binance -0.032%, Bybit -0.043%. Persistent short bias. Longs earn ~0.10%/day across funding intervals.",
+      "binance_fr": -0.000320,
+      "bybit_fr": -0.000426
+    },
+    {
+      "ticker": "HYPE",
+      "note": "NEGATIVE DIVERGENCE: Binance -0.015% vs Bybit -0.037%. Consistent short bias. Longs collect. Big spread between venues.",
+      "binance_fr": -0.000145,
+      "bybit_fr": -0.000368
+    },
+    {
+      "ticker": "INJ",
+      "note": "BOTH NEGATIVE: Binance -0.018%, Bybit -0.018%. Symmetric short pressure. Market bearish but funding income for longs.",
+      "binance_fr": -0.000180,
+      "bybit_fr": -0.000180
+    },
+    {
+      "ticker": "TRUMP",
+      "note": "NEGATIVE: Binance -0.015%, Bybit -0.011%. Political token with persistent short bias = longs get paid.",
+      "binance_fr": -0.000153,
+      "bybit_fr": -0.000113
+    },
+    {
+      "ticker": "SIGN",
+      "note": "NEGATIVE DIVERGENCE: Binance -0.023%, Bybit -0.009%. Recent listing with heavy shorting.",
+      "binance_fr": -0.000229,
+      "bybit_fr": -0.000087
+    },
+    {
+      "ticker": "ARB",
+      "note": "BYBIT MUCH MORE NEGATIVE: Binance -0.001% vs Bybit -0.018%. Cross-exchange spread opportunity.",
+      "binance_fr": -0.0000051,
+      "bybit_fr": -0.000179
+    },
+    {
+      "ticker": "STX",
+      "note": "BOTH NEGATIVE: Binance -0.007%, Bybit -0.016%. Bitcoin ecosystem play with short pressure.",
+      "binance_fr": -0.0000659,
+      "bybit_fr": -0.000158
+    },
+    {
+      "ticker": "HUMA",
+      "note": "DIVERGENT: Binance +0.005% vs Bybit -0.019%. Biggest directional spread in new listings. Pure cross-venue arb opportunity.",
+      "binance_fr": 0.00005,
+      "bybit_fr": -0.000192
+    }
+  ],
+  "key_narratives_may_2026": [
+    "AI/Compute (TAO, RENDER, VIRTUAL, GENSYN, FET) - decentralized AI infra is the dominant narrative",
+    "RWA/Institutional (ONDO, SUI CME futures, SXT) - Wall Street entering crypto infrastructure",
+    "Gaming/Metaverse (NXPC/MapleStory) - real player economies with merchant payments",
+    "Bitcoin ecosystem (HYPER, STX) - L2s and DeFi on Bitcoin",
+    "Telegram/TON ecosystem - deeply shorted, contrarian opportunity",
+    "DeFi yield (PENDLE, ENA) - funding rate and yield tokenization"
+  ],
+  "news_sentiment": "Mixed to bearish short-term (BTC below STH cost basis, ETH developer selling), but strong institutional inflows (Bitmine $11.9M ETH staking, whale $5M ETH buys, HYPE whale activity). Regulatory clarity advancing (CFTC authority, South Korea digital asset legislation)."
+}

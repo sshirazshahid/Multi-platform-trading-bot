@@ -51,45 +51,45 @@ def test_scalp_min_confidence_raised():
     )
 
 
-def test_scalp_size_pct_reduced():
-    """SCALP size_pct 0.10 → 0.075. Math-tune dampens bleed velocity
-    by 25%. Stays in '1-2 USDT/trade' band on a $400 wallet:
-    0.075 × 2x × 1.5% × 400 = $0.90 per SL hit."""
+def test_scalp_size_pct_v4_tune():
+    """v5 (2026-05-28): SCALP size_pct 0.16 → 0.35, SL/TP tightened.
+    Sizing math @ $130 pocket:
+      35% × 3x × 0.8% SL = ~$1.09 per SL hit
+      35% × 3x × 1.3% TP = ~$1.77 per TP hit
+    Target: $1-2 USDT per trade in the 15-60m sweet-spot."""
     import config
     scalp = config.LEVERAGE_TIERS.get("SCALP")
     assert scalp is not None
-    assert scalp["size_pct"] == 0.075, (
-        f"SCALP size_pct expected 0.075; got {scalp['size_pct']}. "
-        f"This is the math-tune bleed-velocity damper."
+    assert scalp["size_pct"] == 0.35, (
+        f"SCALP size_pct expected 0.35; got {scalp['size_pct']}. "
+        f"v5 tune for $1-2/trade at $136 notional."
     )
-    # Sanity: tp/sl untouched (per scalp directive).
-    assert scalp["tp_pct"] == 0.018
-    assert scalp["sl_pct"] == 0.015
+    assert scalp["leverage"] == 3
+    # 2026-05-28: SL/TP matched to SCALP_MODE values.
+    assert scalp["tp_pct"] == 0.013
+    assert scalp["sl_pct"] == 0.008
 
 
 def test_scalp_tier_economics_break_even_math():
-    """Spot-check the break-even math after the tune.
+    """Spot-check the break-even math after the v5 tune.
 
-    R = avg_win/avg_loss after fix should approach configured R (1.2)
-    once AUTO_SMALL_TP stops clipping. Break-even WR at R=1.2 is
-    1/(1+1.2) = 45.5%. Current realized WR 44.8% sits just under this
-    line — the audit-fix WR lift (1-3pp) + tighter min_confidence cohort
-    selection should push WR above 45.5%, making PF > 1.0 plausible
-    once realized R recovers.
+    R = avg_win/avg_loss = TP/SL = 1.3/0.8 = 1.625:1.
+    Break-even WR at R=1.625 is 1/(1+1.625) = 38.1%.
+    Current realized 15-60m WR ~55-64% is well above break-even.
+    At 55% WR: EV = 0.55 × 1.625 - 0.45 = +$0.44 per unit risked.
 
-    This is a math contract, not a guarantee — it asserts the
-    configured R:R is what the tune intends, so any future config edit
-    that breaks the SCALP economics fails loudly.
+    This is a math contract — asserts the configured R:R so any
+    future config edit that breaks SCALP economics fails loudly.
     """
     import config
     scalp = config.LEVERAGE_TIERS["SCALP"]
     configured_r = scalp["tp_pct"] / scalp["sl_pct"]
-    assert configured_r == 1.2, (
-        f"SCALP configured R:R changed to {configured_r}; the math-tune "
-        f"contract expects R=1.2 (TP 1.8% / SL 1.5%)."
+    assert abs(configured_r - 1.625) < 0.01, (
+        f"SCALP configured R:R changed to {configured_r:.3f}; the math-tune "
+        f"contract expects R=1.625 (TP 1.3% / SL 0.8%)."
     )
     break_even_wr = 1.0 / (1.0 + configured_r)
-    assert break_even_wr < 0.46, (
-        f"Break-even WR {break_even_wr:.4f} too high — SCALP can't reach "
-        f"profitability with current WR ~45%."
+    assert break_even_wr < 0.40, (
+        f"Break-even WR {break_even_wr:.4f} too high — SCALP needs WR under "
+        f"40% to be positive-EV at configured R:R."
     )

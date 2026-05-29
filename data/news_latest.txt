@@ -1,43 +1,45 @@
 ============================================================
-  MARKET SNAPSHOT  —  2026-04-26T18:15
+  MARKET SNAPSHOT  —  2026-05-29T08:00
 ============================================================
 
-  Fear & Greed Index  :  33 / 100  —  Fear
-  Market Cap 24h      :  +0.24%
-  BTC Dominance       :  58.1%
-  ETH Dominance       :  10.5%
+  Fear & Greed Index  :  23 / 100  —  Extreme Fear
+  Market Cap 24h      :  -1.15%
+  BTC Dominance       :  57.7%
+  ETH Dominance       :  9.5%
 
   TRENDING COINS:
-    1. MASK      Mask Network  (Rank #404)
-    2. ULTIMA    Ultima  (Rank #260)
-    3. TRUMP     Official Trump  (Rank #89)
-    4. PEAQ      peaq  (Rank #630)
-    5. PENGU     Pudgy Penguins  (Rank #98)
+    1. BONK      Bonk  (Rank #108)
+    2. APT       Aptos  (Rank #82)
+    3. HYPE      Hyperliquid  (Rank #11)
+    4. ALLO      Allora  (Rank #520)
+    5. XLM       Stellar  (Rank #18)
 
   LATEST NEWS:
-    ●     [2026-04-26] MiCA's not enough: Bybit CEO says firms need other licenses to t
+    ▲     [2026-05-28] Calamos bets protected Bitcoin ETFs can outlast crypto market sw
        CoinDesk
 
-    ●     [2026-04-26] Coinbase's John D’Agostino says crypto platform stands alone as 
+    ▼ [H] [2026-05-28] Crypto trading firm FalconX confidentially files with SEC for IP
        CoinDesk
 
-    ●     [2026-04-26] Litecoin hit by denial-of-service attack, rewrites 13 blocks to 
+    ▲     [2026-05-28] Why the Ethereum Foundation is suddenly again at the center of c
        CoinDesk
 
-    ●     [2026-04-25] Crypto is built for AI agents, not humans, says Alchemy's CEO
+    ●     [2026-05-28] Tether's U.S.-focused stablecoin grows over 500% in a month, but
        CoinDesk
 
-    ●     [2026-04-25] Trump defends crypto legislation at private event featuring boxe
+    ▲     [2026-05-28] Bitwise bets Hyperliquid could power future finance as HYPE ETFs
        CoinDesk
 
-    ▲     [2026-04-25] BlackRock’s bitcoin ETF just hit a massive milestone that proves
+    ▼ [H] [2026-05-28] Hyperliquid's pre-IPO SpaceX contracts suffers 45% flash crash, 
        CoinDesk
 
-    ▼     [2026-04-25] How Anthropic’s Mythos model is forcing the crypto industry to r
+    ▼ [H] [2026-05-28] UniCredit warns Europe may struggle to contain crypto-bank crisi
        CoinDesk
 
-    ●     [2026-04-25] Bitcoin falls after Trump reportedly canceled Steve Witkoff and 
+    ▼     [2026-05-28] Toddlers learn by falling: Why DeFi's $20 billion TVL drop is ju
        CoinDesk
 
   NEWS SIGNALS:
-    BULL NEWS   strength=0.35  (3 headlines)
+    BEAR NEWS   strength=0.73  (5 headlines)
+    BEAR FINANCE strength=0.63  (3 headlines)
+    BULL NEWS   strength=0.27  (3 headlines)

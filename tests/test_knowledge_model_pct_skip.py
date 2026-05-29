@@ -80,13 +80,13 @@ def test_none_pct_does_not_poison_hour_scores(km):
     # Hour 0 (all None-pct → must be skipped entirely, no entry produced)
     h0_ts = 1_700_000_000  # whatever
     import datetime as _dt
-    h0 = _dt.datetime.fromtimestamp(h0_ts).hour
+    h0 = _dt.datetime.fromtimestamp(h0_ts, tz=_dt.timezone.utc).hour
     trades = [_trade(-1.50, None, open_time=h0_ts) for _ in range(3)]
 
     # Hour H+? — different hour, with a clean-pct trade so something gets recorded
     h1_ts = h0_ts + 7200  # +2h to land on a different hour
     trades.append(_trade(+2.0, +0.10, open_time=h1_ts))
-    h1 = _dt.datetime.fromtimestamp(h1_ts).hour
+    h1 = _dt.datetime.fromtimestamp(h1_ts, tz=_dt.timezone.utc).hour
 
     km.update_from_trades(trades, mode="dry")
 

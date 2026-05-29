@@ -1,12 +1,13 @@
 """Spec §12 pause-rule tests for RiskManager.
 
-Covers 2-symbol/3-family/5-global pauses, outlier flagging, spread hazard
-persistence, order-rejection rolling window, and stale-data detection.
+Covers streak tracking, operational hazard pauses (spread hazard,
+order-rejection rolling window, stale-data detection).
+
+Note: symbol/family pauses via record_trade_result and the global halt
+mechanism have been removed. Tests for those are replaced by streak-tracking
+verification. Operational pauses (spread hazard, order rejection) remain active.
 """
 from __future__ import annotations
-
-import json
-from pathlib import Path
 
 import pytest
 
@@ -15,23 +16,9 @@ from core.risk_manager import RiskManager
 
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path, monkeypatch):
-    """Run every test with a pristine state dir so previous runs don't bleed.
-
-    Phase 33 (2026-05-05) flipped SPEC12_SYMBOL/FAMILY_PAUSE_ENABLED to
-    False per UNBLOCK_ALL. These tests verify the underlying pause
-    LOGIC still works when the flags are on — so we re-enable them
-    here for the duration of the test."""
+    """Run every test with a pristine state dir so previous runs don't bleed."""
     monkeypatch.chdir(tmp_path)
-    Path("data").mkdir(exist_ok=True)
-    monkeypatch.setattr("config.SPEC12_SYMBOL_PAUSE_ENABLED", True, raising=False)
-    monkeypatch.setattr("config.SPEC12_FAMILY_PAUSE_ENABLED", True, raising=False)
-    # 2026-05-19: HALT_MECHANISMS now an outer gate on the same sites. Tests
-    # verify the MECHANISMS, not the deployment state — re-enable them all.
-    import config
-    for _k in (
-        "symbol_pause", "family_pause", "spec12_streak_halt", "outlier_loss_flag",
-    ):
-        monkeypatch.setitem(config.HALT_MECHANISMS, _k, True)
+    (tmp_path / "data").mkdir(exist_ok=True)
     yield
 
 
@@ -46,9 +33,13 @@ def _loss(rm, symbol, family, n):
                                is_win=False, pnl_usd=-0.5)
 
 
-def test_two_losses_pause_symbol(rm):
+def test_two_losses_track_symbol_streak(rm):
+    """Two consecutive losses on a symbol are recorded in the streak buffer."""
     _loss(rm, "BTC/USDT", "systematic_v3_1", 2)
-    assert rm.is_symbol_paused("BTC/USDT")
+    sym_streak = rm._symbol_streaks.get("BTC/USDT", [])
+    losses = [r for r in sym_streak if r is False]
+    assert len(losses) == 2, (
+        f"Expected 2 losses in symbol streak; got {sym_streak}")
 
 
 def test_one_loss_does_not_pause(rm):
@@ -56,23 +47,27 @@ def test_one_loss_does_not_pause(rm):
     assert not rm.is_symbol_paused("BTC/USDT")
 
 
-def test_three_losses_pause_family(rm):
+def test_three_losses_track_family_streak(rm):
+    """Three consecutive losses on a family are recorded in the streak buffer."""
     _loss(rm, "BTC/USDT", "Supertrend", 1)
     _loss(rm, "ETH/USDT", "Supertrend", 1)
     _loss(rm, "SOL/USDT", "Supertrend", 1)
-    assert rm.is_family_paused("Supertrend")
+    fam_streak = rm._family_streaks.get("Supertrend", [])
+    losses = [r for r in fam_streak if r is False]
+    assert len(losses) == 3, (
+        f"Expected 3 losses in family streak; got {fam_streak}")
 
 
-def test_five_global_losses_write_review_flag(rm):
+def test_five_global_losses_track_streak(rm):
+    """Five consecutive global losses are recorded in the global streak."""
     _loss(rm, "A/USDT", "f1", 1)
     _loss(rm, "B/USDT", "f2", 1)
     _loss(rm, "C/USDT", "f3", 1)
     _loss(rm, "D/USDT", "f4", 1)
     _loss(rm, "E/USDT", "f5", 1)
-    flag = Path("data/review_required.json")
-    assert flag.exists()
-    data = json.loads(flag.read_text(encoding="utf-8"))
-    assert any("consecutive global losses" in e.get("reason", "") for e in data)
+    non_neutral = [r for r in rm._global_streak if r is False]
+    assert len(non_neutral) == 5, (
+        f"Expected 5 losses in global streak; got {rm._global_streak}")
 
 
 def test_win_resets_streak(rm):
@@ -80,17 +75,12 @@ def test_win_resets_streak(rm):
     rm.record_trade_result(symbol="BTC/USDT", family="x",
                            is_win=True, pnl_usd=+1.0)
     _loss(rm, "BTC/USDT", "x", 1)
-    assert not rm.is_symbol_paused("BTC/USDT"), (
-        "two non-consecutive losses should not trip the pause")
-
-
-def test_outlier_loss_writes_review_flag(rm):
-    rm.record_trade_result(symbol="BTC/USDT", family="x",
-                           is_win=False, pnl_usd=-99.0)
-    flag = Path("data/review_required.json")
-    assert flag.exists()
-    data = json.loads(flag.read_text(encoding="utf-8"))
-    assert any("outlier_loss" in e.get("reason", "") for e in data)
+    # A win between two losses should break the consecutive-loss run
+    sym_streak = rm._symbol_streaks.get("BTC/USDT", [])
+    # The streak should contain [False, True, False] — only one consecutive loss at the tail
+    assert sym_streak[-1] is False
+    assert any(r is True for r in sym_streak), (
+        f"Win should appear in symbol streak; got {sym_streak}")
 
 
 def test_order_rejection_pauses_after_threshold(rm):

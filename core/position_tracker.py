@@ -386,6 +386,12 @@ class PositionTracker:
                 self._closed = self._closed[-500:]
             # Phase 24 — record for reconcile-label matching in sync.
             self._record_recent_close(pos)
+            # Clean up pending ghost reconcile entry if present — the
+            # position was closed by a different path (normal close,
+            # paper_ghost_cleanup, etc.), so the pending retry is stale.
+            pending = getattr(self, "_pending_ghost_reconcile", None)
+            if pending is not None:
+                pending.pop(position_id, None)
 
             tag  = "[PAPER]" if pos.paper_trade else "[LIVE]"
             sign = "+" if pos.pnl >= 0 else ""
@@ -839,6 +845,19 @@ class PositionTracker:
             logger.info(f"[Positions] Synced: closed {len(ghosts)} ghost position(s)")
         else:
             logger.debug("[Positions] Sync: all LIVE positions verified on exchange")
+
+        # Prune stale _pending_ghost_reconcile entries: any position id
+        # that is no longer in _open (closed by ghost loop above, or by
+        # another path, or after a restart) should be removed. Also drop
+        # entries older than 5 minutes to prevent unbounded growth.
+        if self._pending_ghost_reconcile:
+            now = time.time()
+            stale_ids = [
+                pid for pid, ts in self._pending_ghost_reconcile.items()
+                if pid not in self._open or (now - ts) > 300
+            ]
+            for pid in stale_ids:
+                self._pending_ghost_reconcile.pop(pid, None)
 
         # 2026-04-17: Reconcile realized-PnL from exchange history for trades
         # that were manually closed (or closed while the bot was offline) so

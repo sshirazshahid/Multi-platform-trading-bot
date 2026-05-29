@@ -75,20 +75,12 @@ def test_blacklist_hard_empty_under_unblock_all():
         f"UNBLOCK_ALL requires empty BLACKLIST_HARD; got {BLACKLIST_HARD}")
 
 
-def test_allowed_hours_all_open_under_unblock_all():
-    """UNBLOCK_ALL: all 24 hours allowed, none blocked (supersedes Phase
-    39/44 hour gating). Kill-switch restores Phase-44 gates when SCALP off."""
+def test_all_hours_allowed_unblock_directive():
+    """UNBLOCK directive (2026-05-27): all 24 hours allowed. No hour blocks
+    if MCP Brain analysis is correct and TP is set accurately."""
     from config import ALLOWED_HOURS_UTC, BLOCKED_HOURS_UTC
     assert len(ALLOWED_HOURS_UTC) == 24
-    assert len(BLOCKED_HOURS_UTC) == 0
-
-
-def test_no_blocked_hours_under_unblock_all():
-    """UNBLOCK_ALL: BLOCKED_HOURS_UTC empty. PEAK/WARMUP retained as sizing
-    hints only (not entry gates)."""
-    from config import BLOCKED_HOURS_UTC
-    assert BLOCKED_HOURS_UTC == set(), (
-        f"UNBLOCK_ALL requires empty BLOCKED_HOURS_UTC; got {BLOCKED_HOURS_UTC}")
+    assert BLOCKED_HOURS_UTC == set()
 
 
 def test_shorts_require_btc_bear_off():

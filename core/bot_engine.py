@@ -1172,8 +1172,10 @@ class BotEngine:
             PEAK_HOURS_UTC,
             WARMUP_HOURS_UTC,
         )
-        dynamic_blocked = self._load_dynamic_blocked_hours()
-        if hour in BLOCKED_HOURS_UTC or hour in dynamic_blocked:
+        # 2026-05-27 (UNBLOCK directive): dynamic hour gate disabled.
+        # If MCP Brain scored the trade correctly, hour shouldn't block it.
+        # dynamic_blocked = self._load_dynamic_blocked_hours()
+        if hour in BLOCKED_HOURS_UTC:
             return "blocked"
         if hour in PEAK_HOURS_UTC:
             return "peak"
@@ -1727,9 +1729,10 @@ class BotEngine:
         try:
             _sl_active, _sl_reason = self.risk.is_sl_cooldown_active(symbol, side)
             if _sl_active:
+                # 2026-05-27 (UNBLOCK directive): log advisory only, don't block.
+                # If analysis is correct, re-entry after SL is valid.
                 logger.info(
-                    f"[Risk29] {symbol} {side} BLOCKED: {_sl_reason}")
-                return False
+                    f"[Risk29] {symbol} {side} SL-cooldown advisory (not blocking): {_sl_reason}")
         except Exception as _e:
             logger.debug(f"[Risk29] sl-cooldown check skipped: {_e}")
 
@@ -1962,27 +1965,19 @@ class BotEngine:
                     f"-- {_decision.reason}"
                 )
                 if _decision.decision == "SKIP":
-                    # Patch the candidate row's decision so the warehouse
-                    # reflects the meta-filter SKIP, not the scorer's ALLOW.
+                    # 2026-05-27 (UNBLOCK directive): log only, don't block.
+                    # If MCP Brain scored it correctly and TP is set, trade it.
+                    # Warehouse still records the meta-filter opinion for audit.
                     try:
                         _get_wh().query(
-                            "UPDATE candidates SET decision='SKIP', skip_reason=? WHERE id=?",
-                            (f"meta:{_decision.reason}", _cid),
+                            "UPDATE candidates SET skip_reason=? WHERE id=?",
+                            (f"meta_advisory:{_decision.reason}", _cid),
                         )
                     except Exception:
                         pass
-                    return False
+                    logger.info(f"[MetaFilter] SKIP advisory (not blocking): {_decision.reason}")
                 if _decision.decision == "REVIEW":
-                    # Phase D will ask ClaudeCode; for now, conservative SKIP.
-                    try:
-                        _get_wh().query(
-                            "UPDATE candidates SET decision='REVIEW', skip_reason=? WHERE id=?",
-                            (f"meta:{_decision.reason}", _cid),
-                        )
-                    except Exception:
-                        pass
-                    logger.info("[MetaFilter] REVIEW -> SKIP (Phase D pending)")
-                    return False
+                    logger.info(f"[MetaFilter] REVIEW advisory (not blocking): {_decision.reason}")
                 _meta_size_multiplier = float(_decision.size_multiplier or 1.0)
         except Exception as _mfe:
             logger.debug(f"[MetaFilter] skipped ({_mfe}) -- defaulting to ALLOW")

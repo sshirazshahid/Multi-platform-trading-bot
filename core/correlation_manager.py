@@ -179,9 +179,15 @@ class CorrelationManager:
     def opposite_direction_check(self, symbol: str, direction: str,
                                   open_positions: list) -> bool:
         """
-        Check if we already have the OPPOSITE direction on a correlated asset.
+        Check if we already have the SAME direction on a correlated asset.
         E.g., long BTC + short ETH is a valid pair trade, don't block it.
         But long BTC + long ETH is concentration risk.
+
+        Returns True (allowed) unless ANY correlated position has the SAME
+        direction. Must check ALL correlated positions, not just the first
+        one — otherwise a pair-trade (opposite) position earlier in the list
+        would short-circuit the check and hide a same-direction concentration
+        that appears later.
         """
         group = self.get_group(symbol)
         if group is None:
@@ -189,19 +195,21 @@ class CorrelationManager:
 
         group_assets = CORRELATION_GROUPS[group]["assets"]
 
+        found_any = False
         for pos in open_positions:
             pos_base = pos.symbol.split("/")[0].upper()
             if pos_base in group_assets:
+                found_any = True
                 if pos.side == direction:
                     # Same direction on correlated asset = concentration risk
                     logger.debug(
                         f"[Correlation] {symbol} {direction.upper()} blocked — "
                         f"same direction as {pos.symbol} {pos.side.upper()}")
                     return False
-                else:
-                    # Opposite direction = pair trade, allowed
-                    logger.debug(
-                        f"[Correlation] {symbol} {direction.upper()} + "
-                        f"{pos.symbol} {pos.side.upper()} = pair trade (allowed)")
-                    return True
-        return True  # no correlated positions found
+
+        if found_any:
+            # All correlated positions are opposite direction = pair trade
+            logger.debug(
+                f"[Correlation] {symbol} {direction.upper()} — "
+                f"only opposite-direction positions in group '{group}' (allowed)")
+        return True  # no same-direction correlated positions found

@@ -1,44 +1,35 @@
 {
   "is_halted": false,
   "halt_reason": "",
-  "halt_time": 0,
-  "daily_pnl": 0.4802,
+  "daily_pnl": -9.0008,
   "max_drawdown_pct": 0.0,
-  "start_balance": 566.18,
-  "peak_balance": 566.66,
-  "trading_day": "2026-05-05",
-  "trades_today": 7,
+  "start_balance": 521.75,
+  "peak_balance": 512.75,
+  "trading_day": "2026-05-29",
+  "trades_today": 0,
   "recent_results": [
     true,
     true,
     false,
     false,
+    true,
     false,
     false,
     false,
     true,
+    false,
     true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
   ],
   "trade_history": [
-    [
-      false,
-      -2.268937520163457
-    ],
-    [
-      false,
-      -1.9294087610857147
-    ],
-    [
-      true,
-      2.965266077665906
-    ],
     [
       true,
       2.8771495570609864
@@ -298,20 +289,171 @@
     [
       true,
       0.6617461799388593
+    ],
+    [
+      false,
+      -1.6936020473448559
+    ],
+    [
+      false,
+      -1.0
+    ],
+    [
+      true,
+      0.025388601036277957
+    ],
+    [
+      true,
+      0.1605676101809715
+    ],
+    [
+      true,
+      1.378479791646559
+    ],
+    [
+      false,
+      -0.5881668283220322
+    ],
+    [
+      false,
+      -0.5174271037921122
+    ],
+    [
+      true,
+      1.0874140666314331
+    ],
+    [
+      false,
+      -0.3311128098722339
+    ],
+    [
+      false,
+      -0.27280776228017256
+    ],
+    [
+      true,
+      0.5194285714285553
+    ],
+    [
+      true,
+      0.04231048680066436
+    ],
+    [
+      true,
+      0.1810847870800559
+    ],
+    [
+      true,
+      1.684859043395654
+    ],
+    [
+      true,
+      2.0515317324782996
+    ],
+    [
+      true,
+      1.8752624088240268
+    ],
+    [
+      true,
+      0.10368914659300592
+    ],
+    [
+      false,
+      -1.9437075599818912
+    ],
+    [
+      false,
+      -1.3848670684154751
+    ],
+    [
+      true,
+      0.12091043671353431
+    ],
+    [
+      false,
+      -0.04219066937120412
+    ],
+    [
+      false,
+      -0.5904847396768667
+    ],
+    [
+      false,
+      -2.1943003971034685
+    ],
+    [
+      true,
+      1.443485598559865
+    ],
+    [
+      false,
+      -0.5895221595629974
+    ],
+    [
+      true,
+      0.4729066248178312
+    ],
+    [
+      false,
+      -0.8351711165225478
+    ],
+    [
+      false,
+      -2.4033033033033
+    ],
+    [
+      false,
+      -0.853521126760565
+    ],
+    [
+      false,
+      -2.157634674922616
+    ],
+    [
+      false,
+      -1.9729587258860217
+    ],
+    [
+      false,
+      -1.8922294398823332
+    ],
+    [
+      false,
+      -2.0008999999999895
+    ],
+    [
+      false,
+      0.0
+    ],
+    [
+      false,
+      -0.17776666666667898
     ]
   ],
   "symbol_pauses": {},
   "family_pauses": {},
   "global_streak": [
-    true,
+    false,
+    false,
+    false,
+    false,
     false,
     true,
     true,
     true,
     true,
+    false,
+    false,
+    false,
     true,
-    true,
-    true
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
   ],
-  "timestamp": 1777988950.0472164
+  "timestamp": 1780001890.8921962
 }

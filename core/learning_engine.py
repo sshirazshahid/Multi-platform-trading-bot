@@ -163,7 +163,7 @@ class LearningEngine:
         def _bucket(trades):
             by_strat  = defaultdict(lambda: {
                 "trades": 0, "wins": 0, "net_pnl": 0.0,
-                "total_fees": 0.0, "pnl_list": []
+                "gross_pnl": 0.0, "total_fees": 0.0, "pnl_list": []
             })
             by_symbol = defaultdict(lambda: {
                 "trades": 0, "wins": 0, "net_pnl": 0.0, "total_fees": 0.0
@@ -183,7 +183,9 @@ class LearningEngine:
                 by_strat[s]["net_pnl"]    += pnl
                 by_strat[s]["total_fees"] += fee
                 by_strat[s]["pnl_list"].append(pnl)
-                if won: by_strat[s]["wins"] += 1
+                if won:
+                    by_strat[s]["wins"]      += 1
+                    by_strat[s]["gross_pnl"] += pnl
                 by_symbol[sym]["trades"]     += 1
                 by_symbol[sym]["net_pnl"]    += pnl
                 by_symbol[sym]["total_fees"] += fee

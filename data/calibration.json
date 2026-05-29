@@ -1,0 +1,58 @@
+{
+  "claude_portfolio:0.80": {
+    "wins": 2556,
+    "total": 4084
+  },
+  "all:0.80": {
+    "wins": 2556,
+    "total": 4084
+  },
+  "claude_portfolio:0.85": {
+    "wins": 2187,
+    "total": 4571
+  },
+  "all:0.85": {
+    "wins": 2187,
+    "total": 4571
+  },
+  "claude_portfolio:0.75": {
+    "wins": 1658,
+    "total": 3444
+  },
+  "all:0.75": {
+    "wins": 1658,
+    "total": 3444
+  },
+  "claude_portfolio:0.70": {
+    "wins": 1787,
+    "total": 5151
+  },
+  "all:0.70": {
+    "wins": 1787,
+    "total": 5151
+  },
+  "claude_portfolio:0.90": {
+    "wins": 2218,
+    "total": 4368
+  },
+  "all:0.90": {
+    "wins": 2218,
+    "total": 4368
+  },
+  "claude_portfolio:0.65": {
+    "wins": 1040,
+    "total": 2070
+  },
+  "all:0.65": {
+    "wins": 1040,
+    "total": 2070
+  },
+  "claude_portfolio:0.60": {
+    "wins": 0,
+    "total": 213
+  },
+  "all:0.60": {
+    "wins": 0,
+    "total": 213
+  }
+}

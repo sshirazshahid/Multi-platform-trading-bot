@@ -50,15 +50,13 @@ def test_phase39_winning_hours_allowed():
 
 
 def test_phase39_catastrophic_losers_blocked():
-    """Phase 39: hours with net PnL ≤ -$9.91 all-time must be blocked.
-
-    Evidence (421 all-time real trades, 2026-05-09):
-      H22 -$35.81  H09 -$23.59  H05 -$19.12  H00 -$15.69
-      H23 -$12.05  H19 -$10.33  H21  -$9.91
-    """
+    """454-trade hardening (2026-05-27): H00 (26% WR, -$20.76) and H17
+    (27% WR, -$34.94) are the two worst hours. Only these are blocked;
+    earlier Phase 39/44 sets were superseded by UNBLOCK_ALL then re-gated
+    with the latest 454-trade data."""
     if not BLOCKED_HOURS_UTC:
         return  # UNBLOCK_ALL mode — relaxed
-    catastrophic = {0, 9, 19, 21, 23}  # Phase 44: H05/H22 unblocked after real-filter audit
+    catastrophic = {0, 17}  # 454-trade hardening (2026-05-27)
     assert catastrophic.issubset(BLOCKED_HOURS_UTC), (
         f"unblocked catastrophic-loss hours: "
         f"{catastrophic - BLOCKED_HOURS_UTC}")

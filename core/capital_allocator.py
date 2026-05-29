@@ -162,7 +162,7 @@ class CapitalAllocator:
         if not self._spot_mgr:
             return actions
 
-        CFG.get("hedge_drawdown_pct", 0.10)
+        hedge_dd_pct = CFG.get("hedge_drawdown_pct", 0.10)  # noqa: F841
 
         for ex_name, holdings in getattr(self._spot_mgr, "_holdings", {}).items():
             for coin, holding in holdings.items():
@@ -285,7 +285,7 @@ class CapitalAllocator:
                 exchange = self._exchanges.get(action["exchange"])
                 if not exchange:
                     return False
-                f"{action['coin']}/USDT"
+                symbol = f"{action['coin']}/USDT"  # noqa: F841
                 # Sell spot coin
                 if self._order_mgr:
                     logger.info(

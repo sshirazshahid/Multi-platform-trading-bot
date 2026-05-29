@@ -43,11 +43,11 @@ def test_max_loss_age_pct_loosened_with_earlier_cutoff():
     assert RISK["max_loss_age_pct"] > 0  # but not zero — would close winners
 
 
-def test_max_stale_hours_tightened():
+def test_max_stale_hours_allows_15m_1h_tp():
     from config import RISK
-    assert RISK["max_stale_hours"] <= 2.0, (
-        "STALE cutoff must be ≤ 2h — the >2h hold bucket lost -$4.34 "
-        "with effectively zero edge (avg_win = avg_loss)")
+    # 2026-05-28: raised to 3h for 15m-1h candle entries that need 1-3h to hit TP.
+    assert RISK["max_stale_hours"] <= 4.0, (
+        "STALE cutoff must be ≤ 4h — gives 15m-1h entries room to reach TP")
 
 
 def test_max_position_age_hours_tightened():
@@ -128,12 +128,12 @@ def test_star_tp_extender_compounds_correctly_with_default_path():
 
 
 @pytest.mark.parametrize("age_h,net_pct,should_fire_age_loss", [
-    # Phase 15 (2026-05-03): max_loss_age_hours cut to 0.75h
-    (0.5, -0.4, False),  # under 0.75h: not yet age-loss
-    (0.8, -0.4, True),   # past 0.75h, below -0.3% → fire
-    (0.8, -0.2, False),  # past 0.75h, but only -0.2% → no fire
-    (0.8, +0.4, False),  # past 0.75h but green → no fire
-    (1.5, -0.5, True),   # well past, well underwater
+    # 2026-05-28: max_loss_age_hours raised to 1.5h for 15m-1h entries
+    (0.5, -0.4, False),  # under 1.5h: not yet age-loss
+    (0.8, -0.4, False),  # under 1.5h: not yet age-loss
+    (0.8, -0.2, False),  # under 1.5h, only -0.2% → no fire
+    (0.8, +0.4, False),  # under 1.5h, green → no fire
+    (1.5, -0.5, True),   # at cutoff, underwater → fire
 ])
 def test_age_loss_rule_logic(age_h, net_pct, should_fire_age_loss):
     """Replicate the order_manager AGE_LOSS condition with new thresholds."""

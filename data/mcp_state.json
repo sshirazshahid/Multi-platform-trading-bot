@@ -1,32 +1,12 @@
 {
   "decisions": {
-    "BTC": {
-      "action": "BUY",
-      "confidence": 0.31,
-      "reason": "3TF EMA up, trend up(5), MACD+ | blend(c=0.62,a=0.00)"
-    },
-    "LINK": {
-      "action": "BUY",
-      "confidence": 0.3,
-      "reason": "Strong 1h/15m ADX, 4h EMA up | blend(c=0.60,a=0.00)"
-    },
-    "DOGE": {
-      "action": "BUY",
-      "confidence": 0.29,
-      "reason": "3TF EMA up, 15m vol 2.07x, RSI safe | blend(c=0.58,a=0.00)"
-    },
-    "AVAX": {
-      "action": "BUY",
-      "confidence": 0.3,
-      "reason": "3TF EMA up, 1h ADX 20.7 confirms | blend(c=0.60,a=0.00)"
+    "ETH": {
+      "action": "SELL",
+      "confidence": 0.72,
+      "reason": "4h/1h EMA+ADX bearish, OI falling | blend(c=0.62,a=0.82)"
     }
   },
   "position_advice": {
-    "MANUAL-bybit-ATOM/USDT:USDT-buy-1777204211": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
     "SPOT-binance-SUI": {
       "action": "HOLD",
       "confidence": 0.5,
@@ -37,12 +17,12 @@
       "confidence": 0.5,
       "reason": "no Claude response"
     },
-    "SPOT-bybit-ETH": {
+    "SPOT-binance-TRX": {
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
     },
-    "SPOT-binance-TRX": {
+    "SPOT-bybit-ETH": {
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
@@ -52,17 +32,7 @@
       "confidence": 0.5,
       "reason": "no Claude response"
     },
-    "SPOT-binance-ETH": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
     "SPOT-binance-DOGE": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
-    "SPOT-bybit-ARB": {
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
@@ -77,7 +47,17 @@
       "confidence": 0.5,
       "reason": "no Claude response"
     },
+    "SPOT-binance-ETH": {
+      "action": "HOLD",
+      "confidence": 0.5,
+      "reason": "no Claude response"
+    },
     "SPOT-bybit-BTC": {
+      "action": "HOLD",
+      "confidence": 0.5,
+      "reason": "no Claude response"
+    },
+    "SPOT-bybit-ARB": {
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
@@ -92,17 +72,7 @@
       "confidence": 0.5,
       "reason": "no Claude response"
     },
-    "SPOT-binance-GRT": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
-    "SPOT-bybit-MANA": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
-    "SPOT-bybit-FET": {
+    "SPOT-bybit-ATOM": {
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
@@ -111,23 +81,13 @@
       "action": "HOLD",
       "confidence": 0.5,
       "reason": "no Claude response"
-    },
-    "SPOT-bybit-AVAX": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
-    },
-    "SPOT-binance-VET": {
-      "action": "HOLD",
-      "confidence": 0.5,
-      "reason": "no Claude response"
     }
   },
-  "saved_at": 1777210422.0861394,
-  "last_entry_run": 1777210211.4025676,
-  "last_position_run": 1777210136.3492014,
-  "api_calls_this_hour": 8,
-  "hour_start": 1777209541.8632586,
+  "saved_at": 1780023882.290697,
+  "last_entry_run": 1780023699.3132386,
+  "last_position_run": 1780023848.7828553,
+  "api_calls_this_hour": 22,
+  "hour_start": 1780021961.0478456,
   "claude_consecutive_fails": 0,
   "claude_backoff_until": 0.0
 }

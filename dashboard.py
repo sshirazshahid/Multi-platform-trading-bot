@@ -1713,8 +1713,6 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             hb_mins = (hb_uptime % 3600) // 60
             hb_cycle = hb.get("cycle_count", 0)
             hb_mem = hb.get("memory_mb", 0)
-            hb_halted = hb.get("is_halted", False)
-            hb_halt_reason = hb.get("halt_reason") or ""
             hb_ts = hb.get("timestamp", "")
             # Calculate age of heartbeat
             hb_age_s = "?"
@@ -1724,13 +1722,8 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 hb_age_s = str(int((datetime.now(timezone.utc) - hb_dt).total_seconds()))
             except Exception:
                 pass
-            # Status indicator
-            if hb_halted:
-                hb_status = col("HALTED", RED + BOLD)
-                hb_reason = "  " + col(hb_halt_reason, YELLOW) if hb_halt_reason else ""
-            else:
-                hb_status = col("RUNNING", GREEN + BOLD)
-                hb_reason = ""
+            hb_status = col("RUNNING", GREEN + BOLD)
+            hb_reason = ""
             # Mem: bot writes 0 when psutil isn't available in the venv —
             # display "n/a" instead of the misleading "0MB".
             mem_str = "n/a" if (not hb_mem or hb_mem == 0) else "{:.0f}MB".format(hb_mem)
@@ -3019,21 +3012,15 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
 
         # Drawdown bar
         if risk_data:
-            # risk_manager writes "max_drawdown_pct" and "is_halted"; accept both old+new keys
             dd_pct = risk_data.get("max_drawdown_pct",
                                    risk_data.get("drawdown_pct", 0)) * 100
             peak = risk_data.get("peak_balance", 0)
             daily_pnl = risk_data.get("daily_pnl", 0)
-            halted = risk_data.get("is_halted",
-                                   risk_data.get("halted", False))
-            halt_reason = risk_data.get("halt_reason", "")
             trades_today = risk_data.get("trades_today", 0)
         else:
             dd_pct = 0
             peak = total_live
             daily_pnl = s.get("today_pnl", 0)
-            halted = False
-            halt_reason = ""
             trades_today = s.get("today_n", 0)
 
         if risk_avail:
@@ -3099,15 +3086,10 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         row("  Positions:   {} {} / {} futures max{}".format(
             pos_bar, n_open, max_positions, col(spot_suffix, DIM)))
 
-        # Halt status + trades today
-        if halted:
-            row("  {}  {}".format(
-                col("!! TRADING HALTED !!", RED + BOLD),
-                col(halt_reason, YELLOW)))
-        else:
-            row("  Status: {}  MaxLev: {}x  Trades Today: {}".format(
-                col("ACTIVE", GREEN + BOLD), max_leverage,
-                col(str(trades_today), WHITE)))
+        # Status + trades today
+        row("  Status: {}  MaxLev: {}x  Trades Today: {}".format(
+            col("ACTIVE", GREEN + BOLD), max_leverage,
+            col(str(trades_today), WHITE)))
 
         # Live safety nets
         if _OP_MODE == "CONTROLLED_LIVE":

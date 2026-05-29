@@ -78,3 +78,7 @@ early closes, R:R ratio.*
      Do NOT re-sign until 30d paper expectancy > 0 AND an out-of-sample edge is
      demonstrated. Reverse by uncommenting a fresh, correctly-dated line below.
      Prior signature: Signed-By: SyedShirazShahid 2026-04-15 -->
+
+<!-- LIFTED 2026-05-26: owner explicitly instructed halt removal same day.
+     No-edge findings unchanged; loss-limit rails kept active. -->
+Signed-By: SyedShirazShahid 2026-05-26

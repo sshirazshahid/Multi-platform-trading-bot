@@ -57,7 +57,6 @@ def mock_om():
 @pytest.fixture
 def mock_rm():
     rm = MagicMock()
-    rm.is_halted = False
     rm.calculate_position_size = MagicMock(return_value=10.0)
     rm.get_sl_tp = MagicMock(return_value=(0.95, 1.10))
     return rm

@@ -5595,6 +5595,678 @@
       "lessons": [
         "Reduce SL to 1.5x ATR or lower leverage"
       ]
+    },
+    {
+      "timestamp": 1779851388.3437479,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.378,
+      "close_price": 9.448,
+      "pnl": -0.5280964500000019,
+      "pnl_pct": -1.6936020473448559,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 224.7,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779878638.944251,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3317,
+      "close_price": 1.3302,
+      "pnl": 0.0034486200000011583,
+      "pnl_pct": 0.025388601036277957,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 951.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779882243.197126,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "reconcile",
+      "entry_price": 1.3319,
+      "close_price": 1.3295,
+      "pnl": 0.021813720000003665,
+      "pnl_pct": 0.1605676101809715,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 60.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on reconcile"
+      ]
+    },
+    {
+      "timestamp": 1779907288.167205,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3329,
+      "close_price": 1.3221,
+      "pnl": 0.22507852499999806,
+      "pnl_pct": 1.378479791646559,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 134.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779914014.3642218,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.279,
+      "close_price": 9.297,
+      "pnl": -0.13753152000000343,
+      "pnl_pct": -0.5881668283220322,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 103.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779917615.2960067,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3238,
+      "close_price": 1.3259,
+      "pnl": -0.07020942499999981,
+      "pnl_pct": -0.5174271037921122,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 163.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779921621.2018654,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "reconcile",
+      "entry_price": 1.3237,
+      "close_price": 1.3149,
+      "pnl": 0.10327766750000203,
+      "pnl_pct": 1.0874140666314331,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 66.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on reconcile"
+      ]
+    },
+    {
+      "timestamp": 1779922344.978075,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.157,
+      "close_price": 9.163,
+      "pnl": -0.015160000000000229,
+      "pnl_pct": -0.3311128098722339,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 60.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779923551.0161786,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 82.45,
+      "close_price": 82.48,
+      "pnl": -0.06298040000000064,
+      "pnl_pct": -0.27280776228017256,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 60.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779926134.8895185,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3125,
+      "close_price": 1.3075,
+      "pnl": 0.03937106249999878,
+      "pnl_pct": 0.5194285714285553,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 62.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779927383.048299,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 82.58,
+      "close_price": 82.48,
+      "pnl": 0.019741099999993572,
+      "pnl_pct": 0.04231048680066436,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 60.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779929204.2894304,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.3127,
+      "close_price": 1.3102,
+      "pnl": 0.01972992999999912,
+      "pnl_pct": 0.1810847870800559,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 50.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1779938733.493827,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.3079,
+      "close_price": 1.2953,
+      "pnl": 0.32084811200000485,
+      "pnl_pct": 1.684859043395654,
+      "close_reason": "Scalp TP hit at 2.1%",
+      "leverage": 2,
+      "duration_min": 140.4,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779940033.9986186,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 81.98,
+      "close_price": 81.04,
+      "pnl": 0.4650303399999988,
+      "pnl_pct": 2.0515317324782996,
+      "close_reason": "sl_crossed_at_placement",
+      "leverage": 2,
+      "duration_min": 36.7,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779942510.9786315,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.2848,
+      "close_price": 1.2712,
+      "pnl": 0.19142183599999738,
+      "pnl_pct": 1.8752624088240268,
+      "close_reason": "Past TP at +2.4%; target was 1.8-2.0%",
+      "leverage": 2,
+      "duration_min": 53.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779943324.297223,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 1.28485,
+      "close_price": 1.2829,
+      "pnl": 0.015187650000002696,
+      "pnl_pct": 0.10368914659300592,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 13.3,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on manual"
+      ]
+    },
+    {
+      "timestamp": 1779953940.6440318,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.836,
+      "close_price": 8.913,
+      "pnl": -0.2576189999999999,
+      "pnl_pct": -1.9437075599818912,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 95.5,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779960709.0423253,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 80.6,
+      "close_price": 81.06,
+      "pnl": -0.6055400500000085,
+      "pnl_pct": -1.3848670684154751,
+      "close_reason": "Age 328m, bounce ongoing, stale",
+      "leverage": 2,
+      "duration_min": 330.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779969679.990147,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 81.06,
+      "close_price": 80.93,
+      "pnl": 0.03920399999999637,
+      "pnl_pct": 0.12091043671353431,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 144.1,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779970092.8485563,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.874,
+      "close_price": 8.867,
+      "pnl": -0.005616000000000981,
+      "pnl_pct": -0.04219066937120412,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 182.9,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779971083.8606696,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.2811,
+      "close_price": 1.2836,
+      "pnl": -0.08623758000000385,
+      "pnl_pct": -0.5904847396768667,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 435.3,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779973293.9216688,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.2843,
+      "close_price": 1.2971,
+      "pnl": -0.33817679999999817,
+      "pnl_pct": -2.1943003971034685,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 34.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779977451.2236538,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.888,
+      "close_price": 8.815,
+      "pnl": 0.1282970000000008,
+      "pnl_pct": 1.443485598559865,
+      "close_reason": "4h RSI=26.5 reversal zone, last 5 all losses",
+      "leverage": 2,
+      "duration_min": 42.0,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779980937.9223568,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 80.81,
+      "close_price": 80.95,
+      "pnl": -0.1350573750000003,
+      "pnl_pct": -0.5895221595629974,
+      "close_reason": "STALE",
+      "leverage": 2,
+      "duration_min": 182.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779982595.3209655,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.921,
+      "close_price": 8.891,
+      "pnl": 0.04218799999999872,
+      "pnl_pct": 0.4729066248178312,
+      "close_reason": "Bank +1.2%; 4h RSI=28.3 reversal risk",
+      "leverage": 2,
+      "duration_min": 78.9,
+      "verdict": "WIN",
+      "mistakes": [],
+      "lessons": [
+        "Good entry on claude_portfolio"
+      ]
+    },
+    {
+      "timestamp": 1779982599.5861497,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 0.09797,
+      "close_price": 0.09826,
+      "pnl": -0.07445775999999975,
+      "pnl_pct": -0.8351711165225478,
+      "close_reason": "171m stagnant -0.2%; 17% WR, 5L streak",
+      "leverage": 2,
+      "duration_min": 173.4,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779983232.8168085,
+      "symbol": "XRP/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 1.2987,
+      "close_price": 1.313,
+      "pnl": -0.31523816999999954,
+      "pnl_pct": -2.4033033033033,
+      "close_reason": "15m RSI 67 EMA up, at SL boundary",
+      "leverage": 2,
+      "duration_min": 62.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779984754.3879702,
+      "symbol": "DOGE/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 0.09798,
+      "close_price": 0.0983,
+      "pnl": -0.03261492000000006,
+      "pnl_pct": -0.853521126760565,
+      "close_reason": "14% WR, last 5 all losses, cut loss",
+      "leverage": 2,
+      "duration_min": 35.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1779985185.9030979,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 80.75,
+      "close_price": 81.54,
+      "pnl": -0.6620702000000047,
+      "pnl_pct": -2.157634674922616,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 65.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779986886.12132,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bitget",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 8.916,
+      "close_price": 8.995,
+      "pnl": -0.1759089999999977,
+      "pnl_pct": -1.9729587258860217,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 60.8,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779988933.351498,
+      "symbol": "SOL/USDT:USDT",
+      "exchange": "Binance",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 81.59,
+      "close_price": 82.28,
+      "pnl": -0.9263219999999973,
+      "pnl_pct": -1.8922294398823332,
+      "close_reason": "stop_loss",
+      "leverage": 2,
+      "duration_min": 58.2,
+      "verdict": "LOSS",
+      "mistakes": [
+        "SHORT stopped out \u2014 possible counter-trend trade"
+      ],
+      "lessons": [
+        "Only trade with the higher timeframe trend"
+      ]
+    },
+    {
+      "timestamp": 1779992226.7331738,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "Bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "claude_portfolio",
+      "entry_price": 9.0,
+      "close_price": 9.081,
+      "pnl": -0.5672551499999969,
+      "pnl_pct": -2.0008999999999895,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 65.1,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
+    },
+    {
+      "timestamp": 1780001890.9083269,
+      "symbol": "LINK/USDT:USDT",
+      "exchange": "bybit",
+      "side": "sell",
+      "market_type": "futures",
+      "strategy": "manual",
+      "entry_price": 9.0,
+      "close_price": 8.999,
+      "pnl": -0.0007999500000000555,
+      "pnl_pct": -0.17776666666667898,
+      "close_reason": "trailing_stop",
+      "leverage": 2,
+      "duration_min": 157.0,
+      "verdict": "LOSS",
+      "mistakes": [
+        "Unknown cause \u2014 needs manual review"
+      ],
+      "lessons": []
     }
   ],
   "lessons": {
@@ -5607,24 +6279,24 @@
       "last_seen": 1775601386.3300211
     },
     "side:sell:futures": {
-      "count": 57,
-      "last_seen": 1777148346.0202894
+      "count": 76,
+      "last_seen": 1780001890.9083269
     },
     "AVAX/USDT:USDT:Supertrend": {
       "count": 2,
       "last_seen": 1774898373.578276
     },
     "symbol:SOL/USDT:USDT": {
-      "count": 11,
-      "last_seen": 1776903153.9963524
+      "count": 16,
+      "last_seen": 1779988933.351498
     },
     "SOL/USDT:USDT:Supertrend": {
       "count": 3,
       "last_seen": 1775591169.8097327
     },
     "symbol:XRP/USDT:USDT": {
-      "count": 11,
-      "last_seen": 1776893108.526037
+      "count": 15,
+      "last_seen": 1779983232.8168085
     },
     "XRP/USDT:USDT:Supertrend": {
       "count": 3,
@@ -5675,8 +6347,8 @@
       "last_seen": 1777207804.5065165
     },
     "symbol:LINK/USDT:USDT": {
-      "count": 8,
-      "last_seen": 1776524361.8896708
+      "count": 16,
+      "last_seen": 1780001890.9083269
     },
     "LINK/USDT:USDT:Supertrend": {
       "count": 1,
@@ -5835,8 +6507,8 @@
       "last_seen": 1777207804.5065165
     },
     "strategy:claude_portfolio": {
-      "count": 78,
-      "last_seen": 1777203993.6254728
+      "count": 95,
+      "last_seen": 1779992226.7331738
     },
     "ARB/USDT:USDT:claude_portfolio": {
       "count": 15,
@@ -5851,8 +6523,8 @@
       "last_seen": 1777203993.6254728
     },
     "LINK/USDT:USDT:claude_portfolio": {
-      "count": 4,
-      "last_seen": 1776133028.273627
+      "count": 11,
+      "last_seen": 1779992226.7331738
     },
     "symbol:AAVE/USDT:USDT": {
       "count": 4,
@@ -5887,36 +6559,36 @@
       "last_seen": 1775793706.5881262
     },
     "symbol:DOGE/USDT:USDT": {
-      "count": 6,
-      "last_seen": 1776488387.4600441
+      "count": 8,
+      "last_seen": 1779984754.3879702
     },
     "DOGE/USDT:USDT:claude_portfolio": {
-      "count": 5,
-      "last_seen": 1776458008.3172507
+      "count": 6,
+      "last_seen": 1779982599.5861497
     },
     "SOL/USDT:USDT:claude_portfolio": {
-      "count": 5,
-      "last_seen": 1776903153.9963524
+      "count": 10,
+      "last_seen": 1779988933.351498
     },
     "ALGO/USDT:USDT:claude_portfolio": {
       "count": 6,
       "last_seen": 1776972503.4077146
     },
     "XRP/USDT:USDT:claude_portfolio": {
-      "count": 3,
-      "last_seen": 1776325567.1633835
+      "count": 7,
+      "last_seen": 1779983232.8168085
     },
     "ADA/USDT:USDT:claude_portfolio": {
       "count": 1,
       "last_seen": 1776092386.6966505
     },
     "strategy:manual": {
-      "count": 25,
-      "last_seen": 1777207804.5065165
+      "count": 27,
+      "last_seen": 1780001890.9083269
     },
     "LINK/USDT:USDT:manual": {
-      "count": 3,
-      "last_seen": 1776524361.8896708
+      "count": 4,
+      "last_seen": 1780001890.9083269
     },
     "BNB/USDT:USDT:manual": {
       "count": 2,
@@ -5927,8 +6599,8 @@
       "last_seen": 1776487876.0891175
     },
     "DOGE/USDT:USDT:manual": {
-      "count": 1,
-      "last_seen": 1776488387.4600441
+      "count": 2,
+      "last_seen": 1779984754.3879702
     },
     "DOT/USDT:USDT:manual": {
       "count": 2,
@@ -5995,5 +6667,5 @@
       "last_seen": 1777141645.6222239
     }
   },
-  "saved_at": "2026-04-26T17:50:04.506516"
+  "saved_at": "2026-05-29T01:58:10.908327"
 }

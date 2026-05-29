@@ -11,13 +11,26 @@ echo ============================================
 echo.
 
 :: Clear __pycache__ before every start so fixes always load
-for /d /r %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+for /d /r %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d" 2>nul
 
 venv\Scripts\python.exe main.py
 
+:: Check exit code: 0 = clean shutdown, non-zero = crash
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo ============================================
+    echo  Bot exited cleanly at %date% %time%
+    echo  NOT restarting (clean exit code 0).
+    echo  Run this script again to restart manually.
+    echo ============================================
+    pause
+    goto :eof
+)
+
 echo.
 echo ============================================
-echo  Bot stopped/crashed at %date% %time%
+echo  Bot CRASHED at %date% %time%
+echo  Exit code: %ERRORLEVEL%
 echo  Restarting in 10 seconds...
 echo  Press Ctrl+C twice to quit permanently
 echo ============================================
