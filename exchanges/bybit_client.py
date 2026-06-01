@@ -192,6 +192,43 @@ class BybitClient(BaseExchange):
                     return {}
         return {}
 
+    # ── transfer ──────────────────────────────────────────────────────
+
+    # Bot account names that all resolve to the ONE Unified Trading wallet.
+    _UTA_POOLED = {"spot", "futures", "swap", "contract", "unified"}
+
+    def transfer(self, amount: float, from_account: str = "spot",
+                 to_account: str = "futures") -> bool:
+        """Move USDT between Bybit wallets.
+
+        2026-05-30: this account is a Unified Trading Account (UTA 2.0,
+        verified unifiedMarginStatus=5). On a UTA, spot and derivatives share
+        ONE margin wallet — there is NO spot<->futures transfer (the UI offers
+        none, and the legacy spot<->contract transfer endpoint is gone). A
+        spot<->futures move is therefore a NO-OP: the funds are already
+        available to both sides. We return True WITHOUT an API call, so the
+        capital-allocator profit-sweep neither errors nor churns the transfer
+        circuit-breaker. (Bybit migrated all accounts to UTA; the prior
+        ccxt transfer("USDT", "contract", "spot") call would just fail here.)
+
+        A genuine cross-wallet move on UTA is Unified<->Funding — a separate
+        operation the bot does not currently use; add it explicitly if needed.
+        """
+        if not self._ok():
+            return False
+
+        a, b = (from_account or "").lower(), (to_account or "").lower()
+        if a in self._UTA_POOLED and b in self._UTA_POOLED:
+            logger.info(
+                f"[Bybit] UTA: {from_account}->{to_account} needs no transfer "
+                f"(spot & derivatives share one unified wallet) — no-op.")
+            return True
+
+        logger.warning(
+            f"[Bybit] Unsupported transfer route {from_account}->{to_account} "
+            f"on a Unified account (only Unified<->Funding is a real move).")
+        return False
+
     # ── fetch_order_book ──────────────────────────────────────────────
 
     def fetch_order_book(self, symbol: str, limit: int = 20,
