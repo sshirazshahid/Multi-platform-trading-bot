@@ -440,6 +440,32 @@ def get_commodity_meta(symbol: str) -> dict:
     return COMMODITIES.get(base, {})
 
 # ==============================================================
+# ANALYSIS-ONLY INSTRUMENTS (2026-06-02)
+# Commodity + equity perpetuals that ARE live + liquid on Binance/Bybit/Bitget
+# (ccxt `XAU/USDT:USDT`, raw `XAUUSDT`) but are only ~5 months old, so they have
+# NO screened edge yet. The bot may FETCH + WAREHOUSE them for research, but must
+# NEVER route them to a live/paper order until they pass the pre-registered screen.
+# is_analysis_only() is the single safety predicate; _execute_open hard-blocks on it.
+# To promote one to tradeable later, remove its base here AFTER it survives the screen.
+# ==============================================================
+ANALYSIS_ONLY_BASES = {
+    # commodities (gold, silver, WTI, Brent, copper)
+    "XAU", "XAG", "CL", "BZ", "COPPER", "WTI",
+    # equity perps
+    "TSLA", "NVDA", "AMZN", "AAPL", "GOOGL", "META", "MSFT", "MSTR", "COIN",
+}
+
+def is_analysis_only(symbol: str) -> bool:
+    """True if the symbol's base is an analysis-only research instrument.
+
+    Matches the ccxt perp form (`XAU/USDT:USDT`) and the spot-name form
+    (`XAU/USDT`) by base. Deliberately base-exact so crypto-native tokens that
+    merely share a prefix (e.g. XAUT = Tether Gold) are NOT caught.
+    """
+    base = symbol.split("/")[0].split(":")[0].upper()
+    return base in ANALYSIS_ONLY_BASES
+
+# ==============================================================
 # RISK MANAGEMENT — HIGH-WR TIERED MECHANISM (2026-04-11 rewrite)
 #
 # Rationale (from data/knowledge_model.json + data/kelly_stats.json + post_mortem):

@@ -969,7 +969,16 @@ class BotEngine:
                      "XAU", "ADA", "AVAX", "LINK", "DOT"}
         priority = sorted(all_coins & _priority)
         others = sorted(all_coins - _priority)
-        return (priority + others)[:40]
+        result = (priority + others)[:40]
+        # 2026-06-02: always include the analysis-only research instruments
+        # (commodity/equity perps) beyond the cap so they are fetched + scored +
+        # warehoused for the eventual edge screen. They are hard-blocked from
+        # live entry in _execute_open, so analyzing them never risks a trade.
+        from config import ANALYSIS_ONLY_BASES
+        for _b in sorted(ANALYSIS_ONLY_BASES):
+            if _b not in result:
+                result.append(_b)
+        return result
 
     def _build_position_snapshot(self) -> list:
         """Build snapshot of all open positions for Claude."""
@@ -1720,6 +1729,18 @@ class BotEngine:
                 del self._dust_skip_cooldown[symbol]
         except Exception:
             pass
+
+        # (A0) ANALYSIS-ONLY hard block (2026-06-02). Commodity/equity perps
+        # (gold, oil, stock perps) are real + liquid but too new (~5mo) to have a
+        # screened edge. They are fetched + warehoused for research only and must
+        # NEVER reach an order until screened. This is the single safety choke;
+        # it fires in EVERY mode (incl. paper) and well before any sizing/order work.
+        from config import is_analysis_only
+        if is_analysis_only(symbol):
+            logger.info(
+                f"[AnalysisOnly] BLOCKED open {ex_name}:{symbol} {side} — "
+                f"analysis/data-collection only (unscreened; no live entry)")
+            return False
 
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
         # per-pair-side StoplossGuard. After a position closes via SL on

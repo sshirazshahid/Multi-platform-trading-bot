@@ -1,49 +1,23 @@
-# Scalp viability + deep bug audit (2026-05-28)
+# Task: Commodity/Equity Perp — Format Fix + Analysis-Tracking (2026-06-02)
 
-Prior 2026-05-23 diagnostic preserved at `tasks/todo.bak.2026-05-23-diagnostic.md`.
+## Goal
+Let the bot FETCH + WAREHOUSE the liquid commodity/equity perps (gold/silver/oil + liquid
+stock perps) for research, while NEVER routing them to live/paper orders until screened.
 
-## The question (user)
-"Fix why it's losing. Build a scalper that wins $1-2/trade on FUTURES 15-60m. Ship it."
+## Constraints
+- SAFETY-CRITICAL: analysis-only symbols must be hard-blocked at the live-entry gate.
+- Minimal impact; mirror existing patterns; no new bugs.
 
-## VERDICT (advisor-corrected, backtest-confirmed)
-The bot is -EV because the **entry has no edge**, not because of fixable bugs.
-A clean fixed bracket on a no-edge entry yields ~38% WR BY CONSTRUCTION
-(= SL/(SL+TP)); fees push it to -EV. **Exits cannot manufacture EV.**
-
-Decisive backtest (`scripts/scalp_replay_backtest.py`, look-ahead-free, 32 syms):
-| test | best-cohort OOS WR | EV/trade | vs breakeven 48.6% |
-|---|---|---|---|
-| bot's actual entries, clean bracket | 27.8% | -0.40% | FAIL (anti-predictive) |
-| momentum scalp (taker) | 41% longs | -0.14% | FAIL |
-| mean-reversion scalp (taker) | 44.7% shorts | -0.07% | FAIL |
-| momentum (MAKER, charitable) | 48.4% longs | +0.015% | marginal, regime-only |
-| meanrev (MAKER, charitable) | 51.5% shorts | +0.071% | marginal, regime-only |
-
-Maker-fee positives DECAY to negative by the latest time fold (regime artifact)
-and assume maker entries always fill (false for scalps). **Not a shippable
-$1-2/trade engine.** Dominant lever = FEES (taker -0.09% -> maker ~0%), not signal.
-
-## Bug audit — most already fixed in prior sessions (verified, not assumed)
-- [x] B1 discretionary `mcp_brain_close` — ALREADY disabled (Phase 39, 2026-05-09).
-- [x] B4 `longs_only` — ALREADY enforced (mcp_brain.py:3087).
-- [x] SCALP path is live-wired & mechanically working (mcp_brain.py:3052+) — no edge.
-- [~] B3 `r_multiple` ~50% null — BENIGN: null only for reconciled/external/ghost
-      closes that have no known stop distance (order_manager.py:1715). Analytics
-      gap, not a money leak. Optional: write a fallback r from realized/ATR.
-- [ ] Ghost-class exits (`reconciled_from_exchange` -$37) — real accounting class;
-      prior 2026-05-23 diagnostic flagged a May 22-23 regression. Re-check current.
-
-## Test baseline
-- 1330 passed / 19 failed / 2 skipped. ALL 14 named failures are in UNTRACKED
-  prior-session WIP (`test_accuracy_tracker.py` + `test_bybit_transfer_and_circuit_breaker.py`,
-  the incomplete prediction-agent/circuit-breaker subsystem). Tracked suite green.
-  NOT regressions from this session. Won't commit that WIP.
-
-## Ship (responsible)
-- [ ] Commit: backtest harness + this finding doc + research record. Keep PAPER.
-- [ ] Do NOT flip OPERATING_MODE / CONTROLLED_LIVE_ENABLED. Do NOT present as profit.
-- [ ] Honest report: fee floor is the wall; a real edge (orderflow/L2/funding-timing)
-      or a maker/VIP fee tier is the prerequisite — neither currently in hand.
+## Plan (checkable)
+- [ ] 1. Map: (a) how the active universe is built + the var holding it, (b) the exact
+        live-entry gate in `_execute_open` + existing allow/deny lists, (c) the OHLCV
+        analysis-fetch path that builds spot `{base}/USDT` (the XAU 404).
+- [ ] 2. Config: add `ANALYSIS_ONLY_SYMBOLS` (liquid commodity/equity perps, full perp fmt).
+- [ ] 3. Format fix: analysis-fetch resolves perp `{base}/USDT:USDT` when spot is absent.
+- [ ] 4. Safety gate: `_execute_open` refuses any base in ANALYSIS_ONLY (hard block).
+- [ ] 5. Tracking: analysis-only symbols are fetched + warehoused, excluded from entry universe.
+- [ ] 6. Tests FIRST (TDD): (a) entry gate blocks analysis-only; (b) format resolver picks perp.
+- [ ] 7. Verify: run tests; restart; confirm bot fetches XAU/USDT:USDT and opens ZERO of them.
 
 ## Review
-(fill after verification workflow lands)
+(to be filled in after implementation)

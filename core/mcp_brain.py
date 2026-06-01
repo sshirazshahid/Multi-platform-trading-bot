@@ -1263,7 +1263,17 @@ class MCPBrain:
         timeframes = ["4h", "1h", "15m"]
         limit_map = {"4h": 80, "1h": 100, "15m": 100}
 
-        for coin in coins[:25]:
+        # Fetch the top-25 analyzed coins, PLUS any analysis-only research
+        # instruments (commodity/equity perps) so their indicators are computed
+        # + warehoused even though they sit beyond the cap. They never trade
+        # (hard-blocked in bot_engine._execute_open).
+        from config import ANALYSIS_ONLY_BASES
+        _fetch_coins = list(coins[:25])
+        for _c in coins:
+            if _c in ANALYSIS_ONLY_BASES and _c not in _fetch_coins:
+                _fetch_coins.append(_c)
+
+        for coin in _fetch_coins:
             symbol = f"{coin}/USDT"
             coin_data = {}
             for tf in timeframes:
@@ -1276,6 +1286,16 @@ class MCPBrain:
                                                     market_type="spot")
                         if raw and len(raw) >= 30:
                             break
+                    # Perp fallback: commodity/equity instruments (XAU, CL, TSLA,
+                    # ...) and some tokens are perp-only, so the spot name
+                    # {coin}/USDT 404s. Try the linear perp before giving up.
+                    if not raw or len(raw) < 30:
+                        for exchange in exchange_list:
+                            raw = exchange.fetch_ohlcv(f"{coin}/USDT:USDT", tf,
+                                                        limit=limit_map[tf],
+                                                        market_type="futures")
+                            if raw and len(raw) >= 30:
+                                break
                     if not raw or len(raw) < 30:
                         continue
                     df = pd.DataFrame(raw,
