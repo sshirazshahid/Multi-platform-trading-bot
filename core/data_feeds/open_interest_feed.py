@@ -5,17 +5,22 @@ Fetches OI tick + hourly OHLCV history from CoinDesk Data API.
 Computes:
   - OI current (in BTC-denominated contracts, i.e. SETTLEMENT units)
   - OI 6h delta % (rising/falling/flat)
-  - OI-price divergence signal (the real alpha):
+  - OI-price divergence signal (CANDIDATE — UNVALIDATED, see thesis):
       price_up + OI_up   = trend continuation (new money entering)
       price_up + OI_down = exhaustion / short covering (likely reversal)
       price_dn + OI_up   = shorts building (trend continuation down)
       price_dn + OI_down = long capitulation (likely bounce)
 
-Signal thesis:
-  The OI-price divergence is the ONE microstructure signal the no-edge-
-  forensics (2026-05-25) identified as untested. Pure OHLCV scoring is
-  anti-predictive. OI adds a dimension OHLCV cannot: whether the move is
-  backed by new capital (continuation) or just position closing (reversal).
+Signal thesis (HYPOTHESIS, NOT a proven edge):
+  OI-price divergence is a microstructure signal the no-edge-forensics
+  (2026-05-25) flagged as untested. ⚠ STATUS (2026-05-30 audit): it is now
+  WIRED LIVE (B12 bonus + V1 veto in mcp_brain) but has NEVER cleared the
+  frozen edge-screen (IR>=0.50 / DSR>=0.10 / PBO<=0.50) — the H5 OI probe was
+  deferred ("Binance OI history rejects 8h period"). So it holds live
+  decision-authority WITHOUT validation. The thesis (new capital = continuation
+  vs position-closing = reversal) is plausible but unproven; treat as a
+  candidate to SCREEN, not established alpha. Pure OHLCV scoring being
+  anti-predictive motivates the hypothesis but does not confirm it.
 
 Cache TTL: 180s (3 min). OI updates every ~10s on Binance.
 """
@@ -98,7 +103,7 @@ class OpenInterestFeed:
                 else:
                     oi_trend = "flat"
 
-                # OI-price divergence (the real signal)
+                # OI-price divergence (candidate signal — UNVALIDATED, live-wired)
                 price_chg = price_changes.get(coin, 0.0)
                 divergence, conviction = self._classify_divergence(
                     delta_pct, price_chg)

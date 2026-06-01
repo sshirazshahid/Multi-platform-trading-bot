@@ -69,3 +69,35 @@ data/models/
 htmlcov/
 .coverage
 # .secrets.baseline is tracked — needed by detect-secrets pre-commit hook
+
+# 2026-06-01: untrack churny runtime state — was causing merge conflicts + 80MB
+# warehouse bloat in git. Files remain on disk; the bot maintains them locally.
+data/warehouse.sqlite
+data/heartbeat.json
+data/positions.json
+data/positions.json.bak
+data/risk_state.json
+data/mcp_state.json
+data/mcp_decisions.jsonl
+data/mcp_accuracy.json
+data/execution_stats.json
+data/kelly_stats.json
+data/post_mortem.json
+data/sentiment_history.json
+data/news_cache.json
+data/news_latest.txt
+data/learning_report.json
+data/learning_report.html
+data/daily_check.json
+data/auto_mutations.json
+data/exchange_positions.json
+data/spot_portfolio.json
+data/knowledge_model.json
+data/knowledge_model.bak.json
+data/calibration.json
+data/calibration_pairs.json
+data/calibration_iso.pkl
+data/virtual_wallet.json
+data/wallet_snapshot.json
+data/trailing_peaks.json
+data/*.runaway-*.bak

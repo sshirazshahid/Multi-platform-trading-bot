@@ -43,6 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "logs"
 WH_PATH = ROOT / "data" / "warehouse.sqlite"
+POS_JSON_PATH = ROOT / "data" / "positions.json"
 
 # Example log line (single-line, after loguru's pipes are stripped):
 #   2026-04-30 05:49:23 | INFO | core.position_tracker:close:235 | [Positions] [LIVE] CLOSED DOGE/USDT:USDT | Gross: +5.5798 USDT | Fees: -0.1561 USDT (in=0.0766 out=0.0794) | Net PnL: +5.4238 USDT (+7.08%) | reason=mcp_take_profit
@@ -107,9 +108,55 @@ def parse_close_events(log_files: list[Path]) -> list[dict]:
                     "realized_pnl": float(m.group("net")),
                     "reason": m.group("reason").strip(),
                     "log_file": str(p.name),
+                    "exchange": None,
+                    "side": None,
+                    "source": "log",
                 })
             except (ValueError, AttributeError):
                 continue
+    events.sort(key=lambda e: e["ts"])
+    return events
+
+
+def parse_close_events_from_positions_json(path: Path) -> list[dict]:
+    """Yield close-event dicts from positions.json's closed list.
+
+    Loguru rotates+deletes daily log files after a few weeks, so the log-based
+    parser can't recover stuck OPENs older than that window. positions.json
+    keeps the canonical record of every closed position with `open_time` and
+    `close_time` floats — a more durable source for backfilling older leaks.
+    """
+    import json
+    events: list[dict] = []
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return events
+    cl = d.get("closed", [])
+    if not isinstance(cl, list):
+        return events
+    for c in cl:
+        if not isinstance(c, dict):
+            continue
+        ct = c.get("close_time") or c.get("closed_at") or c.get("ts_exit")
+        sym = c.get("symbol")
+        if ct is None or sym is None:
+            continue
+        try:
+            events.append({
+                "ts": float(ct),
+                "symbol": str(sym),
+                "gross_pnl": float(c.get("gross_pnl") or 0.0),
+                "fees": float(c.get("total_fees") or 0.0),
+                "realized_pnl": float(c.get("pnl") or 0.0),
+                "reason": str(c.get("close_reason") or "reconciled_from_positions_json"),
+                "log_file": "positions.json",
+                "exchange": str(c.get("exchange") or "").lower() or None,
+                "side": (str(c.get("side")).lower() if c.get("side") else None),
+                "source": "positions_json",
+            })
+        except (ValueError, TypeError):
+            continue
     events.sort(key=lambda e: e["ts"])
     return events
 
@@ -122,6 +169,8 @@ def find_match(
 
     Match rules:
       - same symbol
+      - same exchange + side when the event carries those fields (positions.json
+        events do; legacy log-parsed events have None and skip this check)
       - event ts >= open_row.ts_entry
       - event ts <= open_row.ts_entry + max_hold_sec  (sanity: 24h ceiling)
       - earliest unused event wins (FIFO match — assumes closes pair with the
@@ -130,10 +179,18 @@ def find_match(
     sym = open_row["symbol"]
     ts_entry = float(open_row["ts_entry"])
     deadline = ts_entry + max_hold_sec
+    row_exchange = (open_row.get("exchange") or "").lower()
+    row_side = (open_row.get("side") or "").lower()
     for i, ev in enumerate(events):
         if i in used:
             continue
         if ev["symbol"] != sym:
+            continue
+        ev_ex = ev.get("exchange")
+        if ev_ex is not None and row_exchange and ev_ex != row_exchange:
+            continue
+        ev_side = ev.get("side")
+        if ev_side is not None and row_side and ev_side != row_side:
             continue
         if ev["ts"] < ts_entry or ev["ts"] > deadline:
             continue
@@ -160,14 +217,30 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    # 1. Collect close events from every bot log on disk.
+    # 1. Collect close events from every bot log on disk AND positions.json.
+    # Logs rotate (loguru deletes after retention window); positions.json
+    # keeps the full historical closed list, which is essential for
+    # backfilling stuck OPENs older than the log retention window.
     log_files = sorted(LOG_DIR.glob("bot_*.log")) + sorted(LOG_DIR.glob("bot_*.log.zip"))
-    if not log_files:
-        print("no bot_*.log files found in logs/", file=sys.stderr)
+    if log_files:
+        print(f"scanning {len(log_files)} log file(s) for [LIVE] CLOSED lines ...")
+        events = parse_close_events(log_files)
+        print(f"  parsed {len(events)} close events from logs")
+    else:
+        events = []
+        print("no bot_*.log files found in logs/ — relying on positions.json only")
+
+    if POS_JSON_PATH.exists():
+        pj_events = parse_close_events_from_positions_json(POS_JSON_PATH)
+        print(f"  parsed {len(pj_events)} close events from positions.json")
+        events.extend(pj_events)
+        events.sort(key=lambda e: e["ts"])
+    else:
+        print(f"  (positions.json not found at {POS_JSON_PATH})")
+
+    if not events:
+        print("no close events parsed from any source.", file=sys.stderr)
         return 1
-    print(f"scanning {len(log_files)} log file(s) for [LIVE] CLOSED lines ...")
-    events = parse_close_events(log_files)
-    print(f"  parsed {len(events)} close events")
 
     # 2. Find OPEN warehouse rows.
     if not WH_PATH.exists():
@@ -175,10 +248,18 @@ def main() -> int:
         return 1
     conn = sqlite3.connect(WH_PATH)
     conn.row_factory = sqlite3.Row
+    # Only backfill rows old enough that they cannot be currently-active.
+    # Today's live position would otherwise get matched against a stale
+    # event. 12h is comfortably longer than the MCP monitor's hold window
+    # and the freqtrade AgeFilter cutoff.
+    import time as _time
+    min_age_cutoff = _time.time() - 12 * 3600
     open_rows = [
         dict(r) for r in conn.execute(
             "SELECT id, ts_entry, exchange, symbol, side, mode "
-            "FROM trades WHERE status='OPEN' ORDER BY ts_entry ASC"
+            "FROM trades WHERE status='OPEN' AND ts_entry < ? "
+            "ORDER BY ts_entry ASC",
+            (min_age_cutoff,),
         ).fetchall()
     ]
     print(f"  found {len(open_rows)} OPEN warehouse rows")

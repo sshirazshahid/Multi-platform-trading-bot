@@ -188,8 +188,32 @@
       "Bash(awk 'NR>=1309 && NR<=2752 {print NR\": \"$0}' dashboard.py)",
       "Bash(awk 'NR==1311 || NR==1374 || NR==1444 || NR==1483 || NR==1567 || NR==1685 || NR==1715 || NR==1744 || NR==1788 || NR==1929 || NR==2019 || NR==2099 || NR==2255 || NR==2316 || NR==2375 || NR==2467 || NR==2545 || NR==2628 || NR==2706 {print NR\": \"$0}' dashboard.py)",
       "Bash(awk 'NR>=1310 && NR<=2752' dashboard.py)",
-      "Bash(awk '/^def render/,0' dashboard.py)"
+      "Bash(awk '/^def render/,0' dashboard.py)",
+      "Bash(git stash *)",
+      "Bash(python scripts/sprint_kpi.py --since 2026-04-23 --markdown)",
+      "Bash(echo \"EXIT_30D=$?\")",
+      "Bash(python scripts/sprint_kpi.py --since 2026-05-16 --markdown)",
+      "Bash(echo \"EXIT_7D=$?\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(awk -F: '$2<1830 && $2>1700')",
+      "Bash(awk NR>=1810 && NR<=1830 *)",
+      "Bash(SCALP_TIER_ENABLED=false python -c \"import config; assert 'SCALP' not in config.LEVERAGE_TIERS; assert config.BLACKLIST_HARD; assert 0 in config.BLOCKED_HOURS_UTC; print\\('OK with kill switch'\\)\")",
+      "Bash(SCALP_TIER_ENABLED=true python -c \"import config; assert 'SCALP' in config.LEVERAGE_TIERS; print\\('OK with default'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gh auth *)",
+      "Bash(where hub *)",
+      "Bash(where curl *)",
+      "Bash(git config *)",
+      "Bash(where git-filter-repo *)",
+      "Bash(git filter-branch *)",
+      "Bash(git branch *)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --index-filter \"git rm --cached --ignore-unmatch .env\" HEAD)"
     ]
   },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ],
   "enabledPlugins": {}
 }

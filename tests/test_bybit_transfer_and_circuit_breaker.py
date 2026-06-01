@@ -6,9 +6,15 @@ Root cause fixed (2026-05-27):
   consecutive 'success: false' entries in data/capital_allocator.json were
   all silent stub returns, not exchange errors.
 
-Fix A — BybitClient.transfer():
-  Implements the method using ccxt's unified transfer() with the correct
-  account-type vocabulary ("contract" for futures, "spot" for spot).
+Fix A — BybitClient.transfer() (revised 2026-05-30):
+  This account is a Unified Trading Account (UTA 2.0, verified
+  unifiedMarginStatus=5): spot & derivatives share ONE margin wallet, so
+  there is NO spot<->futures transfer (the legacy spot<->contract endpoint
+  is gone and the UI offers none). transfer() therefore treats a
+  spot<->futures move as a no-op SUCCESS (funds already available to both),
+  returning True without an API call — so the allocator sweep neither errors
+  nor churns the breaker. (The original "ccxt transfer contract/spot" fix
+  was based on the old separate-wallet model and would just fail on a UTA.)
 
 Fix B — CapitalAllocator circuit-breaker:
   After TRANSFER_FAILURE_LIMIT (5) consecutive failures on one exchange,
@@ -39,6 +45,8 @@ def _build_allocator(monkeypatch, exchanges=None):
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "enabled", True)
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "recommendation_only", False)
     from core import capital_allocator as ca
+    # ACCUMULATE transfers fire regardless of DRY_RUN (owner opted in, incl.
+    # PAPER — 2026-05-24/2026-05-30); recommendation_only=False is the gate.
     return ca.CapitalAllocator(exchanges=exchanges or {})
 
 
@@ -73,29 +81,36 @@ class TestBybitClientTransfer:
         client.exchange.transfer.return_value = {"id": "abc", "status": "ok"}
         return client
 
-    def test_transfer_futures_to_spot_uses_contract_account(self):
+    # This account is a Unified Trading Account (UTA 2.0, verified 2026-05-30
+    # unifiedMarginStatus=5): spot & derivatives share ONE margin wallet, so a
+    # spot<->futures move is a NO-OP success — transfer() returns True WITHOUT
+    # any ccxt transfer() call (the legacy spot<->contract endpoint is gone).
+
+    def test_transfer_futures_to_spot_is_uta_noop(self):
         client = self._make_client()
         result = client.transfer(10.0, from_account="futures", to_account="spot")
         assert result is True
-        client.exchange.transfer.assert_called_once_with("USDT", 10.0, "contract", "spot")
+        client.exchange.transfer.assert_not_called()
 
-    def test_transfer_spot_to_futures_uses_contract_account(self):
+    def test_transfer_spot_to_futures_is_uta_noop(self):
         client = self._make_client()
         result = client.transfer(5.0, from_account="spot", to_account="futures")
         assert result is True
-        client.exchange.transfer.assert_called_once_with("USDT", 5.0, "spot", "contract")
+        client.exchange.transfer.assert_not_called()
 
-    def test_transfer_swap_alias_maps_to_contract(self):
+    def test_transfer_swap_alias_is_uta_noop(self):
         client = self._make_client()
-        client.transfer(3.0, from_account="swap", to_account="spot")
-        _, args, _ = client.exchange.transfer.mock_calls[0]
-        assert args[2] == "contract"
+        result = client.transfer(3.0, from_account="swap", to_account="spot")
+        assert result is True
+        client.exchange.transfer.assert_not_called()
 
-    def test_transfer_returns_false_on_exception(self):
+    def test_transfer_unsupported_route_returns_false(self):
+        # A non-pooled route (e.g. funding<->unified) is not handled here; it
+        # must return False without claiming success or calling ccxt.
         client = self._make_client()
-        client.exchange.transfer.side_effect = Exception("retCode=10002 forbidden")
-        result = client.transfer(10.0, from_account="futures", to_account="spot")
+        result = client.transfer(10.0, from_account="funding", to_account="spot")
         assert result is False
+        client.exchange.transfer.assert_not_called()
 
     def test_transfer_returns_false_when_not_connected(self):
         client = self._make_client()

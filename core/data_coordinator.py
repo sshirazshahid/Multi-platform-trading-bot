@@ -28,6 +28,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -111,6 +112,12 @@ class DataCoordinator:
             "smart_money_ttl": 900,
             "staleness_multiplier": 2.0,  # >2x TTL = stale
             "max_workers": 5,
+            # Hard wall-clock deadline for a single refresh(). The bot runs on
+            # a single-threaded scheduler; a slow CoinDesk feed must NEVER
+            # stall the position monitor. Feeds not done by the deadline are
+            # marked stale (False) and their work is cancelled/abandoned — we
+            # never block on stragglers. (2026-05-30 audit fix.)
+            "refresh_deadline_sec": 20.0,
         }
 
         self._initialized = False
@@ -197,9 +204,9 @@ class DataCoordinator:
              self._config["smart_money_ttl"], self._config["smart_money_enabled"]),
         ]
 
-        with ThreadPoolExecutor(
-            max_workers=self._config["max_workers"]
-        ) as pool:
+        deadline = self._config.get("refresh_deadline_sec", 20.0)
+        pool = ThreadPoolExecutor(max_workers=self._config["max_workers"])
+        try:
             futures = {}
             for name, feed, last_time, ttl, enabled in feed_specs:
                 if not enabled or feed is None:
@@ -216,11 +223,12 @@ class DataCoordinator:
                 else:
                     fut = pool.submit(feed.fetch, coins)
                 futures[fut] = name
+                results[name] = False  # stale until this feed completes below
 
-            for fut in as_completed(futures, timeout=20):
+            for fut in as_completed(futures, timeout=deadline):
                 name = futures[fut]
                 try:
-                    data = fut.result(timeout=15)
+                    data = fut.result(timeout=1)
                     with self._lock:
                         if name == "funding":
                             self._funding_data = data or {}
@@ -241,6 +249,19 @@ class DataCoordinator:
                 except Exception as e:
                     logger.warning(f"[DataCoord] {name} refresh failed: {e}")
                     results[name] = False
+        except FuturesTimeout:
+            pending = [n for f, n in futures.items() if not f.done()]
+            logger.warning(
+                f"[DataCoord] refresh deadline ({deadline}s) hit; feeds still "
+                f"pending kept stale: {pending} (not blocking the scheduler)")
+        finally:
+            # NEVER block the single-threaded scheduler on a slow feed. The old
+            # `with ThreadPoolExecutor(...)` exit called shutdown(wait=True),
+            # which awaited EVERY submitted fetch regardless of the deadline —
+            # a slow CoinDesk call stalled the position monitor for minutes.
+            # cancel_futures drops not-yet-started work; in-flight fetches are
+            # abandoned (their results discarded) rather than awaited.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return results
 

@@ -1,9 +1,10 @@
 """
 core/learning_engine.py — Learn from Trade History (Dry Run + Live)
 
-Reads ALL closed trades from:
-  - data/positions.json                     (single-bot trades)
-  - data/profiles/*/positions.json          (multi-profile trades)
+Reads closed trades from the ACTIVE account (data/positions.json). The dead
+multi-profile sim (data/profiles/*/positions.json, frozen since 4/26) is merged
+ONLY when LEARNING_MERGE_PROFILES=true — excluded by default so the report
+reflects the real running bot, not stale simulation data.
 
 Feeds them into the KnowledgeModel, and produces actionable insights
 plus an HTML report at data/learning_report.html.
@@ -13,6 +14,7 @@ The LearningEngine is the analysis layer — it runs the numbers.
 """
 
 import json
+import os
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -32,6 +34,13 @@ except ImportError:
 
 POSITIONS_FILE   = Path("data/positions.json")
 PROFILE_NAMES    = ("conservative", "moderate", "aggressive")
+# 2026-06-01: the multi-profile sim is DEAD (data/profiles/* frozen since 4/26;
+# main.py runs only the single BotEngine). Merging those stale accounts
+# contaminated the active bot's learning — it reported a phantom +$110 over 93
+# trades and a false "READY FOR LIVE" while the real account was ~ -$28 over 29.
+# Default: analyze the ACTIVE account only. Set LEARNING_MERGE_PROFILES=true ONLY
+# if a live multi-profile run is actually being driven.
+MERGE_PROFILE_TRADES = os.getenv("LEARNING_MERGE_PROFILES", "false").lower() in ("1", "true", "yes")
 LEARNING_FILE    = Path("data/learning_report.json")
 REPORT_HTML_FILE = Path("data/learning_report.html")
 
@@ -54,7 +63,8 @@ class LearningEngine:
     # ── Public API ────────────────────────────────────────────────────
 
     def learn(self, force: bool = False) -> dict:
-        """Analyze ALL trades (single-bot + all 3 profiles), update knowledge model."""
+        """Analyze the active account's closed trades (profile sims only if
+        LEARNING_MERGE_PROFILES), update knowledge model."""
         if not force and (time.time() - self._last_run) < self._run_every:
             return self._insights
 
@@ -100,12 +110,12 @@ class LearningEngine:
 
         if self.calibrator:
             try:
-                for t in all_trades:
-                    conf = t.get("confidence", 0)
-                    if conf > 0:
-                        strat = (t.get("strategy","unknown") or "unknown").split("|")[0]
-                        won   = (t.get("pnl",0) or 0) > 0
-                        self.calibrator.record(conf, won, strat)
+                # 2026-06-01 FIX (runaway calibrator): do NOT re-record the full
+                # trade history every learn() cycle. order_manager._finalize_close
+                # already records ONE calibration sample per close as it happens;
+                # re-recording here duplicated every trade on every cycle, inflating
+                # data/calibration.json to 24k+ phantom records and turning a
+                # warm-up calibrator into a wrongly-active entry gate. Summary only.
                 cal_summary = self.calibrator.get_summary()
                 if cal_summary.get("is_calibrated"):
                     logger.info(
@@ -151,8 +161,9 @@ class LearningEngine:
                 logger.debug(f"[Learning] Load {path}: {e}")
 
         _ingest(POSITIONS_FILE)
-        for prof in PROFILE_NAMES:
-            _ingest(Path(f"data/profiles/{prof}/positions.json"))
+        if MERGE_PROFILE_TRADES:
+            for prof in PROFILE_NAMES:
+                _ingest(Path(f"data/profiles/{prof}/positions.json"))
 
         return result
 
@@ -278,11 +289,21 @@ class LearningEngine:
             suggestions.append(f"BEST HOURS: Most profitable trades at {hrs}.")
 
         km = self.knowledge.export_status()
+        # 2026-06-01: gate the live-readiness nudge on ACTUAL paper profitability.
+        # Previously it fired on trade COUNT alone (dry>0, live==0), so it told a
+        # financially-dependent owner to "switch to LIVE" even on a losing account.
+        dry_net = sum((t.get("pnl", 0) or 0) for t in dry_trades)
         if km["dry_run_trades"] > 0 and km["live_trades"] == 0:
-            suggestions.append(
-                "READY FOR LIVE: {} paper trades learned. "
-                "Switch to LIVE mode — dry run knowledge applies immediately.".format(
-                    km["dry_run_trades"]))
+            if dry_net > 0 and len(dry_trades) >= MIN_SAMPLE_SIZE:
+                suggestions.append(
+                    "Paper net {:+.2f} USDT over {} trades. NOTE: a small positive paper "
+                    "sample is not proof of a live edge — verify before risking real money.".format(
+                        dry_net, len(dry_trades)))
+            else:
+                suggestions.append(
+                    "NOT READY FOR LIVE: paper net {:+.2f} USDT over {} trades — the paper "
+                    "account is NOT profitable. Stay in PAPER; do NOT switch to live.".format(
+                        dry_net, len(dry_trades)))
         elif not km["graduated"] and km["live_trades"] > 0:
             suggestions.append(
                 "BLENDING: {:.0f}% graduated to live data ({}/50 live trades). "

@@ -1,9 +1,0 @@
-{
-  "total_orders": 243.0,
-  "limit_fills": 109.0,
-  "market_fallbacks": 134.0,
-  "twap_orders": 0,
-  "spread_rejects": 0,
-  "avg_slippage_pct": 0,
-  "estimated_fee_savings": 0
-}

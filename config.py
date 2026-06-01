@@ -139,10 +139,10 @@ CLAUDE_PORTFOLIO = {
                                       # 60 chances/hour vs prior 12. ENTRY_COOLDOWN dropped
                                       # to 50s in mcp_brain.py to track.
     "position_monitor_sec": 30,       # Position monitor every 30s (consumed by bot_engine)
-    "max_actions_per_cycle": 4,       # Max 4 OPEN/CLOSE actions per cycle
+    "max_actions_per_cycle": 12,      # PAPER aggressive (2026-05-31): was 4 — allow opens across all 3 venues per cycle. Revert to 4 before live.
     "model":                "sonnet", # Claude model for portfolio analysis
     "max_prompt_chars":     6000,     # Cap prompt size
-    "max_per_exchange":     2,        # Max 2 positions per exchange — focus capital
+    "max_per_exchange":     20,       # PAPER 2026-05-30: was 2 — allow ~10-20 positions/exchange for data-gathering. Revert to 2 before live.
     "news_interval_min":    30,       # News scan interval in minutes (bot_engine)
     "learn_interval_min":   60,       # Learning engine interval in minutes (bot_engine)
 }
@@ -295,7 +295,14 @@ MODEL_GATE = {
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model
     # logged but didn't gate.
     # 2026-05-01 (stop-bleed plan): flipped to FALSE. The live ensemble
-    # (AUC 0.76 / OOS WR 70.7% at p>=0.55) is now the entry authority.
+    # (reported AUC 0.76 / OOS WR 70.7% at p>=0.55) is now the entry authority.
+    # ⚠ HONESTY CAVEAT (2026-05-30 audit): the currently-promoted bundle
+    # (data/models/ensemble_futures_latest.json) reports PBO=1.0 (100% backtest-
+    # overfit probability) and deflated_sharpe≈0.0008 — it only promoted because
+    # the train_models gates were loosened to min_dsr=0.0 / max_pbo=1.0. AUC 0.76
+    # does NOT establish out-of-sample edge at PBO=1.0; this is consistent with
+    # the project-wide NO_EDGE record. Treat this as an UNPROVEN gate, not edge.
+    # Demote to logged-only with MODEL_GATE_SHADOW=true.
     # Candidates with p_win_ensemble < threshold_futures (0.55) are
     # blocked at core/mcp_brain.py:~2509-2526. When no model bundle is
     # loaded (fresh install / artifact missing) the gate auto-bypasses
@@ -364,8 +371,15 @@ _TOP_SPOT = [
     "FIL/USDT", "ARB/USDT", "OP/USDT", "ATOM/USDT", "SUI/USDT",
     "SEI/USDT", "INJ/USDT", "FET/USDT", "RENDER/USDT", "TIA/USDT",
     "ALGO/USDT", "IOTA/USDT", "VET/USDT", "PEPE/USDT", "WIF/USDT",
+    # 2026-05-31: added XLM — liquid top-coin listed on all 3 venues (owner-directed).
+    "XLM/USDT",
 ]
 _TOP_FUTURES = [s.replace("/USDT", "/USDT:USDT") for s in _TOP_SPOT]
+# 2026-05-31: PRUNED commodity perps (XAU/XAG/CL) from the traded universe (owner-directed).
+# They are not listed uniformly across Binance/Bybit/Bitget, so every scan cycle logged
+# "[Bybit] XAU/USDT not available — skipped" / "CL/USDT not available" noise for zero benefit
+# (no validated commodity edge; this is a crypto bot). The COMMODITIES metadata block below is
+# left intact (dormant) so commodities can be re-added cleanly later if ever desired.
 
 TRADING_PAIRS = {
     "binance": {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
@@ -467,7 +481,7 @@ RISK = {
     # moves meaningfully larger than fees+spread+slippage. Supersedes the
     # 2026-04-16 signed-checklist value; user accepted the trade-off.
     "max_position_pct":     0.05,
-    "max_open_positions":   8,        # 2 per exchange — focus capital, reduce correlation risk
+    "max_open_positions":   60,       # PAPER 2026-05-30: was 8 — ~20/exchange × 3. Revert to 8 before live.
     # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed.
     # 2026-04-28 (L99): KEPT at 0.015. Daily-loss halt is the last
     # post-trade circuit breaker — at 99x leverage a single -1% move
@@ -563,10 +577,10 @@ LEVERAGE_TIERS = {
         # hour signals at conf>=55%. The 3x era (90 trades) was the only
         # historically profitable leverage era (+$0.28 net vs -$5.07 at 2x).
         "leverage":               3,
-        "size_pct":               0.50,
+        "size_pct":               0.06,   # PAPER: 0.06 (raised from 0.03 — 0.03 fell under $5 min after de-risk multipliers). Revert to 0.50 before live.
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,   # 2.5:1 R:R
-        "min_confidence":         0.55,
+        "min_confidence":         0.50,     # PAPER aggressive (2026-05-31): was 0.55 — lowered to the 0.50 worst-band boundary (NOT below; see test_math_tune). Revert to 0.55 before live.
         "requires_whitelist":     False,
         "requires_allowed_hour":  True,
         "requires_peak_hour":     False,
@@ -575,7 +589,7 @@ LEVERAGE_TIERS = {
     "STRONG": {
         # 2026-05-12 (phase51): 2→4x. Whitelist + BTC-aligned any allowed hour.
         "leverage":               4,
-        "size_pct":               0.50,
+        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.72,
@@ -588,7 +602,7 @@ LEVERAGE_TIERS = {
         # 2026-05-12 (phase51): 2→5x per user directive. Whitelist + peak hour
         # + BTC aligned. Tightest standard conditions — highest-conviction setups.
         "leverage":               5,
-        "size_pct":               0.50,
+        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.80,
@@ -602,7 +616,7 @@ LEVERAGE_TIERS = {
         # >=85% during peak hours on whitelist symbols with BTC aligned.
         # Anti-EV score cap removed in bot_engine (was from bug-era data).
         "leverage":               10,
-        "size_pct":               0.50,
+        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
         "sl_pct":                 0.015,
         "tp_pct":                 0.0375,
         "min_confidence":         0.85,
@@ -632,10 +646,10 @@ LEVERAGE_TIERS = {
         #   35% × 3x × 1.3% TP = 1.37% balance/win  = ~$1.77 per TP hit
         #   R:R = 1.625:1. At 55% WR: EV = +$0.48/trade.
         "leverage":               3,
-        "size_pct":               0.35,
+        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03/0.35). Revert to 0.35 before live.
         "sl_pct":                 0.008,   # 0.8% price (matches SCALP_MODE)
         "tp_pct":                 0.013,   # 1.3% price = 1.625:1 R:R
-        "min_confidence":         0.50,
+        "min_confidence":         0.50,    # FLOOR — do NOT lower: the 0.40-0.50 conf band is the anti-monotonic worst-WR cohort (~23-27%), guarded by test_math_tune_2026_05_24. Aggression comes from the prompt + cadence knobs, not from admitting the worst band.
         "requires_whitelist":     False,
         "requires_allowed_hour":  True,
         "requires_peak_hour":     False,
@@ -1538,25 +1552,47 @@ DATA_FEEDS = {
     # ── Scoring weights (MCP Brain bonus points) ───────────────────
     # B11: Funding rate alignment bonus
     #   FR z-score aligns with proposed side (extreme neg FR + long = bonus)
-    "b11_funding_enabled":     True,
+    # ⚠ DISABLED 2026-05-30: SCREENED at owner's request (run_edge_sweep.py, 31
+    #   syms x 210 8h-bars through 2026-05-30) -> NO_EDGE, weakly ANTI-predictive.
+    #   B11's exact construction is the per-symbol funding z-fade (B_ts_zfade):
+    #   Sharpe -1.29; cross-sectional fade A_H1 IR +0.26/-0.04 (vs the 0.50 bar);
+    #   time-series funding IC mean -0.055, t=-3.70 (significantly negative).
+    #   A +7 bonus on an anti-predictive signal was inflating live entry scores.
+    #   Mechanism kept; re-enable only if a funding signal clears IR>=0.50.
+    "b11_funding_enabled":     False,
     "b11_funding_points":      7,       # points awarded when FR aligns
     "b11_fr_zscore_threshold": 1.5,     # |z| must exceed this to qualify
 
     # B12: OI-price divergence confirmation bonus
     #   "continuation" signal when entering WITH the trend
-    "b12_oi_enabled":          True,
+    # ⚠ DISABLED 2026-05-30: OI-divergence (H5 = sign(dPrice)*dOI) was finally
+    #   screened on 28 syms x 100 daily bars (scripts/run_oi_edge_screen.py) and
+    #   FAILED stage-1 by a wide margin (IR -0.06 @1d, -0.07 @3d vs the 0.50 bar;
+    #   DSR~0). NO_EDGE. Removing the +8 stops noise from inflating entry scores.
+    "b12_oi_enabled":          False,
     "b12_oi_points":           8,       # points for continuation signal
     "b12_oi_conviction_min":   0.3,     # minimum conviction to award
 
     # B13: Smart money alignment bonus
     #   Coin in top-20 smart money inflow AND proposed side = buy
-    "b13_smart_money_enabled": True,
+    # ⚠ DISABLED 2026-05-30 (owner directive): UNSCREENABLE with available data —
+    #   smart_money_feed POSTs Binance Web3 for a CURRENT top-30 inflow ranking
+    #   (BSC chain, 24h window): a live snapshot with NO historical time-series,
+    #   so it cannot be validated against forward returns. Owner chose to disable
+    #   the unproven +5 bonus rather than let it gate entries ungated. Mechanism
+    #   kept; to revisit, log the daily ranking forward ~60-90d then screen.
+    "b13_smart_money_enabled": False,
     "b13_smart_money_points":  5,       # points when smart money confirms
 
     # ── VETO gates (block entry, not just reduce score) ────────────
     # V1: OI exhaustion veto — price up + OI down with high conviction
     #   Blocks LONG entries when the move is short-covering, not new money
-    "v1_oi_exhaustion_veto":           True,
+    # ⚠ DISABLED 2026-05-30: rests on the SAME OI-divergence signal B12 uses,
+    #   which screened NO_EDGE (see B12). A veto firing on a falsified signal is
+    #   noise, not protection — and blocking longs on noise contradicts the
+    #   owner's UNBLOCK_ALL stance. Cost/risk vetoes V2/V3 stay ON. (Re-enabling
+    #   trades fewer/more is a turnover knob, not an edge — owner's call.)
+    "v1_oi_exhaustion_veto":           False,
     "v1_oi_exhaustion_conviction_min": 0.5,
 
     # V2: News veto — negative-impact news on specific coin in last 2h
@@ -1571,11 +1607,19 @@ DATA_FEEDS = {
     "v4_fomo_size_reduction":          True,
     "v4_fomo_size_multiplier":         0.5,     # half size on FOMO signal
 
-    # ── Enhanced B6 (replaces existing microstructure bonus) ────────
-    # When data_feeds are active, B6 uses the enhanced orderbook feed
-    # (imbalance momentum, depth ratio, slippage) instead of the basic
-    # Binance depth fetch. Falls back to legacy B6 when orderbook feed
-    # is disabled or stale.
+    # ── B6 orderbook-imbalance bonus ───────────────────────────────
+    # ⚠ DISABLED 2026-05-30 (owner directive): the B6 bonus (+7) rewards live
+    #   L2 orderbook imbalance + funding direction. It is UNSCREENABLE — L2
+    #   depth is a point-in-time snapshot (CoinDesk history paywalled/403, ccxt
+    #   snapshot-only), so it can't be validated against forward returns; and
+    #   its funding leg screened NO_EDGE/anti-predictive (B11). Top-of-book
+    #   imbalance has no documented edge at 15-60min+ holds and is spoofable.
+    #   `b6_orderbook_enabled` is the MASTER gate (off => no B6 bonus at all,
+    #   enhanced OR legacy). The V3 slippage veto uses the same feed and stays
+    #   ON. To revisit, log imbalance forward then screen.
+    "b6_orderbook_enabled": False,
+    # When B6 is on, `enhanced_b6_enabled` picks the enhanced orderbook feed
+    # (imbalance momentum, depth ratio) over the basic Binance depth fetch.
     "enhanced_b6_enabled":  True,
     "enhanced_b6_points":   7,      # was 5 in legacy B6
 

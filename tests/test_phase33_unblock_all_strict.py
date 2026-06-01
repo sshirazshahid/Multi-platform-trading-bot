@@ -79,8 +79,15 @@ def test_all_hours_allowed_unblock_directive():
     """UNBLOCK directive (2026-05-27): all 24 hours allowed. No hour blocks
     if MCP Brain analysis is correct and TP is set accurately."""
     from config import ALLOWED_HOURS_UTC, BLOCKED_HOURS_UTC
-    assert len(ALLOWED_HOURS_UTC) == 24
+    assert ALLOWED_HOURS_UTC == set(range(24))
     assert BLOCKED_HOURS_UTC == set()
+
+
+def test_blocked_hours_empty_per_unblock_all():
+    """2026-05-21 UNBLOCK_ALL: no hour-of-day entry blocks remain."""
+    from config import BLOCKED_HOURS_UTC
+    assert BLOCKED_HOURS_UTC == set(), (
+        f"BLOCKED_HOURS_UTC must be empty under UNBLOCK_ALL, got {BLOCKED_HOURS_UTC}")
 
 
 def test_shorts_require_btc_bear_off():

@@ -1,11 +1,20 @@
 """
 core/prediction_agent.py — AI Sub-Agent Prediction Layer (Phase 50).
 
-A SECOND prediction layer that sits between the MCP Brain's rule-based scoring
-and the execution path. The MCP Brain proposes entries; this agent confirms or
-vetoes them using richer context analyzed by Claude.
+STATUS (2026-05-30 audit): DORMANT SCAFFOLD — NOT wired into bot_engine or
+mcp_brain. No live entry is gated, confirmed, or vetoed by this agent; the
+only importers are tests/ and scripts/. The "integration modes" and "used as
+a gate" language below describes the INTENDED design, not current behaviour.
+Treat this as an unactivated component (mirrors the honest dormancy notes in
+core/kronos_forecaster.py and core/data_sources/derivs.py). Do not assume any
+live trade is AI-vetoed. Wire-up would require an explicit call site in
+bot_engine._execute_open / mcp_brain and its own falsification-first gate.
 
-Integration modes:
+A SECOND prediction layer intended to sit between the MCP Brain's rule-based
+scoring and the execution path. The MCP Brain proposes entries; this agent
+would confirm or veto them using richer context analyzed by Claude.
+
+Integration modes (DESIGN INTENT — not active):
   VETO     — (default) Can only BLOCK entries. MCP Brain proposes, agent disposes.
   ADVISOR  — Predictions logged but not acted on (shadow validation).
   FULL     — Can confirm/veto entries AND suggest exits on open positions.

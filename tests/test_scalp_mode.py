@@ -417,8 +417,14 @@ class TestB1B3Removal:
 class TestReweights:
     """B6 microstructure and scalp B7 VWAP point values."""
 
-    def test_b6_microstructure_awards_7_points(self):
-        """B6 legacy path must award exactly 7 pts (was 5, reweighted in v4)."""
+    def test_b6_microstructure_awards_7_points(self, monkeypatch):
+        """B6 legacy path must award exactly 7 pts when ENABLED (was 5, v4).
+
+        B6 is disabled by default (2026-05-30: orderbook imbalance unscreenable
+        + funding leg screened NO_EDGE), so enable the master gate to verify the
+        MECHANISM independent of the production default."""
+        import config
+        monkeypatch.setitem(config.DATA_FEEDS, "b6_orderbook_enabled", True)
         brain = _make_brain()
         # Build an ei where B6 fires: long, funding <= 0.0003, imbalance > 0.05
         data_with_b6 = {

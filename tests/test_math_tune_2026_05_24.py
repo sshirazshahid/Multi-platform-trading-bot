@@ -52,17 +52,23 @@ def test_scalp_min_confidence_raised():
 
 
 def test_scalp_size_pct_v4_tune():
-    """v5 (2026-05-28): SCALP size_pct 0.16 → 0.35, SL/TP tightened.
-    Sizing math @ $130 pocket:
-      35% × 3x × 0.8% SL = ~$1.09 per SL hit
-      35% × 3x × 1.3% TP = ~$1.77 per TP hit
-    Target: $1-2 USDT per trade in the 15-60m sweet-spot."""
+    """SCALP size_pct has two documented lifecycle values:
+      - 0.35 = LIVE design target (v5 2026-05-28, size_pct 0.16 → 0.35).
+        Sizing math @ $130 pocket: 35% × 3x × 0.8% SL = ~$1.09 per SL,
+        35% × 3x × 1.3% TP = ~$1.77 per TP — the $1-2 USDT/trade target.
+      - 0.06 = TEMPORARY PAPER overlay (2026-05-30 data-gathering pass;
+        config comment: 'Revert to 0.35 before live'). All tiers were
+        scaled down for capital-preservation while LIVE-in-PAPER.
+    Pin accepts either documented value; rejects undocumented drift
+    (e.g. a typo to 0.16). SL/TP/leverage stay fixed across both."""
     import config
     scalp = config.LEVERAGE_TIERS.get("SCALP")
     assert scalp is not None
-    assert scalp["size_pct"] == 0.35, (
-        f"SCALP size_pct expected 0.35; got {scalp['size_pct']}. "
-        f"v5 tune for $1-2/trade at $136 notional."
+    assert scalp["size_pct"] in (0.06, 0.35), (
+        f"SCALP size_pct {scalp['size_pct']} not in the documented set "
+        f"{{0.06 PAPER overlay (2026-05-30), 0.35 live target}}. "
+        f"0.35 is the live $1-2/trade design; 0.06 is the temporary "
+        f"capital-preservation overlay ('Revert to 0.35 before live')."
     )
     assert scalp["leverage"] == 3
     # 2026-05-28: SL/TP matched to SCALP_MODE values.

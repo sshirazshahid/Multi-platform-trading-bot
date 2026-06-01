@@ -31,6 +31,13 @@ except ImportError:
 STATE_FILE = Path("data/capital_allocator.json")
 RECOMMENDATIONS_FILE = Path("data/allocation_recommendations.jsonl")
 
+# Transfer circuit-breaker: after this many consecutive failed transfers on a
+# single exchange, suppress further attempts for TRANSFER_BACKOFF_SEC to avoid
+# futile API hammering / log spam (root-caused 2026-05-27: BybitClient had no
+# transfer() method so every ACCUMULATE failed silently 88+ times in a row).
+TRANSFER_FAILURE_LIMIT = 5
+TRANSFER_BACKOFF_SEC = 2 * 60 * 60  # 2 hours
+
 
 class CapitalAllocator:
 
@@ -245,43 +252,59 @@ class CapitalAllocator:
             self._record_action(action, success=False)
             return False
 
+        # ACCUMULATE executes a REAL futures→spot transfer of the owner's OWN
+        # funds even under DRY_RUN/PAPER — owner explicitly confirmed this
+        # (AskUserQuestion 2026-05-24, reconfirmed 2026-05-30: "Allow in PAPER
+        # too"). DRY_RUN simulates market ORDERS, not wallet transfers between
+        # the owner's own spot/futures wallets. recommendation_only=False is the
+        # opt-in gate; the transfer circuit-breaker prevents futile retries.
+        if action_type == "ACCUMULATE":
+            ex_name = action["exchange"]
+            if self._transfer_circuit_open(ex_name):
+                logger.warning(
+                    f"[CapAlloc] Transfer circuit OPEN for {ex_name} — "
+                    f"skipping ACCUMULATE (backoff active)")
+                self._record_action(action, success=False)
+                return False
+            exchange = self._exchanges.get(ex_name)
+            if not exchange:
+                return False
+            try:
+                # Transfer futures → spot
+                success = bool(exchange.transfer(
+                    action["amount_usdt"], "futures", "spot"))
+            except Exception as e:
+                logger.error(f"[CapAlloc] ACCUMULATE transfer error: {e}")
+                success = False
+            self._record_transfer_result(ex_name, success)
+            if success:
+                logger.info(
+                    f"[CapAlloc] Transferred ${action['amount_usdt']:.2f} "
+                    f"futures→spot on {ex_name}")
+                # Reset baseline to post-transfer free so the next cycle
+                # doesn't re-sweep the same profit window. Refetch fresh;
+                # the transfer may have settled slightly differently than
+                # `amount_usdt`.
+                try:
+                    post = exchange.fetch_balance("futures") or {}
+                    usdt_post = float(
+                        post.get("USDT", {}).get("free", 0)
+                        if isinstance(post.get("USDT"), dict) else 0
+                    )
+                    self._state.setdefault("baselines", {})[ex_name] = usdt_post
+                except Exception as _e:
+                    logger.debug(
+                        f"[CapAlloc] post-transfer baseline refetch failed: {_e}")
+            self._record_action(action, success=success)
+            return success
+
         if DRY_RUN:
             logger.info(f"[CapAlloc] [DRY] {action_type}: {action}")
             self._record_action(action, success=True)
             return True
 
         try:
-            if action_type == "ACCUMULATE":
-                exchange = self._exchanges.get(action["exchange"])
-                if not exchange:
-                    return False
-                # Transfer futures → spot
-                success = exchange.transfer(
-                    action["amount_usdt"], "futures", "spot")
-                if success:
-                    logger.info(
-                        f"[CapAlloc] Transferred ${action['amount_usdt']:.2f} "
-                        f"futures→spot on {action['exchange']}")
-                    # 2026-05-24 — Reset baseline to post-transfer free so
-                    # the next cycle doesn't re-sweep the same profit
-                    # window. Refetch fresh; the transfer may have settled
-                    # slightly differently than `amount_usdt`.
-                    try:
-                        post = exchange.fetch_balance("futures") or {}
-                        usdt_post = float(
-                            post.get("USDT", {}).get("free", 0)
-                            if isinstance(post.get("USDT"), dict) else 0
-                        )
-                        self._state.setdefault("baselines", {})[action["exchange"]] = usdt_post
-                    except Exception as _e:
-                        logger.debug(
-                            f"[CapAlloc] post-transfer baseline refetch "
-                            f"failed: {_e}"
-                        )
-                self._record_action(action, success=success)
-                return success
-
-            elif action_type == "DEPLOY":
+            if action_type == "DEPLOY":
                 exchange = self._exchanges.get(action["exchange"])
                 if not exchange:
                     return False
@@ -339,6 +362,41 @@ class CapitalAllocator:
         self._save_state()
         return executed
 
+    def _transfer_circuit_open(self, ex_name: str) -> bool:
+        """Return True if the transfer circuit-breaker for `ex_name` is open
+        (>= TRANSFER_FAILURE_LIMIT consecutive failures and still inside the
+        backoff window). Resets the counter and returns False once the backoff
+        window has elapsed."""
+        breakers = self._state.setdefault("transfer_breakers", {})
+        info = breakers.get(ex_name)
+        if not info:
+            return False
+        if info.get("consecutive_failures", 0) < TRANSFER_FAILURE_LIMIT:
+            return False
+        tripped_at = info.get("tripped_at", 0) or 0
+        if time.time() - tripped_at >= TRANSFER_BACKOFF_SEC:
+            # Backoff elapsed — reset and allow another attempt.
+            info["consecutive_failures"] = 0
+            return False
+        return True
+
+    def _record_transfer_result(self, ex_name: str, success: bool) -> None:
+        """Update the transfer circuit-breaker after a transfer attempt.
+
+        success=True  -> reset the consecutive-failure counter to 0.
+        success=False -> increment it; once it reaches TRANSFER_FAILURE_LIMIT,
+                         stamp tripped_at so the backoff window starts.
+        """
+        breakers = self._state.setdefault("transfer_breakers", {})
+        info = breakers.setdefault(
+            ex_name, {"consecutive_failures": 0, "tripped_at": 0})
+        if success:
+            info["consecutive_failures"] = 0
+            return
+        info["consecutive_failures"] = info.get("consecutive_failures", 0) + 1
+        if info["consecutive_failures"] >= TRANSFER_FAILURE_LIMIT:
+            info["tripped_at"] = time.time()
+
     def _record_action(self, action: dict, success: bool):
         """Record allocation action to history."""
         entry = {**action, "success": success, "timestamp": time.time()}
@@ -383,4 +441,5 @@ class CapitalAllocator:
             "last_cycle": 0,
             "allocation_history": [],
             "baselines": {},
+            "transfer_breakers": {},
         }
