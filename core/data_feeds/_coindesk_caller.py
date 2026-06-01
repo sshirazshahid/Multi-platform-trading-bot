@@ -123,9 +123,16 @@ def call_coindesk_oi_ohlcv(
     """Fetch historical open interest OHLCV.
 
     Equivalent to mcp__claude_ai_CoinDesk__fetch_futures_oi_ohlcv.
+
+    2026-05-30 FIX: the futures OI-history endpoint path segment is the literal
+    frequency ("days"/"hours"/"minutes") — NOT the spot-style "histoday"/
+    "histohour". The old freq_map produced /open-interest/histohour which 404s,
+    so OI history silently fell back to Binance's 7-bar endpoint and long
+    history was never available. With the correct segment, ~100 daily bars
+    (~99 days) of OI are returned.
     """
-    freq_map = {"hours": "histohour", "days": "histoday", "minutes": "histominute"}
-    endpoint = freq_map.get(frequency, "histohour")
+    freq_map = {"hours": "hours", "days": "days", "minutes": "minutes"}
+    endpoint = freq_map.get(frequency, "hours")
     return _http_get(
         f"{_BASE_URL}/futures/v1/historical/open-interest/{endpoint}",
         params={

@@ -283,6 +283,7 @@ The `docs-completeness` pre-commit hook blocks commits if doc pages are missing.
 python -m pytest skills/<name>/scripts/tests/ -v
 ```
 
+
 The root `conftest.py` handles sys.path isolation: evicts conflicting module names and pushes the active skill's `scripts/` to front of sys.path.
 
 ### API Keys for Skills
@@ -445,3 +446,6 @@ npx @claude-flow/cli@latest daemon start     # for hooks/memory features (run in
 ```
 
 The trading bot itself does NOT use Ruflo — Ruflo is purely for me (Claude Code) to coordinate development work on the bot. Bot runtime is independent.
+
+### gstack
+use the /browse skill from gstack for all web browsing, never use mcp__claude-in-chrome__* tools, and lists the available skills: /office-hours, /plan-ceo-review, /plan-eng-review, /plan-design-review, /design-consultation, /design-shotgun, /design-html, /review, /ship, /land-and-deploy, /canary, /benchmark, /browse, /connect-chrome, /qa, /qa-only, /design-review, /setup-browser-cookies, /setup-deploy, /setup-gbrain, /retro, /investigate, /document-release, /document-generate, /codex, /cso, /autoplan, /plan-devex-review, /devex-review, /careful, /freeze, /guard, /unfreeze, /gstack-upgrade, /learn. Then ask the user if they also want to add gstack to the current project so teammates get it.

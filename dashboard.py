@@ -856,8 +856,15 @@ def load_positions(fetcher: "LiveFetcher" = None):
             all_closed.append(pos)
 
     _ingest(_file_cache.load("data/positions.json"))
-    for profile in ("conservative", "moderate", "aggressive"):
-        _ingest(_file_cache.load("data/profiles/{}/positions.json".format(profile)))
+    # 2026-05-31: in PAPER, scope the dashboard to the single active paper
+    # account (data/positions.json only). The profile sims, the operator
+    # positions_extra warehouse rows, and the real-exchange snapshot below are
+    # merged ONLY in LIVE — in PAPER they polluted the stats (showed All-Time
+    # +$77 / 187 trades vs the true paper -$31.27 / 25) and rendered the 15 real
+    # spot holdings as phantom open positions on a paper account.
+    if is_live:
+        for profile in ("conservative", "moderate", "aggressive"):
+            _ingest(_file_cache.load("data/profiles/{}/positions.json".format(profile)))
 
     # 2026-04-30: external "extras" feed for closed trades that the bot's
     # tracker doesn't have in memory (e.g. closes that happened while the
@@ -876,7 +883,7 @@ def load_positions(fetcher: "LiveFetcher" = None):
     # while positions.json uses the exchange's order_id. The plain
     # `seen_ids` dedup would let the SAME trade through both files under
     # different IDs and double-count totals.
-    extras = _file_cache.load("data/positions_extra.json")
+    extras = _file_cache.load("data/positions_extra.json") if is_live else None  # 2026-05-31: PAPER shows only the active paper account
     if extras and isinstance(extras, dict):
         # Build a (exchange_lower, symbol, side, close_time_bucket) set
         # from already-loaded closed records. Bucket = close_time // 60
@@ -946,7 +953,9 @@ def load_positions(fetcher: "LiveFetcher" = None):
         ex_snap = _file_cache.load("data/exchange_positions.json") or {}
         snap_ts = float(ex_snap.get("ts") or 0)
         # Treat as fresh if written within last 5 minutes
-        if snap_ts and (time.time() - snap_ts) < 300:
+        # 2026-05-31: merge the REAL exchange snapshot only in LIVE. In PAPER the
+        # 15 real spot holdings must NOT appear as open positions on the paper account.
+        if is_live and snap_ts and (time.time() - snap_ts) < 300:
             for ep in ex_snap.get("positions", []):
                 ex = (ep.get("exchange") or "").lower()
                 sym = ep.get("symbol", "")
@@ -1750,7 +1759,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     start_bal  = 0.0
     _stables = {"USDT", "USD", "BUSD", "USDC"}
 
-    if dry_run and wallet_bal:
+    if dry_run:  # 2026-05-31: fail-safe — PAPER never falls through to the live
+        # real-balance / Est.-Total path (which sums real spot holdings as the paper
+        # balance — the class behind the historical ~$24,934 conflation). If the
+        # virtual wallet is unavailable, show the start balance, never real holdings.
+        wallet_bal = wallet_bal or {}
         try:
             wf = Path("data/virtual_wallet.json")
             if wf.exists():

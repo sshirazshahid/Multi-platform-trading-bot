@@ -31,6 +31,8 @@ def _build_allocator(monkeypatch, exchanges=None):
     import config
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "enabled", True)
     from core import capital_allocator as ca
+    # ACCUMULATE transfers fire regardless of DRY_RUN (owner opted in, incl.
+    # PAPER — 2026-05-24/2026-05-30); recommendation_only default False is the gate.
     return ca.CapitalAllocator(exchanges=exchanges or {})
 
 

@@ -69,16 +69,16 @@ FETCH_TIMEOUT  = 10
 # silently overriding the engine's scan cadence — the engine would
 # re-enter every 5 min but receive the SAME cached actions, meaning
 # fresh market moves weren't re-evaluated for 15 min.
-ENTRY_COOLDOWN    = 270   # ~4.5 min — just under the 5-min engine cycle so
-                          # tiny scheduler drift never pushes the cooldown
-                          # past the next call. Must stay < scan_interval_min*60.
+ENTRY_COOLDOWN    = 50    # PAPER aggressive (2026-05-31): was 270. Tracks the 1-min
+                          # scan cadence so entries re-evaluate ~every cycle (~60/hr vs
+                          # ~13/hr). Must stay < scan_interval_min*60. Revert to 270 before live.
 POSITION_COOLDOWN = 90    # 90s between position monitor checks
 DATA_CACHE_TTL    = 120   # Cache raw data for 2 min
 
 # ── Claude CLI config ───────────────────────────────────────────────
 MODEL_ENTRY    = "sonnet"   # Portfolio analysis model
 MODEL_MONITOR  = "haiku"    # Position monitor — fast model for simple classification
-MAX_API_CALLS_HR = 25       # Rate budget: 25 calls/hour max
+MAX_API_CALLS_HR = 90       # PAPER aggressive (2026-05-31): was 25 — keep Claude (not the conservative algo fallback) active at faster cadence. Revert to 25 before live.
 
 # ══════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPTS — the core intelligence of the trading system
@@ -87,19 +87,20 @@ MAX_API_CALLS_HR = 25       # Rate budget: 25 calls/hour max
 _PORTFOLIO_SYSTEM_PROMPT = (
     "Crypto portfolio manager. 3 exchanges, real money. Maximize risk-adjusted returns.\n"
     "RULES: Min 1.2:1 RR. 4h=direction,1h=confirm,15m=entry. "
-    "RSI>78/<22 on 4h=reversal risk. Skip only on clear conflicting signals.\n"
+    "RSI>82/<18 on 4h=reversal risk. Default to ACTION; skip ONLY on directly conflicting 4h-vs-1h signals.\n"
     "EXCHANGES: Binance/Bybit/Bitget=spot+futures.\n"
     "DISTRIBUTE trades across exchanges — use whichever has the best balance/liquidity. "
     "DO NOT default to one exchange. Check BAL line and spread positions.\n"
     "LIMITS: Spot side=buy. Futures use tiered 2-10x; executor chooses final size/leverage. "
-    "Max 6/exchange,8 total.\n"
+    "Max 20/exchange, 60 total. Spread NEW positions across all 3 venues every cycle.\n"
     "ENTRY: Prefer 4h EMA aligned + 1h RSI confirming. Volume preferred but OPTIONAL "
     "in low-F&G/quiet regimes — trend+RSI alone can qualify. Do NOT hard-require vol>1x.\n"
     "FUTURES SCALP: target TP 1.8-2.0%, SL 1.2-1.6%, keep RR >=1.2. "
     "Prefer small repeatable wins over stale 5% targets.\n"
     "SIZING: suggest size_pct 1.0 only; executor overrides risk from live tiers.\n"
-    "IMPORTANT: Empty actions=do nothing, but if ANY coin has score>=60 with trend+momentum "
-    "aligned, PROPOSE it even in low-volume sessions. Bot idle >12h is worse than cautious loss.\n"
+    "IMPORTANT (PAPER research mode): if ANY coin has score>=50 with a clear 4h direction, "
+    "PROPOSE it. Aim for 2-4 OPENs per cycle SPREAD across binance/bybit/bitget. "
+    "Idle cycles waste learning data — bias toward ACTION.\n"
     "RESPOND ONLY WITH COMPACT JSON, no markdown.\n"
     '{"actions":[{"type":"OPEN","symbol":"SOL/USDT","exchange":"bitget",'
     '"market_type":"futures","side":"buy","leverage":5,"size_pct":1.0,'
@@ -731,15 +732,15 @@ class AccuracyTracker:
         self._save()
 
     def resolve_outcomes(self, current_prices: dict):
-        """Check unresolved decisions against current prices (5-min window)."""
+        """Check unresolved decisions against current prices (30-min min age, 4-h expiry)."""
         now = time.time()
         for rec in self._records:
             if rec["resolved"]:
                 continue
             age = now - rec["ts"]
-            if age < 300:  # Wait at least 5 minutes
+            if age < 1800:  # Wait at least 30 minutes
                 continue
-            if age > 3600:  # Expire after 1 hour
+            if age > 14400:  # Expire after 4 hours
                 rec["resolved"] = True
                 rec["outcome"] = "expired"
                 continue
@@ -752,11 +753,11 @@ class AccuracyTracker:
                 continue
             chg = (current - entry) / entry
             action = rec["action"]
-            # 1.0% threshold — crypto moves ±0.2% on noise alone; need real moves
+            # 0.3% threshold — wins/losses above noise, flat band inside ±0.3%
             if action == "BUY":
-                rec["outcome"] = "win" if chg > 0.01 else "loss" if chg < -0.01 else "flat"
+                rec["outcome"] = "win" if chg > 0.003 else "loss" if chg < -0.003 else "flat"
             elif action == "SELL":
-                rec["outcome"] = "win" if chg < -0.01 else "loss" if chg > 0.01 else "flat"
+                rec["outcome"] = "win" if chg < -0.003 else "loss" if chg > 0.003 else "flat"
             else:
                 rec["outcome"] = "flat"
             rec["resolved"] = True
@@ -2572,6 +2573,17 @@ class MCPBrain:
         _b6_pts = 7  # legacy points (v4: reweighted +5→+7)
         _b6_label = f"micro(f={funding_rate*100:+.3f}%,ob={imb:+.2f})"
 
+        # B6 master gate (2026-05-30): orderbook imbalance is unscreenable and
+        # the funding leg screened NO_EDGE — bonus disabled by default. When
+        # b6_orderbook_enabled is False, NEITHER the enhanced nor the legacy
+        # path may set micro_ok, so no B6 points are awarded.
+        _b6_enabled = True
+        try:
+            from config import DATA_FEEDS as _df_cfg_b6_gate
+            _b6_enabled = bool(_df_cfg_b6_gate.get("b6_orderbook_enabled", True))
+        except (ImportError, AttributeError):
+            pass
+
         # Try enhanced orderbook feed first
         _enhanced_b6_used = False
         try:
@@ -2580,7 +2592,8 @@ class MCPBrain:
                 from config import DATA_FEEDS as _df_cfg_b6
             except (ImportError, AttributeError):
                 pass
-            if (_df_cfg_b6.get("enhanced_b6_enabled", True)
+            if (_b6_enabled
+                    and _df_cfg_b6.get("enhanced_b6_enabled", True)
                     and self._data_coordinator is not None):
                 _ob_ctx = self._data_coordinator.get_market_context(
                     coin).orderbook
@@ -2607,8 +2620,8 @@ class MCPBrain:
         except Exception:
             pass
 
-        # Legacy fallback
-        if not _enhanced_b6_used and not micro_ok:
+        # Legacy fallback (also gated by the B6 master switch)
+        if _b6_enabled and not _enhanced_b6_used and not micro_ok:
             if side == "buy" and funding_rate <= 0.0003 and imb > 0.05:
                 micro_ok = True
             elif side == "sell" and funding_rate >= -0.0003 and imb < -0.05:

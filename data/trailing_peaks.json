@@ -326,5 +326,13 @@
     "peak_pnl": 0.0,
     "symbol": "ATOM/USDT:USDT",
     "breakeven": 2.0389437999999998
+  },
+  "1441905727155871745": {
+    "peak": 0.112,
+    "trough": 0.112,
+    "active": false,
+    "peak_pnl": 0.0,
+    "symbol": "ALGO/USDT:USDT",
+    "breakeven": 0.11196548
   }
 }

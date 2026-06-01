@@ -550,9 +550,18 @@ class PositionTracker:
         # Collect all active positions from exchanges (raw snapshot with entry/size).
         # exchange_positions: (exchange_lower, symbol, side) -> raw ep dict
         exchange_positions: dict = {}
+        # 2026-05-30 FIX — Track which exchanges returned a VALID snapshot this
+        # cycle. A transient fetch_positions() error (e.g. Binance
+        # "load_markets failed") must NOT be read as "no positions here" --
+        # otherwise every live position on that exchange is mis-flagged as a
+        # ghost and false-closed, then re-imported as a duplicate RECONCILE-*
+        # record next cycle. Only exchanges in this set are ghost-checked.
+        fetched_ok_exchanges: set = set()
         for ex_name, exchange in active_exchanges.items():
             try:
                 positions = exchange.fetch_positions()
+                if positions is None:
+                    raise ValueError("fetch_positions() returned None")
                 for ep in positions:
                     size = float(ep.get("contracts") or ep.get("contractSize") or 0)
                     if size == 0:
@@ -563,6 +572,8 @@ class PositionTracker:
                     side = "buy" if side_raw == "long" else "sell"
                     sym = ep.get("symbol", "")
                     exchange_positions[(ex_name.lower(), sym, side)] = ep
+                # Mark success only AFTER the full snapshot parsed cleanly.
+                fetched_ok_exchanges.add(ex_name.lower())
             except Exception as e:
                 logger.warning(f"[Positions] Sync fetch {ex_name} failed: {str(e)[:150]}")
 
@@ -670,6 +681,17 @@ class PositionTracker:
         for pos in live_open:
             if pos.market_type != "futures":
                 continue  # skip spot — can't verify via fetch_positions()
+            # 2026-05-30 FIX — Only ghost-check positions on exchanges that
+            # returned a valid snapshot this cycle. If fetch_positions()
+            # failed for this exchange, we cannot tell "closed" from "API
+            # error", so we keep the position open and retry next cycle.
+            # This is the core fix for the ghost_sync -> reopen churn.
+            if pos.exchange.lower() not in fetched_ok_exchanges:
+                logger.warning(
+                    f"[Positions] Skipping ghost-check for {pos.symbol} "
+                    f"{pos.side.upper()} on {pos.exchange}: snapshot "
+                    f"unavailable this cycle (fetch failed) -- keeping open")
+                continue
             key = (pos.exchange.lower(), pos.symbol, pos.side)
             if key not in exchange_positions:
                 ghosts.append(pos)

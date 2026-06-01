@@ -1435,7 +1435,9 @@ class BotEngine:
         entry-side block, and was kept intentional. Restore by removing
         the early return below.
         """
-        return True  # UNBLOCK_ALL/A — clamp disabled for entry path
+        # return True  # UNBLOCK_ALL/A — RE-ENABLED 2026-05-30 (audit): per-trade loss
+        #                clamp restored. To disable again, uncomment this single line.
+        pass  # fall through to the loss-clamp logic below
 
         # ── Original logic preserved below (unreachable until early-return removed):
         from config import MAX_LOSS_PER_TRADE_PCT, MAX_LOSS_PER_TRADE_USD
@@ -2660,8 +2662,9 @@ class BotEngine:
         except Exception:
             pass
 
-        # Set leverage
-        if market_type == "futures" and leverage > 1:
+        # Set leverage (LIVE only — 2026-05-31: was an ungated live-account
+        # write firing in PAPER too; mirrors order_manager open_position:658).
+        if market_type == "futures" and leverage > 1 and not DRY_RUN:
             try:
                 exchange.set_leverage(trade_symbol, leverage)
             except Exception as e:
@@ -3017,6 +3020,19 @@ class BotEngine:
                     f"<= last {last:.6g} (would be exchange-rejected); keeping current SL")
                 return False
 
+        # 2026-05-31 (CRITICAL fix): PAPER must never write to the live venue.
+        # A simulated position has no real order to cancel/replace; issuing a
+        # real cancel_all_orders + SL placement here was leaking onto live
+        # accounts (Bitget 43023 -> fail-closed paper winners; Binance/Bybit
+        # accepted -> phantom resting orders). Mirror the open_position gate
+        # (order_manager.py:1045): clear the exchange-SL flags so the dry_run
+        # check_sl_tp wick-trigger enforces the moved level, and report success
+        # so the caller updates pos.stop_loss in-memory only.
+        if DRY_RUN:
+            pos._exchange_sl = False
+            pos._exchange_tp = False
+            return True
+
         # Cancel existing conditional orders for this symbol. We cancel
         # ALL conditional orders on the symbol because we did not store
         # the specific SL order ID at placement time — the symbol is a
@@ -3279,6 +3295,14 @@ class BotEngine:
             kind = action.get("action")
             if kind not in ("SELL", "SCALE_OUT"):
                 return  # ignore HOLD / unknown actions defensively
+            # 2026-05-31: PAPER must not touch REAL spot holdings. This path
+            # market-sells the owner's actual coins; gate it off in DRY_RUN so
+            # paper-research mode never trades real money. (Reversible.)
+            if DRY_RUN:
+                logger.info(
+                    f"[SpotMgr] [DRY] would {kind} {action.get('exchange')}:{action.get('coin')} "
+                    f"— skipped (PAPER: no real spot trades)")
+                return
 
             ex_name = action.get("exchange")
             coin    = action.get("coin")
@@ -3472,6 +3496,15 @@ class BotEngine:
 
     def _execute_fund_ops(self, fund_ops: list):
         """Execute MCP Brain fund management operations: TRANSFER, SELL_PORTFOLIO, BUY_PORTFOLIO."""
+        # 2026-05-31: PAPER must not move real money or trade real spot. These
+        # ops hit live exchange transfer/spot endpoints; gate off in DRY_RUN so
+        # paper-research mode is fully simulated. (Reversible.)
+        if DRY_RUN:
+            if fund_ops:
+                logger.info(
+                    f"[MCP-FundOps] [DRY] {len(fund_ops)} fund op(s) skipped "
+                    f"(PAPER: no real transfers / spot trades)")
+            return
         for op in fund_ops:
             op_type = op.get("op", "")
             ex_name = op.get("exchange", "").lower()

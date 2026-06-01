@@ -36,7 +36,14 @@ CORE_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "AVAX"}
 COMMODITY_BASES = {"XAU", "XAG", "WTI", "CL"}
 
 # Stock / equity token bases available on some exchanges (Bitget, Bybit)
-STOCK_BASES = {
+# DISABLED 2026-05-30: the bot has NO stock-specific strategy (only crypto +
+# COMMODITIES metadata). Force-including these pulled equity tickers into the
+# universe; they were then fetched on every exchange (incl. ones that don't list
+# them), logging "not available" every cycle and wasting scan cycles. Emptied so
+# ALL-mode discovery no longer force-adds stocks. To re-enable deliberate stock
+# trading, restore _STOCK_BASES_DISABLED into STOCK_BASES below.
+STOCK_BASES = set()
+_STOCK_BASES_DISABLED = {
     "AAPL", "TSLA", "GOOG", "GOOGL", "AMZN", "MSFT", "META", "NVDA",
     "NFLX", "AMD", "COIN", "MSTR", "GME", "AMC", "PLTR", "BABA",
     "TSM", "INTC", "PYPL", "SQ", "SHOP", "UBER", "ABNB", "SNAP",

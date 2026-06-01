@@ -216,6 +216,58 @@ class TestDataCoordinator:
         for name in ("funding", "oi", "orderbook", "news", "smart_money"):
             assert results.get(name) is False
 
+    def test_refresh_does_not_block_on_hung_feed(self):
+        """refresh() must NOT stall the (single-threaded) scheduler when a
+        feed's fetch() hangs: it returns within the deadline and marks the
+        hung feed stale (False). Regression for the 2026-05-30 bug where the
+        `with ThreadPoolExecutor(...)` exit called shutdown(wait=True) and
+        blocked on the slowest CoinDesk feed regardless of the timeout."""
+        import threading
+
+        from core.data_coordinator import DataCoordinator
+
+        coord = DataCoordinator()
+        coord.set_coins(["BTC"])
+        coord._ensure_feeds()  # build real feeds + mark initialized
+        # Short deadline keeps the test fast + deterministic (behavior test,
+        # not a tight wall-clock assertion).
+        coord.set_config({
+            "refresh_deadline_sec": 0.5,
+            "funding_enabled": True, "oi_enabled": False,
+            "orderbook_enabled": False, "news_enabled": False,
+            "smart_money_enabled": False,
+        })
+
+        never_set = threading.Event()
+
+        class _HangingFeed:
+            def fetch(self, coins, **kwargs):
+                never_set.wait()  # blocks forever — event is never set
+                return {}
+
+        coord._initialized = True
+        coord._funding_feed = _HangingFeed()
+        coord._funding_time = 0  # force stale so it is submitted
+
+        done = threading.Event()
+        box = {}
+
+        def _run():
+            box["result"] = coord.refresh(force=True)
+            done.set()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        # Fixed code returns ~0.5s; the generous 8s join is a behavior check,
+        # not a timing assertion. OLD code blocked here forever.
+        finished = done.wait(timeout=8)
+        never_set.set()  # release the hung worker so it can exit cleanly
+
+        assert finished, (
+            "refresh() blocked on a hung feed — shutdown(wait=True) regression")
+        assert box["result"].get("funding") is False, (
+            "a feed that never completed must be reported stale (False)")
+
 
 # ── Config section tests ──────────────────────────────────────────────
 
@@ -310,8 +362,14 @@ class TestMCPBrainIntegration:
             },
         }
 
-    def test_b11_funding_bonus_awarded(self):
-        """B11 should award points when FR z-score aligns with side."""
+    def test_b11_funding_bonus_awarded(self, monkeypatch):
+        """B11 should award points when FR z-score aligns with side (when ENABLED).
+
+        B11 is disabled by default (2026-05-30: screened NO_EDGE / anti-predictive,
+        Sharpe -1.29), so this unit test enables the flag to verify the MECHANISM
+        independent of the production default."""
+        import config
+        monkeypatch.setitem(config.DATA_FEEDS, "b11_funding_enabled", True)
         from core.mcp_brain import MCPBrain
         brain = MCPBrain()
         brain._data_coordinator = self._make_brain_with_mock_coordinator({
@@ -323,8 +381,13 @@ class TestMCPBrainIntegration:
         assert result["score"] > 0, "should have a score"
         assert "fr_z=" in result["reason"], f"B11 not in reason: {result['reason']}"
 
-    def test_b12_oi_continuation_bonus(self):
-        """B12 should award points for OI continuation signal."""
+    def test_b12_oi_continuation_bonus(self, monkeypatch):
+        """B12 should award points for OI continuation signal (when ENABLED).
+
+        B12 is disabled by default (2026-05-30: OI-divergence screened NO_EDGE),
+        so enable the flag to verify the MECHANISM independent of the default."""
+        import config
+        monkeypatch.setitem(config.DATA_FEEDS, "b12_oi_enabled", True)
         from core.mcp_brain import MCPBrain
         brain = MCPBrain()
         brain._data_coordinator = self._make_brain_with_mock_coordinator({
@@ -340,8 +403,13 @@ class TestMCPBrainIntegration:
         assert "oi_continuation" in result["reason"], \
             f"B12 not in reason: {result['reason']}"
 
-    def test_v1_oi_exhaustion_veto(self):
-        """V1 should block long entry when OI shows exhaustion."""
+    def test_v1_oi_exhaustion_veto(self, monkeypatch):
+        """V1 should block long entry when OI shows exhaustion (when ENABLED).
+
+        V1 is disabled by default (2026-05-30: OI-divergence screened NO_EDGE),
+        so enable the flag to verify the MECHANISM independent of the default."""
+        import config
+        monkeypatch.setitem(config.DATA_FEEDS, "v1_oi_exhaustion_veto", True)
         from core.mcp_brain import MCPBrain
         brain = MCPBrain()
         brain._data_coordinator = self._make_brain_with_mock_coordinator({
