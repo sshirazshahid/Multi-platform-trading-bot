@@ -33,7 +33,15 @@ ALL_MAX_FUTURES_PAIRS = 25
 CORE_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "AVAX"}
 
 # Commodity symbols to look for on futures
-COMMODITY_BASES = {"XAU", "XAG", "WTI", "CL"}
+# DISABLED 2026-06-01: owner pruned commodities from the traded universe (this is a
+# crypto bot; XAU/XAG/WTI/CL are not listed uniformly across Binance/Bybit/Bitget).
+# Force-including them pulled gold/oil into the ALL-mode universe; they were then
+# fetched on every exchange — incl. ones that don't list them — logging
+# "XAU/USDT not available — skipped" / "CL/USDT does not have market symbol" every
+# cycle for zero benefit (no validated commodity edge). Mirrors the STOCK_BASES
+# disable below. To re-enable, restore _COMMODITY_BASES_DISABLED into COMMODITY_BASES.
+COMMODITY_BASES = set()
+_COMMODITY_BASES_DISABLED = {"XAU", "XAG", "WTI", "CL"}
 
 # Stock / equity token bases available on some exchanges (Bitget, Bybit)
 # DISABLED 2026-05-30: the bot has NO stock-specific strategy (only crypto +
