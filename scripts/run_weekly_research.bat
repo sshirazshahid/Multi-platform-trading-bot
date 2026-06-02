@@ -12,3 +12,7 @@ echo --- backfill perps --- >> logs\weekly_research.log
 D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\backfill_perps_ohlcv.py >> logs\weekly_research.log 2>&1
 echo --- edge screen (1h) --- >> logs\weekly_research.log
 D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\run_perp_alpha_screen.py --timeframe 1h >> logs\weekly_research.log 2>&1
+echo --- sweet spots (trade-history, IS/OOS) --- >> logs\weekly_research.log
+D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\find_sweet_spots.py >> logs\weekly_research.log 2>&1
+echo --- calendar patterns (seasonality, after-cost + OOS-significant) --- >> logs\weekly_research.log
+D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\find_patterns.py >> logs\weekly_research.log 2>&1
