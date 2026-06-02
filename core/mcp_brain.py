@@ -1275,20 +1275,22 @@ class MCPBrain:
 
         for coin in _fetch_coins:
             symbol = f"{coin}/USDT"
+            _perp_only = coin in ANALYSIS_ONLY_BASES  # commodity/equity perps have no spot
             coin_data = {}
             for tf in timeframes:
                 try:
                     # Try each exchange until one returns valid data
                     raw = None
-                    for exchange in exchange_list:
-                        raw = exchange.fetch_ohlcv(symbol, tf,
-                                                    limit=limit_map[tf],
-                                                    market_type="spot")
-                        if raw and len(raw) >= 30:
-                            break
-                    # Perp fallback: commodity/equity instruments (XAU, CL, TSLA,
-                    # ...) and some tokens are perp-only, so the spot name
-                    # {coin}/USDT 404s. Try the linear perp before giving up.
+                    if not _perp_only:
+                        for exchange in exchange_list:
+                            raw = exchange.fetch_ohlcv(symbol, tf,
+                                                        limit=limit_map[tf],
+                                                        market_type="spot")
+                            if raw and len(raw) >= 30:
+                                break
+                    # Perp fallback — and the ONLY attempt for perp-only instruments
+                    # (XAU, CL, TSLA, ...): the spot name {coin}/USDT 404s, so skip
+                    # the doomed spot fetch for those and go straight to the linear perp.
                     if not raw or len(raw) < 30:
                         for exchange in exchange_list:
                             raw = exchange.fetch_ohlcv(f"{coin}/USDT:USDT", tf,
