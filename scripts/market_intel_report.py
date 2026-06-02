@@ -39,11 +39,42 @@ def _safe(fn, default, label=""):
         return default
 
 
+def _get_json(url, timeout=20):
+    req = urllib.request.Request(url, headers={"User-Agent": "crypto-research/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
 def _fear_greed():
-    url = "https://api.alternative.me/fng/?limit=1"
-    with urllib.request.urlopen(url, timeout=15) as r:
-        d = json.loads(r.read().decode())
-        return d["data"][0]
+    d = _get_json("https://api.alternative.me/fng/?limit=1", timeout=15)
+    return d["data"][0]
+
+
+def _defillama_chains():
+    """Total DeFi TVL + top chains by TVL (where on-chain capital sits). Free, no key."""
+    data = _get_json("https://api.llama.fi/v2/chains")
+    chains = sorted(((d.get("name"), float(d.get("tvl") or 0)) for d in data),
+                    key=lambda x: x[1], reverse=True)
+    total = sum(t for _, t in chains)
+    return total, chains[:8]
+
+
+def _defillama_stablecoins():
+    """Total stablecoin circulating supply (USD) — 'dry powder' on the sidelines. Free."""
+    data = _get_json("https://stablecoins.llama.fi/stablecoins?includePrices=false")
+    total = 0.0
+    for a in data.get("peggedAssets", []):
+        total += float((a.get("circulating") or {}).get("peggedUSD") or 0)
+    return total
+
+
+def _coingecko_categories():
+    """Crypto sectors ranked by 24h market-cap change (narrative rotation). Free, no key."""
+    data = _get_json("https://api.coingecko.com/api/v3/coins/categories", timeout=25)
+    cats = [(c.get("name"), c.get("market_cap_change_24h"))
+            for c in data if c.get("market_cap_change_24h") is not None]
+    cats.sort(key=lambda x: x[1], reverse=True)
+    return cats
 
 
 def main() -> int:
@@ -80,6 +111,9 @@ def main() -> int:
     neg_fund = sorted(frows, key=lambda r: r[1])[:8]
 
     fng = _safe(_fear_greed, None, "fear_greed")
+    total_tvl, top_chains = _safe(_defillama_chains, (0.0, []), "defillama_chains")
+    stable_total = _safe(_defillama_stablecoins, 0.0, "defillama_stables")
+    cats = _safe(_coingecko_categories, [], "coingecko_categories")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     L = [f"# Crypto Market Intelligence Brief — {now}", "",
@@ -119,10 +153,32 @@ def main() -> int:
             L.append(f"| {lft} | {rgt} |")
         L.append("")
 
+    if top_chains:
+        L.append("## Macro / on-chain — where DeFi capital sits")
+        head = f"**Total DeFi TVL:** ${total_tvl:,.0f}"
+        if stable_total:
+            head += f"  |  **Stablecoin supply (sideline dry powder):** ${stable_total:,.0f}"
+        L += [head, "", "| chain | TVL (USD) |", "|---|---|"]
+        for name, tvl in top_chains:
+            L.append(f"| {name} | ${tvl:,.0f} |")
+        L.append("")
+
+    if cats:
+        hot = cats[:8]
+        cold = cats[-5:][::-1]
+        L.append("## Narrative rotation — sectors by 24h market-cap change")
+        L += ["| hot sectors (24h) | cold sectors (24h) |", "|---|---|"]
+        for i in range(max(len(hot), len(cold))):
+            lft = f"{hot[i][0]} {hot[i][1]:+.1f}%" if i < len(hot) else ""
+            rgt = f"{cold[i][0]} {cold[i][1]:+.1f}%" if i < len(cold) else ""
+            L.append(f"| {lft} | {rgt} |")
+        L.append("")
+
     L.append("---")
-    L.append("_v1: movers + volume + funding + sentiment. Planned: on-chain exchange "
-             "in/outflows (DefiLlama/explorers), token-unlock & listing calendar "
-             "(CoinMarketCal), news headlines, sector/narrative rotation._")
+    L.append("_Sources (all public/free): Binance (movers/volume/funding), "
+             "alternative.me (Fear & Greed), DefiLlama (TVL + stablecoin supply), "
+             "CoinGecko (sector rotation). Descriptive awareness, NOT a trade signal. "
+             "Planned: news headlines + daily auto-run._")
 
     report = "\n".join(L)
     out = ROOT / "reports" / f"market_intel_{date.today().isoformat()}.md"
@@ -136,6 +192,10 @@ def main() -> int:
     print("Top movers (24h, liquid): " + ", ".join(f"{b} {p:+.0f}%" for b, p, _, _ in gainers[:5]))
     print("Worst (24h):              " + ", ".join(f"{b} {p:+.0f}%" for b, p, _, _ in losers[:5]))
     print("Most crowded longs:       " + ", ".join(f"{b}" for b, _ in pos_fund[:5]))
+    if cats:
+        print("Hot narratives (24h):     " + ", ".join(f"{n} {p:+.0f}%" for n, p in cats[:5]))
+    if top_chains:
+        print(f"DeFi TVL: ${total_tvl:,.0f}  | top chain: {top_chains[0][0]} (${top_chains[0][1]:,.0f})")
     print(f"\nFull brief written to: {out}")
     return 0
 
