@@ -458,12 +458,27 @@ ANALYSIS_ONLY_BASES = {
 def is_analysis_only(symbol: str) -> bool:
     """True if the symbol's base is an analysis-only research instrument.
 
-    Matches the ccxt perp form (`XAU/USDT:USDT`) and the spot-name form
-    (`XAU/USDT`) by base. Deliberately base-exact so crypto-native tokens that
-    merely share a prefix (e.g. XAUT = Tether Gold) are NOT caught.
+    Matches the ccxt perp form (`XAU/USDT:USDT`), the spot-name form (`XAU/USDT`),
+    AND the raw exchange id (`XAUUSDT`) by EXACT base — so crypto-native tokens that
+    merely share a prefix (e.g. XAUT = Tether Gold -> `XAUTUSDT`) are NOT caught.
+
+    A few analysis-only bases are short/generic (CL, BZ, META, COIN). The match is
+    deliberately fail-SAFE: if a real crypto perp ever shared one of these exact
+    tickers it would be over-blocked (never traded), never under-blocked. This is the
+    single safety choke in bot_engine._execute_open, so erring toward over-block is
+    correct. The raw-id branch closes the only unsafe direction — a future caller
+    passing a slash-less id silently failing OPEN through the choke.
     """
-    base = symbol.split("/")[0].split(":")[0].upper()
-    return base in ANALYSIS_ONLY_BASES
+    s = symbol.upper()
+    base = s.split("/")[0].split(":")[0]
+    if base in ANALYSIS_ONLY_BASES:
+        return True
+    if "/" not in s:  # raw concatenated id (e.g. 'XAUUSDT'); match base+quote EXACTLY
+        for b in ANALYSIS_ONLY_BASES:
+            for q in ("USDT", "USDC", "USD"):
+                if s == b + q or s == f"{b}{q}:{q}":
+                    return True
+    return False
 
 # ==============================================================
 # RISK MANAGEMENT — HIGH-WR TIERED MECHANISM (2026-04-11 rewrite)

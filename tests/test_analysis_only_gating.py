@@ -32,6 +32,8 @@ def test_is_analysis_only_matches_perp_and_spot_forms():
     assert is_analysis_only("XAU/USDT") is True         # spot-name form
     assert is_analysis_only("COPPER/USDT:USDT") is True
     assert is_analysis_only("TSLA/USDT:USDT") is True
+    assert is_analysis_only("XAUUSDT") is True          # raw exchange id (no slash)
+    assert is_analysis_only("TSLAUSDT") is True
 
 
 def test_is_analysis_only_does_not_block_crypto():
@@ -40,8 +42,10 @@ def test_is_analysis_only_does_not_block_crypto():
     assert is_analysis_only("ETH/USDT") is False
     assert is_analysis_only("ATOM/USDT:USDT") is False
     # XAUT (Tether Gold) is a crypto-native token, NOT an analysis-only perp —
-    # must not be caught by a sloppy prefix match on "XAU".
+    # must not be caught by a sloppy prefix match on "XAU" (slash or raw form).
     assert is_analysis_only("XAUT/USDT") is False
+    assert is_analysis_only("XAUTUSDT") is False        # raw id must not collide with XAU
+    assert is_analysis_only("BTCUSDT") is False         # raw crypto id stays tradeable
 
 
 # ── 2. Hard live-entry block ──────────────────────────────────────────
