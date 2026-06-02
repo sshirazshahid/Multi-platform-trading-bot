@@ -77,7 +77,43 @@ def _coingecko_categories():
     return cats
 
 
+def _news_headlines(limit=8):
+    """Recent crypto headlines from free RSS feeds (the 'why' behind moves)."""
+    import xml.etree.ElementTree as ET
+    feeds = [("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+             ("Cointelegraph", "https://cointelegraph.com/rss")]
+    out, per = [], max(1, limit // len(feeds) + 1)
+    for src, url in feeds:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "crypto-research/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                root = ET.fromstring(r.read())
+            titles = [it.findtext("title") for it in root.iter("item")][:per]
+            out += [(src, t.strip()) for t in titles if t]
+        except Exception:
+            continue
+    return out[:limit]
+
+
+def _multi_tf_change(ex, base):
+    """1h / 4h / 24h % change for a coin from one 1h-candle fetch — momentum across
+    timeframes (descriptive). Returns (h1, h4, h24) or None."""
+    o = ex.fetch_ohlcv(f"{base}/USDT", "1h", limit=25)
+    closes = [c[4] for c in (o or []) if c and c[4]]
+    if len(closes) < 25:
+        return None
+    last = closes[-1]
+    def pct(n):
+        ref = closes[-1 - n]
+        return (last / ref - 1) * 100 if ref else 0.0
+    return pct(1), pct(4), pct(24)
+
+
 def main() -> int:
+    try:  # Windows consoles default to cp1252 and crash on non-ASCII tickers
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-vol", type=float, default=5_000_000.0, help="min 24h quote volume (USDT) for movers")
     ap.add_argument("--top", type=int, default=10)
@@ -104,9 +140,21 @@ def main() -> int:
     losers = sorted(rows, key=lambda r: r[1])[: args.top]
     byvol = sorted(rows, key=lambda r: r[2], reverse=True)[: args.top]
 
+    # Multi-timeframe momentum for the biggest movers (candles across 1h/4h/24h)
+    mtf = {}
+    for b, _, _, _ in gainers[:6]:
+        res = _safe(lambda b=b: _multi_tf_change(ex, b), None, f"mtf {b}")
+        if res:
+            mtf[b] = res
+
     fund = _safe(lambda: ex.fetch_funding_rates(), {}, "fetch_funding_rates")
+    # crypto-only: keep bases that have a spot USDT market (excludes equity/commodity
+    # perps like SAMSUNG/COHR/XAU that have no spot listing)
+    _spot_bases = {sym.replace("/USDT", "") for sym, m in ex.markets.items()
+                   if m.get("quote") == "USDT" and m.get("spot")}
     frows = [(s.split("/")[0].split(":")[0], f.get("fundingRate"))
-             for s, f in (fund or {}).items() if f.get("fundingRate") is not None]
+             for s, f in (fund or {}).items()
+             if f.get("fundingRate") is not None and s.split("/")[0].split(":")[0] in _spot_bases]
     pos_fund = sorted(frows, key=lambda r: r[1], reverse=True)[:8]
     neg_fund = sorted(frows, key=lambda r: r[1])[:8]
 
@@ -114,6 +162,7 @@ def main() -> int:
     total_tvl, top_chains = _safe(_defillama_chains, (0.0, []), "defillama_chains")
     stable_total = _safe(_defillama_stablecoins, 0.0, "defillama_stables")
     cats = _safe(_coingecko_categories, [], "coingecko_categories")
+    news = _safe(_news_headlines, [], "news")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     L = [f"# Crypto Market Intelligence Brief — {now}", "",
@@ -142,8 +191,17 @@ def main() -> int:
         L.append(f"| {b} | {p:+.1f}% | ${v:,.0f} |")
     L.append("")
 
+    if mtf:
+        L.append("## Multi-timeframe momentum — top movers (candles: 1h / 4h / 24h)")
+        L += ["| coin | 1h | 4h | 24h |", "|---|---|---|---|"]
+        for b, _, _, _ in gainers[:6]:
+            if b in mtf:
+                h1, h4, h24 = mtf[b]
+                L.append(f"| {b} | {h1:+.1f}% | {h4:+.1f}% | {h24:+.1f}% |")
+        L.append("")
+
     if frows:
-        L.append("## Positioning — funding-rate extremes (perps)")
+        L.append("## Positioning — funding-rate extremes (perps, crypto-only)")
         L.append("_High positive = crowded longs (over-eager, squeeze risk down); "
                  "high negative = crowded shorts (squeeze risk up). Positioning, not a signal._")
         L += ["", "| crowded LONGS (funding) | crowded SHORTS (funding) |", "|---|---|"]
@@ -174,11 +232,18 @@ def main() -> int:
             L.append(f"| {lft} | {rgt} |")
         L.append("")
 
+    if news:
+        L.append("## Recent headlines (the 'why')")
+        for src, title in news:
+            L.append(f"- _{src}_ — {title}")
+        L.append("")
+
     L.append("---")
-    L.append("_Sources (all public/free): Binance (movers/volume/funding), "
-             "alternative.me (Fear & Greed), DefiLlama (TVL + stablecoin supply), "
-             "CoinGecko (sector rotation). Descriptive awareness, NOT a trade signal. "
-             "Planned: news headlines + daily auto-run._")
+    L.append("_Sources (all public/free): Binance (movers/volume/funding + 1h/4h/24h "
+             "candles), alternative.me (Fear & Greed), DefiLlama (TVL + stablecoin "
+             "supply), CoinGecko (sector rotation), CoinDesk/Cointelegraph RSS (news). "
+             "Descriptive awareness, NOT a trade signal. Runs daily via "
+             "TradingBot-MarketIntel._")
 
     report = "\n".join(L)
     out = ROOT / "reports" / f"market_intel_{date.today().isoformat()}.md"
