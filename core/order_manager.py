@@ -1392,6 +1392,33 @@ class OrderManager:
         position.size -= partial_size
         position.partial_taken = True
 
+        # Book the closed fraction in the PAPER wallet (audit 2026-06-03). Without this,
+        # partial_close never returned the taken fraction's margin + profit to the paper
+        # balance — only _finalize_close booked anything, and on the now-REDUCED size — so
+        # every partial TP silently leaked the taken fraction's margin + profit from the
+        # paper wallet, biasing the displayed balance/PnL DOWNWARD. The taken fraction is
+        # disjoint from the final close (reduced size), so this is additive with NO
+        # double-count. Paper-only (live partials settle on the real exchange).
+        _is_paper = position.paper_trade if hasattr(position, "paper_trade") else self.dry_run
+        if _is_paper:
+            try:
+                p_gross = ((price - position.entry_price) if position.side == "buy"
+                           else (position.entry_price - price)) * partial_size
+                try:
+                    from core.position_tracker import _fee_rate
+                    p_exit_fee = partial_size * price * _fee_rate(position.market_type)
+                except Exception:
+                    p_exit_fee = partial_size * price * (
+                        0.0005 if position.market_type == "futures" else 0.001)
+                self.wallet.on_close(
+                    position.exchange, position.symbol, position.side,
+                    partial_size, price, position.entry_price,
+                    p_exit_fee, p_gross,
+                    position.market_type, leverage=position.leverage,
+                )
+            except Exception as we:
+                logger.debug(f"[Wallet] partial on_close skipped: {we}")
+
         try:
             from config import PARTIAL_TP
             if PARTIAL_TP.get("move_sl_to_breakeven", True):
