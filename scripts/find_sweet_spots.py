@@ -119,7 +119,8 @@ def main() -> int:
         ("Base", lambda t: t["base"]),
         ("MCP score bucket", lambda t: _score_bucket(t["score"])),
         ("Strategy family", lambda t: t["fam"]),
-        ("Hold-time bucket", lambda t: _hold_bucket(t["hold"])),
+        # Hold-time DROPPED (audit #2): hold_sec is known only at EXIT and is jointly determined
+        # with PnL, so slicing by it conditions on the outcome and is not actionable at entry.
     ]
 
     held, washed = [], []
@@ -147,8 +148,12 @@ def main() -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     L = [f"# Trading 'Sweet Spots' — conditional performance ({now})", "",
          "_Anti-data-mining: candidates are found IN-SAMPLE (older 60%) and only count if "
-         "they ALSO hold OUT-OF-SAMPLE (newer 40%). On a no-edge ~600-trade sample, in-sample "
-         "slices that look good are usually noise; an honest sweet spot must survive OOS._", "",
+         "they ALSO hold OUT-OF-SAMPLE (newer 40%). On a no-edge sample, in-sample slices that "
+         "look good are usually noise; an honest sweet spot must survive OOS._", "",
+         "_Scope caveat (audit #4/#15): this conditions on the bot's OWN executed trades, so it "
+         "can only attribute which TAKEN trades did better — it cannot discover an edge in "
+         "untaken conditions. 'Held' = positive in BOTH halves (sign agreement only), NOT a "
+         "significance test; treat any survivor as a weak hypothesis, never go-live evidence._", "",
          f"**Sample:** {base_n} closed PAPER trades | overall WR {base_wr:.0f}% | "
          f"avg PnL ${base_avg:+.3f}/trade  (IS {is_n}@{is_wr:.0f}%/${is_avg:+.3f}, "
          f"OOS {oos_n}@{oos_wr:.0f}%/${oos_avg:+.3f})", "",

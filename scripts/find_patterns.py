@@ -89,12 +89,9 @@ def main() -> int:
     dims = [("Hour of day (UTC)", "1h", 365 * 24 * 3600, "hour"),
             ("Day of week (0=Mon)", "1d", 3 * 365 * 24 * 3600, "dayofweek")]
 
-    held_by_dim = {}
-    detail = []        # (dim, asset, bucket, is_n, is_mean, oos_n, oos_mean, oos_t, holds)
     coverage = []
-
+    cand = []  # every evaluated (dim, asset, bucket): (dim, a, v, isn, ismean, on, omean, oos_t)
     for dim_name, tf, lookback, attr in dims:
-        held_by_dim[dim_name] = {}
         for a in ASSETS:
             df = load_ohlcv_window(f"{a}/USDT", tf, now - lookback, now, fetcher=_fetch)
             if len(df) < 200:
@@ -104,12 +101,27 @@ def main() -> int:
             for v, (isn, ismean, _isstd) in is_b.items():
                 on, omean, ostd = oos_b.get(v, (0, 0.0, 0.0))
                 oos_t = (omean / (ostd / math.sqrt(on))) if (on > 1 and ostd > 0) else 0.0
-                is_sweet = ismean > COST_RT
-                holds = (is_sweet and on >= MIN_OBS and omean > COST_RT and oos_t >= T_MIN)
-                if is_sweet:
-                    detail.append((dim_name, a, v, isn, ismean, on, omean, oos_t, holds))
-                if holds:
-                    held_by_dim[dim_name].setdefault(v, []).append(a)
+                cand.append((dim_name, a, v, isn, ismean, on, omean, oos_t))
+
+    # Bonferroni-corrected OOS significance threshold over the ACTUAL window count (audit #3 —
+    # the old fixed |t|>=2 had no multiple-comparisons control; the >=2-asset gate is NOT a
+    # valid FWER control because the majors are ~0.8 correlated).
+    k = len(cand)
+    try:
+        from scipy.stats import norm
+        t_bar = float(norm.ppf(1 - (0.05 / max(k, 1)) / 2))
+    except Exception:
+        t_bar = 3.6 if k > 100 else (3.2 if k > 30 else 2.6)
+
+    held_by_dim = {}
+    detail = []        # (dim, asset, bucket, is_n, is_mean, oos_n, oos_mean, oos_t, holds)
+    for dim_name, a, v, isn, ismean, on, omean, oos_t in cand:
+        is_sweet = ismean > COST_RT
+        holds = (is_sweet and on >= MIN_OBS and omean > COST_RT and oos_t >= t_bar)
+        if is_sweet:
+            detail.append((dim_name, a, v, isn, ismean, on, omean, oos_t, holds))
+        if holds:
+            held_by_dim.setdefault(dim_name, {}).setdefault(v, []).append(a)
 
     robust = [(d, v, assets) for d, buckets in held_by_dim.items()
               for v, assets in buckets.items() if len(assets) >= ROBUST_ASSETS]
@@ -122,6 +134,8 @@ def main() -> int:
          "(multi-asset != independent), and ~155 windows were tested (multiple comparisons)._", "",
          f"**Assets:** {', '.join(ASSETS)} | hour-of-day (1y hourly), day-of-week (3y daily). "
          "Monthly/longer NOT tested — too few observations to be honest.", "",
+         f"**Tests:** {k} windows | Bonferroni OOS t-threshold ≈ {t_bar:.2f} (replaces the prior "
+         "fixed |t|>=2, which had no multiple-comparisons control — audit #3).", "",
          f"## Verdict: {len(robust)} pattern(s) cleared the full bar "
          "(after-cost + OOS-significant + multi-asset)", ""]
 

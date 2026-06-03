@@ -78,15 +78,17 @@ def _eval(r, pos, warm):
     """Net (after-cost) IS/OOS stats. Returns dict or None."""
     import numpy as np
     turn = np.abs(np.diff(np.concatenate([[0.0], pos])))
+    turn[-1] += abs(pos[-1])           # charge exit of any position still open at end-of-sample (audit #11)
     net = pos * r - turn * COST_ONEWAY
     seg = net[warm:]
     if len(seg) < 100:
         return None
     cut = int(len(seg) * IS_FRAC)
     is_s, oos_s = seg[:cut], seg[cut:]
-    if len(oos_s) < MIN_OOS or oos_s.std() == 0 or is_s.std() == 0:
+    os_std = oos_s.std(ddof=1)          # sample SE, ddof=1 (audit #9)
+    if len(oos_s) < MIN_OOS or os_std == 0 or is_s.std(ddof=1) == 0:
         return None
-    oos_t = oos_s.mean() / (oos_s.std() / math.sqrt(len(oos_s)))
+    oos_t = oos_s.mean() / (os_std / math.sqrt(len(oos_s)))
     return {
         "is_mean": float(is_s.mean()), "oos_mean": float(oos_s.mean()),
         "oos_t": float(oos_t), "oos_n": len(oos_s),
@@ -116,7 +118,8 @@ def main() -> int:
     for tf, lookback in tfs:
         for p in PAIRS:
             df = load_ohlcv_window(f"{p}/USDT", tf, now - lookback, now, fetcher=_fetch)
-            closes = df["close"].to_numpy() if len(df) else np.array([])
+            # drop the final (possibly still-forming) bar for reproducibility (audit #7)
+            closes = df["close"].to_numpy()[:-1] if len(df) > 1 else np.array([])
             if len(closes) < 250:
                 coverage.append(f"{p} {tf}: {len(closes)} bars (skipped)")
                 continue
@@ -150,6 +153,18 @@ def main() -> int:
     uncorrected = [(p, tf, name, st) for (p, tf, name, st) in results
                    if st["oos_mean"] > 0 and abs(st["oos_t"]) >= 1.96 and st["is_sign"] == st["oos_sign"]]
 
+    # Detection floor / minimum-detectable effect (audit #1): the smallest annualized Sharpe
+    # this Bonferroni bar can actually reject. MDE_perbar = t_bonf / sqrt(n_oos); annualize by
+    # sqrt(periods/yr). A 0-survivor result only excludes edges ABOVE this floor.
+    ppy = {"1d": 365.0, "4h": 365.0 * 6}
+    mde = {}
+    for tf in ("1d", "4h"):
+        ns = [st["oos_n"] for (p, t, name, st) in results if t == tf]
+        if ns:
+            n_med = sorted(ns)[len(ns) // 2]
+            mde[tf] = t_bonf / math.sqrt(n_med) * math.sqrt(ppy[tf])
+    mde_str = " / ".join(f"{tf}≈{v:.1f}" for tf, v in mde.items()) or "n/a"
+
     now_s = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     L = [f"# Per-pair strategy / pattern sweep — go-live falsification ({now_s})", "",
          "_Brutal bar by design: a survivor must be after-cost positive OOS, sign-consistent "
@@ -157,6 +172,10 @@ def main() -> int:
          "tests. On a no-edge market the expected survivor count is ~0._", "",
          f"**Tests run:** {k} (pairs x strategies x params x timeframes) | "
          f"Bonferroni t-threshold ≈ {t_bonf:.2f} (family-wise α=0.05) | cost {COST_ONEWAY*1e4:.0f}bps/side", "",
+         f"**⚠ Detection floor (MDE):** the min annualized Sharpe this bar can reject ≈ {mde_str}. "
+         "Genuinely tradeable edges sit around Sharpe 0.5-1.5 — BELOW this floor — so a 0-survivor "
+         "result means **no edge DETECTED above the floor, NOT 'no edge exists'** (Type-II not excluded). "
+         "This bar only rejects EXTRAORDINARY edges by design.", "",
          f"## Verdict: {len(survivors)} survivor(s) cleared the Bonferroni bar", ""]
 
     if survivors:
@@ -166,10 +185,13 @@ def main() -> int:
             L.append(f"| {p} | {tf} | {name} | {st['oos_n']} | {st['oos_mean']*100:+.3f}% | {st['oos_t']:+.2f} |")
         L.append("")
     else:
-        L.append("### None. No per-pair strategy cleared the multiple-comparisons-corrected bar.")
-        L.append("_The honest, expected go-live answer: there is no per-pair momentum / "
-                 "mean-reversion / breakout configuration here with a repeatable, after-cost, "
-                 "statistically-robust edge. Consistent with every prior falsification._")
+        L.append("### None cleared the bar — no per-pair strategy shows an edge ABOVE the detection floor.")
+        L.append("_Honest reading (audit-corrected): this means no LARGE edge (annualized Sharpe above the "
+                 "floor disclosed above) was DETECTED — NOT that no edge exists. A modest, genuinely-"
+                 "tradeable edge (Sharpe ~0.5-1.5) is below this test's power and would be invisible here. "
+                 "The uncorrected-hit count below is at/under the chance rate, so no latent signal appears "
+                 "to be suppressed — but the correct go-live statement remains 'no edge DETECTED "
+                 "(Type-II not excluded)', not 'no edge exists'._")
         L.append("")
 
     L.append(f"### Transparency: {len(uncorrected)} hit(s) at UNCORRECTED p<0.05 "
@@ -195,7 +217,8 @@ def main() -> int:
     out.write_text("\n".join(L), encoding="utf-8")
 
     print(f"=== Strategy/pattern sweep ({now_s}) ===")
-    print(f"Tests: {k} | Bonferroni t≈{t_bonf:.2f}")
+    print(f"Tests: {k} | Bonferroni t≈{t_bonf:.2f} | detection floor MDE ann.Sharpe: {mde_str}")
+    print("(0 survivors => no edge DETECTED above that floor, NOT 'no edge exists' — Type-II not excluded)")
     print(f"VERDICT: {len(survivors)} survivor(s) cleared the corrected bar; "
           f"{len(uncorrected)} uncorrected p<0.05 hits (~{round(0.025*k)} expected by chance)")
     for p, tf, name, st in sorted(survivors, key=lambda x: abs(x[3]['oos_t']), reverse=True):
