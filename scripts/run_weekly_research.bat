@@ -16,3 +16,5 @@ echo --- sweet spots (trade-history, IS/OOS) --- >> logs\weekly_research.log
 D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\find_sweet_spots.py >> logs\weekly_research.log 2>&1
 echo --- calendar patterns (seasonality, after-cost + OOS-significant) --- >> logs\weekly_research.log
 D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\find_patterns.py >> logs\weekly_research.log 2>&1
+echo --- per-pair strategy sweep (mom/MR/breakout, IS/OOS + Bonferroni) --- >> logs\weekly_research.log
+D:\Downloads\Trading_Bot\venv\Scripts\python.exe scripts\strategy_pattern_search.py >> logs\weekly_research.log 2>&1
