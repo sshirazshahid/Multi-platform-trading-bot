@@ -11,6 +11,8 @@ Bybit API quirks handled here:
 DRY_RUN=true prevents real orders — all paper trades go through DirectExecutor.
 """
 
+import threading
+
 import ccxt
 from loguru import logger
 
@@ -29,6 +31,15 @@ class BybitClient(BaseExchange):
 
     def __init__(self, api_key: str = None, secret: str = None):
         self._connected = False
+        # 2026-06-04 — Reentrant lock guarding self.exchange.options["defaultType"]
+        # (mirrors BinanceClient). Concurrent threads — the 10s SL/TP daemon, the
+        # 5min portfolio cycle, and the MCP-brain ThreadPoolExecutor fanning
+        # fetch_ohlcv/fetch_ticker across spot+futures on ONE client — otherwise
+        # stomp each other's defaultType between the switch and the ccxt call,
+        # routing a call to the wrong market (wrong candles/prices/order routing).
+        # RLock is reentrant, so a nested switch-using call on the same thread
+        # cannot self-deadlock.
+        self._defaultType_lock = threading.RLock()
         super().__init__(
             api_key = (api_key or BYBIT_API_KEY    or "").strip(),
             secret  = (secret  or BYBIT_SECRET_KEY or "").strip(),
@@ -123,17 +134,18 @@ class BybitClient(BaseExchange):
                     limit: int = 100, market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        if market_type == "futures":
-            self.switch_to_futures()
-        else:
-            self.switch_to_spot()
-        try:
-            result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
-        except Exception as e:
-            logger.debug(f"[Bybit] fetch_ohlcv {symbol} {timeframe}: {e}")
-            result = []
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            else:
+                self.switch_to_spot()
+            try:
+                result = super().fetch_ohlcv(symbol, timeframe, limit, market_type)
+            except Exception as e:
+                logger.debug(f"[Bybit] fetch_ohlcv {symbol} {timeframe}: {e}")
+                result = []
+            finally:
+                self.switch_to_spot()
         return result
 
     # ── fetch_ticker ──────────────────────────────────────────────────
@@ -141,17 +153,18 @@ class BybitClient(BaseExchange):
     def fetch_ticker(self, symbol: str, market_type: str = "spot") -> dict:
         if not self._ok():
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-        else:
-            self.switch_to_spot()
-        try:
-            result = super().fetch_ticker(symbol, market_type)
-        except Exception as e:
-            logger.debug(f"[Bybit] fetch_ticker {symbol}: {e}")
-            result = {}
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            else:
+                self.switch_to_spot()
+            try:
+                result = super().fetch_ticker(symbol, market_type)
+            except Exception as e:
+                logger.debug(f"[Bybit] fetch_ticker {symbol}: {e}")
+                result = {}
+            finally:
+                self.switch_to_spot()
         return result
 
     # ── fetch_balance ─────────────────────────────────────────────────
@@ -253,60 +266,61 @@ class BybitClient(BaseExchange):
         if not self._ok():
             logger.warning("[Bybit] create_order skipped — not connected.")
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-        try:
-            order = super().create_order(symbol, order_type, side, amount,
-                                         price, params, market_type)
-            return order
-        except Exception as e:
-            err = str(e)
-            # Handle One-Way mode (positionSide / positionIdx errors)
-            if "110025" in err or "110043" in err or "position side" in err.lower() or "positionIdx" in err.lower() or "position mode" in err.lower():
-                logger.info("[Bybit] ONE-WAY mode detected. Retrying...")
-                # Keep reduceOnly! Stripping it turns close orders into new position opens
-                clean = {k: v for k, v in (params or {}).items()
-                         if k not in ("positionSide",)}
-                try:
-                    order = super().create_order(symbol, order_type, side, amount,
-                                                 price, clean, market_type)
-                    return order
-                except Exception:
-                    raise
-            # 2026-04-12: Handle 110007 "ab not enough for new order" — the
-            # sizing layer believed more margin was available than the unified
-            # account actually had free. Retry with progressively smaller
-            # amount (70%, 50%, 30%) so we don't spin on the same failed order
-            # while the balance-extract fix propagates.
-            if "110007" in err or "ab not enough" in err.lower():
-                skip_retry = (params or {}).get("reduceOnly") is True
-                if not skip_retry:
-                    for scale in (0.70, 0.50, 0.30):
-                        shrunk = amount * scale
-                        logger.warning(
-                            f"[Bybit] 110007 insufficient margin — retrying "
-                            f"{symbol} at {scale*100:.0f}% size ({shrunk:.6g})")
-                        try:
-                            order = super().create_order(
-                                symbol, order_type, side, shrunk,
-                                price, params, market_type)
-                            logger.info(
-                                f"[Bybit] downsized order filled at "
-                                f"{scale*100:.0f}% ({shrunk:.6g} {symbol})")
-                            return order
-                        except Exception as e3:
-                            if "110007" not in str(e3) and "ab not enough" not in str(e3).lower():
-                                raise
-                            continue
-                    logger.error(
-                        f"[Bybit] 110007 unrecoverable after 3 downsize "
-                        f"retries on {symbol}. Bybit reports insufficient "
-                        f"margin even at 30%. Likely root cause: "
-                        f"balance-extract using totalEquity instead of "
-                        f"totalAvailableBalance. Restart bot to apply fix.")
-            raise
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                order = super().create_order(symbol, order_type, side, amount,
+                                             price, params, market_type)
+                return order
+            except Exception as e:
+                err = str(e)
+                # Handle One-Way mode (positionSide / positionIdx errors)
+                if "110025" in err or "110043" in err or "position side" in err.lower() or "positionIdx" in err.lower() or "position mode" in err.lower():
+                    logger.info("[Bybit] ONE-WAY mode detected. Retrying...")
+                    # Keep reduceOnly! Stripping it turns close orders into new position opens
+                    clean = {k: v for k, v in (params or {}).items()
+                             if k not in ("positionSide",)}
+                    try:
+                        order = super().create_order(symbol, order_type, side, amount,
+                                                     price, clean, market_type)
+                        return order
+                    except Exception:
+                        raise
+                # 2026-04-12: Handle 110007 "ab not enough for new order" — the
+                # sizing layer believed more margin was available than the unified
+                # account actually had free. Retry with progressively smaller
+                # amount (70%, 50%, 30%) so we don't spin on the same failed order
+                # while the balance-extract fix propagates.
+                if "110007" in err or "ab not enough" in err.lower():
+                    skip_retry = (params or {}).get("reduceOnly") is True
+                    if not skip_retry:
+                        for scale in (0.70, 0.50, 0.30):
+                            shrunk = amount * scale
+                            logger.warning(
+                                f"[Bybit] 110007 insufficient margin — retrying "
+                                f"{symbol} at {scale*100:.0f}% size ({shrunk:.6g})")
+                            try:
+                                order = super().create_order(
+                                    symbol, order_type, side, shrunk,
+                                    price, params, market_type)
+                                logger.info(
+                                    f"[Bybit] downsized order filled at "
+                                    f"{scale*100:.0f}% ({shrunk:.6g} {symbol})")
+                                return order
+                            except Exception as e3:
+                                if "110007" not in str(e3) and "ab not enough" not in str(e3).lower():
+                                    raise
+                                continue
+                        logger.error(
+                            f"[Bybit] 110007 unrecoverable after 3 downsize "
+                            f"retries on {symbol}. Bybit reports insufficient "
+                            f"margin even at 30%. Likely root cause: "
+                            f"balance-extract using totalEquity instead of "
+                            f"totalAvailableBalance. Restart bot to apply fix.")
+                raise
+            finally:
+                self.switch_to_spot()
 
     # ── set_leverage ──────────────────────────────────────────────────
 
@@ -320,50 +334,51 @@ class BybitClient(BaseExchange):
         """
         if not self._ok():
             return 0
-        self.switch_to_futures()
-        try:
-            self.exchange.set_leverage(
-                leverage, symbol,
-                params={
-                    "buyLeverage":  str(leverage),
-                    "sellLeverage": str(leverage),
-                }
-            )
-            logger.info(f"[Bybit] Leverage set: {leverage}x for {symbol}")
-            return leverage
-        except Exception as e:
-            # Leverage already set at this level — not an error
-            if "leverage not modified" in str(e).lower():
-                logger.debug(f"[Bybit] Leverage already {leverage}x for {symbol}")
+        with self._defaultType_lock:
+            self.switch_to_futures()
+            try:
+                self.exchange.set_leverage(
+                    leverage, symbol,
+                    params={
+                        "buyLeverage":  str(leverage),
+                        "sellLeverage": str(leverage),
+                    }
+                )
+                logger.info(f"[Bybit] Leverage set: {leverage}x for {symbol}")
                 return leverage
-            logger.warning(f"[Bybit] set_leverage {symbol}: {e}")
-            # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
-            # Bybit caps per-symbol leverage by notional tier; without the
-            # ladder, any cap rejection returns 0, which order_manager treats
-            # as a fatal abort and skips the trade. Preserve venue-specific
-            # buyLeverage/sellLeverage params on each retry.
-            ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
-                      if x < leverage]
-            for lev in ladder:
-                try:
-                    self.exchange.set_leverage(
-                        lev, symbol,
-                        params={
-                            "buyLeverage":  str(lev),
-                            "sellLeverage": str(lev),
-                        }
-                    )
-                    logger.warning(
-                        f"[Bybit] Leverage CLAMPED {leverage}x → {lev}x "
-                        f"for {symbol} (exchange tier cap)")
-                    return lev
-                except Exception:
-                    continue
-            logger.error(
-                f"[Bybit] Could not set ANY leverage for {symbol}; aborting")
-            return 0
-        finally:
-            self.switch_to_spot()
+            except Exception as e:
+                # Leverage already set at this level — not an error
+                if "leverage not modified" in str(e).lower():
+                    logger.debug(f"[Bybit] Leverage already {leverage}x for {symbol}")
+                    return leverage
+                logger.warning(f"[Bybit] set_leverage {symbol}: {e}")
+                # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
+                # Bybit caps per-symbol leverage by notional tier; without the
+                # ladder, any cap rejection returns 0, which order_manager treats
+                # as a fatal abort and skips the trade. Preserve venue-specific
+                # buyLeverage/sellLeverage params on each retry.
+                ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
+                          if x < leverage]
+                for lev in ladder:
+                    try:
+                        self.exchange.set_leverage(
+                            lev, symbol,
+                            params={
+                                "buyLeverage":  str(lev),
+                                "sellLeverage": str(lev),
+                            }
+                        )
+                        logger.warning(
+                            f"[Bybit] Leverage CLAMPED {leverage}x → {lev}x "
+                            f"for {symbol} (exchange tier cap)")
+                        return lev
+                    except Exception:
+                        continue
+                logger.error(
+                    f"[Bybit] Could not set ANY leverage for {symbol}; aborting")
+                return 0
+            finally:
+                self.switch_to_spot()
 
     # ── cancel_all_orders override — handles conditional stop orders ──
 

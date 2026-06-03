@@ -13,6 +13,7 @@ Verified via behavior + structural pin.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -45,6 +46,7 @@ def bybit_client_with_mock_exchange(monkeypatch):
     client._ok = lambda: True
     client.switch_to_futures = lambda: None
     client.switch_to_spot = lambda: None
+    client._defaultType_lock = threading.RLock()  # set in __init__, bypassed by __new__
 
     return client, rejected_levs, accepted_lev
 
@@ -71,6 +73,7 @@ def test_bybit_returns_zero_when_no_lev_works(monkeypatch):
     client._ok = lambda: True
     client.switch_to_futures = lambda: None
     client.switch_to_spot = lambda: None
+    client._defaultType_lock = threading.RLock()  # set in __init__, bypassed by __new__
 
     assert client.set_leverage("BTC/USDT:USDT", 10) == 0
 

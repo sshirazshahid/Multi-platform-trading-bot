@@ -8,6 +8,8 @@ Handles:
   - Leverage: requires marginCoin="USDT"
 """
 
+import threading
+
 import ccxt
 from loguru import logger
 
@@ -37,6 +39,17 @@ class BitgetClient(BaseExchange):
                  passphrase: str = None):
         self._connected  = False
         self._is_oneway  = True   # Instance variable — safe for multi-profile
+        # 2026-06-04 — Reentrant lock guarding self.exchange.options["defaultType"]
+        # (mirrors BinanceClient). Concurrent threads — the 10s SL/TP daemon, the
+        # 5min portfolio cycle, and the MCP-brain ThreadPoolExecutor fanning
+        # fetch_ohlcv/fetch_ticker across spot+futures on ONE client — otherwise
+        # stomp each other's defaultType between the switch and the ccxt call,
+        # routing a call to the wrong market (wrong candles/prices/order routing).
+        # RLock is reentrant, so a nested switch-using call on the same thread
+        # cannot self-deadlock. Note: Bitget's spot fetch_balance branch relies
+        # on defaultType already being "spot"; the lock makes that hold by
+        # excluding concurrent swap-setters (every region resets to spot).
+        self._defaultType_lock = threading.RLock()
         self._passphrase = (passphrase or BITGET_PASSPHRASE or "").strip()
         super().__init__(
             api_key = (api_key or BITGET_API_KEY    or "").strip(),
@@ -204,25 +217,26 @@ class BitgetClient(BaseExchange):
                     limit: int = 100, market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        if market_type == "futures":
-            self.switch_to_futures()
-            tf = self._TF_MAP.get(timeframe, timeframe)
-        else:
-            self.switch_to_spot()
-            tf = timeframe
-        try:
-            result = self.exchange.fetch_ohlcv(symbol, tf, limit=limit)
-        except Exception as e:
-            if tf != timeframe:
-                try:
-                    result = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-                except Exception:
-                    result = []
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+                tf = self._TF_MAP.get(timeframe, timeframe)
             else:
-                logger.debug(f"[Bitget] fetch_ohlcv {symbol} {timeframe}: {e}")
-                result = []
-        finally:
-            self.switch_to_spot()
+                self.switch_to_spot()
+                tf = timeframe
+            try:
+                result = self.exchange.fetch_ohlcv(symbol, tf, limit=limit)
+            except Exception as e:
+                if tf != timeframe:
+                    try:
+                        result = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+                    except Exception:
+                        result = []
+                else:
+                    logger.debug(f"[Bitget] fetch_ohlcv {symbol} {timeframe}: {e}")
+                    result = []
+            finally:
+                self.switch_to_spot()
         return result
 
     # ── fetch_ticker ──────────────────────────────────────────────────
@@ -230,17 +244,18 @@ class BitgetClient(BaseExchange):
     def fetch_ticker(self, symbol: str, market_type: str = "spot") -> dict:
         if not self._ok():
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-        else:
-            self.switch_to_spot()
-        try:
-            result = super().fetch_ticker(symbol, market_type)
-        except Exception as e:
-            logger.debug(f"[Bitget] fetch_ticker {symbol}: {e}")
-            result = {}
-        finally:
-            self.switch_to_spot()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            else:
+                self.switch_to_spot()
+            try:
+                result = super().fetch_ticker(symbol, market_type)
+            except Exception as e:
+                logger.debug(f"[Bitget] fetch_ticker {symbol}: {e}")
+                result = {}
+            finally:
+                self.switch_to_spot()
         return result
 
     # ── fetch_balance ─────────────────────────────────────────────────
@@ -248,26 +263,27 @@ class BitgetClient(BaseExchange):
     def fetch_balance(self, market_type: str = "spot") -> dict:
         if not self._ok():
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
-            for params in [{}, {"type": "swap"}, {"type": "umcbl"},
-                           {"type": "mix"}, {"productType": "USDT-FUTURES"}]:
-                try:
-                    bal = self.exchange.fetch_balance(params) if params else self.exchange.fetch_balance()
-                    self.switch_to_spot()
-                    usdt = bal.get("USDT") or bal.get("free", {}).get("USDT")
-                    if usdt is not None:
-                        return bal
-                except Exception:
-                    pass
-            self.switch_to_spot()
-            logger.debug("[Bitget] fetch_balance futures: all methods failed")
-            return {}
-        try:
-            return self.exchange.fetch_balance()
-        except Exception as e:
-            logger.debug(f"[Bitget] fetch_balance spot: {e}")
-            return {}
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+                for params in [{}, {"type": "swap"}, {"type": "umcbl"},
+                               {"type": "mix"}, {"productType": "USDT-FUTURES"}]:
+                    try:
+                        bal = self.exchange.fetch_balance(params) if params else self.exchange.fetch_balance()
+                        self.switch_to_spot()
+                        usdt = bal.get("USDT") or bal.get("free", {}).get("USDT")
+                        if usdt is not None:
+                            return bal
+                    except Exception:
+                        pass
+                self.switch_to_spot()
+                logger.debug("[Bitget] fetch_balance futures: all methods failed")
+                return {}
+            try:
+                return self.exchange.fetch_balance()
+            except Exception as e:
+                logger.debug(f"[Bitget] fetch_balance spot: {e}")
+                return {}
 
     # ── fetch_order_book ──────────────────────────────────────────────
 
@@ -291,53 +307,54 @@ class BitgetClient(BaseExchange):
         if not self._ok():
             logger.warning("[Bitget] create_order skipped — not connected.")
             return {}
-        if market_type == "futures":
-            self.switch_to_futures()
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
 
-        _params = dict(params or {})
+            _params = dict(params or {})
 
-        # For One-Way mode on FUTURES:
-        # - Remove two-way params (positionSide, holdSide, tradeSide)
-        # - KEEP reduceOnly as-is (that's how one-way mode closes positions)
-        # - tradeSide="open"/"close" is ONLY valid in two-way (hedge) mode
-        #   and causes error 40773 "Closed positions can only occur in two-way positions"
-        if self._is_oneway and market_type == "futures":
-            _params.pop("positionSide", None)
-            _params.pop("holdSide", None)
-            _params.pop("tradeSide", None)   # NOT valid in one-way mode
-            # reduceOnly stays as-is: True for close, False/absent for open
-            _params.setdefault("productType", "USDT-FUTURES")
+            # For One-Way mode on FUTURES:
+            # - Remove two-way params (positionSide, holdSide, tradeSide)
+            # - KEEP reduceOnly as-is (that's how one-way mode closes positions)
+            # - tradeSide="open"/"close" is ONLY valid in two-way (hedge) mode
+            #   and causes error 40773 "Closed positions can only occur in two-way positions"
+            if self._is_oneway and market_type == "futures":
+                _params.pop("positionSide", None)
+                _params.pop("holdSide", None)
+                _params.pop("tradeSide", None)   # NOT valid in one-way mode
+                # reduceOnly stays as-is: True for close, False/absent for open
+                _params.setdefault("productType", "USDT-FUTURES")
 
-        try:
-            order = super().create_order(symbol, order_type, side, amount,
-                                         price, _params, market_type)
-            return order
-        except Exception as e:
-            err = str(e)
-            if ("40774" in err or "unilateral" in err or "40773" in err):
-                if not self._is_oneway:
-                    self._is_oneway = True
-                    logger.info("[Bitget] ONE-WAY mode detected. Retrying...")
-                # Retry: one-way mode — no tradeSide, keep reduceOnly
-                oneway_params = dict(_params)
-                oneway_params.pop("positionSide", None)
-                oneway_params.pop("holdSide", None)
-                oneway_params.pop("tradeSide", None)   # NOT valid in one-way mode
-                # reduceOnly stays as-is for close operations
-                oneway_params["productType"] = "USDT-FUTURES"
-                try:
-                    # Call ccxt exchange directly to avoid base class re-adding params
-                    order = self.exchange.create_order(
-                        symbol, order_type, side, amount, price, oneway_params)
-                    logger.info(
-                        f"[Bitget] ORDER {side.upper()} {amount} {symbol} "
-                        f"@ {price or 'MARKET'} | id={order.get('id')} (one-way retry)")
-                    return order
-                except Exception:
-                    raise
-            raise
-        finally:
-            self.switch_to_spot()
+            try:
+                order = super().create_order(symbol, order_type, side, amount,
+                                             price, _params, market_type)
+                return order
+            except Exception as e:
+                err = str(e)
+                if ("40774" in err or "unilateral" in err or "40773" in err):
+                    if not self._is_oneway:
+                        self._is_oneway = True
+                        logger.info("[Bitget] ONE-WAY mode detected. Retrying...")
+                    # Retry: one-way mode — no tradeSide, keep reduceOnly
+                    oneway_params = dict(_params)
+                    oneway_params.pop("positionSide", None)
+                    oneway_params.pop("holdSide", None)
+                    oneway_params.pop("tradeSide", None)   # NOT valid in one-way mode
+                    # reduceOnly stays as-is for close operations
+                    oneway_params["productType"] = "USDT-FUTURES"
+                    try:
+                        # Call ccxt exchange directly to avoid base class re-adding params
+                        order = self.exchange.create_order(
+                            symbol, order_type, side, amount, price, oneway_params)
+                        logger.info(
+                            f"[Bitget] ORDER {side.upper()} {amount} {symbol} "
+                            f"@ {price or 'MARKET'} | id={order.get('id')} (one-way retry)")
+                        return order
+                    except Exception:
+                        raise
+                raise
+            finally:
+                self.switch_to_spot()
 
     # ── set_leverage ──────────────────────────────────────────────────
 
@@ -346,38 +363,39 @@ class BitgetClient(BaseExchange):
         reason (anything other than 'leverage not modified' = already set)."""
         if not self._ok():
             return 0
-        self.switch_to_futures()
-        try:
-            self.exchange.set_leverage(
-                leverage, symbol,
-                params={"marginCoin": "USDT"})
-            logger.info(f"[Bitget] Leverage set: {leverage}x for {symbol}")
-            return leverage
-        except Exception as e:
-            if "leverage not modified" in str(e).lower():
-                logger.debug(f"[Bitget] Leverage already {leverage}x for {symbol}")
+        with self._defaultType_lock:
+            self.switch_to_futures()
+            try:
+                self.exchange.set_leverage(
+                    leverage, symbol,
+                    params={"marginCoin": "USDT"})
+                logger.info(f"[Bitget] Leverage set: {leverage}x for {symbol}")
                 return leverage
-            logger.warning(f"[Bitget] set_leverage {symbol}: {e}")
-            # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
-            # Without the ladder, any cap rejection returns 0 → order_manager
-            # treats as fatal abort. Preserve marginCoin on each retry.
-            ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
-                      if x < leverage]
-            for lev in ladder:
-                try:
-                    self.exchange.set_leverage(
-                        lev, symbol, params={"marginCoin": "USDT"})
-                    logger.warning(
-                        f"[Bitget] Leverage CLAMPED {leverage}x → {lev}x "
-                        f"for {symbol} (exchange tier cap)")
-                    return lev
-                except Exception:
-                    continue
-            logger.error(
-                f"[Bitget] Could not set ANY leverage for {symbol}; aborting")
-            return 0
-        finally:
-            self.switch_to_spot()
+            except Exception as e:
+                if "leverage not modified" in str(e).lower():
+                    logger.debug(f"[Bitget] Leverage already {leverage}x for {symbol}")
+                    return leverage
+                logger.warning(f"[Bitget] set_leverage {symbol}: {e}")
+                # 2026-05-24 — Ladder fallback (mirrors BaseExchange.set_leverage).
+                # Without the ladder, any cap rejection returns 0 → order_manager
+                # treats as fatal abort. Preserve marginCoin on each retry.
+                ladder = [x for x in (75, 50, 40, 25, 20, 15, 10, 5, 3, 2, 1)
+                          if x < leverage]
+                for lev in ladder:
+                    try:
+                        self.exchange.set_leverage(
+                            lev, symbol, params={"marginCoin": "USDT"})
+                        logger.warning(
+                            f"[Bitget] Leverage CLAMPED {leverage}x → {lev}x "
+                            f"for {symbol} (exchange tier cap)")
+                        return lev
+                    except Exception:
+                        continue
+                logger.error(
+                    f"[Bitget] Could not set ANY leverage for {symbol}; aborting")
+                return 0
+            finally:
+                self.switch_to_spot()
 
     def get_min_order_size(self, symbol: str) -> float:
         if not self._ok():
