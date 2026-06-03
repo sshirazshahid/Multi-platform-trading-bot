@@ -72,3 +72,16 @@ def test_replace_exchange_sl_live_still_writes(monkeypatch):
     assert result is True
     ex.cancel_all_orders.assert_called_once()
     eng.order_mgr._place_exchange_sl_tp.assert_called_once()
+
+
+def test_auto_transfer_gated_by_dry_run():
+    """Audit 2026-06-03: the low-balance auto-transfer in _execute_open must NOT call the
+    live exchange.transfer() in PAPER — it is a real Binance Universal-Transfer / Bitget
+    fund move. PAPER must simulate the wallet shift in-memory only. This was the one
+    transfer site missed by the 2026-05-31 PAPER->live leak fix; it now mirrors
+    set_leverage / _execute_fund_ops (gated on DRY_RUN)."""
+    from pathlib import Path
+    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    assert "did_xfer = True if DRY_RUN else exchange.transfer" in src, (
+        "auto-transfer must be DRY_RUN-gated: the live exchange.transfer() may only run "
+        "when not DRY_RUN; PAPER simulates in-memory")

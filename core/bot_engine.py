@@ -2465,12 +2465,20 @@ class BotEngine:
             if can_xfer:
                 xfer = min(other_bal * 0.70, 200.0)
                 self._last_transfer[xfer_key] = time.time()
-                logger.info(f"[Claude] Auto-transfer ${xfer:.2f} {other}->{market_type} on {ex_name}")
+                # SAFETY (audit 2026-06-03): exchange.transfer() is a REAL live-account fund
+                # move (Binance Universal Transfer / Bitget transfer). In PAPER it must NEVER
+                # touch the live account — simulate the move in-memory only. Mirrors the
+                # DRY_RUN gating already on set_leverage and _execute_fund_ops. This was the
+                # one transfer site missed by the May-31 PAPER->live leak fix.
                 try:
-                    if exchange.transfer(xfer, other, market_type):
+                    did_xfer = True if DRY_RUN else exchange.transfer(xfer, other, market_type)
+                    if did_xfer:
                         ex_bals[other] -= xfer
                         ex_bals[market_type] = mtype_bal + xfer
                         mtype_bal += xfer
+                        logger.info(
+                            f"[Claude] {'[DRY] simulated ' if DRY_RUN else ''}auto-transfer "
+                            f"${xfer:.2f} {other}->{market_type} on {ex_name}")
                 except Exception as e:
                     logger.debug(f"[Claude] Auto-transfer failed: {e}")
             if mtype_bal < min_trade_bal:
