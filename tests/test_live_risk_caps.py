@@ -69,6 +69,23 @@ def test_opens_today_persists_across_save_load(rm, monkeypatch):
     assert fresh.can_trade(open_position_count=0) is False
 
 
+def test_same_day_restart_keeps_start_balance_no_double_count(rm):
+    """Audit 2026-06-03: on a same-day restart, set_start_balance() must KEEP the
+    disk-restored start-of-day balance, NOT overwrite it with current equity (which
+    already includes today's realized PnL). Overwriting double-counts the day's loss
+    in effective_balance (_start_balance + _daily_pnl) and deflates the daily-loss-
+    breaker budget (loss_budget = max_loss_pct * _start_balance)."""
+    rm.set_start_balance(400.0)        # start of day: start=peak=400
+    rm._daily_pnl = -20.0              # lose $20 today (realized)
+    rm._save_state()                   # persists start=400, daily_pnl=-20, peak=400
+    fresh = RiskManager()              # same-day restart restores start=400, daily_pnl=-20, peak=400
+    assert fresh._start_balance == 400.0 and fresh._daily_pnl == -20.0
+    # bot startup passes CURRENT equity (400-20=380); it must NOT clobber start_balance
+    fresh.set_start_balance(380.0)
+    assert fresh._start_balance == 400.0, "start_balance overwritten -> today's PnL double-counted"
+    assert abs((fresh._start_balance + fresh._daily_pnl) - 380.0) < 1e-6  # effective = 380, not 360
+
+
 def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):
     """Crossing UTC midnight inside can_trade() must reset the counter."""
     import datetime as _dt
@@ -80,15 +97,11 @@ def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):
     rm.note_trade_opened()
     assert rm.can_trade(open_position_count=0) is False
 
-    # Simulate the next UTC day arriving without restart.
+    # Simulate the next UTC day arriving without restart. can_trade() now reads the UTC
+    # calendar date via _utc_today() (audit 2026-06-03 fix: code had drifted to local
+    # date()), so patch that single source of truth.
     next_day = rm._trading_day + _dt.timedelta(days=1)
-
-    class _StubDate:
-        @staticmethod
-        def today():
-            return next_day
-
-    monkeypatch.setattr(rmod, "date", _StubDate)
+    monkeypatch.setattr(rmod, "_utc_today", lambda: next_day)
     assert rm.can_trade(open_position_count=0) is True
     assert rm._opens_today == 0
 

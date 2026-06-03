@@ -11,12 +11,19 @@ Features:
 
 import json
 import time as _time
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
 from config import RISK
+
+
+def _utc_today() -> date:
+    """UTC calendar date. Daily rollover / loss-breaker / trade-cap boundaries align with
+    exchange & funding settlement (UTC), matching this module's design comments
+    (audit 2026-06-03: code had drifted to local date()). Single source of truth."""
+    return datetime.now(timezone.utc).date()
 
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
@@ -120,7 +127,7 @@ class RiskManager:
         # Stops the "peak from a higher-equity prior session haunts
         # forever, drawdown halts every restart" anti-pattern.
         self._peak_stale_flag: bool = False
-        self._trading_day:   date  = date.today()
+        self._trading_day:   date  = _utc_today()
         self._recent_results: list = []   # last N trades: True=win, False=loss
         self._trade_history:  list = []   # Kelly: (win, pnl_pct)
         # Tracks the last balance reading for the 30%-down-spike guard in
@@ -164,8 +171,8 @@ class RiskManager:
             "halt_reason": "",
             "daily_pnl": round(self._daily_pnl, 4),
             "max_drawdown_pct": round(
-                (self._peak_balance - ((self._start_balance or self._peak_balance) + self._daily_pnl))
-                / self._peak_balance, 4) if self._peak_balance > 0 else 0.0,
+                max(0.0, (self._peak_balance - ((self._start_balance or self._peak_balance) + self._daily_pnl))
+                    / self._peak_balance), 4) if self._peak_balance > 0 else 0.0,
             "start_balance": round(self._start_balance, 2),
             "peak_balance": round(self._peak_balance, 2),
             "trading_day": self._trading_day.isoformat(),
@@ -217,7 +224,7 @@ class RiskManager:
         self._family_pauses = {k: float(v) for k, v in state.get("family_pauses", {}).items()}
         self._global_streak = list(state.get("global_streak", []))
 
-        if saved_day == date.today():
+        if saved_day == _utc_today():
             # Same-day restart: restore daily PnL, peak
             self._daily_pnl = state.get("daily_pnl", 0.0)
             self._trading_day = saved_day
@@ -239,7 +246,7 @@ class RiskManager:
         else:
             # New day: reset daily counters but keep trade history
             self._daily_pnl = 0.0
-            self._trading_day = date.today()
+            self._trading_day = _utc_today()
             self._opens_today = 0
             logger.info(
                 f"[Risk] New day — daily counters reset. "
@@ -324,7 +331,7 @@ class RiskManager:
         # New-day rollover: in long-running processes the load-state path
         # only fires at startup, so a midnight crossing must be picked up
         # here. Without this the daily counters never reset.
-        today = date.today()
+        today = _utc_today()
         if today != self._trading_day:
             self._daily_pnl = 0.0
             self._trading_day = today
@@ -373,7 +380,7 @@ class RiskManager:
         # Roll over the counter on a UTC-midnight crossing the same way
         # can_trade() does, so a long-running process that opens its first
         # post-midnight trade doesn't carry yesterday's count forward.
-        today = date.today()
+        today = _utc_today()
         if today != self._trading_day:
             self._daily_pnl = 0.0
             self._trading_day = today
@@ -668,7 +675,7 @@ class RiskManager:
         # closed_pnl). The dollar `pnl` is still ground truth, so is_win and
         # daily_pnl stay correct. Only Kelly-history storage cares about the
         # percentage; store None there and let Kelly ignore unknowns.
-        today = date.today()
+        today = _utc_today()
         if today != self._trading_day:
             self._daily_pnl   = 0.0
             self._trading_day = today
@@ -715,19 +722,19 @@ class RiskManager:
 
     def set_start_balance(self, balance: float):
         """Set starting balance on startup. Respects resumed same-day state."""
-        self._start_balance = balance
-
-        if self._trading_day == date.today() and self._peak_balance > 0:
-            # Same-day restart: keep resumed daily PnL and peak.
-            # Phase 34: do NOT advance peak from startup `balance` —
-            # it includes unrealized P&L. Peak only advances via
-            # record_trade_pnl (realized).
+        if self._trading_day == _utc_today() and self._peak_balance > 0:
+            # Same-day restart: keep the disk-restored _start_balance, daily PnL and peak.
+            # Audit 2026-06-03: do NOT overwrite _start_balance with `balance` here —
+            # `balance` is CURRENT equity (already has today's realized PnL baked in), so
+            # overwriting would double-count today's PnL in effective_balance
+            # (_start_balance + _daily_pnl) and deflate the daily-loss-breaker budget.
+            # Phase 34: peak only advances via realized record_trade_pnl, not startup equity.
             logger.info(
-                f"[Risk] Starting balance: {balance:.4f} USDT "
-                f"(resumed: daily_pnl={self._daily_pnl:+.4f}, "
-                f"peak=${self._peak_balance:.2f})")
+                f"[Risk] Starting balance: keeping resumed start=${self._start_balance:.4f} USDT "
+                f"(daily_pnl={self._daily_pnl:+.4f}, peak=${self._peak_balance:.2f})")
         else:
             # New day or first run: fresh slate
+            self._start_balance = balance
             self._peak_balance = balance
             self._daily_pnl = 0.0
             logger.info(f"[Risk] Starting balance: {balance:.4f} USDT (peak reset)")
