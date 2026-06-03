@@ -1370,6 +1370,16 @@ class MCPBrain:
 
                     # Market structure: 5-bar swing high/low detection
                     # (replaces single-bar comparison which was pure noise)
+                    # AUDIT 2026-06-03: the window below INCLUDES the current bar
+                    # (range starts at 1 = high.iloc[-1]), so max(recent_highs) >= curr_h and
+                    # hh / ll are mathematically ALWAYS False -> the B5 +8 structure bonus never
+                    # fires for either side. Left AS-IS DELIBERATELY (not a silent oversight):
+                    # to enable it, compare against PRIOR bars only via range(2, n_swing + 2).
+                    # But enabling B5 lets more setups reach score>=65 -> MORE entries, and on a
+                    # CONFIRMED NO_EDGE system more trades = more fee bleed, not more profit. The
+                    # dead bonus is symmetric (gates both long hh and short ll) so it adds no
+                    # directional bias. Re-enable ONLY if a validated edge ever justifies higher
+                    # entry frequency. (Capital-preservation > feature-completeness here.)
                     hh = hl = ll = lh = False
                     n_swing = min(5, len(high) - 1)
                     if n_swing >= 3:
