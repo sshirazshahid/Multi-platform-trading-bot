@@ -12,12 +12,16 @@ open (bot_engine.py:2375).
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from core.risk_manager import RiskManager
+# _utc_today is the code's single source of "today" (UTC). The test must use the
+# SAME clock for its rollover arithmetic — using local date.today() here made the
+# midnight-cross test flake in the 00:00-05:00 window where local date is a day
+# ahead of UTC (audit 2026-06-03 moved the breaker boundary to UTC).
+from core.risk_manager import RiskManager, _utc_today
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +35,7 @@ def _isolate_state(tmp_path, monkeypatch):
 def rm() -> RiskManager:
     r = RiskManager()
     r.set_start_balance(400.0)
-    r._trading_day = date.today()      # deterministic: no spurious rollover
+    r._trading_day = _utc_today()      # deterministic: no spurious rollover
     return r
 
 
@@ -79,7 +83,7 @@ def test_auto_resets_next_day(rm, monkeypatch):
     _enable(monkeypatch, pct=0.02)
     rm.record_trade_pnl(-20.0, balance=400.0, is_win=False)
     assert rm.can_trade(0) is False
-    rm._trading_day = date.today() - timedelta(days=1)   # simulate midnight cross
+    rm._trading_day = _utc_today() - timedelta(days=1)   # simulate midnight cross
     assert rm.can_trade(0) is True
     assert rm._daily_pnl == 0.0
 
@@ -90,6 +94,6 @@ def test_noop_without_start_balance(monkeypatch):
     _enable(monkeypatch, pct=0.02)
     r = RiskManager()
     r._start_balance = 0.0
-    r._trading_day = date.today()
+    r._trading_day = _utc_today()
     r.record_trade_pnl(-100.0, balance=0.0, is_win=False)
     assert r.can_trade(0) is True
