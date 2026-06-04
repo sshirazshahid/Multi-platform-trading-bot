@@ -19,6 +19,8 @@ Only active in DRY_RUN mode. In LIVE mode this class is a no-op.
 """
 
 import json
+import os
+import threading
 import time
 from pathlib import Path
 
@@ -39,14 +41,23 @@ def _start_balance() -> float:
 
 
 class VirtualWallet:
-    """
-    Paper-trading wallet.  Thread-safe enough for single-threaded schedule loop.
+    """Paper-trading wallet.
+
+    Balance mutations are serialized by self._lock (RLock). The bot hits ONE
+    shared wallet from several threads — the 5-min portfolio cycle (on_open),
+    the 10s SL/TP daemon whose ThreadPoolExecutor fans (exchange, market_type)
+    so a spot close and a futures close on the SAME exchange key run in parallel
+    (on_close + funding), and the shadow runner. Without the lock the
+    read-modify-write on _balances[ex] lost updates and the paper balance
+    drifted from true paper PnL — the data the learning-first phase depends on
+    (audit 2026-06-04). LIVE is unaffected (the wallet is a no-op via _enabled).
     """
 
     def __init__(self):
         self._enabled  = DRY_RUN
         self._balances: dict = {}   # {exchange_name: float}
         self._start    = _start_balance()
+        self._lock     = threading.RLock()  # serialize _balances RMW + _save
         self._load()
 
     # ── Public API ────────────────────────────────────────────────────
@@ -82,32 +93,33 @@ class VirtualWallet:
         if not self._enabled:
             return True
 
-        ex  = exchange.lower()
-        bal = self._balances.get(ex, self._start)
+        with self._lock:
+            ex  = exchange.lower()
+            bal = self._balances.get(ex, self._start)
 
-        notional = size * price
-        if market_type == "futures" and leverage > 1:
-            cost = notional / leverage + fee   # margin + entry fee
-        else:
-            cost = notional + fee   # spot: full notional + entry fee
+            notional = size * price
+            if market_type == "futures" and leverage > 1:
+                cost = notional / leverage + fee   # margin + entry fee
+            else:
+                cost = notional + fee   # spot: full notional + entry fee
 
-        if cost > bal:
-            logger.warning(
-                f"[VirtualWallet] Insufficient balance on {exchange}: "
-                f"need {cost:.4f} USDT, have {bal:.4f} USDT — order skipped."
+            if cost > bal:
+                logger.warning(
+                    f"[VirtualWallet] Insufficient balance on {exchange}: "
+                    f"need {cost:.4f} USDT, have {bal:.4f} USDT — order skipped."
+                )
+                return False
+
+            self._balances[ex] = bal - cost
+            self._save()
+
+            logger.info(
+                f"[VirtualWallet] {exchange} | OPEN {side.upper()} {size:.6f} "
+                f"{symbol} @ {price:.4f} | "
+                f"cost={cost:.4f} USDT (notional={size*price:.4f} + fee={fee:.4f}) | "
+                f"balance: {bal:.4f} → {self._balances[ex]:.4f} USDT"
             )
-            return False
-
-        self._balances[ex] = bal - cost
-        self._save()
-
-        logger.info(
-            f"[VirtualWallet] {exchange} | OPEN {side.upper()} {size:.6f} "
-            f"{symbol} @ {price:.4f} | "
-            f"cost={cost:.4f} USDT (notional={size*price:.4f} + fee={fee:.4f}) | "
-            f"balance: {bal:.4f} → {self._balances[ex]:.4f} USDT"
-        )
-        return True
+            return True
 
     def on_close(self, exchange: str, symbol: str, side: str,
                  size: float, exit_price: float, entry_price: float,
@@ -124,50 +136,70 @@ class VirtualWallet:
         if not self._enabled:
             return
 
-        ex       = exchange.lower()
-        bal      = self._balances.get(ex, self._start)
+        with self._lock:
+            ex       = exchange.lower()
+            bal      = self._balances.get(ex, self._start)
 
-        if market_type == "futures" and leverage > 1:
-            # Return margin (what was originally deducted) + realized PnL
-            margin = size * entry_price / leverage
-            proceeds = margin + gross_pnl - exit_fee
-        else:
-            proceeds = size * exit_price - exit_fee   # spot: sell proceeds
+            if market_type == "futures" and leverage > 1:
+                # Return margin (what was originally deducted) + realized PnL
+                margin = size * entry_price / leverage
+                proceeds = margin + gross_pnl - exit_fee
+            else:
+                proceeds = size * exit_price - exit_fee   # spot: sell proceeds
 
-        # Use config fee rates for accurate net PnL display
-        try:
-            from core.position_tracker import _fee_rate
-            entry_fee_est = size * entry_price * _fee_rate(market_type)
-        except Exception:
-            fee_rate = 0.0005 if market_type == "futures" else 0.001
-            entry_fee_est = size * entry_price * fee_rate
-        net_pnl  = gross_pnl - entry_fee_est - exit_fee
+            # Use config fee rates for accurate net PnL display
+            try:
+                from core.position_tracker import _fee_rate
+                entry_fee_est = size * entry_price * _fee_rate(market_type)
+            except Exception:
+                fee_rate = 0.0005 if market_type == "futures" else 0.001
+                entry_fee_est = size * entry_price * fee_rate
+            net_pnl  = gross_pnl - entry_fee_est - exit_fee
 
-        self._balances[ex] = bal + proceeds
-        self._save()
+            self._balances[ex] = bal + proceeds
+            self._save()
 
-        pnl_str = f"{net_pnl:+.4f}"
-        logger.info(
-            f"[VirtualWallet] {exchange} | CLOSE {symbol} @ {exit_price:.4f} | "
-            f"proceeds={proceeds:.4f} USDT (exit_fee={exit_fee:.4f}) | "
-            f"net pnl={pnl_str} USDT | "
-            f"balance: {bal:.4f} → {self._balances[ex]:.4f} USDT"
-        )
+            pnl_str = f"{net_pnl:+.4f}"
+            logger.info(
+                f"[VirtualWallet] {exchange} | CLOSE {symbol} @ {exit_price:.4f} | "
+                f"proceeds={proceeds:.4f} USDT (exit_fee={exit_fee:.4f}) | "
+                f"net pnl={pnl_str} USDT | "
+                f"balance: {bal:.4f} → {self._balances[ex]:.4f} USDT"
+            )
+
+    def apply_funding(self, exchange: str, cost: float) -> float:
+        """Locked balance adjustment for paper funding accrual: +cost debits
+        (wallet shrinks), -cost credits. Returns the new balance.
+
+        order_manager.accrue_paper_funding calls THIS instead of mutating
+        self.wallet._balances directly — that external RMW (read prev / write
+        prev-cost) raced the on_open/on_close RMW on the same per-exchange key
+        every 10s funding tick (audit 2026-06-04)."""
+        if not self._enabled:
+            return 0.0
+        ex = exchange.lower()
+        with self._lock:
+            bal = self._balances.get(ex, self._start)
+            new_bal = bal - cost
+            self._balances[ex] = new_bal
+            self._save()
+            return new_bal
 
     def reset(self, exchange: str = None):
         """Reset balance back to starting amount."""
-        if exchange:
-            self._balances[exchange.lower()] = self._start
-            logger.warning(
-                f"[VirtualWallet] {exchange} balance reset to "
-                f"{self._start:.2f} USDT"
-            )
-        else:
-            self._balances.clear()
-            logger.warning(
-                f"[VirtualWallet] ALL balances reset to {self._start:.2f} USDT"
-            )
-        self._save()
+        with self._lock:
+            if exchange:
+                self._balances[exchange.lower()] = self._start
+                logger.warning(
+                    f"[VirtualWallet] {exchange} balance reset to "
+                    f"{self._start:.2f} USDT"
+                )
+            else:
+                self._balances.clear()
+                logger.warning(
+                    f"[VirtualWallet] ALL balances reset to {self._start:.2f} USDT"
+                )
+            self._save()
 
     def statement(self) -> str:
         """Return a formatted balance statement string."""
@@ -188,9 +220,14 @@ class VirtualWallet:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _save(self):
+        # Atomic write (tmp + os.replace) so two concurrent saves can never tear
+        # data/virtual_wallet.json into invalid JSON (which _load would swallow,
+        # resetting balances to start). Callers hold self._lock; os.replace is
+        # atomic on the same filesystem. Audit 2026-06-04.
         try:
             WALLET_FILE.parent.mkdir(parents=True, exist_ok=True)
-            WALLET_FILE.write_text(
+            tmp = WALLET_FILE.with_name(WALLET_FILE.name + ".tmp")
+            tmp.write_text(
                 json.dumps({
                     "start":    self._start,
                     "balances": self._balances,
@@ -198,6 +235,7 @@ class VirtualWallet:
                 }, indent=2),
                 encoding="utf-8",
             )
+            os.replace(tmp, WALLET_FILE)
         except Exception as e:
             logger.debug(f"[VirtualWallet] Save error: {e}")
 

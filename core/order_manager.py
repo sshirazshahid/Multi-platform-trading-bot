@@ -2115,15 +2115,17 @@ class OrderManager:
                     pos.funding_paid = float(getattr(pos, "funding_paid", 0.0) or 0.0) + float(cost)
                 except Exception:
                     pass
-                # Apply to wallet: +cost = debit (wallet shrinks), -cost = credit
+                # Apply to wallet: +cost = debit (wallet shrinks), -cost = credit.
+                # Use the wallet's LOCKED apply_funding (audit 2026-06-04) instead of
+                # mutating self.wallet._balances directly — the direct RMW raced the
+                # on_open/on_close RMW on the same per-exchange key under the SL/TP daemon.
                 name = exchange.name.lower()
-                prev = self.wallet._balances.get(name, self.wallet._start)
-                self.wallet._balances[name] = prev - cost
-                self.wallet._save()
+                prev = self.wallet.balance(name)
+                new_bal = self.wallet.apply_funding(name, cost)
                 logger.info(
                     f"[SimFund] {exchange.name} {pos.symbol} {pos.side.upper()}: "
                     f"rate={rate*100:.4f}% cost={cost:+.4f} USDT "
-                    f"→ bal {prev:.2f} → {self.wallet._balances[name]:.2f}"
+                    f"→ bal {prev:.2f} → {new_bal:.2f}"
                 )
             except Exception as e:
                 logger.debug(f"[SimFund] {pos.symbol}: {e}")
