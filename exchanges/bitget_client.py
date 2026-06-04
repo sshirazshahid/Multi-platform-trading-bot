@@ -13,7 +13,7 @@ import threading
 import ccxt
 from loguru import logger
 
-from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY
+from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY, DRY_RUN
 
 from .base import BaseExchange
 
@@ -126,14 +126,23 @@ class BitgetClient(BaseExchange):
                 self._connected = False
                 return
 
-        # Ensure One-Way position mode is set (prevents 40774 errors)
-        try:
-            self.exchange.set_position_mode(hedged=False, symbol=None)
-            logger.debug("[Bitget] Position mode set to One-Way.")
-        except Exception as e:
-            # Already in one-way mode, or endpoint not available — safe to ignore
-            if "already" not in str(e).lower() and "not modified" not in str(e).lower():
-                logger.warning(f"[Bitget] set_position_mode failed: {e}")
+        # Ensure One-Way position mode is set (prevents 40774 errors).
+        # 2026-06-04 (audit): set_position_mode is a REAL authenticated private POST
+        # (mix/v1/account/setPositionMode) to the LIVE Bitget account. It ran at
+        # construction time on EVERY start regardless of mode — the only init-time
+        # write among the 3 clients (Binance/Bybit init is read-only). Gate it behind
+        # DRY_RUN so PAPER/research runs never mutate the owner's live account-wide
+        # position mode. In LIVE the one-way default is still applied here; in PAPER no
+        # orders are placed on Bitget so the mode is irrelevant, and LIVE's first real
+        # order still hits the existing _oneway retry path if mode were ever wrong.
+        if not DRY_RUN:
+            try:
+                self.exchange.set_position_mode(hedged=False, symbol=None)
+                logger.debug("[Bitget] Position mode set to One-Way.")
+            except Exception as e:
+                # Already in one-way mode, or endpoint not available — safe to ignore
+                if "already" not in str(e).lower() and "not modified" not in str(e).lower():
+                    logger.warning(f"[Bitget] set_position_mode failed: {e}")
 
         try:
             self.exchange.fetch_balance()
