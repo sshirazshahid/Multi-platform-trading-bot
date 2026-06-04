@@ -300,13 +300,29 @@ class BitgetClient(BaseExchange):
                          market_type: str = "spot") -> dict:
         if not self._ok():
             return {"bids": [], "asks": []}
-        return super().fetch_order_book(symbol, limit, market_type)
+        # 2026-06-04 (audit #6): mirror Binance — lock + switch + finally-reset.
+        # Previously bypassed _defaultType_lock and never switched market, so a
+        # concurrent locked futures fetch could flip defaultType to "swap" mid-call
+        # (wrong-market book) and a futures-intended read hit the spot book.
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_order_book(symbol, limit, market_type)
+            finally:
+                self.switch_to_spot()
 
     def fetch_open_orders(self, symbol: str,
                           market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        return super().fetch_open_orders(symbol, market_type)
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_open_orders(symbol, market_type)
+            finally:
+                self.switch_to_spot()
 
     # ── create_order (with One-Way mode: reduceOnly) ───────────────────
 

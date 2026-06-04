@@ -98,3 +98,20 @@ def test_every_switch_call_is_lock_guarded(name, relpath):
         f"`with self._defaultType_lock:` block — a concurrent thread can stomp "
         f"defaultType between the switch and the ccxt call, routing to the "
         f"wrong market. Wrap the region in the lock (see BinanceClient).")
+
+
+@pytest.mark.parametrize("name,relpath", CLIENTS.items())
+def test_orderbook_and_openorders_are_lock_guarded(name, relpath):
+    """Audit 2026-06-04 (#6): fetch_order_book / fetch_open_orders on Bybit/Bitget
+    previously bypassed the lock AND contained no switch_to_* call — so the AST test
+    above passed VACUOUSLY for them (no switch call to flag) while they read the
+    shared defaultType unprotected. Pin these two methods explicitly so the gap
+    cannot silently reopen in any client."""
+    src = Path(relpath).read_text(encoding="utf-8")
+    for meth in ("def fetch_order_book", "def fetch_open_orders"):
+        i = src.index(meth)
+        j = src.find("\n    def ", i + 1)
+        body = src[i:j if j != -1 else i + 800]
+        assert "with self._defaultType_lock:" in body, (
+            f"{name}: {meth} must hold self._defaultType_lock and switch market "
+            f"(audit #6) — mirror BinanceClient")

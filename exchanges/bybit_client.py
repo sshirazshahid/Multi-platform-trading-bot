@@ -248,7 +248,18 @@ class BybitClient(BaseExchange):
                          market_type: str = "spot") -> dict:
         if not self._ok():
             return {"bids": [], "asks": []}
-        return super().fetch_order_book(symbol, limit, market_type)
+        # 2026-06-04 (audit #6): these two bypassed _defaultType_lock AND never
+        # switched market — so a concurrent locked futures fetch_ohlcv/fetch_ticker
+        # could flip defaultType to "linear" mid-call (wrong-market book for a spot
+        # read), and a futures-intended read silently hit the spot book. Mirror
+        # Binance: lock + switch + finally-reset.
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_order_book(symbol, limit, market_type)
+            finally:
+                self.switch_to_spot()
 
     # ── fetch_open_orders ─────────────────────────────────────────────
 
@@ -256,7 +267,13 @@ class BybitClient(BaseExchange):
                           market_type: str = "spot") -> list:
         if not self._ok():
             return []
-        return super().fetch_open_orders(symbol, market_type)
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            try:
+                return super().fetch_open_orders(symbol, market_type)
+            finally:
+                self.switch_to_spot()
 
     # ── create_order ──────────────────────────────────────────────────
 
