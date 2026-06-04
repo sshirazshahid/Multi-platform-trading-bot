@@ -1873,6 +1873,29 @@ class BotEngine:
             except Exception as _ssfe:
                 logger.debug(f"[ShortFilter] gate skipped ({_ssfe}) -- defaulting to ALLOW")
 
+        # (C.4) Market-wide BTC volatility circuit-breaker (2026-06-04 owner
+        # directive). Pauses NEW entries (any side) during a violent BTC move,
+        # auto-resuming when vol normalises. Direction-agnostic (no beta bias);
+        # NEW ENTRIES ONLY; fail-OPEN. See core/btc_vol_pause.py.
+        try:
+            from config import BTC_VOL_PAUSE as _BVP_CFG
+        except ImportError:
+            _BVP_CFG = {"enabled": False}
+        if _BVP_CFG.get("enabled", False):
+            try:
+                _bvp = getattr(self, "_btc_vol_pause", None)
+                if _bvp is None:
+                    from core.btc_vol_pause import BtcVolPause
+                    _bvp = BtcVolPause()
+                    self._btc_vol_pause = _bvp
+                _ei_bvp = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
+                _paused, _preason, _ = _bvp.update_and_evaluate(_ei_bvp)
+                if _paused:
+                    logger.info(f"[BtcVolPause] WAIT -- {_preason} -- skipping new entry {symbol}")
+                    return False
+            except Exception as _bvpe:
+                logger.debug(f"[BtcVolPause] gate skipped ({_bvpe}) -- defaulting to ALLOW")
+
         # (D) Per-symbol pause (spec §12). Family pause is checked at (D.1)
         # below once strategy_family is known.
         if self.risk and self.risk.is_symbol_paused(symbol):

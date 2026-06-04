@@ -1199,6 +1199,25 @@ SHORT_SIDE_FILTER = {
     "min_confidence": float(os.getenv("SHORT_MIN_CONFIDENCE", "0.70")),
 }
 
+# Market-wide BTC volatility circuit-breaker for NEW entries (2026-06-04, owner
+# directive: "wait during the violent one-line-down move, react when worth the
+# risk"). Pauses NEW entries (any side) while BTC 1h ATR% spikes >= vol_spike_mult
+# x its OWN trailing-median 1h ATR% (adaptive, not a fixed % tuned to this week),
+# then auto-resumes after clear_minutes of calm. Direction-AGNOSTIC by design — no
+# "short the dump" bias (that is market beta, not edge; see core/btc_vol_pause.py).
+# Fail-OPEN on missing BTC data / warmup. NEW ENTRIES ONLY (never exits/SL).
+# Lowers cost + variance + trade count; does NOT add alpha.
+BTC_VOL_PAUSE = {
+    "enabled":                 os.getenv("BTC_VOL_PAUSE_ENABLED", "true").lower() == "true",
+    "timeframe":               "1h",
+    "vol_spike_mult":          float(os.getenv("BTC_VOL_SPIKE_MULT", "2.0")),
+    "hysteresis_mult":         float(os.getenv("BTC_VOL_HYSTERESIS_MULT", "1.5")),
+    "clear_minutes":           float(os.getenv("BTC_VOL_CLEAR_MIN", "30")),
+    "min_samples":             int(os.getenv("BTC_VOL_MIN_SAMPLES", "24")),   # ~1d warmup (hourly)
+    "append_min_interval_sec": 3600,
+    "buffer_max":              1000,
+}
+
 # 2026-05-27 (454-trade hardening): min hold time gate.
 # Trades closed <15 min = 43% of total, 31% WR, -$41.25. Only profitable
 # bucket is 15m-1h (64% WR, +$4.41). Guard in position monitor.
