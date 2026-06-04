@@ -10,6 +10,7 @@ Features:
 """
 
 import json
+import threading
 import time as _time
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -117,6 +118,15 @@ class RiskManager:
         self.default_leverage   = RISK["default_leverage"]
         self.sizing_mode        = RISK.get("position_sizing_mode", "fixed")
         self.max_drawdown_pct   = RISK.get("max_drawdown_pct", 0.15)  # 15%
+
+        # 2026-06-04 (audit): serialize the PnL accumulators. record_trade_pnl runs
+        # from the post-close hook, which PositionTracker fires OUTSIDE its own lock, on
+        # whatever thread closed the position — the 10s SL/TP daemon's ThreadPoolExecutor
+        # (fanned per exchange×{spot,futures}), the 5-min cycle, and the 90s monitor.
+        # Without serialization two concurrent closes lost-update `self._daily_pnl += pnl`,
+        # under-counting the day's loss so the LIVE-active daily-loss breaker trips late.
+        # RLock so nested locked calls on the same thread cannot self-deadlock.
+        self._lock = threading.RLock()
 
         self._daily_pnl:     float = 0.0
         self._start_balance: float = 0.0
@@ -675,50 +685,51 @@ class RiskManager:
         # closed_pnl). The dollar `pnl` is still ground truth, so is_win and
         # daily_pnl stay correct. Only Kelly-history storage cares about the
         # percentage; store None there and let Kelly ignore unknowns.
-        today = _utc_today()
-        if today != self._trading_day:
-            self._daily_pnl   = 0.0
-            self._trading_day = today
-            logger.info("[Risk] Daily PnL reset (new day)")
+        with self._lock:
+            today = _utc_today()
+            if today != self._trading_day:
+                self._daily_pnl   = 0.0
+                self._trading_day = today
+                logger.info("[Risk] Daily PnL reset (new day)")
 
-        self._daily_pnl += pnl
+            self._daily_pnl += pnl
 
-        # Track recent results for smart recovery
-        if is_win is not None:
-            self._recent_results.append(is_win)
-            if len(self._recent_results) > 20:
-                self._recent_results.pop(0)
+            # Track recent results for smart recovery
+            if is_win is not None:
+                self._recent_results.append(is_win)
+                if len(self._recent_results) > 20:
+                    self._recent_results.pop(0)
 
-        # Kelly history — store pnl_pct verbatim (None stays None).
-        if is_win is not None:
-            self._trade_history.append((is_win, pnl_pct))
-            if len(self._trade_history) > 100:
-                self._trade_history.pop(0)
+            # Kelly history — store pnl_pct verbatim (None stays None).
+            if is_win is not None:
+                self._trade_history.append((is_win, pnl_pct))
+                if len(self._trade_history) > 100:
+                    self._trade_history.pop(0)
 
-        # Effective balance = start balance + cumulative daily PnL
-        # (The `balance` param is often just position notional — unreliable for DD calc)
-        effective_balance = (self._start_balance or balance) + self._daily_pnl
+            # Effective balance = start balance + cumulative daily PnL
+            # (The `balance` param is often just position notional — unreliable for DD calc)
+            effective_balance = (self._start_balance or balance) + self._daily_pnl
 
-        # Phase 25 (2026-05-05): stale-peak reset on first update post-restart.
-        # If the peak loaded from disk is >10% above current effective, the
-        # peak is from a richer prior session and should not gate today's
-        # drawdown calc. Reset to current × 1.05 to give a small buffer for
-        # normal volatility without losing all guard.
-        if self._peak_stale_flag:
-            self._peak_stale_flag = False
-            if (effective_balance > 0
-                    and self._peak_balance > effective_balance * 1.10):
-                old_peak = self._peak_balance
-                self._peak_balance = effective_balance * 1.05
-                logger.warning(
-                    f"[Risk] Phase 25: stale peak ${old_peak:.2f} > "
-                    f"${effective_balance:.2f} × 1.10 — reset to "
-                    f"${self._peak_balance:.2f} (current × 1.05).")
+            # Phase 25 (2026-05-05): stale-peak reset on first update post-restart.
+            # If the peak loaded from disk is >10% above current effective, the
+            # peak is from a richer prior session and should not gate today's
+            # drawdown calc. Reset to current × 1.05 to give a small buffer for
+            # normal volatility without losing all guard.
+            if self._peak_stale_flag:
+                self._peak_stale_flag = False
+                if (effective_balance > 0
+                        and self._peak_balance > effective_balance * 1.10):
+                    old_peak = self._peak_balance
+                    self._peak_balance = effective_balance * 1.05
+                    logger.warning(
+                        f"[Risk] Phase 25: stale peak ${old_peak:.2f} > "
+                        f"${effective_balance:.2f} × 1.10 — reset to "
+                        f"${self._peak_balance:.2f} (current × 1.05).")
 
-        if effective_balance > self._peak_balance:
-            self._peak_balance = effective_balance
+            if effective_balance > self._peak_balance:
+                self._peak_balance = effective_balance
 
-        self._save_state()
+            self._save_state()
 
     def set_start_balance(self, balance: float):
         """Set starting balance on startup. Respects resumed same-day state."""
