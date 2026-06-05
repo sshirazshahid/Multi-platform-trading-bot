@@ -227,6 +227,38 @@ class Warehouse:
                 conn.execute("ALTER TABLE trades ADD COLUMN fill_type TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Phase (audit 2026-06-04): entry-time stop price so r_multiple is
+            # re-derivable and never contaminated by a trailed/breakeven-moved
+            # stop. NULL on legacy rows and on reconcile/stale closes (no entry
+            # stop context). See reports/tp_booking_codepath_audit_2026-06-04.md.
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN entry_stop_px REAL")
+            except sqlite3.OperationalError:
+                pass
+            # Phase (audit 2026-06-04): partial-TP completeness. realized_pnl
+            # stays the RUNNER leg (it feeds the live recent_expectancy entry
+            # gate — must not shift), and the taken fraction's net PnL is booked
+            # here. Whole-trade $ = realized_pnl + partial_realized_pnl. NULL /
+            # 0 when no partial was taken.
+            try:
+                conn.execute(
+                    "ALTER TABLE trades ADD COLUMN partial_realized_pnl REAL")
+            except sqlite3.OperationalError:
+                pass
+            # Phase (2026-06-05): beta-adjusted alpha-vs-BTC label. Separates
+            # genuine entry alpha from BTC market beta so learning can't mistake a
+            # net-short book riding a BTC dump for edge. Two-phase: NULL at close,
+            # filled by scripts/backfill_btc_alpha.py / the learning cycle from
+            # cached BTC OHLCV. See core/btc_alpha.py.
+            for _alpha_col in (
+                "alpha_vs_btc REAL",
+                "btc_ret_window REAL",
+                "beta_used REAL",
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE trades ADD COLUMN {_alpha_col}")
+                except sqlite3.OperationalError:
+                    pass
             # Phase 13.5b: predictions.candidate_id added for clean
             # predictions→trades join. NULL on legacy rows.
             try:
@@ -370,6 +402,8 @@ class Warehouse:
         exit_reason: str = "",
         fee: float | None = None,
         slippage: float | None = None,
+        entry_stop_px: float | None = None,
+        partial_realized_pnl: float | None = None,
     ) -> None:
         """Update a trade row to CLOSED.
 
@@ -393,10 +427,13 @@ class Warehouse:
                 """UPDATE trades SET
                     ts_exit=?, exit_px=?, realized_pnl=?, r_multiple=?,
                     hold_sec=?, exit_reason=?, status='CLOSED',
-                    fee=COALESCE(?, fee), slippage=COALESCE(?, slippage)
+                    fee=COALESCE(?, fee), slippage=COALESCE(?, slippage),
+                    entry_stop_px=COALESCE(?, entry_stop_px),
+                    partial_realized_pnl=COALESCE(?, partial_realized_pnl)
                 WHERE id=?""",
                 (ts_exit, exit_px, realized_pnl, r_multiple,
-                 hold_sec, exit_reason, fee, slippage, trade_id),
+                 hold_sec, exit_reason, fee, slippage, entry_stop_px,
+                 partial_realized_pnl, trade_id),
             )
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_close error: {e}")
@@ -573,6 +610,32 @@ class Warehouse:
             )
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_attribution error: {e}")
+
+    def update_btc_alpha(self, updates) -> int:
+        """Batch-fill beta-adjusted alpha-vs-BTC labels onto closed trades.
+
+        updates: iterable of (alpha_vs_btc, btc_ret_window, beta_used, trade_id).
+        The backfill selects only rows where alpha_vs_btc IS NULL, so re-runs are
+        idempotent. Returns the number of rows written. See core/btc_alpha.py.
+        """
+        rows = [
+            (float(a), float(br), float(b), int(tid))
+            for (a, br, b, tid) in updates
+        ]
+        if not rows:
+            return 0
+        try:
+            conn = self._conn()
+            conn.executemany(
+                "UPDATE trades SET alpha_vs_btc=?, btc_ret_window=?, beta_used=? "
+                "WHERE id=?",
+                rows,
+            )
+            conn.commit()
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] update_btc_alpha error: {e}")
+            return 0
+        return len(rows)
 
     # ── Labels (triple-barrier) ───────────────────────────────────────
 

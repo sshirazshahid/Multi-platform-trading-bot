@@ -125,6 +125,24 @@ class LearningEngine:
             except Exception as e:
                 logger.debug(f"[Learning] Calibrator update: {e}")
 
+        # Beta-adjusted alpha-vs-BTC labeling (in-process, cache-only -> no live
+        # network, no cross-process DB contention). Fills trades.alpha_vs_btc so the
+        # learning substrate can separate genuine entry alpha from BTC market beta.
+        # Trades beyond the cached BTC window stay NULL for a later cycle. Non-fatal.
+        try:
+            from core.btc_alpha import backfill_unlabeled
+            from core.feature_store import load_ohlcv_window
+            from core.warehouse import get_warehouse
+
+            n_lab, n_cand = backfill_unlabeled(
+                get_warehouse(),
+                lambda s, tf, a, b: load_ohlcv_window(s, tf, a, b, fetcher=None),
+            )
+            if n_lab:
+                logger.info(f"[Learning] alpha-vs-BTC: labeled {n_lab}/{n_cand} closed trades")
+        except Exception as e:
+            logger.debug(f"[Learning] alpha-vs-BTC labeling skipped: {e}")
+
         return insights
 
     def best_strategy_for(self, symbol: str, regime: str):
