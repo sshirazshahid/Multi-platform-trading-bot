@@ -4261,6 +4261,17 @@ class BotEngine:
     def _close_external_position(self, ex_name: str, pos: dict, reason: str):
         """Close an exchange-discovered position NOT tracked internally.
         Futures: market close order. Spot: market sell coins."""
+        # Defense-in-depth: this places REAL reduceOnly futures closes / spot sells
+        # of the owner's actual coins. The sole caller (the MCP position monitor) is
+        # already DRY_RUN-gated, but a real-money side effect must never rely on
+        # caller governance alone — self-gate so PAPER/OBSERVATION can never reach
+        # the exchange even via a future call site. No-op in CONTROLLED_LIVE.
+        if DRY_RUN:
+            logger.info(
+                f"[MCP-Brain] [DRY] EXT CLOSE skipped (self-gate): "
+                f"{pos.get('symbol')} {pos.get('side')} on {ex_name} "
+                f"({pos.get('market_type')}) | {reason}")
+            return
         exchange = self.active_exchanges.get(ex_name)
         if not exchange:
             return
