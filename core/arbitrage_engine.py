@@ -414,6 +414,18 @@ class ArbitrageEngine:
             return True
 
         else:
+            # Defense-in-depth (2026-06-05): the live branch trusts only the
+            # constructor's dry_run flag. A real-money create_order must NEVER fire
+            # unless the WHOLE bot is in CONTROLLED_LIVE — block if the global mode
+            # is not live (e.g. a caller/test instantiated this with dry_run=False
+            # inside a PAPER process). Mirrors BotEngine._close_external_position.
+            from config import DRY_RUN as _global_dry_run
+            if _global_dry_run:
+                logger.warning(
+                    f"[Arb] BLOCKED live order — global DRY_RUN set (OPERATING_MODE "
+                    f"!= CONTROLLED_LIVE); engine dry_run={self.dry_run}. "
+                    f"No real order placed. {opp.label}")
+                return False
             try:
                 buy_order = buy_ex.create_order(
                     opp.symbol, "market", "buy", size, market_type="spot")
