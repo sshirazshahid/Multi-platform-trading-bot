@@ -70,6 +70,21 @@ def print_status():
         console.print("[yellow]No open positions.[/yellow]")
 
 
+def _classify_exit(exc: BaseException) -> str:
+    """Classify a watchdog-caught exit as 'clean' (intentional → stop) or 'crash' (→ restart).
+
+    bot_engine.run() signals a fatal main-loop crash with sys.exit(1) (a non-zero SystemExit). That
+    must be treated as a CRASH so the watchdog restarts — NOT as a clean exit. Only a zero/None-code
+    SystemExit or a KeyboardInterrupt is an intentional, do-not-restart shutdown.
+    """
+    if isinstance(exc, KeyboardInterrupt):
+        return "clean"
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        return "clean" if (code is None or code == 0) else "crash"
+    return "crash"  # any other Exception is a crash
+
+
 def run_with_watchdog():
     """Watchdog wrapper — restarts the bot on crashes for 24/7 operation."""
     from core.bot_engine import BotEngine
@@ -85,10 +100,12 @@ def run_with_watchdog():
             engine.run()
             # If run() returns normally, exit cleanly
             break
-        except SystemExit:
-            logger.info("[Watchdog] Clean exit requested")
-            break  # Intentional exit
-        except Exception as e:
+        except (KeyboardInterrupt, SystemExit, Exception) as e:
+            # A non-zero SystemExit is bot_engine.run()'s fatal-crash signal (sys.exit(1)) — restart
+            # it; do NOT mistake it for a clean exit (the bug that left the bot permanently down).
+            if _classify_exit(e) == "clean":
+                logger.info("[Watchdog] Clean exit requested")
+                break  # Intentional exit
             # loguru ignores the stdlib `exc_info` kwarg — use .opt(exception=True)
             # so the full traceback lands in the log. 2026-04-20: previously
             # `'list' object has no attribute 'get'` crashes were invisible.
