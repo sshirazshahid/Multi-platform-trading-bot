@@ -261,6 +261,8 @@ def _summarise(y, oos_proba, *, n_trials: int):
         sr_observed=out["paper_sharpe_at_0_55"],
         n_trials=int(n_trials),
         n_obs=max(2, int(paper.size)),
+        # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
+        sr_var=1.0 / max(2, int(paper.size)),
     ))
     return out
 
@@ -488,6 +490,8 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
             sr_observed=ens_sharpe,
             n_trials=len(LR_C_GRID) + len(GBM_LR_GRID),
             n_obs=int(paper_ens.size),
+            # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
+            sr_var=1.0 / max(2, int(paper_ens.size)),
         ))
     else:
         ens_sharpe = 0.0

@@ -60,10 +60,38 @@ def test_bh_fdr_basic():
 def test_dsr_for_alpha_uses_trials():
     # n_trials>=2 both sides (stat_tests clamps n_trials to >=2), strict
     # inequality so a regression that drops the trials arg would FAIL.
-    r = np.full(300, 0.005) + np.random.default_rng(2).normal(0, 0.01, 300)
+    # Per-bar Sharpe ~0.1 (mean 0.001 / std 0.01): in the discriminating band given the
+    # 1/n_obs sr_var scaling, so the n_trials deflation is observable (a Sharpe of ~0.5
+    # would saturate both sides to 1.0 once the gate actually discriminates).
+    r = np.full(300, 0.001) + np.random.default_rng(2).normal(0, 0.01, 300)
     d_low = screen.dsr_for_returns(r, n_trials=2)
     d_high = screen.dsr_for_returns(r, n_trials=500)
     assert d_low > d_high  # more trials strictly deflates the probability
+
+
+def test_dsr_discriminates_a_real_per_bar_edge_from_null():
+    # The frozen DSR gate must SEPARATE a genuine per-bar edge from a null one at the same
+    # n_trials. Pre-fix (sr_var defaulted to 1.0) the expected-max-Sharpe bar was ~3.0 PER BAR,
+    # so DSR read 0.00 for ANY realistic per-bar Sharpe -> non-discriminating GO gate.
+    rng = np.random.default_rng(7)
+    n = 4000
+    strong = 0.0012 + rng.normal(0, 0.01, n)    # per-bar Sharpe ~0.12 (a real edge)
+    nullish = 0.00005 + rng.normal(0, 0.01, n)  # per-bar Sharpe ~0.005 (noise)
+    d_strong = screen.dsr_for_returns(strong, n_trials=200)
+    d_null = screen.dsr_for_returns(nullish, n_trials=200)
+    assert d_strong >= 0.10   # a genuine per-bar edge can now clear the gate
+    assert d_null < 0.10      # a null one cannot
+    assert d_strong > d_null
+
+
+def test_dsr_accepts_explicit_sr_var_override():
+    # A caller holding the full trial-Sharpe population may pass the empirical variance for a
+    # stricter, BLdP-faithful gate; a larger sr_var raises the expected-max bar -> lower DSR.
+    rng = np.random.default_rng(8)
+    r = 0.0012 + rng.normal(0, 0.01, 4000)
+    d_default = screen.dsr_for_returns(r, n_trials=200)                 # sr_var = 1/n_obs
+    d_inflated = screen.dsr_for_returns(r, n_trials=200, sr_var=1e-2)   # large -> stricter
+    assert d_inflated < d_default
 
 
 def test_bh_fdr_rejects_up_to_largest_passing_rank():

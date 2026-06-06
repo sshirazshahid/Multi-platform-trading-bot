@@ -112,17 +112,28 @@ def sharpe_pvalue(returns) -> float:
     return float(1.0 - norm.cdf(z))
 
 
-def dsr_for_returns(returns, *, n_trials: int) -> float:
-    """Trials-deflated Pr[true SR > 0] for a return series."""
+def dsr_for_returns(returns, *, n_trials: int, sr_var: float | None = None) -> float:
+    """Trials-deflated Pr[true SR > 0] for a RAW per-bar return series.
+
+    ``sr_var`` is V[{SR_n}] — the variance of the Sharpe estimates ACROSS the n_trials attempts
+    (Bailey & López de Prado). For raw per-bar returns the null sampling variance of a Sharpe
+    estimate is ~ 1/n_obs, so when ``sr_var`` is not given we default to ``1/n_obs`` rather than
+    the primitive's ``1.0``. With ``sr_var=1.0`` the expected-max-Sharpe bar is ~3.0 PER BAR, which
+    makes the DSR read 0.00 for ANY realistic per-bar Sharpe — a silent, non-discriminating gate
+    (the bug this fixes, 2026-06-06). Callers holding the full population of trial Sharpes may pass
+    the empirical variance for a stricter, fully BLdP-faithful gate.
+    """
     r = pd.Series(returns).dropna().to_numpy()
     if r.size < 2:
         return 0.5
+    var = (1.0 / r.size) if sr_var is None else float(sr_var)
     return float(deflated_sharpe(
         sr_observed=sharpe(r),
         n_trials=int(n_trials),
         n_obs=int(r.size),
         skew=float(_skew(r)),
         kurt=float(_kurtosis(r, fisher=False)),  # Pearson: normal = 3
+        sr_var=var,
     ))
 
 
