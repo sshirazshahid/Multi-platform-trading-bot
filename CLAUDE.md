@@ -132,10 +132,21 @@ Active exchanges: `BinanceClient`, `BybitClient`, `BitgetClient` (three-exchange
 
 ### Strategies (`strategies/`)
 
-All extend `BaseStrategy`. Active in backtest/research; Claude Portfolio mode makes its own entry/exit decisions.
+All extend `BaseStrategy`. **None of these classes are in the live Claude Portfolio decision
+path** — `mcp_brain` makes every live entry/exit decision (Claude-primary, algorithmic-fallback).
+These are for backtest/research only. (Corrected 2026-06-07 wiring audit; the prior "Active" list
+was misleading.)
 
-Active: `SupertrendStrategy`, `MeanReversionStrategy`, `MultiTFStrategy`, `GridTradingStrategy`, `ScalpingStrategy`, `DCAStrategy`, `FundingRateArbStrategy`, `RebalancingStrategy`
-Backtest-only: `TrendFollowingStrategy` (0% WR over 8 live trades)
+- `strategies/` root: `DCAStrategy` (live DCA is hard-OFF: `ENABLE_DCA=False`, config.py),
+  `RebalancingStrategy`, `rule_engine`, `base_strategy`.
+- `strategies/legacy/` (backtest-only, moved out of the live tree): `SupertrendStrategy`,
+  `MeanReversionStrategy`, `MultiTFStrategy`, `GridTradingStrategy`, `ScalpingStrategy`,
+  `FundingRateArbStrategy`, `TrendFollowingStrategy` (0% WR over 8 live trades).
+
+Note: live SCALP behavior is the SCALP *leverage tier* in `mcp_brain`/`bot_engine`, NOT the legacy
+`ScalpingStrategy` class. "Breakout" is the MCP structure/microstructure bonus, NOT
+`SupertrendStrategy`. The standalone `strategy_selector`/`arbitrage` strategies run only via the
+separate `multi_profile_main.py` entry point (DRY_RUN-required), not via `main.py`.
 
 ### Environment Setup
 
@@ -153,7 +164,7 @@ All settings centralized. Loaded from `.env` via `python-dotenv`. Key sections:
 - Operating mode and DRY_RUN derivation
 - Fee structure per exchange
 - Sim-live realism settings (slippage, wick SL/TP, funding)
-- Risk management (tiered leverage: STANDARD 3x / STRONG 4x / CONVICTION 5x)
+- Risk management — five `LEVERAGE_TIERS` (config.py): STANDARD 3x / STRONG 4x / CONVICTION 5x / AGGRESSIVE 10x / SCALP 3x. **As of 2026-06-06 (`CONFIDENCE_LEVERAGE_ESCALATION=False`), confidence cannot escalate leverage above STANDARD** — the MCP score is anti-predictive, so STRONG/CONVICTION/AGGRESSIVE are blocked; only STANDARD/SCALP are reachable. SCALP is dropped from the dict when `SCALP_TIER_ENABLED=false`.
 - Trading pairs: `TRADING_MODE=all` (in `.env`) runs `pair_discovery.discover_all_mode` against every liquid USDT perp on each exchange. The static `UNIVERSE_WHITELIST` gate in `bot_engine._execute_open` is SKIPPED when `TRADING_MODE=all` — quality is enforced by MCP score ≥65, meta-filter, universe_filter (spread/vol/depth), and risk gates. `WHITELIST_SYMBOLS` (16 high-WR symbols) is retained as a leverage-tier hint, not as an entry gate
 - Trading gates (whitelist/blacklist/allowed hours from knowledge_model data)
 - Strategy parameters (legacy, kept for DCA/rebalance reference)

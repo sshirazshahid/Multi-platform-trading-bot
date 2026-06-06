@@ -1,7 +1,13 @@
 """
-core/mcp_brain.py — Algorithmic Quant Brain: 24/7 Multi-Factor Scoring Engine
+core/mcp_brain.py — Quant Brain: 24/7 Multi-Factor Scoring Engine
 
-Pure algorithmic decision-making — NO external AI calls (no Claude CLI, no Anthropic API).
+DECISION AUTHORITY (corrected 2026-06-07 wiring audit): the live portfolio path is
+Claude-PRIMARY. analyze_portfolio() calls the Claude CLI first (_ask_claude_portfolio);
+the algorithmic multi-factor scorer below is the FALLBACK that decides only when Claude
+returns no actions (e.g. CLI timeout), plus it always blends into the confidence of a
+Claude OPEN. The earlier "pure algorithmic, no external AI calls" claim was false — the
+algorithmic gate (score>=66) is authoritative on the fallback path only. (Both paths run
+on the same OHLCV substrate and the book is NO_EDGE; wiring != edge.)
 
 7 Live Data Sources:
   1. Crypto.com API        - live prices, 24h volume, high/low
@@ -23,7 +29,9 @@ Two Operating Modes:
   + Smart Money: SMC Structure(10) | SMC Entry(10) | SMC Confirmation(8)
   Smart Money integrates: FVG, Fibonacci, Supply/Demand, Liquidity Sweeps,
   Order Blocks, BOS/ChoCH, Volume Profile, ICT OTE, Price Action patterns.
-  Requires score >= 65 AND 4+/10 layers for entry. Asymmetric R:R 2.0:1 minimum.
+  Live fallback gate: score >= 66 AND 6+/10 layers for entry (scalp path: score >= 65 AND
+  4+ layers). Asymmetric R:R 2.0:1 minimum. NOTE: B1 MACD and B3 15m-timing bonuses are
+  computed but award +0 (v4 anti-predictive finding), so the effective bonus set is 8, not 10.
 
 Safety:
   - < 2 data sources = all HOLD

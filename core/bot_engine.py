@@ -1386,7 +1386,13 @@ class BotEngine:
             if _tier_blocked_by_cap(tier_name, tier_cap, CONFIDENCE_LEVERAGE_ESCALATION):
                 continue
 
-            t = LEVERAGE_TIERS[tier_name]
+            # .get() not [] — config.py pops 'SCALP' from LEVERAGE_TIERS when
+            # SCALP_TIER_ENABLED=false, but this loop iterates a hard-coded tuple
+            # that still includes 'SCALP'. A bare subscript KeyErrors on the popped
+            # tier; skip a disabled/absent tier gracefully instead.
+            t = LEVERAGE_TIERS.get(tier_name)
+            if t is None:
+                continue
             if confidence < t["min_confidence"]:
                 continue
             if t["requires_whitelist"] and not in_whitelist:
