@@ -612,6 +612,13 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # 0.015 = 0.45% balance risk per STANDARD trade (was 0.675% at 3x), still
 # above the cost floor for any pocket ≥ $165 and well under the 1.0%
 # MAX_LOSS_PER_TRADE_PCT cap below.
+# 2026-06-06 (audit + owner directive): the MCP score is anti-predictive (r=-0.285; score>=85 =
+# WORST cohort), yet confidence rose with score and unlocked higher leverage tiers (phase51 mapped
+# score 85+ -> AGGRESSIVE 10x). That sizes UP on the known-worst trades. With this False, confidence
+# can NO LONGER escalate leverage above STANDARD (3x) — pure loss-variance reduction on a NO_EDGE
+# book (does NOT create edge). Set True to restore phase51 aggressive-on-high-score sizing.
+CONFIDENCE_LEVERAGE_ESCALATION = False
+
 LEVERAGE_TIERS = {
     "STANDARD": {
         # 2026-05-12 (phase51): 2→3x per user directive. Covers all allowed-

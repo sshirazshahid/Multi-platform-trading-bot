@@ -67,6 +67,19 @@ from utils import TelegramNotifier
 
 console = Console()
 
+
+def _tier_blocked_by_cap(tier_name: str, tier_cap, escalation_enabled: bool) -> bool:
+    """True if `tier_name` exceeds the allowed leverage ceiling and must be skipped.
+
+    Leverage is capped to STANDARD (3x) when EITHER the consec-loss throttle set tier_cap to
+    "STANDARD", OR confidence-driven escalation is disabled (config.CONFIDENCE_LEVERAGE_ESCALATION
+    False). The latter (owner directive 2026-06-06) stops the bot sizing UP on its anti-predictive
+    high-score cohort (score>=85, r=-0.285). STANDARD and SCALP are always allowed (both 3x).
+    """
+    cap_to_standard = (tier_cap == "STANDARD") or (not escalation_enabled)
+    return bool(cap_to_standard and tier_name not in ("STANDARD", "SCALP"))
+
+
 MAX_PER_EXCHANGE    = CLAUDE_PORTFOLIO.get("max_per_exchange", 6)
 MAX_TOTAL_POSITIONS = 8       # Max 8 total across all exchanges
 NEWS_INTERVAL       = CLAUDE_PORTFOLIO.get("news_interval_min", 30) * 60
@@ -1360,16 +1373,17 @@ class BotEngine:
         # half-size path unreachable and silently discarding WARMUP_HOURS_UTC opportunities.
         is_allowed_hour = hour_class in ("peak", "allowed", "warmup")
         high_atr        = atr_pct >= HIGH_ATR_PCT_THRESHOLD
-        # 2026-05-12 (phase51): anti-EV cap removed. Cap was based on bug-era
-        # data (0.57:1 R:R, ghost-close leaks, misattributed trades). Post-fix
-        # R:R is 2.37:1 and score 85+ now maps to AGGRESSIVE (10x) by user
-        # directive. tier_cap still set by consec-loss throttle above.
+        # 2026-05-12 (phase51): anti-EV cap removed; score 85+ mapped to AGGRESSIVE (10x).
+        # 2026-06-06 (audit + owner directive): REVERSED — the MCP score is anti-predictive
+        # (r=-0.285; score>=85 = worst cohort), so confidence no longer escalates leverage above
+        # STANDARD unless config.CONFIDENCE_LEVERAGE_ESCALATION is True. tier_cap (consec-loss
+        # throttle) still caps independently.
+        from config import CONFIDENCE_LEVERAGE_ESCALATION
 
-        # Try tiers highest → lowest (10x → 5x → 4x → 3x → 2x SCALP)
+        # Try tiers highest → lowest (10x → 5x → 4x → 3x → 3x SCALP)
         # 2026-05-22: SCALP fallback for chop hours when blended conf is 0.40-0.55.
-        # Position size is 10% balance (vs 50% for higher tiers) so risk is contained.
         for tier_name in ("AGGRESSIVE", "CONVICTION", "STRONG", "STANDARD", "SCALP"):
-            if tier_cap == "STANDARD" and tier_name not in ("STANDARD", "SCALP"):
+            if _tier_blocked_by_cap(tier_name, tier_cap, CONFIDENCE_LEVERAGE_ESCALATION):
                 continue
 
             t = LEVERAGE_TIERS[tier_name]

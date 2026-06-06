@@ -486,13 +486,12 @@ class TestReweights:
                 f"(score_no_vwap={r_off['score']}, score_with_vwap={r_on['score']})"
             )
 
-    def test_b7_vwap_weight_in_standard_scorer_is_15(self):
-        """Standard _score_coin B7 VWAP awards +15 pts (v4 reweight from +5).
+    def test_b7_vwap_weight_in_standard_scorer_is_5(self):
+        """Standard _score_coin B7 VWAP awards +5 pts.
 
-        The v4 reweight is confirmed at mcp_brain.py line ~2627: score += 15.
-        Both the standard scorer (_score_coin) and the scalp scorer
-        (_score_coin_scalp) use +15 for VWAP proximity — it is the strongest
-        signal in the 454-trade dataset (61.9% WR for VWAP + Long).
+        2026-06-06 (audit + owner): the v4 +15 reweight was REVERTED to +5 — it was unvalidated
+        (no OOS evidence) and over-weighted one feature on a NO_EDGE tape. The scalp scorer's
+        tighter-window B_VWAP stays +15 (load-bearing for the scalp entry threshold).
         """
         brain = _make_brain()
         ei_no_vwap = _minimal_ei(
@@ -512,7 +511,7 @@ class TestReweights:
 
         if r_off.get("score", 0) > 0 and r_on.get("score", 0) > 0:
             delta = r_on["score"] - r_off["score"]
-            assert delta == 15, (
-                f"Standard B7 VWAP (v4) should contribute +15 pts, got delta={delta} "
+            assert delta == 5, (
+                f"Standard B7 VWAP should contribute +5 pts (reverted from +15), got delta={delta} "
                 f"(score_no_vwap={r_off['score']}, score_with_vwap={r_on['score']})"
             )

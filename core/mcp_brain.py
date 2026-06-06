@@ -2665,15 +2665,17 @@ class MCPBrain:
             bonus_reasons.append(_b6_label)
 
         # B7: VWAP confirmation — price above VWAP for longs, below for shorts
-        # v4: reweighted +5→+15 (VWAP proximity is the strongest scalp signal)
+        # v4 reweighted +5→+15 ("strongest scalp signal"); 2026-06-06 (audit + owner): reverted to
+        # +5 — the +15 was unvalidated (no OOS evidence) and over-weighted one feature on a NO_EDGE
+        # tape, driving more entries / fee bleed without edge.
         pvw = ei_1h.get("price_vs_vwap", 0)
         if side == "buy" and 0.05 < pvw < 2.0:
             bonus_count += 1
-            score += 15
+            score += 5
             bonus_reasons.append(f"vwap=+{pvw:.2f}%")
         elif side == "sell" and -2.0 < pvw < -0.05:
             bonus_count += 1
-            score += 15
+            score += 5
             bonus_reasons.append(f"vwap={pvw:.2f}%")
 
         # ═══ SMART MONEY / ICT BONUS CONDITIONS (2026-04-16) ═══════
@@ -3165,7 +3167,9 @@ class MCPBrain:
         bonus_count = 0
         bonus_reasons = []
 
-        # B_VWAP (+15): near VWAP and approaching from below (longs)
+        # B_VWAP (+15): near VWAP and approaching from below (longs). Left at +15: this is a
+        # load-bearing, tighter-window (-0.2..0.15) calibration of the SCALP tier (it must reach
+        # the scalp entry threshold) — distinct from the standard B7 reverted to +5 on 2026-06-06.
         pvw_signed = ei_1h.get("price_vs_vwap", 0)
         if side == "buy" and -0.2 <= pvw_signed <= 0.15:
             bonus_count += 1
