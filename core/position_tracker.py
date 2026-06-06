@@ -183,6 +183,18 @@ class Position:
     # Defaults to 0.0 so old positions in JSON load fine; calibrator
     # skips trades with confidence == 0.
     confidence:   float           = 0.0
+    # ── Booking-completeness fields (audit 2026-06-04) ────────────────
+    # entry_stop_loss: the IMMUTABLE entry-time stop. r_multiple MUST be
+    # measured against this, not the trailed/breakeven-moved stop_loss —
+    # otherwise a BE move (denom == 0) NULLs R or a tightened stop inflates
+    # it. Captured once in __post_init__; never mutated by trailing/BE.
+    entry_stop_loss: float        = 0.0
+    # Partial-TP accumulators so the final warehouse row books the WHOLE
+    # trade, not just the runner leg. The taken fraction otherwise only
+    # hits the paper wallet, biasing warehouse WR / realized-R downward.
+    realized_partial_pnl: float   = 0.0   # Σ net pnl of partial fills
+    partial_exit_value:   float   = 0.0   # Σ (qty * price) of partial fills
+    partial_exit_qty:     float   = 0.0   # Σ qty of partial fills
 
     def __post_init__(self):
         rate = _fee_rate(self.market_type)
@@ -192,6 +204,12 @@ class Position:
         # total_fees = entry_fee + exit_fee (exit_fee is 0 until close())
         if self.total_fees == 0.0:
             self.total_fees = self.entry_fee + self.exit_fee
+        # Capture the entry-time stop ONCE so trailing/breakeven moves to
+        # self.stop_loss can't contaminate booked r_multiple. Positions
+        # loaded from pre-fix JSON (== 0.0) fall back to their current stop
+        # as a best-effort baseline.
+        if self.entry_stop_loss == 0.0:
+            self.entry_stop_loss = self.stop_loss
 
     def close(self, exit_price: float, reason: str):
         self.exit_price   = exit_price
@@ -216,6 +234,48 @@ class Position:
         notional     = self.entry_price * self.size
         margin       = notional / max(self.leverage, 1)
         self.pnl_pct = (self.pnl / margin * 100) if margin > 0 else 0.0
+
+    def entry_risk_stop(self) -> float:
+        """Entry-time stop used as the R denominator. Falls back to the
+        (possibly trailed) stop_loss for positions opened before
+        entry_stop_loss was tracked."""
+        es = float(self.entry_stop_loss or 0.0)
+        return es if es > 0 else float(self.stop_loss or 0.0)
+
+    def r_multiple(self, exit_px: float) -> Optional[float]:
+        """Reward / entry-risk, measured against the IMMUTABLE entry stop so
+        a trailed / breakeven-moved stop cannot inflate (or NULL) booked R."""
+        ep = float(self.entry_price or 0.0)
+        sp = self.entry_risk_stop()
+        xp = float(exit_px or 0.0)
+        if ep <= 0 or sp <= 0 or xp <= 0 or sp == ep:
+            return None
+        if self.side == "buy":
+            denom = ep - sp
+            return (xp - ep) / denom if denom > 0 else None
+        denom = sp - ep
+        return (ep - xp) / denom if denom > 0 else None
+
+    def book_partial_exit(self, qty: float, price: float, net_pnl: float) -> None:
+        """Record a partial-TP fill so _finalize_close books the WHOLE trade
+        (runner leg alone under-counts realized PnL). Additive — supports
+        multiple partials on one position."""
+        self.partial_exit_qty += float(qty)
+        self.partial_exit_value += float(qty) * float(price)
+        self.realized_partial_pnl += float(net_pnl)
+
+    def effective_exit_price(self, final_px: float) -> float:
+        """Size-weighted average exit over partial fills + the final (runner)
+        fill. Reduces to final_px when no partial was taken. `self.size` is
+        the runner size at finalize (already decremented by the partial)."""
+        pq = float(self.partial_exit_qty or 0.0)
+        if pq <= 0:
+            return float(final_px)
+        runner = float(self.size or 0.0)
+        total = pq + runner
+        if total <= 0:
+            return float(final_px)
+        return (self.partial_exit_value + runner * float(final_px)) / total
 
     @property
     def is_open(self) -> bool:
