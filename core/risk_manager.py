@@ -360,9 +360,13 @@ class RiskManager:
             _DLB = {}
         if _DLB.get("enabled") and self._start_balance > 0:
             loss_budget = abs(float(_DLB.get("max_loss_pct", 0.02))) * self._start_balance
-            if loss_budget > 0 and self._daily_pnl <= -loss_budget:
+            # Read _daily_pnl under the lock the writer (record_trade_pnl) holds, so the breaker
+            # decision sees a committed value rather than a value mid-update (audit 2026-06-06).
+            with self._lock:
+                daily_pnl_snapshot = self._daily_pnl
+            if loss_budget > 0 and daily_pnl_snapshot <= -loss_budget:
                 logger.warning(
-                    f"[Risk] Daily-loss breaker tripped: today {self._daily_pnl:+.2f} USDT "
+                    f"[Risk] Daily-loss breaker tripped: today {daily_pnl_snapshot:+.2f} USDT "
                     f"<= -{loss_budget:.2f} ({float(_DLB.get('max_loss_pct', 0.02)) * 100:.1f}% "
                     f"of {self._start_balance:.2f}) — refusing NEW entries until the day "
                     f"rolls over. Existing positions keep their SLs; auto-resets next day."
@@ -658,6 +662,12 @@ class RiskManager:
             tp_dist = tp_dist * ratio
             original_pct = sl_dist / entry * 100 if entry > 0 else 0
             sl_dist = min_sl_dist
+            # The 2.0x TP-expansion cap can leave R:R below the configured minimum when the
+            # original ATR SL was tiny (e.g. 0.2% SL + 2:1 TP -> floored 1.0% SL + 0.8% TP = 0.8:1).
+            # Re-assert min_rr_ratio so we never ship a sub-minimum-R:R bracket (audit 2026-06-06).
+            min_rr = RISK.get("min_rr_ratio", 1.2)
+            if tp_dist < sl_dist * min_rr:
+                tp_dist = sl_dist * min_rr
             logger.debug(
                 f"[Risk] SL floor applied: {sl_dist/entry*100:.2f}% "
                 f"(original wanted {original_pct:.2f}%, lev={leverage}x)")

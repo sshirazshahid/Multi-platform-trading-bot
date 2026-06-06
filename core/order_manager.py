@@ -1380,6 +1380,10 @@ class OrderManager:
             _params: dict = {}
             if position.market_type == "futures":
                 _params["reduceOnly"] = True
+                # Hedge-mode (not one-way) futures need positionSide so ccxt can disambiguate the
+                # leg — mirrors close_position. One-way venues (e.g. Bitget) keep reduceOnly only.
+                if exchange.name.lower() not in self._oneway_mode:
+                    _params["positionSide"] = "LONG" if position.side == "buy" else "SHORT"
             try:
                 exchange.create_order(
                     position.symbol, "market", close_side, partial_size,
@@ -1392,6 +1396,27 @@ class OrderManager:
         position.size -= partial_size
         position.partial_taken = True
 
+        # Compute the partial fill's economics ONCE (mode-agnostic) and record
+        # it on the Position so _finalize_close books the WHOLE trade — not just
+        # the runner leg (audit 2026-06-04: the taken fraction only ever reached
+        # the paper wallet, so the warehouse trade row under-counted realized PnL
+        # and biased WR / realized-R downward). book_partial_exit is additive and
+        # disjoint from the final (reduced-size) close — NO double-count.
+        p_gross = 0.0
+        p_exit_fee = 0.0
+        try:
+            p_gross = ((price - position.entry_price) if position.side == "buy"
+                       else (position.entry_price - price)) * partial_size
+            try:
+                from core.position_tracker import _fee_rate
+                p_exit_fee = partial_size * price * _fee_rate(position.market_type)
+            except Exception:
+                p_exit_fee = partial_size * price * (
+                    0.0005 if position.market_type == "futures" else 0.001)
+            position.book_partial_exit(partial_size, price, p_gross - p_exit_fee)
+        except Exception as _be:
+            logger.debug(f"[Orders] book_partial_exit skipped: {_be}")
+
         # Book the closed fraction in the PAPER wallet (audit 2026-06-03). Without this,
         # partial_close never returned the taken fraction's margin + profit to the paper
         # balance — only _finalize_close booked anything, and on the now-REDUCED size — so
@@ -1402,14 +1427,6 @@ class OrderManager:
         _is_paper = position.paper_trade if hasattr(position, "paper_trade") else self.dry_run
         if _is_paper:
             try:
-                p_gross = ((price - position.entry_price) if position.side == "buy"
-                           else (position.entry_price - price)) * partial_size
-                try:
-                    from core.position_tracker import _fee_rate
-                    p_exit_fee = partial_size * price * _fee_rate(position.market_type)
-                except Exception:
-                    p_exit_fee = partial_size * price * (
-                        0.0005 if position.market_type == "futures" else 0.001)
                 self.wallet.on_close(
                     position.exchange, position.symbol, position.side,
                     partial_size, price, position.entry_price,
@@ -1797,20 +1814,29 @@ class OrderManager:
             )
 
         if tid:
-            # r_multiple = price move / stop distance (side-aware).
-            r_mult = None
-            sl = float(getattr(pos, "stop_loss", 0) or 0)
-            ep = float(pos.entry_price or 0)
             xp = float(price or 0)
-            if sl > 0 and ep > 0 and xp > 0 and sl != ep:
-                if pos.side == "buy":
-                    denom = ep - sl
-                    if denom > 0:
-                        r_mult = (xp - ep) / denom
-                else:
-                    denom = sl - ep
-                    if denom > 0:
-                        r_mult = (ep - xp) / denom
+            # r_multiple against the IMMUTABLE entry stop (not the trailed/BE
+            # stop) and blended over any partial fills (audit 2026-06-04: a
+            # BE-moved stop NULLed/inflated R). r_multiple has no ACTIVE live
+            # reader, so fixing it is measurement-only.
+            #
+            # realized_pnl is DELIBERATELY left as the RUNNER leg: it feeds the
+            # live recent_expectancy entry gate + health/mcp/promotion readers,
+            # so shifting it would silently change gating. The partial-TP
+            # fraction is booked SEPARATELY in partial_realized_pnl; whole-trade
+            # $ = realized_pnl + partial_realized_pnl. Recalibrating the gate to
+            # whole-trade economics is a separate owner decision.
+            # Defensive fallback keeps legacy behavior if the Position predates
+            # the booking-completeness methods.
+            try:
+                eff_exit = pos.effective_exit_price(xp)
+                r_mult = pos.r_multiple(eff_exit)
+                entry_stop_px = pos.entry_risk_stop()
+                partial_pnl = float(getattr(pos, "realized_partial_pnl", 0.0) or 0.0)
+            except Exception:
+                r_mult = None
+                entry_stop_px = None
+                partial_pnl = 0.0
             ts_exit = float(getattr(pos, "close_time", 0) or time.time())
             try:
                 wh.record_trade_close(
@@ -1822,6 +1848,8 @@ class OrderManager:
                     hold_sec=ts_exit - float(getattr(pos, "open_time", ts_exit)),
                     exit_reason=reason,
                     fee=float(getattr(pos, "total_fees", 0.0)),
+                    entry_stop_px=round(entry_stop_px, 8) if entry_stop_px else None,
+                    partial_realized_pnl=round(partial_pnl, 8) if partial_pnl else None,
                 )
             except Exception as _wce:
                 logger.warning(
