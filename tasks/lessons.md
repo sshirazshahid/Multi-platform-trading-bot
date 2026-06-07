@@ -106,3 +106,21 @@ lesson L3 ("divide by leverage") was exactly the check I skipped.
 **Rule**: when a percentage looks impossible, apply the leverage divisor
 BEFORE assuming it's phantom/corrupt data. L3 applies at the reading
 step, not just during design.
+
+### L9: In PAPER/research mode, don't caveat findings with real-capital deployability
+I kept appending "even a positive result isn't capturable at ~$1,300
+(min-notional × many legs)" to every research finding. The user corrected
+it: we're in PAPER mode, so capital is NOT the research constraint. Two
+separate questions were being conflated:
+  - **Does an edge exist, after costs?** — a research question, capital-
+    independent. This is what PAPER mode is for. KEEP after-cost gating
+    (an edge must beat fees/slippage to be real).
+  - **Is it deployable at current real capital?** — a deployment question.
+    Irrelevant while researching in PAPER; raise it only at a genuine
+    live-sizing decision, and then once, not as a refrain.
+
+**Rule**: evaluate PAPER-mode research purely on after-cost edge-existence.
+Do NOT reflexively tack on the $1,300/min-notional caveat — it's a deploy-
+time concern, not a research finding. (Does not contradict the standing
+honesty that the bot won't cover living expenses — that's a big-picture
+truth stated when relevant, not a per-result disclaimer.)

@@ -1289,7 +1289,13 @@ class MCPBrain:
 
         results = {}
         timeframes = ["4h", "1h", "15m"]
-        limit_map = {"4h": 80, "1h": 100, "15m": 100}
+        # Warmup: scripts/indicator_bias_audit.py (2026-06-08) showed ADX(14) drifts ~34% and
+        # EMA50 ~0.9% at <200 bars (ewm adjust=False is recursive). The 4 REQUIRED entry gates
+        # (4h/1h EMA20-50, RSI, ADX>=20) must be computed on CONVERGED indicators, so the old
+        # 80/100 warmup was too short (ADX needs ~200) → backtest-vs-live divergence on the gate
+        # values. 250 bars is one API call on every venue and converges all of EMA50/RSI/ADX.
+        # (Correctness/fidelity fix; expectancy-neutral — does not change the NO-EDGE verdict.)
+        limit_map = {"4h": 250, "1h": 250, "15m": 250}
 
         # Fetch the top-25 analyzed coins, PLUS any analysis-only research
         # instruments (commodity/equity perps) so their indicators are computed

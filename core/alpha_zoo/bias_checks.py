@@ -8,7 +8,15 @@ peeking at the future (shift(-n), centered windows, unbounded max/mean over the 
 series). `lookahead_violations` recomputes the feature on each truncated prefix and flags
 any bar whose value moves.
 
-(A same-universe shuffle-control significance check is a planned follow-up increment.)
+RECURSIVE / REPAINT: a feature whose value at the SAME final bar changes depending on how
+much PRECEDING history it was given (recursive EMA/RSI/ATR warmup, whole-series
+normalisation). `recursive_instability` recomputes the feature with progressively more
+startup history, all ending on the same bar, and measures the final-bar drift — a backtest
+(full history) and live (limited history) DIVERGE wherever this drift is non-trivial. This
+mirrors freqtrade's `recursive-analysis`; `lookahead_violations` mirrors its
+`lookahead-analysis`.
+
+(A same-universe shuffle-control significance check is implemented below.)
 """
 from __future__ import annotations
 
@@ -45,6 +53,63 @@ def lookahead_violations(compute_fn, series, *, check_indices=None, atol=1e-9):
 def is_causal(compute_fn, series, **kwargs) -> bool:
     """True iff ``compute_fn`` shows no look-ahead violations on ``series``."""
     return len(lookahead_violations(compute_fn, series, **kwargs)) == 0
+
+
+def _tail(series, length):
+    """Last ``length`` elements of a list/ndarray/Series/DataFrame."""
+    if hasattr(series, "iloc"):
+        return series.iloc[-length:]
+    return series[-length:]
+
+
+def recursive_instability(compute_fn, series, *, history_lengths=None,
+                          min_len: int = 30, rel_tol: float = 1e-3):
+    """Quantify how much ``compute_fn``'s FINAL-bar value depends on preceding history.
+
+    Recomputes the indicator on the last L elements for several L (all ending on the same
+    final bar) and measures how far the final value drifts from the most-history reference.
+    Recursive indicators (EMA/RSI/ATR with ``adjust=False``) and whole-series normalisers
+    drift until enough warmup accrues — that drift is the size of the backtest-vs-live gap
+    at that bar.
+
+    compute_fn: callable(sequence) -> sequence of the SAME length.
+    Returns dict(lengths, history_values, reference, max_abs_drift, max_rel_drift,
+    stable, min_stable_len). ``min_stable_len`` is the smallest tested L whose value is
+    within ``rel_tol`` of the reference (a warmup recommendation), or None.
+    """
+    n = len(series)
+    if history_lengths is None:
+        history_lengths = [50, 100, 200, 400, 800]
+    lens = sorted({min(int(L), n) for L in history_lengths if L >= min_len and L <= n} | {n})
+    vals: dict[int, float] = {}
+    for L in lens:
+        out = np.asarray(compute_fn(_tail(series, L)), dtype=float)
+        vals[L] = float(out[-1]) if len(out) else float("nan")
+    ref = vals[max(lens)] if lens else float("nan")
+    finite = {L: v for L, v in vals.items() if np.isfinite(v)}
+    if not np.isfinite(ref) or not finite:
+        return {"lengths": lens, "history_values": vals, "reference": ref,
+                "max_abs_drift": float("nan"), "max_rel_drift": float("nan"),
+                "stable": False, "min_stable_len": None}
+    denom = abs(ref) + 1e-12
+    abs_drift = {L: abs(v - ref) for L, v in finite.items()}
+    max_abs = max(abs_drift.values())
+    max_rel = max(d / denom for d in abs_drift.values())
+    min_stable = next((L for L in lens if L in finite and abs_drift[L] / denom <= rel_tol), None)
+    return {
+        "lengths": lens,
+        "history_values": vals,
+        "reference": ref,
+        "max_abs_drift": float(max_abs),
+        "max_rel_drift": float(max_rel),
+        "stable": bool(max_rel <= rel_tol),
+        "min_stable_len": min_stable,
+    }
+
+
+def is_history_stable(compute_fn, series, **kwargs) -> bool:
+    """True iff ``compute_fn``'s final-bar value is stable across history lengths."""
+    return bool(recursive_instability(compute_fn, series, **kwargs)["stable"])
 
 
 def shuffle_control_significance(signal, fwd, *, n_shuffles=200, seed=0,
