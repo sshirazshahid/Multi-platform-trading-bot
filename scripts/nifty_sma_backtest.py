@@ -39,15 +39,20 @@ _UA = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 
 
 # ---- data ------------------------------------------------------------------
-def fetch_nifty(rng: str = "5y", *, use_cache: bool = True) -> pd.DataFrame:
-    """Daily ^NSEI via Yahoo v8 chart API (UA + 429 backoff); cache per range to CSV."""
+def fetch_index(symbol: str = "^NSEI", rng: str = "5y", *, use_cache: bool = True) -> pd.DataFrame:
+    """Daily index OHLC via Yahoo v8 chart API (UA + 429 backoff); cache per symbol+range.
+
+    `rng="maxdaily"` uses explicit period1/period2 (since 2000-01-01) to force full DAILY
+    history — `range=max` silently returns MONTHLY bars. Works for any Yahoo index symbol
+    (^NSEI, ^BSESN, ^GSPC, ^IXIC, ^DJI, ^FTSE, ^N225, ^GDAXI, ...)."""
     import requests
-    cache = DATA / f"nifty50_daily_{rng}.csv"
-    base = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI"
+    slug = "".join(ch if ch.isalnum() else "_" for ch in symbol)
+    cache = DATA / f"index_{slug}_{rng}.csv"
+    enc = symbol.replace("^", "%5E")
+    base = f"https://query1.finance.yahoo.com/v8/finance/chart/{enc}"
     if rng == "maxdaily":
-        # range=max silently returns MONTHLY bars; explicit period1/period2 forces full DAILY.
         import time as _t
-        url = f"{base}?period1=1188604800&period2={int(_t.time())}&interval=1d"  # 2007-09-01->now
+        url = f"{base}?period1=946684800&period2={int(_t.time())}&interval=1d"  # 2000-01-01->now
     else:
         url = f"{base}?range={rng}&interval=1d"
     last_err = None
@@ -76,7 +81,12 @@ def fetch_nifty(rng: str = "5y", *, use_cache: bool = True) -> pd.DataFrame:
     if use_cache and cache.exists():
         print(f"[warn] fetch failed ({last_err}); using cached {cache}")
         return pd.read_csv(cache)
-    raise RuntimeError(f"could not fetch ^NSEI and no cache: {last_err}")
+    raise RuntimeError(f"could not fetch {symbol} and no cache: {last_err}")
+
+
+def fetch_nifty(rng: str = "5y", *, use_cache: bool = True) -> pd.DataFrame:
+    """Nifty 50 (^NSEI) convenience wrapper around fetch_index."""
+    return fetch_index("^NSEI", rng, use_cache=use_cache)
 
 
 # ---- pure backtest core (tested) -------------------------------------------
