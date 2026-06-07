@@ -111,3 +111,29 @@ manufacture EV from a near-zero entry edge.** See `research/scalp_edge_finding_2
 We tested the SOTA open foundation model for candlesticks, on leakage-safe data, with the bot's real
 cost model, and it does not clear breakeven for scalping. The result reinforces the standing posture:
 no validated edge → capital preservation, no scalper shipped.
+
+---
+
+## ADDENDUM 2026-06-07 — bigger model (Kronos-BASE, 102M) directional IC re-test
+
+Owner asked to "adapt EVERYTHING from Kronos" — fair objection that the May-29 run used only
+**Kronos-mini (4.1M)**. Downloaded **Kronos-base (102M, 25× mini)** + Tokenizer-base, ran the SAME
+leakage-safe Phase-2 IC probe (`scripts/kronos_ic_probe.py`, env-override `KRONOS_MDL_DIR`/`KRONOS_TOK_DIR`
+in `core/kronos_forecaster.py`), 1h post-cutoff (≥2025-09-01), 1200 inferences, 8 symbols.
+
+| tf | h | hit% | hit_p | Spearman IC | IC_p | mean signed R% |
+|----|---|------|-------|-------------|------|----------------|
+| 1h | 1 | 50.50 | 0.729 | 0.0429 | 0.138 | **0.0145%** |
+| 1h | 2 | 51.67 | 0.248 | 0.0301 | 0.297 | **0.0216%** |
+| 1h | 4 | 50.75 | 0.603 | 0.0035 | 0.903 | **0.0149%** |
+
+**Verdict: NO_EDGE, decisively — bigger is NOT better here.** Gross per-trade move 0.015–0.022% is
+**6–8× below the ~0.12% round-trip cost** (pre-committed kill threshold). Hit-rate is a coin-flip
+(no p<0.05), and the IC is **non-significant AND lower than the mini's** (base 0.043 vs mini 0.076 at
+h=1). Scaling 25× the parameters did not raise the per-bar *directional* magnitude — consistent with
+the paper's gains being in cross-sectional RankIC, not single-asset after-cost direction. Phase-3
+(after-cost bracket) was NOT run: the gross-vs-cost wall already fails before costs are even applied,
+so it cannot clear. Kronos remains NOT in any decision path; nothing was removed/disabled from the
+live bot. Structural reason unchanged: forecasting candles well ≠ exploitable directional edge net of
+retail cost — the efficient-market result, now confirmed at 25× scale. Base weights kept under
+`models/kronos/Kronos-base` (gitignored). **Do not re-litigate Kronos** (mini AND base both falsified).

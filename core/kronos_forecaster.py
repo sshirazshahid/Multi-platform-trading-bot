@@ -84,14 +84,19 @@ class KronosForecaster:
                 "Kronos requires torch + the vendored model package. "
                 "Install: python -m pip install -r requirements-kronos.txt"
             ) from e
-        if not _TOK_DIR.exists() or not _MDL_DIR.exists():
+        # Eval-only override (defaults to mini): point at a larger model/tokenizer
+        # via KRONOS_MDL_DIR / KRONOS_TOK_DIR to fairly test bigger Kronos sizes.
+        import os
+        tok_dir = Path(os.environ.get("KRONOS_TOK_DIR", str(_TOK_DIR)))
+        mdl_dir = Path(os.environ.get("KRONOS_MDL_DIR", str(_MDL_DIR)))
+        if not tok_dir.exists() or not mdl_dir.exists():
             raise RuntimeError(
-                f"Kronos weights missing under {_MDL_DIR.parent}. "
+                f"Kronos weights missing (tok={tok_dir}, mdl={mdl_dir}). "
                 "Download with huggingface_hub snapshot_download (see scripts/kronos_smoke.py)."
             )
         self._device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        tok = KronosTokenizer.from_pretrained(str(_TOK_DIR))
-        mdl = Kronos.from_pretrained(str(_MDL_DIR))
+        tok = KronosTokenizer.from_pretrained(str(tok_dir))
+        mdl = Kronos.from_pretrained(str(mdl_dir))
         self._predictor = KronosPredictor(
             mdl, tok, device=self._device, max_context=self.max_context
         )
