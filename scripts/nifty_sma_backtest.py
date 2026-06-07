@@ -43,8 +43,13 @@ def fetch_nifty(rng: str = "5y", *, use_cache: bool = True) -> pd.DataFrame:
     """Daily ^NSEI via Yahoo v8 chart API (UA + 429 backoff); cache per range to CSV."""
     import requests
     cache = DATA / f"nifty50_daily_{rng}.csv"
-    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI"
-           f"?range={rng}&interval=1d")
+    base = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI"
+    if rng == "maxdaily":
+        # range=max silently returns MONTHLY bars; explicit period1/period2 forces full DAILY.
+        import time as _t
+        url = f"{base}?period1=1188604800&period2={int(_t.time())}&interval=1d"  # 2007-09-01->now
+    else:
+        url = f"{base}?range={rng}&interval=1d"
     last_err = None
     for attempt in range(5):
         try:
