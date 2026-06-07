@@ -63,7 +63,10 @@ def main() -> int:
     except Exception:
         pass
 
+    cap = float(sys.argv[1]) if len(sys.argv) > 1 else CAP   # e.g. `... 1.0` for de-risk-only
+    mode = "de-risk-only (no leverage)" if cap <= 1.0 else f"de-risk + up to {cap:.0f}x leverage"
     rows = []
+    give_up = 0
     improve_sharpe = improve_dd = 0
     wfes, dsharpes = [], []
     for iname, sym in INDICES.items():
@@ -78,7 +81,7 @@ def main() -> int:
         pr = np.zeros(len(close)); pr[1:] = close[1:] / close[:-1] - 1.0
         tr_ret = pr + (DIV_YIELD[iname] / 100.0) / PPY
         tr_ret[0] = 0.0
-        sbp = {f"vt{lb}": _strat_ret(vol_target_position(tr_ret, lb), tr_ret, COST_ONEWAY)
+        sbp = {f"vt{lb}": _strat_ret(vol_target_position(tr_ret, lb, cap=cap), tr_ret, COST_ONEWAY)
                for lb in LOOKBACKS}
         r = _run_wfa(sbp, tr_ret, is_days=IS_DAYS, oos_days=OOS_DAYS, step=STEP, objective="sharpe")
         if not r:
@@ -88,6 +91,7 @@ def main() -> int:
         d_dd = vt["max_drawdown"] - bh["max_drawdown"]    # >0 means SHALLOWER (less negative)
         improve_sharpe += int(d_sharpe > 0)
         improve_dd += int(d_dd > 0)
+        give_up += int(vt["total_return"] < bh["total_return"])
         wfes.append(r["wfe_median"]); dsharpes.append(d_sharpe)
         rows.append({"index": iname, "vt_sharpe": vt["sharpe"], "bh_sharpe": bh["sharpe"],
                      "d_sharpe": d_sharpe, "vt_maxdd": vt["max_drawdown"],
@@ -101,24 +105,32 @@ def main() -> int:
     today = date.today().isoformat()
     REPORTS.mkdir(exist_ok=True)
     L = [f"# Volatility-targeting position sizing — walk-forward — {today}", "",
-         f"{n} indices, TOTAL-RETURN series. Exposure = clip(target/realized_vol, 0, {CAP}); "
-         f"target {TARGET_VOL*100:.0f}%/yr; vol lookback chosen in-sample from {LOOKBACKS}; "
-         f"2y IS / 6mo OOS; 5bps/turn; causal. Compared to plain (always-100%) total-return "
-         "buy-and-hold. **Sharpe is scale-invariant → it measures the time-varying scaling, not "
-         "leverage; raw return just tracks average exposure.**", "",
-         "## Vol-targeted vs plain buy-and-hold (out-of-sample)", "",
-         "| index | VT Sharpe | B&H Sharpe | ΔSharpe | VT MaxDD% | B&H MaxDD% | WFE | lookback |",
-         "|---|---|---|---|---|---|---|---|"]
+         f"**Mode: {mode}** (cap={cap:.1f}). {n} indices, TOTAL-RETURN series. "
+         f"Exposure = clip(target/realized_vol, 0, {cap:.1f}); target {TARGET_VOL*100:.0f}%/yr; "
+         f"vol lookback chosen in-sample from {LOOKBACKS}; 2y IS / 6mo OOS; 5bps/turn; causal. "
+         "Compared to plain (always-100%) total-return buy-and-hold. **Sharpe is scale-invariant → "
+         "it measures the time-varying scaling, not leverage; raw return tracks average exposure.**",
+         "", "## Vol-targeted vs plain buy-and-hold (out-of-sample)", "",
+         "| index | VT Sharpe | B&H Sharpe | ΔSharpe | VT MaxDD% | B&H MaxDD% | VT total% | "
+         "B&H total% | WFE | lookback |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         L.append(f"| {r['index']} | {r['vt_sharpe']:.2f} | {r['bh_sharpe']:.2f} | "
                  f"{r['d_sharpe']:+.2f} | {r['vt_maxdd']*100:.0f} | {r['bh_maxdd']*100:.0f} | "
+                 f"{r['vt_total']*100:+.0f} | {r['bh_total']*100:+.0f} | "
                  f"{r['wfe']:.2f} | {r['modal_lookback']} |")
 
     med_wfe = float(np.median(wfes)) if wfes else float("nan")
     med_dsr = float(np.median(dsharpes)) if dsharpes else float("nan")
     L += ["", "## Verdict", "",
+          f"- Mode: **{mode}** (cap={cap:.1f}).",
           f"- Vol-targeting improved out-of-sample **Sharpe on {improve_sharpe}/{n}** indices and "
           f"**reduced max drawdown on {improve_dd}/{n}** (median ΔSharpe {med_dsr:+.2f}).",
+          f"- Return give-up: **{give_up}/{n}** indices ended BELOW buy-and-hold on total return "
+          + ("(expected — with no leverage, average exposure is <100%, so you trade return for "
+             "safety; the win is risk-adjusted/drawdown, not raw return)."
+             if cap <= 1.0 else
+             "(leverage in calm periods offsets some give-up)."),
           f"- **Median Walk-Forward Efficiency {med_wfe:.2f}** — vs ≈0.3 for the timing strategies. "
           f"{'A high/robust WFE means the benefit PERSISTS out-of-sample' if med_wfe >= 0.6 else 'WFE is modest'}: "
           "this is risk management (vol clusters and is forecastable), not return prediction.",
@@ -133,15 +145,18 @@ def main() -> int:
           "cap=1.0 (de-risk-only) variant keeps the drawdown benefit without the leverage assumptions.",
           "", "_Daily total-return (price + approx dividend); CAP %.1fx; Sharpe scale-invariant so "
           "target level is immaterial to the verdict; cost 5bps/turn._" % CAP]
-    out_md = REPORTS / f"vol_targeting_{today}.md"
+    tag = f"cap{cap:.1f}".replace(".", "")
+    out_md = REPORTS / f"vol_targeting_{tag}_{today}.md"
     out_md.write_text("\n".join(L), encoding="utf-8")
-    (REPORTS / f"vol_targeting_{today}.json").write_text(json.dumps({
-        "date": today, "n": n, "improve_sharpe": improve_sharpe, "improve_drawdown": improve_dd,
-        "median_wfe": med_wfe, "median_d_sharpe": med_dsr, "rows": rows,
+    (REPORTS / f"vol_targeting_{tag}_{today}.json").write_text(json.dumps({
+        "date": today, "cap": cap, "mode": mode, "n": n, "improve_sharpe": improve_sharpe,
+        "improve_drawdown": improve_dd, "return_giveup": give_up, "median_wfe": med_wfe,
+        "median_d_sharpe": med_dsr, "rows": rows,
     }, indent=2, default=str), encoding="utf-8")
 
-    print(f"\nVOL-TARGETING: Sharpe improved {improve_sharpe}/{n}, drawdown improved {improve_dd}/{n} "
-          f"| median ΔSharpe {med_dsr:+.2f} | median WFE {med_wfe:.2f}")
+    print(f"\nVOL-TARGETING [{mode}]: Sharpe improved {improve_sharpe}/{n}, drawdown improved "
+          f"{improve_dd}/{n}, return give-up {give_up}/{n} | median ΔSharpe {med_dsr:+.2f} | "
+          f"median WFE {med_wfe:.2f}")
     print(f"Report: {out_md}")
     return 0
 
