@@ -101,3 +101,7 @@ data/virtual_wallet.json
 data/wallet_snapshot.json
 data/trailing_peaks.json
 data/*.runaway-*.bak
+
+# WS3c liquidation forward-harvest (accumulated locally)
+data/liquidations_history.jsonl
+data/liquidations_status.json
