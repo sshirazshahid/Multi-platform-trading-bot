@@ -808,6 +808,25 @@ class AccuracyTracker:
         return []
 
 
+def _claude_should_run(mode, cycle: int, throttle_n: int) -> bool:
+    """Whether to call Claude on this decision cycle (owner 2026-06-07: reduce Claude dependence).
+
+    mode 'primary' (or any unknown -> fail SAFE to original behaviour): always call Claude.
+    mode 'off': never call Claude (pure algorithmic — no Max-plan usage, no timeout latency).
+    mode 'throttled': call Claude only every `throttle_n`-th cycle (0-indexed); algo otherwise.
+
+    Both deciders are NO_EDGE, so this trades cost/latency, not edge — but routing more entries to
+    the algo's score>=66 gate MAY lower WR (mid-score buckets ran worse), hence reversible + measured.
+    """
+    m = (mode or "primary").lower()
+    if m == "off":
+        return False
+    if m == "throttled":
+        n = max(1, int(throttle_n))
+        return (int(cycle) % n) == 0
+    return True  # 'primary' / unknown -> always (do not silently disable Claude on a typo)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # MAIN CLASS: MCPBrain v2
 # ══════════════════════════════════════════════════════════════════════
@@ -1683,8 +1702,14 @@ class MCPBrain:
 
         actions = []
 
-        # Try Claude first (CLI → API), then fall back to algorithmic scoring
-        if self._claude_available:
+        # Claude-dependence control (owner 2026-06-07): gate Claude by CLAUDE_PORTFOLIO_MODE.
+        # The algorithmic block below decides whenever Claude is skipped/unavailable, so reducing
+        # Claude cuts Max-plan cost + timeout latency without losing edge (both are no-edge).
+        from config import CLAUDE_PORTFOLIO_MODE, CLAUDE_THROTTLE_N
+        self._portfolio_cycle = getattr(self, "_portfolio_cycle", 0) + 1
+        _use_claude = self._claude_available and _claude_should_run(
+            CLAUDE_PORTFOLIO_MODE, self._portfolio_cycle - 1, CLAUDE_THROTTLE_N)
+        if _use_claude:
             try:
                 actions = self._ask_claude_portfolio(
                     coins, data, exchange_indicators,
@@ -1692,6 +1717,10 @@ class MCPBrain:
                     risk_envelope, recent_trades)
             except Exception as e:
                 logger.error(f"[MCP-Brain] Claude portfolio analysis failed: {e}")
+        elif self._claude_available:
+            logger.debug(
+                f"[MCP-Brain] Claude skipped (mode={CLAUDE_PORTFOLIO_MODE} "
+                f"cycle={self._portfolio_cycle}) -> algorithmic")
 
         # Algorithmic fallback: pure scoring engine when Claude is unavailable/failed
         if not actions and risk_envelope.get("max_new_positions", 0) > 0:
@@ -2167,8 +2196,14 @@ class MCPBrain:
 
         advice = {}
 
-        # Try Claude first, then fall back to algorithmic monitor
-        if self._claude_available:
+        # Claude-dependence control (owner 2026-06-07): same gate as the entry path; the
+        # algorithmic monitor below + the deterministic SL/TP/trailing/entry_invalidated exits
+        # (in order_manager, ungated) handle positions whenever Claude is skipped.
+        from config import CLAUDE_PORTFOLIO_MODE, CLAUDE_THROTTLE_N
+        self._monitor_cycle = getattr(self, "_monitor_cycle", 0) + 1
+        _use_claude = self._claude_available and _claude_should_run(
+            CLAUDE_PORTFOLIO_MODE, self._monitor_cycle - 1, CLAUDE_THROTTLE_N)
+        if _use_claude:
             try:
                 advice = self._ask_claude_positions(positions, data, exchange_indicators)
             except Exception as e:

@@ -1170,6 +1170,21 @@ RANGE_STABILITY_FILTER_ENABLED = (
 # is genuinely catastrophic rather than an attribution artifact.
 SCALP_TIER_ENABLED = (os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false")
 
+# ── Claude-dependence control (owner 2026-06-07: "make the bot less dependent on ClaudeCode") ──
+# The live decision path is Claude-PRIMARY (every cycle calls Opus 4.8 via CLI). Measured this
+# session: ~5,058 Claude calls/6.5d, ~17% (portfolio path ~27%) time out at 120s; and Claude is
+# NO_EDGE just like the algo (corr(mcp_score,realized_pnl) ~ -0.008). So leaning less on Claude cuts
+# Max-plan usage + timeout latency without sacrificing edge. Gates BOTH the portfolio-entry and
+# position-monitor Claude calls; the existing algorithmic path decides whenever Claude is skipped.
+#   "primary"   - Claude every cycle, algo fallback (original behaviour)
+#   "throttled" - Claude every CLAUDE_THROTTLE_N-th cycle, algo otherwise  (DEFAULT = less dependent)
+#   "off"       - pure algorithmic, no Claude calls at all
+# ⚠ Routing more entries to the algo's score>=66 gate MAY lower WR (mid-score buckets ran worse this
+# session) — this is cost/robustness, NOT edge. Revert with CLAUDE_PORTFOLIO_MODE=primary; measure
+# in PAPER (accept only if cost↓ AND trade-count↓ WITHOUT realized-R↓).
+CLAUDE_PORTFOLIO_MODE = os.getenv("CLAUDE_PORTFOLIO_MODE", "throttled").lower()
+CLAUDE_THROTTLE_N = max(1, int(os.getenv("CLAUDE_THROTTLE_N", "3")))
+
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
     # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade
