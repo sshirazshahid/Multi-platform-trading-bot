@@ -43,7 +43,7 @@ ANALYSIS_FILE = Path("data/claude_analysis.json")
 ANALYSIS_HTML = Path("data/claude_analysis.html")
 HISTORY_FILE  = Path("data/claude_analysis_history.json")
 RESEARCH_FILE = Path("data/research/report_latest.json")
-MODEL         = "claude-opus-4-7"
+MODEL         = "claude-opus-4-8"  # call_claude force-overrides to BOT_CLAUDE_MODEL (4-8)
 MAX_TOKENS    = 1500
 
 # Framework weights — must sum to 1.0

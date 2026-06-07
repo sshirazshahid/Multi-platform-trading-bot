@@ -845,7 +845,8 @@ class MCPBrain:
         self._indicator_cache = {}
         self._indicator_cache_time = 0
 
-        # Claude availability: CLI only (Opus 4.7), algorithmic fallback
+        # Claude availability: CLI only (Opus 4.8 — forced in utils/claude_client.py),
+        # algorithmic fallback
         self._cli_available = _check_claude_code()
         self._claude_available = self._cli_available
         # ALWAYS enabled — algorithmic scoring works without Claude
@@ -877,7 +878,7 @@ class MCPBrain:
 
         if self._cli_available:
             logger.info(
-                "[MCP-Brain] Claude Code CLI (Opus 4.7) + Algorithmic engine ready — "
+                "[MCP-Brain] Claude Code CLI (Opus 4.8) + Algorithmic engine ready — "
                 "7 sources + multi-TF exchange indicators")
         else:
             logger.info(

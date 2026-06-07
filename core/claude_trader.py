@@ -18,8 +18,8 @@ Claude's analysis covers:
   - Overall portfolio allocation suggestion
   - Risk warnings
 
-The Claude model used: claude-opus-4-7 (Opus 4.7 — deepest reasoning
-for financial decisions; Max subscription via CLI when available)
+The Claude model used: claude-opus-4-8 (Opus 4.8 — deepest reasoning
+for financial decisions; forced in utils/claude_client.py, Max subscription via CLI)
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ ANALYSIS_DIR = Path("data/claude_analysis")
 TRADES_FILE  = Path("data/claude_trades.json")
 REPORT_FILE  = Path("data/claude_analysis/latest_report.html")
 
-# Claude model for API fallback
-CLAUDE_MODEL   = "claude-opus-4-7"
+# Claude model label (call_claude force-overrides the live CLI call to BOT_CLAUDE_MODEL = 4-8)
+CLAUDE_MODEL   = "claude-opus-4-8"
 
 # Minimum confidence for Claude to place a trade
 MIN_CONFIDENCE = 0.60
