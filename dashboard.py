@@ -2020,18 +2020,28 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         btc_trend = "?"
         btc_col = DIM
         try:
-            # Try to read cached BTC trend if the engine has persisted it
+            # Read the BTC trend the engine persists (data/btc_trend.json).
             btc_state = _file_cache.load("data/btc_trend.json") or {}
-            btc_slope = btc_state.get("ema200_slope", 0)
-            if btc_slope > 0:
-                btc_trend = "BULL"
-                btc_col = GREEN
-            elif btc_slope < 0:
-                btc_trend = "BEAR"
-                btc_col = RED
+            # Prefer the engine's actual trend string so BULL/BEAR matches the bot's
+            # +/-0.2% logic; fall back to slope sign for older files.
+            _t = btc_state.get("trend")
+            if _t in ("bull", "bear", "neutral"):
+                btc_trend, btc_col = {
+                    "bull": ("BULL", GREEN),
+                    "bear": ("BEAR", RED),
+                    "neutral": ("FLAT", YELLOW),
+                }[_t]
             else:
-                btc_trend = "FLAT"
-                btc_col = YELLOW
+                btc_slope = btc_state.get("ema200_slope", 0)
+                if btc_slope > 0:
+                    btc_trend = "BULL"
+                    btc_col = GREEN
+                elif btc_slope < 0:
+                    btc_trend = "BEAR"
+                    btc_col = RED
+                else:
+                    btc_trend = "FLAT"
+                    btc_col = YELLOW
         except Exception:
             pass
         shorts_ok = (not SHORTS_REQUIRE_BTC_BEAR) or (btc_trend == "BEAR")

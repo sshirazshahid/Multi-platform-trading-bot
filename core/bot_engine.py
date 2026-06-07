@@ -1258,6 +1258,24 @@ class BotEngine:
             logger.info(
                 f"[BTC-Trend] {trend} "
                 f"(slope={slope_pct*100:+.2f}%, close_above_ema={above_ema})")
+            # Persist for the dashboard's BTC macro panel (dashboard.py reads
+            # data/btc_trend.json; nothing wrote it before -> blank panel). Local
+            # file, atomic, no trade-logic impact. Write the trend string too so the
+            # dashboard's BULL/BEAR matches the bot's actual +/-0.2% logic, not just
+            # the raw slope sign.
+            try:
+                _btc_p = Path("data/btc_trend.json")
+                _btc_p.parent.mkdir(parents=True, exist_ok=True)
+                _btc_tmp = _btc_p.with_name(_btc_p.name + ".tmp")
+                _btc_tmp.write_text(json.dumps({
+                    "trend": trend,
+                    "ema200_slope": slope_pct,
+                    "close_above_ema": above_ema,
+                    "ts": now,
+                }), encoding="utf-8")
+                _btc_tmp.replace(_btc_p)
+            except Exception as _btc_e:
+                logger.debug(f"[BTC-Trend] persist skipped: {_btc_e}")
             return trend
         except Exception as e:
             logger.debug(f"[BTC-Trend] error: {e}")
