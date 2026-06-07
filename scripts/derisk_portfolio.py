@@ -65,6 +65,77 @@ def _m(strat, equity, pos=None):
     return metrics(strat, equity, pos)
 
 
+def _mpl():
+    """Return pyplot with a headless backend, or None if matplotlib is absent."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        return plt
+    except Exception:
+        print("[plot] matplotlib not installed; skipping PNGs (pip install matplotlib)")
+        return None
+
+
+def _drawdown(equity):
+    e = np.asarray(equity, dtype=float)
+    return (e / np.maximum.accumulate(e) - 1.0) * 100.0
+
+
+def _plot_portfolio(common, eq_overlay, eq_bh, exposure, eq_sp, today):
+    plt = _mpl()
+    if plt is None:
+        return None
+    x = pd.to_datetime(list(common))
+    fig, ax = plt.subplots(3, 1, figsize=(12, 11), height_ratios=[3, 2, 1.2], sharex=True)
+    ax[0].plot(x, eq_overlay, lw=1.7, color="#1f77b4", label="Core + de-risk overlay")
+    ax[0].plot(x, eq_bh, lw=1.2, color="#777", alpha=0.9, label="Basket buy & hold")
+    if eq_sp is not None:
+        ax[0].plot(x, eq_sp, lw=1.0, color="#d62728", alpha=0.6, label="S&P 500 (B&H)")
+    ax[0].set_yscale("log"); ax[0].set_ylabel("Growth of 1 (log)")
+    ax[0].set_title("Buy-and-hold core + de-risk overlay — diversified index portfolio "
+                    f"({pd.to_datetime(common[0]).year}–{pd.to_datetime(common[-1]).year})")
+    ax[0].legend(loc="upper left"); ax[0].grid(True, which="both", alpha=0.25)
+    ax[1].fill_between(x, _drawdown(eq_overlay), 0, color="#1f77b4", alpha=0.45,
+                       label="Core+overlay")
+    ax[1].plot(x, _drawdown(eq_bh), color="#777", lw=1.0, label="Basket B&H")
+    ax[1].set_ylabel("Drawdown %"); ax[1].legend(loc="lower left"); ax[1].grid(True, alpha=0.25)
+    ax[2].fill_between(x, np.asarray(exposure) * 100.0, 0, color="#2ca02c", alpha=0.5)
+    ax[2].set_ylabel("Exposure %"); ax[2].set_ylim(0, 105); ax[2].grid(True, alpha=0.25)
+    ax[2].set_xlabel("Date")
+    fig.tight_layout()
+    out = REPORTS / f"derisk_portfolio_chart_{today}.png"
+    fig.savefig(out, dpi=110); plt.close(fig)
+    return out
+
+
+def _plot_per_index_grid(eq_curves, today):
+    plt = _mpl()
+    if plt is None:
+        return None
+    names = list(eq_curves)
+    ncol = 4
+    nrow = (len(names) + ncol - 1) // ncol
+    fig, axes = plt.subplots(nrow, ncol, figsize=(15, 3.2 * nrow))
+    axes = np.atleast_1d(axes).ravel()
+    for ax, name in zip(axes, names):
+        dates, eq, bh = eq_curves[name]
+        x = pd.to_datetime(list(dates))
+        ax.plot(x, eq, lw=1.3, color="#1f77b4", label="core+overlay")
+        ax.plot(x, bh, lw=1.0, color="#777", alpha=0.8, label="B&H")
+        ax.set_yscale("log"); ax.set_title(name, fontsize=10)
+        ax.grid(True, which="both", alpha=0.2); ax.tick_params(labelsize=7)
+    for ax in axes[len(names):]:
+        ax.axis("off")
+    axes[0].legend(loc="upper left", fontsize=7)
+    fig.suptitle("Per-index: buy-and-hold core + de-risk overlay vs plain B&H (log equity)",
+                 fontsize=12)
+    fig.tight_layout()
+    out = REPORTS / f"derisk_portfolio_perindex_{today}.png"
+    fig.savefig(out, dpi=110); plt.close(fig)
+    return out
+
+
 def _ascii(equity, label, width=72, height=12):
     v = np.log(np.asarray(equity, dtype=float))
     idx = np.linspace(0, len(v) - 1, width).astype(int)
@@ -98,12 +169,14 @@ def main() -> int:
 
     # ---- A. per-index combined strategy ----
     per_index = []
+    eq_curves = {}                      # name -> (dates, overlay_equity, bh_equity) for plotting
     for iname in names:
         tr = data[iname].to_numpy()
         pos, strat, eq, bh_eq = _combined(tr)
         cm, bm = _m(strat, eq, pos), _m(tr, bh_eq)
         per_index.append({"index": iname, "core_overlay": cm, "buy_hold": bm,
                           "avg_exposure": float(np.mean(pos))})
+        eq_curves[iname] = (data[iname].index, eq, bh_eq)
 
     # ---- B. diversified equal-weight basket (LOCAL ccy) ----
     common = None
@@ -124,6 +197,12 @@ def main() -> int:
                   "basket_core_overlay": b_eq.tolist(),
                   "basket_exposure": b_pos.tolist()}).to_csv(
         REPORTS / f"derisk_portfolio_equity_{today}.csv", index=False)
+
+    # charts (matplotlib optional)
+    sp_eq = np.cumprod(1.0 + np.nan_to_num(data["S&P500"].reindex(common).to_numpy())) \
+        if "S&P500" in data else None
+    chart1 = _plot_portfolio(common, b_eq, b_bh_eq, b_pos, sp_eq, today)
+    chart2 = _plot_per_index_grid(eq_curves, today)
 
     def fmt(m):
         return (f"CAGR {m['cagr']*100:+.1f}% | Sharpe {m['sharpe']:.2f} | Sortino "
@@ -194,6 +273,10 @@ def main() -> int:
     print(f"  S&P500 alone B&H            : {fmt(sp_bh)}")
     print(f"  per-index overlay improved drawdown {dd_better}/{len(per_index)}, "
           f"Sharpe {sr_better}/{len(per_index)}")
+    if chart1:
+        print(f"Chart (portfolio): {chart1}")
+    if chart2:
+        print(f"Chart (per-index): {chart2}")
     print(f"Report: {out_md}")
     return 0
 
