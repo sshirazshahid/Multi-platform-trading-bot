@@ -61,6 +61,14 @@ def w_6040(rets, t, assets):
     return w
 
 
+def _blend(assets, sw, bw):
+    """Static SPY/IEF stock-bond blend (the 'dumb' diversification baseline)."""
+    w = np.zeros(len(assets))
+    w[assets.index("SPY")] = sw
+    w[assets.index("IEF")] = bw
+    return w
+
+
 def w_inverse_vol(rets, t, assets, lookback=VOL_LOOKBACK):
     lo = max(0, t - lookback)
     vol = np.array([rets[lo:t, j].std(ddof=1) for j in range(len(assets))])
@@ -130,7 +138,7 @@ def _plot(curves, dates, today):
     fig, ax = plt.subplots(2, 1, figsize=(13, 9), height_ratios=[3, 2], sharex=True)
     colors = {"SPY": "#d62728", "60/40": "#9467bd", "EqualWeight": "#8c8c8c",
               "RiskParity": "#2ca02c", "RP+VolTarget": "#1f77b4", "RP+VolTgt(noLev)": "#17becf",
-              "RP+Lever(~SPYvol)": "#ff7f0e"}
+              "RP+Lever(~SPYvol)": "#ff7f0e", "Stk/Bnd 40/60": "#bcbd22", "Stk/Bnd 30/70": "#e377c2"}
     for name, eq in curves.items():
         ax[0].plot(x, eq, label=name, lw=1.8 if name == "RP+VolTarget" else 1.1,
                    color=colors.get(name), alpha=0.95 if name in ("RP+VolTarget", "SPY") else 0.8)
@@ -179,6 +187,8 @@ def main() -> int:
                                   rebal=10**9),
         "60/40": backtest_portfolio(rets, assets, w_6040),
         "EqualWeight": backtest_portfolio(rets, assets, w_equal),
+        "Stk/Bnd 40/60": backtest_portfolio(rets, assets, lambda r, t, a: _blend(a, 0.40, 0.60)),
+        "Stk/Bnd 30/70": backtest_portfolio(rets, assets, lambda r, t, a: _blend(a, 0.30, 0.70)),
         "RiskParity": backtest_portfolio(rets, assets, w_inverse_vol),
         "RP+VolTarget": backtest_portfolio(rets, assets, w_inverse_vol, target_vol=TARGET_VOL, cap=3.0),
         "RP+VolTgt(noLev)": backtest_portfolio(rets, assets, w_inverse_vol, target_vol=TARGET_VOL, cap=1.0),
@@ -226,8 +236,16 @@ def main() -> int:
           "'lever risk-parity' thesis over this window.",
           f"- **No free lunch:** {sum(1 for k in m if k != 'SPY' and m[k]['cagr'] > spm['cagr'])}"
           f"/{len(m)-1} constructions beat SPY's {spm['cagr']*100:.1f}% CAGR. The best construction wins "
-          "on Sharpe/drawdown by ACCEPTING lower return (7.1% vs 11.0%). Engineering improves the "
-          "risk/return TRADE-OFF; it does not manufacture extra return over just holding equities.",
+          "on Sharpe/drawdown by ACCEPTING lower return. Engineering improves the risk/return "
+          "TRADE-OFF; it does not manufacture extra return over just holding equities.",
+          f"- ⚠ **Sophistication adds nothing:** a trivial static **Stk/Bnd 30/70** blend "
+          f"(Sharpe {m['Stk/Bnd 30/70']['sharpe']:.2f}) ties or BEATS the 8-asset inverse-vol "
+          f"risk-parity (Sharpe {m['RiskParity']['sharpe']:.2f}). The fancy construction is not worth "
+          "its complexity over a simple fixed stock/bond mix, rebalanced.",
+          "- ⚠ **Regime-dependent (verified by sub-period):** risk-parity beats SPY on Sharpe from "
+          "2006/2010 (driven by the 2008 crash + the multi-decade bond bull) but LOSES from 2015 "
+          "(0.81 vs 0.83) and 2020 (0.96 vs 1.12). Its diversification edge is largely a "
+          "2008-and-bond-tailwind artifact, not a durable recent advantage.",
           "", "## Honest scope (robot, no spin)", "",
           "- This is **risk-premium harvesting, not alpha** — returns come from owning equity/bond/"
           "gold/commodity risk; there is no forecasting. Expected forward return depends on those "
