@@ -10,11 +10,19 @@ State : data/confluence_paper_state.json   |  Trade log: reports/confluence_pape
 Run   : python run_confluence_paper.py            (loop, default every 5 min)
         python run_confluence_paper.py --once     (single cycle, for testing)
 """
+
 from __future__ import annotations
-import os, sys, json, time, csv
+
+import csv
+import json
+import os
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
 import ccxt
+
 from quant_suite import bot_adapter as A
 
 ROOT = Path(__file__).resolve().parent
@@ -57,8 +65,15 @@ def load_state() -> dict:
             return json.loads(STATE.read_text())
         except Exception:
             pass
-    return {"balance": START_BAL, "start_balance": START_BAL, "open": [], "closed_count": 0,
-            "wins": 0, "realized_pnl": 0.0, "created": _now()}
+    return {
+        "balance": START_BAL,
+        "start_balance": START_BAL,
+        "open": [],
+        "closed_count": 0,
+        "wins": 0,
+        "realized_pnl": 0.0,
+        "created": _now(),
+    }
 
 
 def save_state(st):
@@ -77,9 +92,32 @@ def log_trade(rec):
     with open(LOG, "a", newline="") as f:
         w = csv.writer(f)
         if new:
-            w.writerow(["opened", "closed", "symbol", "side", "entry", "exit", "outcome", "pnl_usd", "balance"])
-        w.writerow([rec["opened"], rec["closed"], rec["symbol"], rec["side"], rec["entry"],
-                    rec["exit"], rec["outcome"], rec["pnl_usd"], rec["balance"]])
+            w.writerow(
+                [
+                    "opened",
+                    "closed",
+                    "symbol",
+                    "side",
+                    "entry",
+                    "exit",
+                    "outcome",
+                    "pnl_usd",
+                    "balance",
+                ]
+            )
+        w.writerow(
+            [
+                rec["opened"],
+                rec["closed"],
+                rec["symbol"],
+                rec["side"],
+                rec["entry"],
+                rec["exit"],
+                rec["outcome"],
+                rec["pnl_usd"],
+                rec["balance"],
+            ]
+        )
 
 
 def last_price(ex, sym):
@@ -105,9 +143,17 @@ def cycle(once_note=""):
             continue
         hit = None
         if pos["side"] == "buy":
-            hit = ("SL", pos["sl"]) if p <= pos["sl"] else (("TP", pos["tp"]) if p >= pos["tp"] else None)
+            hit = (
+                ("SL", pos["sl"])
+                if p <= pos["sl"]
+                else (("TP", pos["tp"]) if p >= pos["tp"] else None)
+            )
         else:
-            hit = ("SL", pos["sl"]) if p >= pos["sl"] else (("TP", pos["tp"]) if p <= pos["tp"] else None)
+            hit = (
+                ("SL", pos["sl"])
+                if p >= pos["sl"]
+                else (("TP", pos["tp"]) if p <= pos["tp"] else None)
+            )
         if hit:
             outc, ex_px = hit
             pnl = realized_pnl(pos["side"], pos["entry"], ex_px, outc, pos["notional"])
@@ -115,11 +161,22 @@ def cycle(once_note=""):
             st["realized_pnl"] += pnl
             st["closed_count"] += 1
             st["wins"] += 1 if pnl > 0 else 0
-            rec = {"opened": pos["opened"], "closed": _now(), "symbol": pos["symbol"], "side": pos["side"],
-                   "entry": round(pos["entry"], 8), "exit": round(ex_px, 8), "outcome": outc,
-                   "pnl_usd": round(pnl, 2), "balance": round(st["balance"], 2)}
-            log_trade(rec); st["open"].remove(pos)
-            print(f"  CLOSE {outc} {pos['symbol']} {pos['side']} pnl ${pnl:+.2f} -> bal ${st['balance']:.2f}")
+            rec = {
+                "opened": pos["opened"],
+                "closed": _now(),
+                "symbol": pos["symbol"],
+                "side": pos["side"],
+                "entry": round(pos["entry"], 8),
+                "exit": round(ex_px, 8),
+                "outcome": outc,
+                "pnl_usd": round(pnl, 2),
+                "balance": round(st["balance"], 2),
+            }
+            log_trade(rec)
+            st["open"].remove(pos)
+            print(
+                f"  CLOSE {outc} {pos['symbol']} {pos['side']} pnl ${pnl:+.2f} -> bal ${st['balance']:.2f}"
+            )
 
     # 2) open new confluence setups (paper) if room
     open_syms = {p["symbol"] for p in st["open"]}
@@ -130,21 +187,37 @@ def cycle(once_note=""):
                 break
             if s["symbol"] in open_syms:
                 continue
-            st["open"].append({"symbol": s["symbol"], "side": s["side"], "entry": s["entry"],
-                               "sl": s["stop_loss"], "tp": s["take_profit"], "notional": s["notional_usd"],
-                               "tf": s.get("tf"), "tier": s.get("conviction_tier"), "opened": _now()})
+            st["open"].append(
+                {
+                    "symbol": s["symbol"],
+                    "side": s["side"],
+                    "entry": s["entry"],
+                    "sl": s["stop_loss"],
+                    "tp": s["take_profit"],
+                    "notional": s["notional_usd"],
+                    "tf": s.get("tf"),
+                    "tier": s.get("conviction_tier"),
+                    "opened": _now(),
+                }
+            )
             open_syms.add(s["symbol"])
-            print(f"  OPEN  {s['side'].upper()} {s['symbol']} entry {s['entry']} SL {s['stop_loss']} TP {s['take_profit']} (${s['notional_usd']})")
+            print(
+                f"  OPEN  {s['side'].upper()} {s['symbol']} entry {s['entry']} SL {s['stop_loss']} TP {s['take_profit']} (${s['notional_usd']})"
+            )
 
     wr = (st["wins"] / st["closed_count"] * 100) if st["closed_count"] else 0.0
     save_state(st)
-    print(f"[{_now()}] open={len(st['open'])} closed={st['closed_count']} winrate={wr:.0f}% "
-          f"realizedPnL=${st['realized_pnl']:+.2f} balance=${st['balance']:.2f} (PAPER){once_note}")
+    print(
+        f"[{_now()}] open={len(st['open'])} closed={st['closed_count']} winrate={wr:.0f}% "
+        f"realizedPnL=${st['realized_pnl']:+.2f} balance=${st['balance']:.2f} (PAPER){once_note}"
+    )
 
 
 if __name__ == "__main__":
     once = "--once" in sys.argv
-    print(f"Confluence PAPER forward-test | start ${START_BAL} | scan top {SCAN_TOP} | max {MAX_OPEN} open | pure-price | NO real orders")
+    print(
+        f"Confluence PAPER forward-test | start ${START_BAL} | scan top {SCAN_TOP} | max {MAX_OPEN} open | pure-price | NO real orders"
+    )
     if once:
         cycle(once_note=" [--once]")
     else:
