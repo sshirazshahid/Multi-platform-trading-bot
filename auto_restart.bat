@@ -2,6 +2,10 @@
 title Trading Bot - 24/7 Auto-Restart
 cd /d "%~dp0"
 
+:: Start persistent auxiliary processes once (confluence paper + liq/skew/L2 harvesters),
+:: dedup-safe. main.py itself is run by the restart loop below.
+call "%~dp0start_all.bat"
+
 :loop
 echo.
 echo ============================================

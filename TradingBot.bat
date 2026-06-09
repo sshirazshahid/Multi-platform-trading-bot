@@ -245,6 +245,8 @@ if /i not "!CONFIRM!"=="YES" goto :bot_cancel
 :bot_start
 echo  Running. Ctrl+C to stop.
 echo.
+:: Start persistent auxiliary processes (confluence paper + liq/skew/L2 harvesters), dedup-safe
+call "%BOT_DIR%start_all.bat"
 "%VENV_PYTHON%" main.py
 echo.
 echo  Bot stopped.
