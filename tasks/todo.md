@@ -32,6 +32,15 @@
   perps + 4 CRYPTOCAP regime series).
 - PAPER mode unchanged (user-confirmed); CONTROLLED_LIVE latch untouched. Live-path code
   untouched entirely.
+- FOLLOW-UP (same session, user: "use [TV's] Global Market Data..."): pre-registered
+  tradfi→crypto macro screen (scripts/run_tv_macro_screen.py — TVC:DXY/VIX, SP:SPX,
+  TVC:US10Y/GOLD, 2,599 daily bars each; 7 variants + BTC-price control twins; macro
+  series enter ffilled + 1-day lag b/c tradfi sessions cross 00:00 UTC) → **NO_EDGE**,
+  0/7 FDR, best IS p=0.38; vix_z14's OOS p=.038 is an OOS-only fluke on an IS-rejected
+  variant (DSR 0.50 < 0.90). 4 alignment tests; suite 1655 green. Strategy-tester /
+  paper-trading / bar-replay are TV UI-only (no MCP endpoints) — user-facing path is
+  loading pine_strategies/*.pine on charts; get_script can't return source (even STD;RSI)
+  so Pine-library mining is not programmatically possible (and is re-mining price anyway).
 
 # Task: pine_strategies study + integrate (2026-06-10) — shipped
 

@@ -19,6 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   zero-cost rerun also fails; `reports/tv_regime_screen_2026-06-10.md`)
 - `scripts/tv_crosscheck_ohlcv.py`: TV-vs-exchange data verification → 10/10 majors
   OK, median divergence 0.0 bps (`reports/tv_crosscheck_2026-06-10.md`)
+- `scripts/run_tv_macro_screen.py`: pre-registered tradfi→crypto regime screen
+  (TV global data: DXY/VIX/SPX/US10Y/GOLD, 7 variants + BTC-price controls,
+  session-stamp causality lag) → **NO_EDGE** (0/7 FDR, best IS p=0.38;
+  `reports/tv_macro_screen_2026-06-10.md`)
 
 ### Added
 - Multi-profile runner: Conservative, Moderate, and Aggressive profiles run simultaneously
