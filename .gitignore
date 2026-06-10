@@ -63,6 +63,7 @@ data/*.sqlite-bak*
 
 # Regenerable runtime caches / trained-model artifacts
 data/ohlcv_cache/
+data/funding_cache/
 data/models/
 
 # CI artifacts

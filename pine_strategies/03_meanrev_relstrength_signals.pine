@@ -1,0 +1,59 @@
+//@version=6
+// QuantSuite #3 - Mean-Reversion + Relative-Strength | INDICATOR (alerts). Run on 1h.
+indicator("QuantSuite #3 MeanRev+RS [signals]", overlay=true)
+gT = "Context"
+htf    = input.timeframe("240", "Trend-filter TF", group=gT)
+btcSym = input.symbol("BINANCE:BTCUSDT.P", "Relative-strength benchmark", group=gT)
+gS = "Mean-reversion"
+vwapLen  = input.int(24, "Rolling VWAP length", group=gS)
+devMult  = input.float(2.0, "Deviation (x ATR) for bands", group=gS)
+rsiLen   = input.int(14, "RSI length", group=gS)
+rsiLow   = input.float(32.0, "RSI oversold (long)", group=gS)
+rsiHigh  = input.float(68.0, "RSI overbought (short)", group=gS)
+rsLen    = input.int(48, "Relative-strength lookback (bars)", group=gS)
+adxStrong = input.float(28.0, "4h ADX = 'strong trend' block", group=gS)
+gR = "Risk (for alert SL/TP)"
+atrLen   = input.int(14, "ATR length", group=gR)
+atrMult  = input.float(1.5, "ATR x for stop", group=gR)
+slMinPct = input.float(1.5, "Min stop (%)", group=gR) / 100.0
+slMaxPct = input.float(3.5, "Max stop (%)", group=gR) / 100.0
+rr       = input.float(1.5, "Reward : Risk", group=gR)
+allowLong  = input.bool(true, "Allow longs", group=gR)
+allowShort = input.bool(true, "Allow shorts", group=gR)
+
+hlc3v = (high + low + close) / 3.0
+rvwap = math.sum(hlc3v * volume, vwapLen) / math.sum(volume, vwapLen)
+rsiV  = ta.rsi(close, rsiLen)
+atrV  = ta.atr(atrLen)
+lower = rvwap - devMult * atrV
+upper = rvwap + devMult * atrV
+btcClose = request.security(btcSym, timeframe.period, close)
+rs = (close / close[rsLen] - 1.0) - (btcClose / btcClose[rsLen] - 1.0)
+// benchmark bypass (mirrors engine.py is_bench): on the BTC chart rs == 0 exactly.
+// ticker.standard strips chart-type/session decorations from the id.
+isBench = ticker.standard(syminfo.tickerid) == ticker.standard(btcSym)
+htfAdx() =>
+    [p, m, a] = ta.dmi(14, 14)
+    a
+ema20H = request.security(syminfo.tickerid, htf, ta.ema(close, 20)[1], lookahead=barmerge.lookahead_on)
+ema50H = request.security(syminfo.tickerid, htf, ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
+adxH   = request.security(syminfo.tickerid, htf, htfAdx()[1], lookahead=barmerge.lookahead_on)
+strongBear = ema20H < ema50H and adxH >= adxStrong
+strongBull = ema20H > ema50H and adxH >= adxStrong
+longSig  = allowLong  and close < lower and rsiV < rsiLow  and (rs > 0 or isBench) and not strongBear
+shortSig = allowShort and close > upper and rsiV > rsiHigh and (rs < 0 or isBench) and not strongBull
+atrPct = atrV / close
+slDist = math.min(math.max(atrMult * atrPct, slMinPct), slMaxPct)
+
+plot(rvwap, "rVWAP", color.new(color.purple, 0))
+plot(upper, "Upper", color.new(color.red, 50))
+plot(lower, "Lower", color.new(color.green, 50))
+plotshape(longSig,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size=size.small)
+plotshape(shortSig, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size=size.small)
+alertcondition(longSig and not longSig[1],   "MeanRev LONG",  "MEANREV LONG {{ticker}} @ {{close}}")
+alertcondition(shortSig and not shortSig[1], "MeanRev SHORT", "MEANREV SHORT {{ticker}} @ {{close}}")
+// edge-trigger: alert once at signal ONSET (stretched-band states persist for bars)
+if longSig and not longSig[1]
+    alert('{"strategy":"meanrev_rs","action":"buy","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(close * (1 - slDist)) + ',"tp":' + str.tostring(close * (1 + slDist * rr)) + '}', alert.freq_once_per_bar_close)
+if shortSig and not shortSig[1]
+    alert('{"strategy":"meanrev_rs","action":"sell","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(close * (1 + slDist)) + ',"tp":' + str.tostring(close * (1 - slDist * rr)) + '}', alert.freq_once_per_bar_close)

@@ -1,0 +1,69 @@
+//@version=6
+// =============================================================================
+// QuantSuite #4 - Funding / Carry-Aware  |  STRATEGY (backtestable)
+// Pine can't read exchange funding directly, so this uses the perp-vs-spot
+// PREMIUM (basis) as a funding proxy: premium = (perp - spot)/spot * 100.
+//   Positive premium  -> perp rich -> crowded longs / longs pay  -> FADE (short)
+//                        when price confirms weakness.
+//   Negative premium  -> perp cheap -> shorts pay longs (carry)  -> LONG
+//                        when price confirms strength.
+// Run this on the PERPETUAL chart and set the matching SPOT symbol below.
+// Optional: point "Real funding symbol" at a funding ticker your feed provides.
+// =============================================================================
+strategy("QuantSuite #4 Funding/Carry [proxy]", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     commission_type=strategy.commission.percent, commission_value=0.05,
+     slippage=2, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+
+gC = "Funding proxy"
+spotSym   = input.symbol("BINANCE:BTCUSDT", "Spot symbol (for basis)", group=gC)
+fundSym   = input.string("", "Real funding symbol (optional, overrides proxy)", group=gC)
+smoothLen = input.int(8, "Premium smoothing (EMA)", group=gC)
+premThr   = input.float(0.05, "Premium threshold (%)", group=gC)
+gS = "Trend confirm"
+emaFastLen = input.int(20, "EMA fast", group=gS)
+emaSlowLen = input.int(50, "EMA slow", group=gS)
+adxLen     = input.int(14, "ADX length", group=gS)
+adxMin     = input.float(18.0, "ADX minimum", group=gS)
+gR = "Risk"
+atrLen   = input.int(14, "ATR length", group=gR)
+atrMult  = input.float(1.5, "ATR x for stop", group=gR)
+slMinPct = input.float(1.5, "Min stop (%)", group=gR) / 100.0
+slMaxPct = input.float(3.5, "Max stop (%)", group=gR) / 100.0
+rr       = input.float(2.0, "Reward : Risk", group=gR)
+riskPct  = input.float(0.5, "Risk % of equity / trade", group=gR) / 100.0
+allowLong  = input.bool(true, "Allow longs (carry)", group=gR)
+allowShort = input.bool(true, "Allow shorts (fade)", group=gR)
+
+ema20 = ta.ema(close, emaFastLen)
+ema50 = ta.ema(close, emaSlowLen)
+[diP, diM, adxV] = ta.dmi(adxLen, adxLen)
+atrV = ta.atr(atrLen)
+
+useReal = str.length(fundSym) > 0
+spotClose = request.security(spotSym, timeframe.period, close)
+// guard: request.security runs every bar even inside a ternary, so never pass ""
+fSym = useReal ? fundSym : syminfo.tickerid
+realFund = request.security(fSym, timeframe.period, close)
+basis = na(spotClose) or spotClose == 0 ? 0.0 : (close - spotClose) / spotClose * 100.0
+rawFund = useReal ? realFund : basis
+fund = ta.ema(rawFund, smoothLen)
+
+longSig  = allowLong  and fund < -premThr and close > ema20 and ema20 > ema50 and adxV >= adxMin
+shortSig = allowShort and fund >  premThr and close < ema20 and ema20 < ema50 and adxV >= adxMin
+
+atrPct = atrV / close
+slDist = math.min(math.max(atrMult * atrPct, slMinPct), slMaxPct)
+qtyL = slDist > 0 ? (strategy.equity * riskPct) / (close * slDist) : 0.0
+
+if longSig and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qtyL)
+    strategy.exit("L-x", from_entry="Long", stop=close * (1 - slDist), limit=close * (1 + slDist * rr))
+if shortSig and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qtyL)
+    strategy.exit("S-x", from_entry="Short", stop=close * (1 + slDist), limit=close * (1 - slDist * rr))
+
+plot(ema20, "EMA20", color.new(color.aqua, 0))
+plot(ema50, "EMA50", color.new(color.orange, 0))
+plotshape(longSig and strategy.position_size == 0,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size=size.small)
+plotshape(shortSig and strategy.position_size == 0, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size=size.small)
