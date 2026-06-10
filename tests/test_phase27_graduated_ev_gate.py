@@ -11,7 +11,11 @@ Phase 27 re-enables it as a GRADUATED multiplier:
   - mean >= 0:                  1.0  (positive EV — full size)
   - -0.20 <= mean < 0:          0.75 (mildly negative — downsize)
   - -0.50 <= mean < -0.20:      0.50 (moderately negative — half size)
-  - mean < -0.50 (n>=5):        0.0  (catastrophic — HARD BLOCK)
+  - mean < -0.50 (n>=5):        0.25 (catastrophic — smallest size)
+
+2026-06-11 (owner: "Don't block any trades"): the catastrophic tier no
+longer hard-blocks — it floors at 0.25 size. The 0.0 block is re-armable
+via RISK["ev_catastrophic_block_enabled"].
 
 Whitelisted symbols bypass entirely.
 
@@ -24,10 +28,7 @@ with Phase 17 (rolling-50 EV), Phase 18 (calibrator), Phase 22
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import MagicMock
 
 # ─── Config — Phase 27 enabled with graduated semantics ───────────────
 
@@ -99,10 +100,21 @@ def test_ev_mult_050_when_moderately_negative(monkeypatch):
     assert "ev_neg_med" in reason
 
 
-def test_ev_mult_zero_when_catastrophic(monkeypatch):
-    """mean < -0.50 with n>=5 → 0.0 (BLOCK)"""
+def test_ev_mult_floor_when_catastrophic(monkeypatch):
+    """mean < -0.50 with n>=5 → 0.25 smallest size (2026-06-11 unblock)."""
     eng = _stub_engine_with_expectancy(
         {"mean": -0.80, "n": 8, "win_rate": 0.25}, monkeypatch)
+    mult, reason = eng._ev_per_symbol_multiplier("BAD/USDT:USDT", "sell")
+    assert mult == 0.25
+    assert "catastrophic" in reason
+
+
+def test_ev_mult_zero_when_catastrophic_block_rearmed(monkeypatch):
+    """RISK['ev_catastrophic_block_enabled']=True restores the 0.0 hard block."""
+    import config
+    eng = _stub_engine_with_expectancy(
+        {"mean": -0.80, "n": 8, "win_rate": 0.25}, monkeypatch)
+    monkeypatch.setitem(config.RISK, "ev_catastrophic_block_enabled", True)
     mult, reason = eng._ev_per_symbol_multiplier("BAD/USDT:USDT", "sell")
     assert mult == 0.0
     assert "catastrophic" in reason

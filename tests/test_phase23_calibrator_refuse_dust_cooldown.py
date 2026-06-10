@@ -109,14 +109,14 @@ def test_calibrator_hard_refuse_threshold_is_30_percent_phase40():
 
 def test_calibrator_refuse_also_sets_cooldown():
     """Hard-refuse must also set the dust-skip cooldown so the same
-    dead signal isn't re-pitched on every 5min cycle."""
+    dead signal isn't re-pitched on every 5min cycle. (Window widened
+    2026-06-11: the refuse now sits inside the opt-in
+    calibrator_hard_refuse_enabled branch, which added lines.)"""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     cal_idx = src.index("self.order_mgr.calibrator.calibrate(")
     block = src[cal_idx:cal_idx + 3000]
-    # The < 0.40 branch must contain BOTH a return False AND a
-    # cooldown set — proximity check
     refuse_idx = block.index("_calibrated < 0.30")
-    refuse_block = block[refuse_idx:refuse_idx + 800]
+    refuse_block = block[refuse_idx:refuse_idx + 1400]
     assert "self._dust_skip_cooldown[symbol]" in refuse_block
     assert "return False" in refuse_block
 

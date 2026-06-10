@@ -1688,7 +1688,10 @@ class BotEngine:
           mean >= 0:                  1.0  (positive EV — full size)
           -0.20 <= mean < 0:          0.75 (mildly negative — downsize)
           -0.50 <= mean < -0.20:      0.50 (moderately negative)
-          mean < -0.50:               0.0  (catastrophic — BLOCK)
+          mean < -0.50:               0.25 (catastrophic — smallest size;
+                                      2026-06-11 owner "Don't block any
+                                      trades": was 0.0 hard-block, re-arm
+                                      via RISK["ev_catastrophic_block_enabled"])
 
         Whitelisted symbols (config.EXPECTANCY_FILTER.whitelist) bypass.
 
@@ -1719,8 +1722,12 @@ class BotEngine:
             n = int(exp.get("n", 0))
             wr = float(exp.get("win_rate", 0.0))
             if mean < -0.50 and n >= 5:
-                return 0.0, (
-                    f"ev_catastrophic_${mean:+.2f}_n{n}_wr{wr:.0%}")
+                _reason = f"ev_catastrophic_${mean:+.2f}_n{n}_wr{wr:.0%}"
+                if RISK.get("ev_catastrophic_block_enabled", False):
+                    return 0.0, _reason
+                # 2026-06-11 (owner: "Don't block any trades"): smallest
+                # graduated size instead of refusing; ratchet unchanged.
+                return 0.25, _reason
             if mean < -0.20:
                 return 0.5, f"ev_neg_med_${mean:+.2f}_n{n}"
             if mean < 0.0:
@@ -2235,13 +2242,23 @@ class BotEngine:
                 regime = self._regime_detector.detect(ex_obj, symbol)
                 _block = False
                 _why = ""
-                # Counter-trend: hard block (Phase 16 unchanged)
-                if side == "buy" and regime == REGIME_TRENDING_DOWN:
-                    _block, _why = True, "regime:trending_down_blocks_long"
-                elif side == "sell" and regime == REGIME_TRENDING_UP:
-                    _block, _why = True, "regime:trending_up_blocks_short"
+                # Counter-trend: hard block DISABLED 2026-06-11 (owner:
+                # "Don't block any trades") — soft size-down like VOLATILE.
+                # Re-arm via RISK["regime_countertrend_block_enabled"].
+                _ct = (side == "buy" and regime == REGIME_TRENDING_DOWN) or (
+                    side == "sell" and regime == REGIME_TRENDING_UP)
+                if _ct and RISK.get("regime_countertrend_block_enabled", False):
+                    _why = ("regime:trending_down_blocks_long" if side == "buy"
+                            else "regime:trending_up_blocks_short")
+                    _block = True
+                elif _ct:
+                    _regime_size_mult = float(
+                        RISK.get("regime_countertrend_size_mult", 0.4))
+                    logger.info(
+                        f"[Regime] {symbol} {side} COUNTER-TREND — soft size "
+                        f"×{_regime_size_mult:.2f} (UNBLOCK 2026-06-11)")
                 # Volatile: Phase 22 soft multiplier (or hard block if user re-enabled)
-                elif regime == REGIME_VOLATILE:
+                elif not _ct and regime == REGIME_VOLATILE:
                     if RISK.get("regime_volatile_block_enabled", False):
                         _block, _why = True, "regime:volatile"
                     else:
@@ -2276,8 +2293,14 @@ class BotEngine:
         if self.auto_mutator:
             dyn_bl = self.auto_mutator.get_effective_blacklist()
             if symbol in dyn_bl or symbol_key in dyn_bl:
-                logger.info(f"[Claude] BLOCKED by dynamic (post-mortem) blacklist: {symbol}")
-                return False
+                # 2026-06-11 (owner: "Don't block any trades"): enforcement is
+                # opt-in; the mutator keeps TRACKING loss clusters either way.
+                if RISK.get("auto_mutator_block_enabled", False):
+                    logger.info(f"[Claude] BLOCKED by dynamic (post-mortem) blacklist: {symbol}")
+                    return False
+                logger.info(
+                    f"[Claude] dynamic blacklist hit {symbol} — NOT blocked "
+                    f"(UNBLOCK 2026-06-11; tracking only)")
             if side == "sell" and self.auto_mutator.shorts_blocked():
                 logger.info(
                     "[Claude] BLOCKED: shorts disabled by AutoMutator "
@@ -2621,14 +2644,21 @@ class BotEngine:
                 # — soft mult sizes those down to 70% so worst-case bleed is
                 # contained. This unblocks fresh data collection.
                 if _has_calib_data and _calibrated < 0.30:
-                    import time as _t_p23r
-                    self._dust_skip_cooldown[symbol] = _t_p23r.time() + 1800
-                    logger.warning(
-                        f"[Claude] {symbol} REFUSED: calibrator predicts "
-                        f"actual win-rate {_calibrated:.0%} for raw conf "
-                        f"{_raw_conf:.0%} (Phase 40 hard-refuse < 30%, "
-                        f"30min cooldown).")
-                    return False
+                    # 2026-06-11 (owner: "Don't block any trades"): Phase 40
+                    # hard-refuse is opt-in via RISK["calibrator_hard_refuse_enabled"];
+                    # default path relies on the Phase 18 soft mult below (0.7 floor).
+                    if RISK.get("calibrator_hard_refuse_enabled", False):
+                        import time as _t_p23r
+                        self._dust_skip_cooldown[symbol] = _t_p23r.time() + 1800
+                        logger.warning(
+                            f"[Claude] {symbol} REFUSED: calibrator predicts "
+                            f"actual win-rate {_calibrated:.0%} for raw conf "
+                            f"{_raw_conf:.0%} (Phase 40 hard-refuse < 30%, "
+                            f"30min cooldown).")
+                        return False
+                    logger.info(
+                        f"[Claude] {symbol} calibrator predicts {_calibrated:.0%} "
+                        f"(<30%) — NOT refused (UNBLOCK 2026-06-11); soft mult applies")
                 # Soft mult — existing Phase 18 behavior, unchanged
                 if _has_calib_data:
                     _cal_mult = max(0.7, min(1.3,

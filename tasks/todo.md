@@ -1,3 +1,27 @@
+# Task: UNBLOCK ALL trades — edge-opinion gates to soft sizing (2026-06-11) — shipped
+
+## Review (follow-up to symbols unblock; user saw "[EV] BLOCKED ... Phase 27" + said
+## "Don't block any trades")
+- Converted ALL remaining edge-opinion HARD blocks in _execute_open to soft sizing,
+  each re-armable via RISK flag (defaults OFF, read with .get — no config.py change):
+  * Phase 27 EV catastrophic (mean<−$0.50, n≥5): 0.0-block → ×0.25 smallest size
+    (`ev_catastrophic_block_enabled`). Graduated 0.5/0.75 tiers unchanged.
+  * Regime counter-trend (Phase 16): hard block → ×0.4 soft like VOLATILE
+    (`regime_countertrend_block_enabled`, `regime_countertrend_size_mult`).
+  * Phase 23/40 calibrator <30% hard-refuse: → rely on Phase 18 soft mult 0.7 floor
+    (`calibrator_hard_refuse_enabled`). Supersedes Phase-33 carve-out that kept it.
+  * AutoMutator dynamic blacklist: enforcement opt-in, tracking stays
+    (`auto_mutator_block_enabled`). shorts_blocked() was already neutered (Apr 28).
+- Already inert (verified, no change): caution-symbol/strategy blocks (flags off),
+  BLACKLIST_HARD (empty), hours (open), SHORT_SIDE_FILTER (off), ShortGate/Spec12
+  symbol+family pauses (Phase 33 flags off).
+- KEPT (risk rails, not edge opinions): Spec §12 global halt, daily-loss breaker,
+  drawdown halt, R:R floor, universe liquidity filter, exchange-halted, spot-can't-
+  short, BTC-vol pause, position limits, post-SL cooldown.
+- Tests: phase27 tier tests updated (0.25 floor + re-arm test), phase33 contract
+  amended (directive supersedes carve-out), phase23 window widened. Suite 1659 green.
+- ⚠ Applies on bot RESTART. ⚠ Carries into CONTROLLED_LIVE if flipped.
+
 # Task: UNBLOCK ALL symbols + all-exchange listings (2026-06-11) — shipped
 
 ## Review

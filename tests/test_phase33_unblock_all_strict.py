@@ -132,11 +132,24 @@ def test_global_spec12_halt_still_present():
 # ─── Behavioral: data-driven analysis layers UNCHANGED ───────────────
 
 
-def test_phase23_calibrator_refuse_still_active():
-    """Phase 40 hard-refuse <40% calibrator stays — that IS the analysis."""
+def test_phase23_calibrator_refuse_flag_gated():
+    """2026-06-11 (owner: "Don't block any trades") SUPERSEDES the Phase-33
+    carve-out that kept the calibrator hard-refuse: the refuse is now opt-in
+    via RISK['calibrator_hard_refuse_enabled'] (default off); the Phase 18
+    soft mult (0.7 floor) carries the calibrator information instead."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     assert "_calibrated < 0.30" in src
     assert "Phase 40 hard-refuse" in src
+    assert "calibrator_hard_refuse_enabled" in src
+
+
+def test_unblock_2026_06_11_edge_blocks_flag_gated():
+    """All remaining edge-opinion hard blocks are opt-in (default OFF):
+    EV catastrophic, regime counter-trend, dynamic post-mortem blacklist."""
+    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    assert "ev_catastrophic_block_enabled" in src
+    assert "regime_countertrend_block_enabled" in src
+    assert "auto_mutator_block_enabled" in src
 
 
 def test_phase27_graduated_ev_still_active():
