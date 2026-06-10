@@ -21,7 +21,8 @@ $procs = @(
   @{ name = 'confluence-paper'; script = 'run_confluence_paper.py' },
   @{ name = 'liq-harvester';    script = 'scripts\harvest_liquidations.py' },
   @{ name = 'skew-harvester';   script = 'scripts\harvest_skew.py' },
-  @{ name = 'l2-harvester';     script = 'scripts\harvest_l2.py' }
+  @{ name = 'l2-harvester';     script = 'scripts\harvest_l2.py' },
+  @{ name = 'tv-harvester';     script = 'scripts\harvest_tv.py' }
 )
 
 $running = @(Get-CimInstance Win32_Process -Filter "name='python.exe'" -ErrorAction SilentlyContinue |

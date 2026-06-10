@@ -1,3 +1,38 @@
+# Task: TradingView integration layer (2026-06-11) — shipped
+
+## Plan (executed; user-approved via plan mode)
+1. Probe TV MCP capabilities + keyless endpoints → verify: depth/auth findings recorded
+2. TDD: 4 offline test files first (red) → implement tv_client/harvest/screen/crosscheck (green)
+3. Backfill data/tv_cache (5 CRYPTOCAP 1D + 31 alt 1D + 10 majors 1h) → verify: bar counts
+4. Pre-registered frozen-gate dominance screen → verify: report written, verdict honest
+5. Forward harvester + start_all wiring + TV watchlist → verify: --once run, dedup launcher
+6. Adversarial 3-reviewer workflow → fix findings → full pytest + ruff → commit, merge main
+
+## Review
+- CAPABILITY REALITY: TV MCP = data only (no order placement, no strategy-tester, no alert
+  creation; get_ohlcv can't page — `to` ignored). "Test on TradingView" honestly = TV as
+  independent data source + verifier. No rewrite: integration layer only.
+- NEW: quant_suite/tv_client.py (keyless TV chart-websocket OHLCV; 2,600 daily bars verified;
+  intraday res mapping 1h→"60"), scripts/backfill_tv_cache.py, scripts/harvest_tv.py
+  (CoinGecko dominance + TV Recommend.All point-in-time hourly; skew-harvester skeleton;
+  in start_all.ps1), scripts/run_tv_regime_screen.py, scripts/tv_crosscheck_ohlcv.py.
+- SCREEN (pre-registered, 8 variants + price-only CONTROL TWINS, h=1d, 2020-01-02→2026-06-10,
+  2,352 days, 10 bps/side, n_trials=17 provenance-traced): **NO_EDGE**. Best-IS btcd_rot14
+  (IS p=.006, FDR Y) flipped sign OOS (Sharpe −0.023, DSR .006) and was redundant vs its
+  control (6/8 flagged redundant — point-estimate column, noise at sub-gate magnitudes).
+  Reviewer zero-cost rerun: best OOS p=0.10 → verdict cost-model-independent. No engine
+  wiring (pre-registered skip); confluence forward-test untouched.
+- ADVERSARIAL REVIEW (3 agents): APPROVE_WITH_NITS ×3; all found biases push PRO-PASS →
+  NO_EDGE a fortiori. Fixed pre-ship: partial-final-bar drop + keep-last dedup + null-price
+  skip + incomplete-fetch raise (tv_client), flush-prunes-after-write (harvest_tv),
+  USDT filter (backfill), survivorship/redundancy/n_trials caveats (screen docstring).
+- CROSSCHECK: TV vs ccxt Binance 1h closes, 10 majors, ~1,910 bars each → 10/10 OK, median
+  0.0 bps, 0 missing bars. Bot's data pipeline independently verified.
+- Watchlist "TradingBot Universe" (id 335211589) created on the TV account (17 whitelist
+  perps + 4 CRYPTOCAP regime series).
+- PAPER mode unchanged (user-confirmed); CONTROLLED_LIVE latch untouched. Live-path code
+  untouched entirely.
+
 # Task: pine_strategies study + integrate (2026-06-10) — shipped
 
 ## Plan (executed)

@@ -8,6 +8,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-06-11 — TradingView integration layer)
+- `quant_suite/tv_client.py`: keyless TradingView chart-websocket OHLCV client
+  (research-only; 2,600+ daily bars incl. CRYPTOCAP aggregates) + `scripts/backfill_tv_cache.py`
+- `scripts/harvest_tv.py`: keyless forward-harvester (CoinGecko dominance + TV
+  Recommend.All ratings, hourly point-in-time records) — wired into `start_all.ps1`
+- `scripts/run_tv_regime_screen.py`: pre-registered frozen-gate screen of
+  USDT.D/BTC.D/TOTAL/TOTAL3 regime signals (8 variants + price-only control twins)
+  → **NO_EDGE** (best-IS variant failed OOS and was redundant vs its control;
+  zero-cost rerun also fails; `reports/tv_regime_screen_2026-06-10.md`)
+- `scripts/tv_crosscheck_ohlcv.py`: TV-vs-exchange data verification → 10/10 majors
+  OK, median divergence 0.0 bps (`reports/tv_crosscheck_2026-06-10.md`)
+
 ### Added
 - Multi-profile runner: Conservative, Moderate, and Aggressive profiles run simultaneously
 - Per-profile isolated wallets, position trackers, and blacklists

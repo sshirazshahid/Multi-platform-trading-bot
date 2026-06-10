@@ -106,3 +106,8 @@ data/*.runaway-*.bak
 # WS3c liquidation forward-harvest (accumulated locally)
 data/liquidations_history.jsonl
 data/liquidations_status.json
+
+# TradingView research cache + forward-harvest (regenerable / accumulated locally)
+data/tv_cache/
+data/tv_history.jsonl
+data/tv_status.json
