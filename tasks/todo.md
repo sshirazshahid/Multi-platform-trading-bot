@@ -1,3 +1,23 @@
+# Task: UNBLOCK ALL symbols + all-exchange listings (2026-06-11) — shipped
+
+## Review
+- Audit of every block mechanism: BLACKLIST_HARD empty (6-major block only inside the
+  inert SCALP_TIER_ENABLED=false kill-switch branch; no env override), data/blacklist.json
+  {}, auto_mutations {}, risk_state symbol/family pauses {}, hours all-open
+  (BLOCKED_HOURS_UTC=set()), short-side filter off. The ONLY standing block was
+  ANALYSIS_ONLY_BASES (15 commodity/equity perp bases — all listed on all 3 venues).
+- Change: is_analysis_only() gated behind ANALYSIS_ONLY_ENFORCED (env, default OFF).
+  Bases set RETAINED as perp-only registry (mcp_brain fetch routing + _collect_all_coins
+  depend on it — emptying it would break data fetching). Re-arm: ANALYSIS_ONLY_ENFORCED=true.
+- "Add new symbols on all exchanges": TRADING_MODE=all discovery already scans every
+  liquid USDT perp per venue incl. these perps; the unblock is what makes them tradeable.
+  No static-list change (commodity perps deliberately pruned from _TOP_SPOT 2026-05-31
+  to avoid spot-404 noise; discovery + perp fallback handle them).
+- Tests: test_analysis_only_gating.py reworked (8 pass: default-unblocked pinned, match
+  logic preserved behind flag). Suite 1657 green. ⚠ Applies on bot RESTART. ⚠ Carries to
+  CONTROLLED_LIVE if ever flipped — these instruments have NO screened edge (2026-06-02
+  probe: noise-like).
+
 # Task: TradingView integration layer (2026-06-11) — shipped
 
 ## Plan (executed; user-approved via plan mode)

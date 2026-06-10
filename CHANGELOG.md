@@ -19,6 +19,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   zero-cost rerun also fails; `reports/tv_regime_screen_2026-06-10.md`)
 - `scripts/tv_crosscheck_ohlcv.py`: TV-vs-exchange data verification → 10/10 majors
   OK, median divergence 0.0 bps (`reports/tv_crosscheck_2026-06-10.md`)
+- UNBLOCK directive (2026-06-11, owner): analysis-only entry block now opt-in via
+  `ANALYSIS_ONLY_ENFORCED` (default OFF) — commodity/equity perps listed on all 3
+  exchanges (XAU/XAG/CL/BZ/COPPER + TSLA/NVDA/AMZN/AAPL/GOOGL/META/MSFT/MSTR/COIN)
+  are tradeable; they enter via `TRADING_MODE=all` discovery. All other blocks
+  verified already clear (BLACKLIST_HARD empty, hours open, no pauses).
 - `scripts/run_tv_macro_screen.py`: pre-registered tradfi→crypto regime screen
   (TV global data: DXY/VIX/SPX/US10Y/GOLD, 7 variants + BTC-price controls,
   session-stamp causality lag) → **NO_EDGE** (0/7 FDR, best IS p=0.38;

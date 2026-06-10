@@ -440,14 +440,22 @@ def get_commodity_meta(symbol: str) -> dict:
     return COMMODITIES.get(base, {})
 
 # ==============================================================
-# ANALYSIS-ONLY INSTRUMENTS (2026-06-02)
+# ANALYSIS-ONLY INSTRUMENTS (2026-06-02; entry block LIFTED 2026-06-11)
 # Commodity + equity perpetuals that ARE live + liquid on Binance/Bybit/Bitget
-# (ccxt `XAU/USDT:USDT`, raw `XAUUSDT`) but are only ~5 months old, so they have
-# NO screened edge yet. The bot may FETCH + WAREHOUSE them for research, but must
-# NEVER route them to a live/paper order until they pass the pre-registered screen.
-# is_analysis_only() is the single safety predicate; _execute_open hard-blocks on it.
-# To promote one to tradeable later, remove its base here AFTER it survives the screen.
+# (ccxt `XAU/USDT:USDT`, raw `XAUUSDT`). Originally hard-blocked from entries
+# (~5 months of history, no screened edge).
+#
+# 2026-06-11 (owner UNBLOCK directive #3: "unblock all symbols. add new symbols
+# which are listed on all connected exchanges"): the hard entry block is now
+# OPT-IN — default OFF; re-arm with ANALYSIS_ONLY_ENFORCED=true in .env.
+# These perps are listed on all 3 connected venues and are discovered in
+# TRADING_MODE=all, so with the block off they flow into the tradeable
+# universe like any crypto perp (MCP score / meta-filter / risk gates apply).
+# ⚠ They still have NO screened edge (2026-06-02 probe: noise-like).
+# The bases set is RETAINED as the perp-only instrument registry —
+# mcp_brain fetch routing and _collect_all_coins depend on it; do not empty it.
 # ==============================================================
+ANALYSIS_ONLY_ENFORCED = os.getenv("ANALYSIS_ONLY_ENFORCED", "false").lower() == "true"
 ANALYSIS_ONLY_BASES = {
     # commodities (gold, silver, WTI, Brent, copper)
     "XAU", "XAG", "CL", "BZ", "COPPER", "WTI",
@@ -456,11 +464,13 @@ ANALYSIS_ONLY_BASES = {
 }
 
 def is_analysis_only(symbol: str) -> bool:
-    """True if the symbol's base is an analysis-only research instrument.
+    """True if the symbol is entry-blocked as an analysis-only instrument.
 
-    Matches the ccxt perp form (`XAU/USDT:USDT`), the spot-name form (`XAU/USDT`),
-    AND the raw exchange id (`XAUUSDT`) by EXACT base — so crypto-native tokens that
-    merely share a prefix (e.g. XAUT = Tether Gold -> `XAUTUSDT`) are NOT caught.
+    Always False while ANALYSIS_ONLY_ENFORCED is off (2026-06-11 owner unblock —
+    see the section header above). When enforced, matches the ccxt perp form
+    (`XAU/USDT:USDT`), the spot-name form (`XAU/USDT`), AND the raw exchange id
+    (`XAUUSDT`) by EXACT base — so crypto-native tokens that merely share a
+    prefix (e.g. XAUT = Tether Gold -> `XAUTUSDT`) are NOT caught.
 
     A few analysis-only bases are short/generic (CL, BZ, META, COIN). The match is
     deliberately fail-SAFE: if a real crypto perp ever shared one of these exact
@@ -469,6 +479,8 @@ def is_analysis_only(symbol: str) -> bool:
     correct. The raw-id branch closes the only unsafe direction — a future caller
     passing a slash-less id silently failing OPEN through the choke.
     """
+    if not ANALYSIS_ONLY_ENFORCED:
+        return False
     s = symbol.upper()
     base = s.split("/")[0].split(":")[0]
     if base in ANALYSIS_ONLY_BASES:
