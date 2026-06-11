@@ -33,6 +33,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (it counts opens, not closes); equity curve applies the real-trade filter;
   MARKET REGIME title names its 1h timeframe (vs the gates panel's 4h BTC trend).
   +15 tests (`tests/test_dashboard_mode_scoping.py`), suite 1659→1674.
+- **Daily-loss breaker now sees partial-TP legs** (owner: "wire it"):
+  `partial_close_position` records the partial's net PnL via
+  `risk.record_trade_pnl(..., is_win=None)` when it banks — previously only the
+  runner's `pos.pnl` reached the breaker, so banked partial profits were
+  invisible to the loss budget. `is_win=None` keeps Spec §12 streaks /
+  recent-results / Kelly untouched (those update once, on the whole trade, at
+  `_finalize_close`). Suite 1674→1675.
 
 ### Added (2026-06-11 — TradingView integration layer)
 - `quant_suite/tv_client.py`: keyless TradingView chart-websocket OHLCV client

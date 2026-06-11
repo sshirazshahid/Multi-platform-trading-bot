@@ -59,3 +59,20 @@ def test_partial_close_books_the_paper_wallet():
         "partial_close_position must book the taken fraction in the paper wallet "
         "(else partial TPs leak margin+profit from the paper balance)")
     assert "partial_size, price, position.entry_price" in block  # booked at the partial fill
+
+
+def test_partial_close_records_daily_pnl_for_breaker():
+    """partial_close_position() must feed the partial leg's net PnL to
+    risk.record_trade_pnl so the daily-loss breaker sees banked partials
+    WHEN they bank (2026-06-11; _finalize_close records only the runner's
+    pos.pnl, which excludes realized_partial_pnl). is_win=None is mandatory:
+    a partial is not a completed trade — Spec §12 streaks, recent-results
+    and Kelly history update once, at _finalize_close, on the whole trade."""
+    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    i = src.index("def partial_close_position")
+    block = src[i:i + 7000]
+    assert "self.risk.record_trade_pnl(" in block, (
+        "partial leg must reach the daily-loss breaker")
+    ri = block.index("self.risk.record_trade_pnl(")
+    assert "is_win=None" in block[ri:ri + 400], (
+        "partial leg must NOT update streaks/Kelly — is_win must be None")

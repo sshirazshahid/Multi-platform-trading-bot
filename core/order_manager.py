@@ -1436,6 +1436,22 @@ class OrderManager:
             except Exception as we:
                 logger.debug(f"[Wallet] partial on_close skipped: {we}")
 
+        # 2026-06-11 (owner): the daily-loss breaker must see the partial leg
+        # WHEN it banks — _finalize_close records only the runner's pos.pnl,
+        # which excludes realized_partial_pnl, so banked partial profits were
+        # invisible to the loss budget (breaker erred conservative).
+        # is_win=None on purpose: a partial is not a completed trade — Spec §12
+        # streaks, recent-results and Kelly history update once, at
+        # _finalize_close, on the whole-trade outcome. Mode-agnostic, like
+        # book_partial_exit above (live partials realize PnL too).
+        try:
+            self.risk.record_trade_pnl(
+                p_gross - p_exit_fee, self.risk._start_balance or 0,
+                is_win=None,
+            )
+        except Exception as _rp:
+            logger.debug(f"[Risk] partial record_trade_pnl skipped: {_rp}")
+
         try:
             from config import PARTIAL_TP
             if PARTIAL_TP.get("move_sl_to_breakeven", True):
