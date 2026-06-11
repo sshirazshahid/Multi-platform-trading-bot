@@ -8,6 +8,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-06-11 — dashboard truth + paper-wallet integrity)
+- **CRITICAL: pytest clobbered the production paper wallet.**
+  `tests/test_partial_tp_accounting.py` wrote the real `data/virtual_wallet.json`
+  (start=1000) on every repo-root test run; the next bot restart silently
+  re-seeded all paper balances to 5000/exchange (fired 4× Jun 10-11), erasing
+  paper losses — and the 8 positions open across the final re-seed credited
+  +913.52 USDT of unmatched margin at close. The dashboard's "+477.98 / ROI
+  +3.19%" vs "−173.86 all-time" contradiction reconciled to <$0.10 residual.
+  Fixes: test isolated (tmp_path/chdir); `VirtualWallet._save` refuses to write
+  the production file under pytest; `_load`'s re-seed path now re-debits margin
+  (+est. entry fee) of open paper positions (`_redebit_open_margin`).
+- **Dashboard LIVE/PAPER scoping** (`dashboard.py`): EXCHANGE BREAKDOWN `bal:`
+  showed REAL account balances in PAPER mode → now mode-scoped; warehouse panels
+  (PER-SYMBOL EDGE / LOSS-CLUSTER / SLIPPAGE) mixed 772 PAPER + 498
+  CONTROLLED_LIVE rows → queries now filter `mode`, titles show the mode;
+  balances panel adds a "Trade PnL (mode, all history)" truth line beside the
+  sim-wallet ROI.
+- **Dashboard consistency**: all PnL sums now whole-trade (runner `pnl` +
+  `realized_partial_pnl`; partial-TP profits +22.49 were invisible); Performance/
+  Daily buckets moved local→UTC to match the engine's risk counters; "All Time
+  (since X)" relabeled "Last 500 trades (since X)" once the position-tracker
+  ring buffer is full; risk panel "Trades Today" relabeled "Opens Today (UTC)"
+  (it counts opens, not closes); equity curve applies the real-trade filter;
+  MARKET REGIME title names its 1h timeframe (vs the gates panel's 4h BTC trend).
+  +15 tests (`tests/test_dashboard_mode_scoping.py`), suite 1659→1674.
+
 ### Added (2026-06-11 — TradingView integration layer)
 - `quant_suite/tv_client.py`: keyless TradingView chart-websocket OHLCV client
   (research-only; 2,600+ daily bars incl. CRYPTOCAP aggregates) + `scripts/backfill_tv_cache.py`

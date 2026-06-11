@@ -124,3 +124,19 @@ Do NOT reflexively tack on the $1,300/min-notional caveat — it's a deploy-
 time concern, not a research finding. (Does not contradict the standing
 honesty that the bot won't cover living expenses — that's a big-picture
 truth stated when relevant, not a per-result disclaimer.)
+
+### L10: Tests must NEVER touch production state files (cwd-relative writes)
+A regression test I added (test_partial_tp_accounting, 2026-06-03) constructed
+a real VirtualWallet() with no isolation. Its _save() wrote the PRODUCTION
+data/virtual_wallet.json (cwd-relative path) with start=1000 on every repo-root
+pytest run. The bot then "re-seeded" the paper wallet on each restart (4x on
+Jun 10-11), erasing paper losses and booking +913.52 of phantom margin credits
+for positions open across the re-seed. The user saw an impossible dashboard
+(+477.98 wallet vs -173.86 trade PnL) and lost trust in the data.
+
+**Rule**: any test that instantiates a class with cwd-relative persistence MUST
+isolate it (monkeypatch.chdir(tmp_path) or patch the path constant) BEFORE
+construction. When writing a persistence class, add a save-guard that refuses
+to write its production path while PYTEST_CURRENT_TEST is set. After any full
+suite run, spot-check that no files under data/ were modified by tests
+(git status data/ + key state files).

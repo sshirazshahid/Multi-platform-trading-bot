@@ -201,6 +201,53 @@ class VirtualWallet:
                 )
             self._save()
 
+    def _redebit_open_margin(self):
+        """After a start-balance re-seed, re-debit margin (+ est. entry fee) of
+        any OPEN paper positions from data/positions.json so their eventual
+        on_close credits have a matching debit.
+
+        2026-06-11: a re-seed fired with 8 paper positions open; their margin
+        debits were erased and the later closes credited +913.52 USDT of
+        unmatched margin — losing trades RAISED the balance. This replays the
+        on_open debit (margin + entry fee) against the fresh seed."""
+        try:
+            pf = Path("data/positions.json")
+            if not pf.exists():
+                return
+            rows = json.loads(pf.read_text(encoding="utf-8")).get("open", [])
+            redebited = 0
+            for d in rows:
+                if not d.get("paper_trade"):
+                    continue
+                ex = str(d.get("exchange", "")).lower()
+                size = float(d.get("size") or 0)
+                entry = float(d.get("entry_price") or 0)
+                lev = int(d.get("leverage") or 1)
+                mtype = d.get("market_type", "futures")
+                if not ex or size <= 0 or entry <= 0:
+                    continue
+                notional = size * entry
+                margin = notional / lev if (mtype == "futures" and lev > 1) else notional
+                try:
+                    from core.position_tracker import _fee_rate
+                    fee_est = notional * _fee_rate(mtype)
+                except Exception:
+                    fee_est = notional * (0.0005 if mtype == "futures" else 0.001)
+                cost = margin + fee_est
+                bal = self._balances.get(ex, self._start)
+                self._balances[ex] = bal - cost
+                redebited += 1
+                logger.warning(
+                    f"[VirtualWallet] re-debited {cost:.4f} USDT "
+                    f"(margin {margin:.4f} + fee est {fee_est:.4f}) for open paper "
+                    f"{d.get('symbol')} on {ex} after re-seed | "
+                    f"balance: {bal:.4f} → {self._balances[ex]:.4f}"
+                )
+            if redebited:
+                self._save()
+        except Exception as e:
+            logger.debug(f"[VirtualWallet] re-debit after reset failed: {e}")
+
     def statement(self) -> str:
         """Return a formatted balance statement string."""
         if not self._enabled:
@@ -220,6 +267,22 @@ class VirtualWallet:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _save(self):
+        # Never write the PRODUCTION wallet file from inside a pytest run.
+        # 2026-06-11: an unisolated test constructed VirtualWallet() from the
+        # repo root and its _save() clobbered data/virtual_wallet.json with
+        # start=1000 — on the next bot restart _load saw the start mismatch and
+        # re-seeded every balance, erasing accumulated paper PnL (4x Jun 10-11).
+        # Isolated tests (monkeypatch.chdir(tmp_path)) resolve elsewhere and
+        # still save normally.
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            try:
+                _prod = Path(__file__).resolve().parents[1] / "data" / "virtual_wallet.json"
+                if WALLET_FILE.resolve() == _prod:
+                    logger.debug(
+                        "[VirtualWallet] pytest targeting production wallet file — save skipped")
+                    return
+            except Exception:
+                pass
         # Atomic write (tmp + os.replace) so two concurrent saves can never tear
         # data/virtual_wallet.json into invalid JSON (which _load would swallow,
         # resetting balances to start). Callers hold self._lock; os.replace is
@@ -253,6 +316,7 @@ class VirtualWallet:
                         f"({saved_start} → {self._start}) — resetting."
                     )
                     self._balances = {}
+                    self._redebit_open_margin()
                 else:
                     self._balances = data.get("balances", {})
                     logger.info(

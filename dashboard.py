@@ -1014,8 +1014,21 @@ def load_warehouse_stats() -> dict:
 
     Reads data/warehouse.sqlite directly (no ORM, no core/__init__).
     Returns {} if the DB doesn't exist or an error occurs.
+
+    2026-06-11: every query is scoped to the CURRENT operating mode — the
+    trades table mixes PAPER and CONTROLLED_LIVE rows, and a PAPER dashboard
+    must not blend live-era losses into PER-SYMBOL EDGE / LOSS-CLUSTER /
+    SLIPPAGE (and vice versa when switching to LIVE). Also returns the
+    mode's whole-trade net (realized + partial-TP legs) so the balances
+    panel can cross-check the sim wallet against trade-history truth.
     """
     out: dict = {"per_symbol": [], "per_family": [], "slippage": {}}
+    try:
+        from config import DRY_RUN as _dr
+        wh_mode = "PAPER" if _dr else "CONTROLLED_LIVE"
+    except Exception:
+        wh_mode = "PAPER"
+    out["mode"] = wh_mode
     db_path = Path("data/warehouse.sqlite")
     if not db_path.exists():
         return out
@@ -1024,7 +1037,7 @@ def load_warehouse_stats() -> dict:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
 
-        # Per-symbol expectancy + PF (closed trades only)
+        # Per-symbol expectancy + PF (closed trades only, current mode)
         rows = conn.execute(
             """SELECT symbol,
                       COUNT(*) AS n,
@@ -1033,46 +1046,51 @@ def load_warehouse_stats() -> dict:
                       SUM(CASE WHEN realized_pnl < 0 THEN -realized_pnl ELSE 0 END) AS gl,
                       SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
                  FROM trades
-                WHERE status='CLOSED'
+                WHERE status='CLOSED' AND mode = ?
                 GROUP BY symbol
                 ORDER BY n DESC
-                LIMIT 8"""
+                LIMIT 8""", (wh_mode,)
         ).fetchall()
         out["per_symbol"] = [dict(r) for r in rows]
 
-        # Per-strategy-family net PnL + count
+        # Per-strategy-family net PnL + count (current mode)
         fam = conn.execute(
             """SELECT COALESCE(strategy_family,'unknown') AS fam,
                       COUNT(*) AS n,
                       SUM(realized_pnl) AS net,
                       SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
                  FROM trades
-                WHERE status='CLOSED'
+                WHERE status='CLOSED' AND mode = ?
                 GROUP BY fam
                 ORDER BY n DESC
-                LIMIT 6"""
+                LIMIT 6""", (wh_mode,)
         ).fetchall()
         out["per_family"] = [dict(r) for r in fam]
 
-        # Slippage vs fee ratio — only rows where both are non-null
+        # Slippage vs fee ratio — only rows where both are non-null (current mode)
         slip = conn.execute(
             """SELECT AVG(slippage) AS avg_slip,
                       AVG(fee)      AS avg_fee,
                       COUNT(*)      AS n
                  FROM trades
-                WHERE status='CLOSED' AND slippage IS NOT NULL AND fee IS NOT NULL"""
+                WHERE status='CLOSED' AND slippage IS NOT NULL AND fee IS NOT NULL
+                  AND mode = ?""", (wh_mode,)
         ).fetchone()
         if slip:
             out["slippage"] = dict(slip)
 
-        # Counts for header line
+        # Counts for header line (current mode) + whole-trade net for the
+        # balances-panel cross-check (realized + partial-TP legs)
         tot = conn.execute(
-            "SELECT COUNT(*) AS c FROM trades WHERE status='CLOSED'"
+            """SELECT COUNT(*) AS c,
+                      SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS net
+                 FROM trades WHERE status='CLOSED' AND mode = ?""", (wh_mode,)
         ).fetchone()
         cnd = conn.execute(
             "SELECT COUNT(*) AS c FROM candidates"
         ).fetchone()
         out["total_trades"] = int(tot["c"]) if tot else 0
+        out["mode_net"] = float(tot["net"] or 0.0) if tot else 0.0
         out["total_candidates"] = int(cnd["c"]) if cnd else 0
         conn.close()
     except Exception as e:
@@ -1325,8 +1343,19 @@ def _filter_real_trades(closed):
     return [t for t in closed if _is_real_trade(t)]
 
 
+def _whole_pnl(t) -> float:
+    """Whole-trade PnL: runner-leg net pnl + any partial-TP leg already banked
+    (realized_partial_pnl). The runner-only `pnl` field under-reports profit on
+    every trade that took a partial (+22.49 missing across the 500-row window
+    at the 2026-06-11 audit) — all PnL panels must sum the whole trade."""
+    return (t.get("pnl", 0) or 0) + (t.get("realized_partial_pnl") or 0)
+
+
 def calc_stats(closed):
-    today     = datetime.now().date()
+    # UTC day boundary (2026-06-11): the engine (risk manager, hour gates,
+    # heatmap) lives on UTC days; bucketing this panel by LOCAL date made
+    # "Today 117 / -49.81" disagree with the risk panel's UTC counters.
+    today     = datetime.now(timezone.utc).date()
     yesterday = today - timedelta(days=1)
     # Use the broad "real trade" filter so PERFORMANCE matches email
     # notifications: MANUAL-prefix positions (already open on exchange at
@@ -1354,7 +1383,7 @@ def calc_stats(closed):
     latest_ts = None
 
     for t in closed:
-        pnl   = t.get("pnl",       0) or 0
+        pnl   = _whole_pnl(t)
         gross = t.get("gross_pnl", pnl) or pnl
         fees  = t.get("total_fees", 0) or 0
         ct    = t.get("close_time", 0) or 0
@@ -1369,10 +1398,10 @@ def calc_stats(closed):
                 earliest_ts = ct
             if latest_ts is None or ct > latest_ts:
                 latest_ts = ct
-        # Phase 45: accumulate per-day totals
+        # Phase 45: accumulate per-day totals (UTC days)
         if ct:
             try:
-                _d = datetime.fromtimestamp(ct).date()
+                _d = datetime.fromtimestamp(ct, tz=timezone.utc).date()
                 daily_totals[_d] = daily_totals.get(_d, 0.0) + pnl
             except (OSError, ValueError, OverflowError):
                 pass
@@ -1383,7 +1412,7 @@ def calc_stats(closed):
             loss_amounts.append(abs(pnl))
         if ct:
             try:
-                d = datetime.fromtimestamp(ct).date()
+                d = datetime.fromtimestamp(ct, tz=timezone.utc).date()
             except (OSError, ValueError, OverflowError):
                 d = None
             if d == today:
@@ -1404,7 +1433,7 @@ def calc_stats(closed):
     streak = 0
     streak_type = ""
     for t in closed:  # already sorted by close_time desc
-        p = t.get("pnl", 0) or 0
+        p = _whole_pnl(t)
         if p > 0:
             if streak_type == "" or streak_type == "W":
                 streak += 1; streak_type = "W"
@@ -1459,7 +1488,7 @@ def calc_exchange_stats(closed, open_pos):
     })
     for t in closed:
         ex  = (t.get("exchange") or "unknown").lower()
-        pnl = t.get("pnl", 0) or 0
+        pnl = _whole_pnl(t)
         fee = t.get("total_fees", 0) or 0
         mtype = t.get("market_type", "spot")
         ex_stats[ex]["pnl"]  += pnl
@@ -1489,7 +1518,7 @@ def calc_strategy_stats(closed):
     for t in closed:
         raw  = t.get("strategy", "unknown") or "unknown"
         name = raw.split("|")[0].strip()
-        pnl  = t.get("pnl", 0) or 0
+        pnl  = _whole_pnl(t)
         strat_stats[name]["pnl"] += pnl
         strat_stats[name]["n"]   += 1
         if pnl > 0:
@@ -1512,7 +1541,7 @@ def calc_hourly_heatmap(closed):
         if not ct:
             continue
         hour = datetime.fromtimestamp(ct, tz=timezone.utc).hour
-        pnl  = t.get("pnl", 0) or 0
+        pnl  = _whole_pnl(t)
         hours[hour]["pnl"] += pnl
         hours[hour]["n"]   += 1
     return hours
@@ -1523,13 +1552,14 @@ def calc_daily_pnl(closed, days=7):
     # Use broad real-trade filter so heatmap matches Performance > Today/Yesterday.
     closed = _filter_real_trades(closed)
     buckets = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0})
-    today   = datetime.now().date()
+    # UTC day buckets to match calc_stats / heatmap / engine counters.
+    today   = datetime.now(timezone.utc).date()
     for t in closed:
         ct = t.get("close_time", 0)
         if not ct: continue
-        day = datetime.fromtimestamp(ct).date()
+        day = datetime.fromtimestamp(ct, tz=timezone.utc).date()
         if (today - day).days >= days: continue
-        pnl = t.get("pnl", 0) or 0
+        pnl = _whole_pnl(t)
         buckets[day]["pnl"]    += pnl
         buckets[day]["trades"] += 1
         if pnl > 0: buckets[day]["wins"] += 1
@@ -1547,9 +1577,9 @@ def _bucket_stats(trades):
         return {"n": 0, "wins": 0, "losses": 0, "wr": 0.0, "pnl": 0.0,
                 "pf": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
                 "best": 0.0, "worst": 0.0, "fees": 0.0}
-    wins = [t.get("pnl", 0) or 0 for t in trades if (t.get("pnl") or 0) > 0]
-    losses = [abs(t.get("pnl", 0) or 0) for t in trades if (t.get("pnl") or 0) < 0]
-    pnls = [t.get("pnl", 0) or 0 for t in trades]
+    wins = [_whole_pnl(t) for t in trades if _whole_pnl(t) > 0]
+    losses = [abs(_whole_pnl(t)) for t in trades if _whole_pnl(t) < 0]
+    pnls = [_whole_pnl(t) for t in trades]
     wsum = sum(wins); lsum = sum(losses)
     return {
         "n":       len(trades),
@@ -1788,7 +1818,21 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         box_mid()
         row("{}  {:>10.2f} USDT   {}".format(
             col("TOTAL", BOLD + WHITE), total_live,
-            col("ROI: {:+.2f}%".format(roi_pct), rc)))
+            col("ROI: {:+.2f}% (sim wallet vs seed)".format(roi_pct), rc)))
+        # 2026-06-11: the sim wallet measures "since its last seed" and was
+        # re-seeded by a test-clobber bug, so its ROI can diverge from real
+        # paper results. Always show trade-history truth alongside it.
+        try:
+            _wh = load_warehouse_stats()
+            if _wh.get("total_trades", 0) > 0:
+                _net = _wh.get("mode_net", 0.0)
+                row("{}  {}".format(
+                    col("Trade PnL ({}, all history, {} trades):".format(
+                        _wh.get("mode", ""), _wh["total_trades"]), DIM),
+                    col("{:+.2f} USDT".format(_net),
+                        GREEN if _net >= 0 else RED)))
+        except Exception:
+            pass
     elif live_bals:
         bal_det = fetcher.balance_detail()
         grand_coins = {}
@@ -1924,26 +1968,32 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     pf_s = col("∞" if pf >= 100 else "{:.2f}".format(pf), pf_c)
 
     row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
-        vljust(col("Today", WHITE), 11), pnl_str(s["today_pnl"]),
+        vljust(col("Today (UTC)", WHITE), 13), pnl_str(s["today_pnl"]),
         s["today_n"], col(s["today_wins"], GREEN), col(tl, RED),
         col("{:.1f}%".format(s["today_wr"]), wr_col(s["today_wr"]))))
     if s["yesterday_n"]:
         row("  {}  {}  trades:{}  W:{} L:{}  WR:{}".format(
-            vljust(col("Yesterday", WHITE), 11), pnl_str(s["yesterday_pnl"]),
+            vljust(col("Yesterday", WHITE), 13), pnl_str(s["yesterday_pnl"]),
             s["yesterday_n"], col(s["yesterday_wins"], GREEN), col(yl, RED),
             col("{:.1f}%".format(s["yesterday_wr"]), wr_col(s["yesterday_wr"]))))
     else:
-        row("  {}  {}".format(vljust(col("Yesterday", WHITE), 11),
+        row("  {}  {}".format(vljust(col("Yesterday", WHITE), 13),
                               col("no closed trades", DIM)))
     # Phase 47: show date range + ties (if any) for clarity. WR uses the
     # classic formula (W / (W + L)) excluding ties from denominator; the
     # raw display L count includes ties for compactness.
-    _at_label = "All Time"
+    # 2026-06-11: position_tracker caps closed history at 500 rows, so once
+    # full this window is a rolling ring buffer, NOT inception-to-date — label
+    # honestly ("since" = oldest SURVIVING row, which advances every close).
+    # Below the cap nothing has been evicted yet, so "All Time" stays true.
+    _at_base = "Last 500 trades" if s["total_n"] >= 500 else "All Time"
+    _at_label = _at_base
     _earliest = s.get("earliest_ts")
     if _earliest:
         try:
-            _at_label = "All Time (since {})".format(
-                datetime.fromtimestamp(_earliest).strftime("%d %b"))
+            _at_label = "{} (since {})".format(
+                _at_base,
+                datetime.fromtimestamp(_earliest, tz=timezone.utc).strftime("%d %b"))
         except (OSError, ValueError, OverflowError):
             pass
     _ties = s.get("all_ties", 0)
@@ -2269,7 +2319,10 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             pnl  = d["pnl"]; n = d["n"]; wins = d["wins"]
             open_n = d["open"]
             wr   = (wins / n * 100) if n > 0 else 0
-            live_b = live_bals.get(ex_name)
+            # 2026-06-11: in PAPER show the paper wallet balance, NOT the
+            # user's real exchange balance (previously this column leaked
+            # live account balances into the paper dashboard).
+            live_b = wallet_bal.get(ex_name) if dry_run else live_bals.get(ex_name)
             bal_s  = col("bal:{:.2f}".format(live_b), DIM) if live_b else ""
             row("{} {} trades:{:>3}  WR:{}  PnL:{}  open:{}  {}".format(
                 col("●", ec), vljust(col(ex_name.upper(), ec), 8),
@@ -2339,7 +2392,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     daily    = calc_daily_pnl(closed, days=7)
     has_data = any(d["trades"] > 0 for d in daily)
     if has_data:
-        box_top("DAILY PnL  (7 days)")
+        box_top("DAILY PnL  (7 days, UTC)")
         row("  " + sparkline([d["pnl"] for d in daily]))
         row("  {} {}  {}  {}  {}".format(
             vljust(col("Date", DIM), 12),
@@ -2517,7 +2570,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     )[:8]
     if recent:
         for t in recent:
-            sym    = t.get("symbol", "?"); pnl = t.get("pnl", 0) or 0
+            sym    = t.get("symbol", "?"); pnl = _whole_pnl(t)
             side   = (t.get("side") or "?").upper()
             raw_s  = t.get("strategy", "?") or "?"
             strat  = raw_s.split("|")[0][:14]
@@ -2756,7 +2809,9 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             "volatile":      (RED + BOLD, "VOLATILE "),
             "unknown":       (DIM,    "UNKNOWN  "),
         }
-        box_top("MARKET REGIME  (ADX + Hurst + Volatility)")
+        # "(1h)" so the gates panel's 4h BTC trend and this 1h classifier
+        # aren't misread as contradicting each other (2026-06-11).
+        box_top("MARKET REGIME  (1h ADX + Hurst + Volatility)")
         row("  {} {} {}  {}  {}  {}".format(
             vljust(col("Symbol",     DIM), 12),
             vljust(col("Regime",     DIM), 14),
@@ -2933,12 +2988,15 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     if closed and len(closed) >= 3:
       try:
         import numpy as np
-        # Build equity curve from closed trades
-        sorted_closed = sorted(closed, key=lambda x: x.get("close_time", 0))
+        # Build equity curve from closed trades. 2026-06-11: apply the same
+        # real-trade filter as PERFORMANCE/Daily/Weekly (reconcile imports
+        # otherwise pollute the curve in LIVE) and use whole-trade PnL.
+        sorted_closed = sorted(_filter_real_trades(closed),
+                               key=lambda x: x.get("close_time", 0))
         equity = []
         bal_curve = 0.0
         for t in sorted_closed:
-            bal_curve += t.get("pnl", 0) or 0
+            bal_curve += _whole_pnl(t)
             equity.append(bal_curve)
 
         # Only show last 50 trades for readability
@@ -2947,7 +3005,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             box_top("EQUITY CURVE  (last {} trades)".format(len(eq_show)))
 
             # Compute Sharpe/Sortino from PnL series
-            pnl_series = [t.get("pnl", 0) or 0 for t in sorted_closed[-50:]]
+            pnl_series = [_whole_pnl(t) for t in sorted_closed[-50:]]
             pnl_arr = np.array(pnl_series)
             mean_pnl = np.mean(pnl_arr)
             std_pnl = np.std(pnl_arr)
@@ -3109,8 +3167,10 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         row("  Positions:   {} {} / {} futures max{}".format(
             pos_bar, n_open, max_positions, col(spot_suffix, DIM)))
 
-        # Status + trades today
-        row("  Status: {}  MaxLev: {}x  Trades Today: {}".format(
+        # Status + opens today. 2026-06-11: risk_state's counter is OPENS
+        # since UTC midnight (note_trade_opened), not closed trades — label
+        # it so it isn't compared 1:1 against PERFORMANCE's closed count.
+        row("  Status: {}  MaxLev: {}x  Opens Today (UTC): {}".format(
             col("ACTIVE", GREEN + BOLD), max_leverage,
             col(str(trades_today), WHITE)))
 
@@ -3136,7 +3196,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     # ══════════════════════════════════════════════════════════════════
     wh = load_warehouse_stats()
     if wh and wh.get("total_trades", 0) > 0:
-        box_top("PER-SYMBOL EDGE (warehouse)")
+        box_top("PER-SYMBOL EDGE (warehouse, {})".format(wh.get("mode", "?")))
         row("  {}  candidates: {}   closed trades: {}".format(
             col("Source:", DIM),
             col(str(wh.get("total_candidates", 0)), WHITE),
@@ -3169,7 +3229,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     # ══════════════════════════════════════════════════════════════════
     rstate = load_risk_state()
     if (wh and wh.get("per_family")) or rstate:
-        box_top("LOSS-CLUSTER MONITOR")
+        box_top("LOSS-CLUSTER MONITOR  ({})".format(wh.get("mode", "?")))
         sym_pauses = (rstate or {}).get("symbol_pauses", {}) or {}
         fam_pauses = (rstate or {}).get("family_pauses", {}) or {}
         gstreak = (rstate or {}).get("global_streak", []) or []
@@ -3226,7 +3286,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     #  SLIPPAGE vs FEE RATIO  (execution-quality decay)
     # ══════════════════════════════════════════════════════════════════
     if wh and wh.get("slippage", {}).get("n", 0):
-        box_top("SLIPPAGE vs FEE RATIO")
+        box_top("SLIPPAGE vs FEE RATIO  ({})".format(wh.get("mode", "?")))
         s = wh["slippage"]
         n = int(s.get("n") or 0)
         slip = float(s.get("avg_slip") or 0.0)

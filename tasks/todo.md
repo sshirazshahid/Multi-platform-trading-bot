@@ -223,3 +223,23 @@ stock perps) for research, while NEVER routing them to live/paper orders until s
 - 6 new tests + full bot suite 1406 green. Bot restarted + verified live (no errors).
 - NOTE: live candidate-warehousing is action-driven; for screenable history use
   scripts/backfill_universe_ohlcv.py on the analysis-only perps (next data step).
+
+## 2026-06-11 — Dashboard truth + paper-wallet integrity (review)
+- [x] Root-caused the +477.98-wallet vs −173.86-PnL contradiction: pytest
+      clobbered data/virtual_wallet.json (start=1000) → restart re-seeded
+      wallets 4x; +913.52 unmatched margin credits for cross-reset positions;
+      arithmetic reconciled to <$0.10.
+- [x] Fixed: test isolation; VirtualWallet._save pytest-production guard;
+      _load re-seed now re-debits open paper margin (_redebit_open_margin).
+- [x] Dashboard LIVE/PAPER scoping: breakdown bal: column mode-scoped;
+      warehouse panels mode-filtered (+titles); trade-history truth line in
+      balances panel; whole-trade PnL everywhere; UTC day buckets; honest
+      "Last 500 trades" label; "Opens Today (UTC)" relabel; equity-curve
+      filter; regime title (1h).
+- [x] Suite 1659→1674 green; wallet file verified UNTOUCHED after full run.
+- [x] Why-losing analysis delivered (short SL cascade on bounce day 92%,
+      UNBLOCK volume 4.7x, entry_invalidated kills all longs at 30min,
+      no-edge structure: breakeven WR 60% vs actual 30%).
+- NOTE (not done, owner decisions): entry_invalidated entry-side consistency
+  tune; engine partial-TP legs not in risk.record_trade_pnl (breaker errs
+  conservative); one clean wallet re-seed at zero-open-positions moment.

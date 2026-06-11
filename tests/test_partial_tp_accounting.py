@@ -13,10 +13,16 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_partial_plus_final_close_returns_full_margin_and_total_pnl():
+def test_partial_plus_final_close_returns_full_margin_and_total_pnl(tmp_path, monkeypatch):
     """on_close on the partial fraction + on_close on the remainder must together return
     the FULL reserved margin + TOTAL realized PnL — i.e. no leak."""
     from core.virtual_wallet import VirtualWallet
+    # isolate the on-disk file so _save doesn't touch the real data/ dir.
+    # (2026-06-11: this test's _save() previously clobbered the PRODUCTION
+    # data/virtual_wallet.json with start=1000, which made the bot re-seed the
+    # paper wallet to 5000/exchange on every restart — erasing paper losses.)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir(exist_ok=True)
     w = VirtualWallet()
     w._enabled = True
     w._start = 1000.0
