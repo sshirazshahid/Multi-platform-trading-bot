@@ -2465,10 +2465,17 @@ class OrderManager:
                     and pos.market_type == "futures"
                     and self.mcp_brain is not None):
                 try:
+                    # 2026-06-11 gap-flip semantics: pass the entry epoch so
+                    # born-invalid positions are exempt. Knob off (or missing
+                    # open_time) → entry_ts=0 → checker preserves OLD behavior.
+                    _es_entry_ts = (
+                        float(getattr(pos, "open_time", 0.0) or 0.0)
+                        if _ES.get("require_flip_after_entry", True) else 0.0)
                     invalidated, reason = self.mcp_brain.is_entry_invalidated(
                         symbol=pos.symbol,
                         side=pos.side,
                         gap_pct=float(_ES.get("invalidation_gap_pct", 0.15)),
+                        entry_ts=_es_entry_ts,
                     )
                     if invalidated:
                         logger.warning(
@@ -2478,6 +2485,10 @@ class OrderManager:
                         self.close_position(
                             exchange, pos, "entry_invalidated", price)
                         continue
+                    elif "born-invalid" in reason:
+                        logger.debug(
+                            f"[Orders] ENTRY_STALE exempt: {pos.symbol} "
+                            f"{pos.side} ({reason})")
                 except Exception as _ese:
                     logger.debug(
                         f"[Orders] entry-staleness check skipped ({_ese})")

@@ -933,7 +933,9 @@ EXPECTANCY_FILTER = {
 #
 # Spec §12 GLOBAL halt (5 consecutive losses → 4h cooldown) is a
 # catastrophic safety rail and stays ON regardless. Phase 29 post-SL
-# cooldown stays ON (it's a 30min cooldown, not a block).
+# cooldown stays ON — 2026-06-11 (owner-approved): 180 min per
+# (symbol, side) after a stop_loss, re-armed as a HARD BLOCK (the
+# 2026-05-27 advisory-only mode blocked nothing; see risk_manager).
 SHORT_GATE_ENABLED        = False  # rolling 30-trade SELL WR < 45% pause
 SPEC12_SYMBOL_PAUSE_ENABLED = False  # per-symbol pause after 2 consec losses
 SPEC12_FAMILY_PAUSE_ENABLED = False  # per-family pause after 3 consec losses
@@ -956,6 +958,15 @@ ENTRY_STALENESS_EXIT = {
     "enabled":               True,
     "invalidation_gap_pct":  0.15,   # min EMA gap (in WRONG direction) to fire
     "min_hold_minutes":      30,     # grace period after entry
+    # 2026-06-11 gap-flip semantics: fire ONLY when the 4h gap actually
+    # FLIPPED after entry. Born-invalid positions (gap already >= threshold
+    # against the side AT THE ENTRY BAR) are exempt forever — SL/TP/trailing
+    # manage them. Jun-11 evidence: all 85 entry_invalidated closes since
+    # Jun 4 were longs killed at exactly 30min with gaps -1.6%..-4.8% that
+    # were already invalid at entry (a 4h gap can't move 2% in 30min) —
+    # the old rule structurally forced an all-short book in a 4h-bear
+    # regime. False restores the pre-2026-06-11 fire-on-current-gap rule.
+    "require_flip_after_entry": True,
 }
 
 # 2026-05-01 — Cell-Filter Entry Gate
@@ -1143,6 +1154,22 @@ BLOCKED_HOURS_UTC = set()
 ALLOWED_HOURS_UTC = set(range(24)) - BLOCKED_HOURS_UTC
 PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
 WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 22}  # sizing hint: half-size (H17 removed)
+
+# 2026-06-11 (owner: "Trade only in those hours where its profitable"):
+# dynamic profit-only hour gate — entries allowed ONLY during UTC hours
+# whose recent warehouse history (60d, current mode, whole-trade PnL,
+# n>=8) is net-positive, per data/hour_gate_evidence.json `profitable`
+# (refreshed weekly by scripts/refresh_hour_gates.py). Fail-open on
+# missing/stale(>14d)/empty evidence — an empty list is indistinguishable
+# from insufficient data, and a silently-halted bot is worse than an
+# ungated one. At ship time the profitable set was {2, 19, 20} (+18.81)
+# vs -236 across the other 21 hours. Honest caveat: hour-of-day patterns
+# did NOT survive IS/OOS validation (2026-06-02, 0 survivors) — the
+# robust effect of this gate is fewer trades / less bleed, not profit.
+# Supersedes the 2026-05-27 "hours cleared" decision above for entries;
+# static sets stay open (this gate is evidence-file-driven, not static).
+# Disable: HOUR_GATE_PROFIT_ONLY=false in .env.
+HOUR_GATE_PROFIT_ONLY = os.getenv("HOUR_GATE_PROFIT_ONLY", "true").lower() == "true"
 
 # ── Kronos-inspired temporal awareness (2026-05-27) ────────────
 # Day-of-week confidence multiplier. 459-trade data (all-time):

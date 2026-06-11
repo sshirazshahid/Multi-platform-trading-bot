@@ -1152,10 +1152,10 @@ class BotEngine:
     _HOUR_GATE_TTL_SEC = 300
     _HOUR_GATE_MAX_AGE_DAYS = 14
 
-    def _load_dynamic_blocked_hours(self) -> set:
-        """Read hour_gate_evidence.json and return its `blocked` set.
+    def _load_hour_gate_evidence(self) -> dict:
+        """Read hour_gate_evidence.json → {"blocked": set, "profitable": set}.
 
-        Returns empty set when:
+        Empty sets when:
         - file is missing
         - file is older than _HOUR_GATE_MAX_AGE_DAYS (stale evidence is ignored)
         - file is malformed
@@ -1163,42 +1163,57 @@ class BotEngine:
         """
         now = time.time()
         if (now - getattr(self, "_hour_gate_loaded_at", 0)) < self._HOUR_GATE_TTL_SEC:
-            return getattr(self, "_hour_gate_cached", set())
+            return getattr(self, "_hour_gate_cached",
+                           {"blocked": set(), "profitable": set()})
 
-        blocked: set = set()
+        ev: dict = {"blocked": set(), "profitable": set()}
         try:
             p = self._HOUR_GATE_PATH
             if p.exists():
                 age_days = (now - p.stat().st_mtime) / 86400
                 if age_days <= self._HOUR_GATE_MAX_AGE_DAYS:
                     data = json.loads(p.read_text(encoding="utf-8"))
-                    raw = data.get("blocked") or []
-                    blocked = {int(h) for h in raw if isinstance(h, (int, float))}
+                    for k in ("blocked", "profitable"):
+                        raw = data.get(k) or []
+                        ev[k] = {int(h) for h in raw if isinstance(h, (int, float))}
         except Exception as e:
             logger.debug(f"[HourGate] evidence load skipped: {e}")
-            blocked = set()
+            ev = {"blocked": set(), "profitable": set()}
 
-        self._hour_gate_cached = blocked
+        self._hour_gate_cached = ev
         self._hour_gate_loaded_at = now
-        return blocked
+        return ev
+
+    def _load_dynamic_blocked_hours(self) -> set:
+        """Back-compat shim: the `blocked` set from the evidence file."""
+        return self._load_hour_gate_evidence()["blocked"]
 
     def _classify_hour(self, hour: int) -> str:
         """Return 'peak' | 'allowed' | 'warmup' | 'blocked'.
 
         Combines the static config sets with `data/hour_gate_evidence.json`
         which is refreshed weekly by `scripts/refresh_hour_gates.py`.
-        Evidence-based blocked hours take precedence over peak/warmup.
+
+        2026-06-11 (owner: "Trade only in those hours where its profitable"):
+        profit-only mode — when HOUR_GATE_PROFIT_ONLY is on and the evidence
+        file is fresh with a non-empty `profitable` list, every hour NOT on
+        that list classifies as 'blocked'. Fail-open on missing/stale/empty
+        evidence (an empty list is indistinguishable from insufficient data;
+        a silently-halted bot is worse than an ungated one). Supersedes the
+        2026-05-27 decision that disabled the dynamic hour gate.
         """
         from config import (
             BLOCKED_HOURS_UTC,
+            HOUR_GATE_PROFIT_ONLY,
             PEAK_HOURS_UTC,
             WARMUP_HOURS_UTC,
         )
-        # 2026-05-27 (UNBLOCK directive): dynamic hour gate disabled.
-        # If MCP Brain scored the trade correctly, hour shouldn't block it.
-        # dynamic_blocked = self._load_dynamic_blocked_hours()
         if hour in BLOCKED_HOURS_UTC:
             return "blocked"
+        if HOUR_GATE_PROFIT_ONLY:
+            _prof = self._load_hour_gate_evidence().get("profitable")
+            if _prof and hour not in _prof:
+                return "blocked"
         if hour in PEAK_HOURS_UTC:
             return "peak"
         if hour in WARMUP_HOURS_UTC:
@@ -1363,7 +1378,8 @@ class BotEngine:
 
         if hour_class == "blocked":
             logger.info(
-                f"[Tier] {symbol} REJECTED: hour {hour:02d} UTC is in BLOCKED_HOURS_UTC")
+                f"[Tier] {symbol} REJECTED: hour {hour:02d} UTC blocked by hour "
+                f"gate (static BLOCKED_HOURS_UTC or profit-only evidence)")
             return None, None
 
         # Throttle pause short-circuits everything
@@ -1790,17 +1806,18 @@ class BotEngine:
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
         # per-pair-side StoplossGuard. After a position closes via SL on
         # this (symbol, side):
-        #   - Layer 1: 30min hard cooldown
+        #   - Layer 1: 180min hard cooldown (2026-06-11: 30 → 180 and
+        #     re-armed as a BLOCK; the 2026-05-27 advisory-only mode let
+        #     ADA/DOT/BNB/APT be re-shorted 9-12x into 70 SLs on Jun 11)
         #   - Layer 2: 6h lock if 2+ SL in last 24h (escalation)
-        # Targets the $-78 stop_loss bleed (largest active leak in audit).
-        # Refuses revenge re-entry on a pair-side that just stopped out.
+        # Time-based protection on (symbol, side), NOT an edge-opinion
+        # block — owner kept Phase 29 under UNBLOCK. Fail-open on error.
         try:
             _sl_active, _sl_reason = self.risk.is_sl_cooldown_active(symbol, side)
             if _sl_active:
-                # 2026-05-27 (UNBLOCK directive): log advisory only, don't block.
-                # If analysis is correct, re-entry after SL is valid.
                 logger.info(
-                    f"[Risk29] {symbol} {side} SL-cooldown advisory (not blocking): {_sl_reason}")
+                    f"[Risk29] BLOCKED open {symbol} {side} — {_sl_reason}")
+                return False
         except Exception as _e:
             logger.debug(f"[Risk29] sl-cooldown check skipped: {_e}")
 

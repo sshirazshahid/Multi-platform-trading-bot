@@ -1182,6 +1182,19 @@ def _hour_class(hour: int) -> tuple:
         return ("?", DIM)
     if hour in BLOCKED_HOURS_UTC:
         return ("BLOCKED", RED)
+    # 2026-06-11 profit-only hour gate — mirror bot_engine._classify_hour
+    # so the operator sees WHY the bot isn't entering during most hours.
+    try:
+        from config import HOUR_GATE_PROFIT_ONLY
+        if HOUR_GATE_PROFIT_ONLY:
+            p = Path("data/hour_gate_evidence.json")
+            if p.exists() and (time.time() - p.stat().st_mtime) / 86400 <= 14:
+                _prof = {int(h) for h in (
+                    json.loads(p.read_text(encoding="utf-8")).get("profitable") or [])}
+                if _prof and hour not in _prof:
+                    return ("BLOCKED (hour not profitable)", RED)
+    except Exception:
+        pass
     if hour in PEAK_HOURS_UTC:
         return ("PEAK",    GOLD + BOLD)
     if hour in WARMUP_HOURS_UTC:

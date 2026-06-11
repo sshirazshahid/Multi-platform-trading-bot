@@ -243,3 +243,28 @@ stock perps) for research, while NEVER routing them to live/paper orders until s
 - NOTE (not done, owner decisions): entry_invalidated entry-side consistency
   tune; engine partial-TP legs not in risk.record_trade_pnl (breaker errs
   conservative); one clean wallet re-seed at zero-open-positions moment.
+
+## 2026-06-11 — Three efficiency tunes shipped (review)
+- [x] entry_invalidated gap-flip: born-invalid exempt, flip fires, unknown=old
+      behavior; knob require_flip_after_entry (default True). +11 behavioral
+      tests (fake-exchange MCPBrain) + replica/pin updates.
+- [x] Phase-29 cooldown 30->180min, RE-ARMED as block (was advisory-only
+      since 05-27 = blocked nothing), ledger persisted in risk_state.json.
+- [x] CLAUDE_PORTFOLIO_MODE=off in .env (7-day PAPER experiment; baseline
+      Jun 5-11: -146.03/411 trades/WR 29.2%/~279 calls/day).
+- [x] Suite 1694 green; 3-lens adversarial review before merge.
+- [ ] MEASURE after restart: entry_invalidated mix (expect born-invalid
+      exempt lines, fewer 30-min long culls), [Risk29] BLOCKED lines,
+      Claude calls/day ~0, WR/realized-R vs baseline on ~2026-06-19.
+
+## 2026-06-11 - Profit-only hour gate (review)
+- [x] Owner: "Trade only in those hours where its profitable" -> dynamic
+      allow-list gate (HOUR_GATE_PROFIT_ONLY, default ON): evidence-driven
+      via refresh_hour_gates.py (60d, mode-scoped, whole-trade, entry-hour,
+      n>=8); fail-open on missing/stale/empty; dashboard mirrors block.
+- [x] Evidence regenerated: profitable={1,13,18,20}; weekly task refreshes.
+- [x] Honest caveat recorded: hour patterns 0/0 OOS survivors (Jun 2);
+      expected effect = fewer trades / less bleed, NOT profit.
+- [x] 3-lens review fixes: risk_state atomic write + note_sl_hit lock +
+      ledger snapshot; entry-gap memo race + exact venue mirror; config
+      comment lie. Suite 1707 green.

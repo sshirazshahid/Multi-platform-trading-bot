@@ -8,6 +8,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (2026-06-11 — three efficiency tunes, owner: "ship it all")
+- **entry_invalidated gap-flip semantics** (`mcp_brain.is_entry_invalidated`
+  + `order_manager` + `ENTRY_STALENESS_EXIT["require_flip_after_entry"]`):
+  the 4h-EMA staleness exit now fires ONLY when the gap actually flipped
+  after entry. Born-invalid positions (gap already ≥0.15% against at the
+  entry bar — ALL 85 of its closes since Jun 4, every one a long killed at
+  exactly 30min) are exempt; SL/TP/trailing manage them. Entry-bar gap is
+  computed lazily from a fresh 250-bar 4h window, memoized per position;
+  unknown → old fire behavior (fail-conservative). Set the knob False to
+  restore old semantics exactly.
+- **Phase-29 post-SL cooldown: 30→180 min, re-armed as a BLOCK, persisted**
+  (`risk_manager`, `bot_engine._execute_open`): the cooldown had been
+  advisory-only since 2026-05-27 — it blocked nothing while ADA/DOT/BNB/APT
+  were re-shorted 9-12× into 70 stop-losses on Jun 11. Now a hard block per
+  (symbol, side) for 180 min after a stop_loss (6h Layer-2 guard after 2+
+  SLs in 24h also blocking again); ledger persisted in `risk_state.json`
+  so it survives restarts. Time-based protection, kept under UNBLOCK.
+- **CLAUDE_PORTFOLIO_MODE=off PAPER experiment** (.env, gitignored): 7 days
+  of algo-only entries + deterministic exits. Baseline (throttled, Jun
+  5-11): −146.03 / 411 trades / WR 29.2% / ~279 Claude calls/day.
+  All three apply on bot RESTART. Tests +19 (suite 1675→1694).
+- **3-lens adversarial review fixes** (pre-merge): `note_sl_hit` now locks
+  + `_save_state` snapshots the ledger and writes atomically (tmp +
+  os.replace — a torn risk_state.json previously meant "starting fresh"
+  on reboot, losing daily_pnl + pauses + the ledger); `_entry_gap_at_bar`
+  memo read race-proofed (.get) and venue order now exactly mirrors the
+  indicator fetch (all-spot first, perp fallback); stale "30min cooldown,
+  not a block" comment fixed in config.py.
+
+### Added (2026-06-11 — profit-only hour gate, owner: "Trade only in those hours where its profitable")
+- `HOUR_GATE_PROFIT_ONLY` (default ON, env-disable): entries allowed only
+  during UTC hours whose 60-day warehouse history (current mode,
+  whole-trade PnL, entry-hour basis, n≥8) is net-positive — consumed from
+  `data/hour_gate_evidence.json` `profitable` (refreshed weekly by
+  `scripts/refresh_hour_gates.py`, which now also scopes by mode and sums
+  partial-TP legs). Fail-open on missing/stale(>14d)/empty evidence.
+  At ship time: profitable = {1, 13, 18, 20}. Dashboard TRADING GATES
+  mirrors the block ("BLOCKED (hour not profitable)"). HONEST CAVEAT
+  (recorded in config): hour patterns did NOT survive IS/OOS validation
+  (2026-06-02, 0 survivors) — expected effect is fewer trades / less
+  bleed, not profit. Supersedes the 2026-05-27 dynamic-hour-gate disable.
+  Tests +13 (suite 1694→1707). Applies on RESTART.
+
 ### Fixed (2026-06-11 — dashboard truth + paper-wallet integrity)
 - **CRITICAL: pytest clobbered the production paper wallet.**
   `tests/test_partial_tp_accounting.py` wrote the real `data/virtual_wallet.json`

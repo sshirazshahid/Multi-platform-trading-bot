@@ -158,7 +158,10 @@ def test_phase27_graduated_ev_still_active():
 
 
 def test_phase29_post_sl_cooldown_still_active():
-    """Post-SL cooldown is protection, not a block. Stays."""
+    """Post-SL cooldown is time-based protection, kept under UNBLOCK.
+    2026-06-11 (owner-approved "ship it all"): 30 → 180 min and re-armed
+    as a block after the Jun-11 tape (ADA/DOT/BNB/APT re-shorted 9-12x
+    into 70 stop-losses while the cooldown was advisory-only)."""
     from core.risk_manager import RiskManager
     assert hasattr(RiskManager, "is_sl_cooldown_active")
-    assert RiskManager.POST_SL_SHORT_COOLDOWN_MIN == 30
+    assert RiskManager.POST_SL_SHORT_COOLDOWN_MIN == 180

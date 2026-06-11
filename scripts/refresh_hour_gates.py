@@ -8,12 +8,20 @@ Block rule (and-conditions): n>=8 trades AND wr<35% AND total_pnl<-$3.
 The threshold is intentionally conservative — empty `blocked` is fine
 (bot falls through to static `ALLOWED_HOURS_UTC`).
 
+2026-06-11 (owner: "Trade only in those hours where its profitable"):
+also emits `profitable` = hours with n>=8 AND whole-trade pnl > 0,
+consumed by the HOUR_GATE_PROFIT_ONLY allow-list gate in
+bot_engine._classify_hour. PnL is whole-trade (realized + partial-TP
+legs) and scoped to the CURRENT operating mode (PAPER rows must not be
+judged by CONTROLLED_LIVE-era history and vice versa).
+
 Run weekly from `scripts/retrain_weekly.ps1`.
 
 Usage:
     python scripts/refresh_hour_gates.py [--db data/warehouse.sqlite]
                                          [--out data/hour_gate_evidence.json]
                                          [--lookback-days 60]
+                                         [--mode PAPER|CONTROLLED_LIVE]
 """
 
 from __future__ import annotations
@@ -33,8 +41,20 @@ WR_GREEN_THRESHOLD  = 55.0
 PNL_GREEN_THRESHOLD = 3.0
 
 
-def _load_hour_stats(db_path: Path, lookback_days: int) -> dict[int, dict]:
-    """Group warehouse closed trades by UTC entry hour."""
+def _default_mode() -> str:
+    """Current operating mode for warehouse scoping (PAPER fallback)."""
+    try:
+        from config import DRY_RUN
+        return "PAPER" if DRY_RUN else "CONTROLLED_LIVE"
+    except Exception:
+        return "PAPER"
+
+
+def _load_hour_stats(db_path: Path, lookback_days: int,
+                     mode: str = None) -> dict[int, dict]:
+    """Group warehouse closed trades by UTC entry hour.
+
+    Whole-trade PnL (realized + partial-TP legs), scoped to `mode`."""
     if not db_path.exists():
         return {}
     cutoff = time.time() - lookback_days * 86400
@@ -46,14 +66,15 @@ def _load_hour_stats(db_path: Path, lookback_days: int) -> dict[int, dict]:
             SELECT
                 CAST(strftime('%H', datetime(ts_entry, 'unixepoch')) AS INTEGER) AS hr,
                 COUNT(*) AS n,
-                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                SUM(realized_pnl) AS pnl
+                SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0
+                         THEN 1 ELSE 0 END) AS wins,
+                SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl
             FROM trades
-            WHERE status='CLOSED' AND ts_entry >= ?
+            WHERE status='CLOSED' AND ts_entry >= ? AND mode = ?
             GROUP BY hr
             ORDER BY hr
             """,
-            (cutoff,),
+            (cutoff, mode or _default_mode()),
         )
         out: dict[int, dict] = {}
         for hr, n, wins, pnl in cur.fetchall():
@@ -70,29 +91,38 @@ def _load_hour_stats(db_path: Path, lookback_days: int) -> dict[int, dict]:
         conn.close()
 
 
-def _classify(stats: dict[int, dict]) -> tuple[list[int], list[int], list[int]]:
-    """Return (blocked, green, neutral) hour lists."""
-    blocked, green, neutral = [], [], []
+def _classify(stats: dict[int, dict]) -> tuple[list[int], list[int], list[int], list[int]]:
+    """Return (blocked, green, neutral, profitable) hour lists.
+
+    `profitable` (2026-06-11): hours with n>=MIN_TRADES and whole-trade
+    pnl > 0 — the allow-list for HOUR_GATE_PROFIT_ONLY. Independent of
+    the blocked/green/neutral buckets."""
+    blocked, green, neutral, profitable = [], [], [], []
     for hr in range(24):
         s = stats.get(hr)
         if s is None or s["n"] < MIN_TRADES_PER_HOUR:
             neutral.append(hr)
             continue
+        if s["pnl"] > 0:
+            profitable.append(hr)
         if s["wr"] < WR_BLOCK_THRESHOLD and s["pnl"] < PNL_BLOCK_THRESHOLD:
             blocked.append(hr)
         elif s["wr"] >= WR_GREEN_THRESHOLD and s["pnl"] >= PNL_GREEN_THRESHOLD:
             green.append(hr)
         else:
             neutral.append(hr)
-    return blocked, green, neutral
+    return blocked, green, neutral, profitable
 
 
-def build_evidence(db_path: Path, lookback_days: int = 60) -> dict:
-    stats = _load_hour_stats(db_path, lookback_days)
-    blocked, green, neutral = _classify(stats)
+def build_evidence(db_path: Path, lookback_days: int = 60,
+                   mode: str = None) -> dict:
+    mode = mode or _default_mode()
+    stats = _load_hour_stats(db_path, lookback_days, mode)
+    blocked, green, neutral, profitable = _classify(stats)
     return {
         "computed_at":     datetime.now(timezone.utc).isoformat(),
         "lookback_days":   lookback_days,
+        "mode":            mode,
         "min_trades":      MIN_TRADES_PER_HOUR,
         "thresholds": {
             "wr_block_below":  WR_BLOCK_THRESHOLD,
@@ -103,6 +133,8 @@ def build_evidence(db_path: Path, lookback_days: int = 60) -> dict:
         "blocked": blocked,
         "green":   green,
         "neutral": neutral,
+        # Allow-list for the HOUR_GATE_PROFIT_ONLY gate (2026-06-11)
+        "profitable": profitable,
         "stats":   stats,
     }
 
@@ -112,15 +144,19 @@ def main() -> int:
     ap.add_argument("--db",  default="data/warehouse.sqlite", type=Path)
     ap.add_argument("--out", default="data/hour_gate_evidence.json", type=Path)
     ap.add_argument("--lookback-days", default=60, type=int)
+    ap.add_argument("--mode", default=None,
+                    help="warehouse mode scope (default: current operating mode)")
     args = ap.parse_args()
 
-    evidence = build_evidence(args.db, args.lookback_days)
+    evidence = build_evidence(args.db, args.lookback_days, args.mode)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     print(
         f"[hour-gate] wrote {args.out} "
-        f"(blocked={evidence['blocked']}, "
+        f"(mode={evidence['mode']}, "
+        f"blocked={evidence['blocked']}, "
         f"green={evidence['green']}, "
+        f"profitable={evidence['profitable']}, "
         f"neutral_n={len(evidence['neutral'])})"
     )
     return 0

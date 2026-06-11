@@ -10,6 +10,7 @@ Features:
 """
 
 import json
+import os
 import threading
 import time as _time
 from datetime import date, datetime, timezone
@@ -166,7 +167,8 @@ class RiskManager:
         # Ledger of recent SL exits per (symbol, side):
         #   key = "<symbol>|<side>", value = list of close timestamps
         # Pruned on every check + record (>24h entries dropped).
-        # In-memory only — fresh restart wipes; intentional.
+        # Persisted to risk_state.json since 2026-06-11 — a 180-min
+        # cooldown is too long to lose on a process restart.
         self._recent_sl_by_pair_side: dict = {}
 
         # Restore persisted state from previous session
@@ -192,12 +194,25 @@ class RiskManager:
             "symbol_pauses": self._symbol_pauses,
             "family_pauses": self._family_pauses,
             "global_streak": self._global_streak[-20:],
+            # Phase 29 ledger — persisted since 2026-06-11; a 180-min
+            # cooldown is too long to lose on a process restart. Shallow
+            # snapshot: a concurrent note_sl_hit key-insert mid-dumps would
+            # raise "dictionary changed size during iteration" and silently
+            # drop the save (values are replaced wholesale, never mutated
+            # in place, so dict() suffices).
+            "recent_sl_by_pair_side": dict(self._recent_sl_by_pair_side),
             "timestamp": _time.time(),
         }
         try:
             Path("data").mkdir(parents=True, exist_ok=True)
-            Path("data/risk_state.json").write_text(
-                json.dumps(state, indent=2), encoding="utf-8")
+            # Atomic write (tmp + os.replace) — a torn risk_state.json sends
+            # _load_state down the "starting fresh" path on the next boot,
+            # losing daily_pnl, Spec §12 pauses AND the Phase-29 ledger
+            # (2026-06-11; mirrors virtual_wallet._save).
+            target = Path("data/risk_state.json")
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            os.replace(tmp, target)
         except Exception:
             pass
 
@@ -233,6 +248,14 @@ class RiskManager:
         self._symbol_pauses = {k: float(v) for k, v in state.get("symbol_pauses", {}).items()}
         self._family_pauses = {k: float(v) for k, v in state.get("family_pauses", {}).items()}
         self._global_streak = list(state.get("global_streak", []))
+        # Phase 29 SL-cooldown ledger — restore regardless of day
+        # (entries self-prune at the 24h guard lookback).
+        try:
+            self._recent_sl_by_pair_side = {
+                k: [float(t) for t in v]
+                for k, v in (state.get("recent_sl_by_pair_side") or {}).items()}
+        except (TypeError, ValueError):
+            self._recent_sl_by_pair_side = {}
 
         if saved_day == _utc_today():
             # Same-day restart: restore daily PnL, peak
@@ -276,11 +299,15 @@ class RiskManager:
 
     # Phase 29 (2026-05-05) — post-SL cooldown helpers ─────────────────
     # freqtrade-style CooldownPeriod + StoplossGuard (per-pair-side).
-    # First SL on (symbol, side):  refuse re-entry for 30 min
+    # First SL on (symbol, side):  refuse re-entry for 180 min
     # 2+ SL on (symbol, side) in 24h: refuse for 6 h
     # The check runs at the top of bot_engine._execute_open. SL recording
     # happens in order_manager._finalize_close.
-    POST_SL_SHORT_COOLDOWN_MIN = 30      # after any SL on this pair-side
+    # 2026-06-11 (owner-approved): 30 → 180 min. Jun-11 tape: ADA/DOT/BNB/
+    # APT re-shorted 9-12x each into 70 stop-losses (~every 90 min) while
+    # the 30-min cooldown was advisory-only. Time-based protection, NOT an
+    # edge-opinion block — kept under UNBLOCK per owner.
+    POST_SL_SHORT_COOLDOWN_MIN = 180     # after any SL on this pair-side
     POST_SL_GUARD_TRADE_LIMIT  = 2       # SL count to escalate
     POST_SL_GUARD_LOOKBACK_HRS = 24      # window for the SL-count
     POST_SL_GUARD_LOCK_HRS     = 6       # escalated lock duration
@@ -291,18 +318,24 @@ class RiskManager:
         """
         if not symbol or not side:
             return
-        key = f"{symbol}|{side}"
-        now = _time.time()
-        lst = self._recent_sl_by_pair_side.get(key, [])
-        # Prune entries older than guard lookback (default 24h)
-        cutoff = now - self.POST_SL_GUARD_LOOKBACK_HRS * 3600
-        lst = [t for t in lst if t >= cutoff]
-        lst.append(now)
-        self._recent_sl_by_pair_side[key] = lst
+        # Lock: this runs on SL/TP daemon worker threads concurrently with
+        # record_trade_pnl (which saves under the same lock) — unlocked
+        # mutate+save raced the encoder (2026-06-11 review).
+        with self._lock:
+            key = f"{symbol}|{side}"
+            now = _time.time()
+            lst = self._recent_sl_by_pair_side.get(key, [])
+            # Prune entries older than guard lookback (default 24h)
+            cutoff = now - self.POST_SL_GUARD_LOOKBACK_HRS * 3600
+            lst = [t for t in lst if t >= cutoff]
+            lst.append(now)
+            self._recent_sl_by_pair_side[key] = lst
+            # Flush so the cooldown survives a process restart (2026-06-11).
+            self._save_state()
 
     def is_sl_cooldown_active(self, symbol: str, side: str) -> tuple:
         """Return (active: bool, reason: str). Checks both layers:
-          1. 30min hard cooldown after the last SL on this pair-side
+          1. 180min hard cooldown after the last SL on this pair-side
           2. 6h escalated lock if 2+ SL on this pair-side in last 24h
         Caller refuses the trade when active=True. No state mutation.
         """

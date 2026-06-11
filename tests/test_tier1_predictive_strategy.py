@@ -204,20 +204,38 @@ def test_star_floor_at_or_below_nonstar_floor():
 
 
 def _staleness_decision(*, side: str, ema20: float, ema50: float,
-                        gap_pct: float = 0.15) -> tuple[bool, str]:
-    """Replica of MCPBrain.is_entry_invalidated's predicate."""
+                        gap_pct: float = 0.15,
+                        entry_gap=None) -> tuple[bool, str]:
+    """Replica of MCPBrain.is_entry_invalidated's predicate.
+
+    2026-06-11 gap-flip semantics: when the entry-bar gap is known
+    (`entry_gap` is not None), fire ONLY if the gap was NOT already
+    >= gap_pct against the side at entry (born-invalid → exempt).
+    entry_gap=None (unknown) preserves the old fire-on-current-gap
+    behavior — fail-conservative."""
     if not ema20 or not ema50 or ema50 <= 0:
         return False, "no_ema_data"
     gap = (ema20 - ema50) / ema50 * 100.0
     if side == "buy":
-        if gap <= -gap_pct:
-            return True, f"4h gap={gap:+.2f}% (long invalidated)"
-        return False, f"4h gap={gap:+.2f}% (long still valid)"
+        now_against = gap <= -gap_pct
+        still = f"4h gap={gap:+.2f}% (long still valid)"
+        label = "long invalidated"
     elif side == "sell":
-        if gap >= gap_pct:
-            return True, f"4h gap={gap:+.2f}% (short invalidated)"
-        return False, f"4h gap={gap:+.2f}% (short still valid)"
-    return False, f"unknown_side:{side}"
+        now_against = gap >= gap_pct
+        still = f"4h gap={gap:+.2f}% (short still valid)"
+        label = "short invalidated"
+    else:
+        return False, f"unknown_side:{side}"
+    if not now_against:
+        return False, still
+    if entry_gap is not None:
+        born_invalid = ((entry_gap <= -gap_pct) if side == "buy"
+                        else (entry_gap >= gap_pct))
+        if born_invalid:
+            return False, (
+                f"4h gap={gap:+.2f}% but {entry_gap:+.2f}% at entry — "
+                f"born-invalid — exempt ({side})")
+    return True, f"4h gap={gap:+.2f}% ({label})"
 
 
 def test_long_with_ema20_above_ema50_not_invalidated():
@@ -273,6 +291,52 @@ def test_unknown_side_does_not_invalidate():
     assert "unknown_side" in reason
 
 
+# ─── 2026-06-11 gap-flip semantics (replica) ─────────────────────────
+
+
+def test_born_invalid_long_exempt():
+    """Gap against the long NOW, but it was ALSO against at entry —
+    the 4h EMA was never this entry's hypothesis → exempt forever."""
+    invalidated, reason = _staleness_decision(
+        side="buy", ema20=98.0, ema50=100.0, entry_gap=-1.6)
+    assert not invalidated
+    assert "born-invalid" in reason
+
+
+def test_flipped_after_entry_long_fires():
+    """Gap was favorable at entry (+0.5%) and flipped against (-2.0%) —
+    the genuine regime change the rule exists for."""
+    invalidated, reason = _staleness_decision(
+        side="buy", ema20=98.0, ema50=100.0, entry_gap=0.5)
+    assert invalidated
+    assert "long invalidated" in reason
+
+
+def test_entry_gap_boundary_exempt():
+    """entry_gap exactly -0.15 on a long → born-invalid (boundary
+    inclusive, mirroring the fire boundary)."""
+    invalidated, reason = _staleness_decision(
+        side="buy", ema20=98.0, ema50=100.0, entry_gap=-0.15)
+    assert not invalidated
+    assert "born-invalid" in reason
+
+
+def test_born_invalid_short_exempt():
+    """Symmetry: short with gap already >= +0.15% at entry → exempt."""
+    invalidated, reason = _staleness_decision(
+        side="sell", ema20=102.0, ema50=100.0, entry_gap=1.0)
+    assert not invalidated
+    assert "born-invalid" in reason
+
+
+def test_unknown_entry_gap_preserves_old_fire():
+    """entry_gap=None (uncomputable) → old fire-on-current-gap behavior."""
+    invalidated, reason = _staleness_decision(
+        side="buy", ema20=98.0, ema50=100.0, entry_gap=None)
+    assert invalidated
+    assert "long invalidated" in reason
+
+
 # ─── Production-source structural pin ────────────────────────────────
 
 
@@ -295,6 +359,9 @@ def test_production_has_entry_staleness():
     assert "ENTRY_STALENESS_EXIT" in src
     assert "is_entry_invalidated" in src
     assert "entry_invalidated" in src   # close reason
+    # 2026-06-11 gap-flip semantics: entry epoch passed, knob-gated
+    assert "entry_ts=_es_entry_ts" in src
+    assert "require_flip_after_entry" in src
 
 
 def test_production_has_is_entry_invalidated_method():
@@ -304,6 +371,9 @@ def test_production_has_is_entry_invalidated_method():
     assert "ema20" in src
     assert "long invalidated" in src
     assert "short invalidated" in src
+    # 2026-06-11 gap-flip semantics: entry-bar gap helper + exempt path
+    assert "_entry_gap_at_bar" in src
+    assert "born-invalid — exempt" in src
 
 
 def test_config_carries_documented_defaults():
@@ -312,3 +382,6 @@ def test_config_carries_documented_defaults():
     assert es["enabled"] is True
     assert es["invalidation_gap_pct"] == 0.15
     assert es["min_hold_minutes"] == 30
+    # 2026-06-11: gap-flip semantics ON by default; False restores the
+    # pre-2026-06-11 fire-on-current-gap behavior exactly.
+    assert es["require_flip_after_entry"] is True

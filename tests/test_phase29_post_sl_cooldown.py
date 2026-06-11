@@ -15,8 +15,9 @@ Phase 29 implements the SL-specific narrowed version of both:
 
   Layer 1 (post-SL cooldown):
     Trigger: ANY stop_loss exit on (symbol, side)
-    Action:  30min lock on (symbol, side)
-    Param:   POST_SL_SHORT_COOLDOWN_MIN = 30
+    Action:  180min lock on (symbol, side)  [2026-06-11: raised from 30 —
+             Jun-11 tape: ADA/DOT/BNB/APT re-shorted 9-12x into 70 SLs]
+    Param:   POST_SL_SHORT_COOLDOWN_MIN = 180
 
   Layer 2 (escalated guard):
     Trigger: 2+ stop_loss exits on (symbol, side) within last 24h
@@ -29,17 +30,15 @@ Recording happens in OrderManager._finalize_close (only when
 reason == "stop_loss"); checking happens early in
 BotEngine._execute_open (before any MCP/sizing work).
 
-In-memory ledger only — fresh restart wipes (intentional; restart
-implies operator wants a fresh slate). Spec §12 + Phase 27 still
+Ledger persisted to data/risk_state.json since 2026-06-11 — a 180-min
+cooldown is too long to lose on a process restart (entries still
+self-prune at the 24h guard lookback). Spec §12 + Phase 27 still
 fire independently.
 """
 from __future__ import annotations
 
 import time as _t
 from pathlib import Path
-
-import pytest
-
 
 # ─── RiskManager has the ledger + helpers ─────────────────────────────
 
@@ -55,7 +54,7 @@ def test_recent_sl_attribute_initialized(tmp_path, monkeypatch):
 
 def test_constants_match_design():
     from core.risk_manager import RiskManager
-    assert RiskManager.POST_SL_SHORT_COOLDOWN_MIN == 30
+    assert RiskManager.POST_SL_SHORT_COOLDOWN_MIN == 180
     assert RiskManager.POST_SL_GUARD_TRADE_LIMIT == 2
     assert RiskManager.POST_SL_GUARD_LOOKBACK_HRS == 24
     assert RiskManager.POST_SL_GUARD_LOCK_HRS == 6
@@ -98,25 +97,27 @@ def test_no_cooldown_when_no_sl_history(tmp_path, monkeypatch):
     assert active is False
 
 
-def test_cooldown_active_within_30min_after_sl(tmp_path, monkeypatch):
+def test_cooldown_active_within_180min_after_sl(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)
     from core.risk_manager import RiskManager
     r = RiskManager()
-    # Simulate SL 5 min ago
-    r._recent_sl_by_pair_side["BTC/USDT:USDT|buy"] = [_t.time() - 5 * 60]
+    # Simulate SL 170 min ago — would have cleared under the old 30-min
+    # constant; must still block under 180 (2026-06-11 raise)
+    r._recent_sl_by_pair_side["BTC/USDT:USDT|buy"] = [_t.time() - 170 * 60]
     active, reason = r.is_sl_cooldown_active("BTC/USDT:USDT", "buy")
     assert active is True
     assert "post_sl_cooldown" in reason
 
 
-def test_cooldown_clears_after_30min(tmp_path, monkeypatch):
+def test_cooldown_clears_after_180min(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("data").mkdir(exist_ok=True)
     from core.risk_manager import RiskManager
     r = RiskManager()
-    # Simulate SL 35 min ago (past 30min threshold)
-    r._recent_sl_by_pair_side["BTC/USDT:USDT|buy"] = [_t.time() - 35 * 60]
+    # Simulate SL 185 min ago (past 180min threshold; single SL so the
+    # 2-SL/6h guard layer does not apply)
+    r._recent_sl_by_pair_side["BTC/USDT:USDT|buy"] = [_t.time() - 185 * 60]
     active, reason = r.is_sl_cooldown_active("BTC/USDT:USDT", "buy")
     assert active is False
 
@@ -164,6 +165,47 @@ def test_other_pair_side_not_affected(tmp_path, monkeypatch):
     a2, _ = r.is_sl_cooldown_active("ETH/USDT:USDT", "buy")
     assert a1 is False
     assert a2 is False
+
+
+def test_opposite_side_not_blocked_at_170min(tmp_path, monkeypatch):
+    """Chosen semantics for the 2026-06-11 raise: cooldown stays per
+    (symbol, side). A short stop-out must NOT block a subsequent long."""
+    monkeypatch.chdir(tmp_path)
+    Path("data").mkdir(exist_ok=True)
+    from core.risk_manager import RiskManager
+    r = RiskManager()
+    r._recent_sl_by_pair_side["ADA/USDT:USDT|sell"] = [_t.time() - 170 * 60]
+    blocked_same, reason = r.is_sl_cooldown_active("ADA/USDT:USDT", "sell")
+    blocked_opp, _ = r.is_sl_cooldown_active("ADA/USDT:USDT", "buy")
+    assert blocked_same is True and "post_sl_cooldown" in reason
+    assert blocked_opp is False
+
+
+def test_execute_open_blocks_on_active_cooldown():
+    """2026-06-11: re-armed as a hard block. The 2026-05-27 advisory-only
+    mode ('log advisory only, don't block') let the Jun-11 revenge
+    re-entry tape happen — 9-12 re-shorts per symbol into 70 stop-losses.
+    The is_sl_cooldown_active hit must be followed by `return False`."""
+    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    idx = src.index("self.risk.is_sl_cooldown_active(")
+    block = src[idx:idx + 600]
+    assert "return False" in block, (
+        "Phase 29 cooldown must BLOCK, not advise — re-armed 2026-06-11")
+
+
+def test_cooldown_persists_across_restart(tmp_path, monkeypatch):
+    """note_sl_hit → _save_state → a fresh RiskManager (same cwd, same
+    day) restores the ledger and still blocks within 180 min. A 3-hour
+    cooldown that evaporates on restart is not protection."""
+    monkeypatch.chdir(tmp_path)
+    Path("data").mkdir(exist_ok=True)
+    from core.risk_manager import RiskManager
+    r1 = RiskManager()
+    r1.note_sl_hit("DOT/USDT:USDT", "sell")
+    r2 = RiskManager()  # simulated restart — reads data/risk_state.json
+    active, reason = r2.is_sl_cooldown_active("DOT/USDT:USDT", "sell")
+    assert active is True
+    assert "post_sl_cooldown" in reason
 
 
 # ─── Wire-up: order_manager records, bot_engine checks ────────────────

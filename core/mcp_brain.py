@@ -863,6 +863,14 @@ class MCPBrain:
         # Cache for exchange indicators (120s TTL)
         self._indicator_cache = {}
         self._indicator_cache_time = 0
+        # 2026-06-11: memo of the 4h EMA20/50 gap at a position's ENTRY bar,
+        # keyed (base, int(entry_ts)) — computed once per position lifetime
+        # (in-memory only). Caveat: entries first checked inside their own
+        # still-forming 4h bar memoize that bar's LIVE close (entry gap ≈
+        # current gap → exempt) — deliberate, codified in
+        # tests/test_entry_staleness_gap_flip.py (same-bar test); the
+        # direction of error is fewer fires, handled by SL/TP/trailing.
+        self._entry_gap_memo = {}
 
         # Claude availability: CLI only (Opus 4.8 — forced in utils/claude_client.py),
         # algorithmic fallback
@@ -1201,6 +1209,7 @@ class MCPBrain:
 
     def is_entry_invalidated(
         self, *, symbol: str, side: str, gap_pct: float = 0.15,
+        entry_ts: float = 0.0,
     ) -> tuple[bool, str]:
         """Check whether the 4h EMA20/50 hypothesis still supports `side`.
 
@@ -1214,6 +1223,7 @@ class MCPBrain:
         - 4h EMAs still aligned with `side`
         - EMAs touching the cross-line (gap < threshold) — whipsaw guard
         - Indicator fetch failure (don't close on transient errors)
+        - Born-invalid positions (2026-06-11, see entry_ts below)
 
         Reuses the 120s `_indicator_cache` so this is cheap on every
         90s monitor cycle when the cache is warm.
@@ -1226,6 +1236,13 @@ class MCPBrain:
             gap_pct: Minimum EMA gap (in WRONG direction) to fire, as a
                      percentage. Default 0.15% matches `_score_coin`'s
                      R1 threshold for "decisive 4h cross".
+            entry_ts: Position entry time (epoch seconds, Position.open_time).
+                     When > 0, gap-flip semantics apply (2026-06-11): fire
+                     ONLY if the gap was NOT already >= gap_pct against the
+                     side at the entry bar — born-invalid positions are
+                     exempt forever (the 4h EMA was never their hypothesis;
+                     SL/TP/trailing manage them). 0/unknown/uncomputable →
+                     the pre-2026-06-11 fire-on-current-gap behavior.
 
         Returns:
             (invalidated: bool, reason: str)
@@ -1256,16 +1273,128 @@ class MCPBrain:
         if side == "buy":
             # Long entry was predicated on ema20 > ema50. Invalidate when
             # ema20 is now BELOW ema50 by at least `gap_pct`%.
-            if gap <= -gap_pct:
-                return True, f"4h ema20-ema50 gap={gap:+.2f}% (long invalidated)"
-            return False, f"4h gap={gap:+.2f}% (long still valid)"
+            now_against = gap <= -gap_pct
+            still = f"4h gap={gap:+.2f}% (long still valid)"
         elif side == "sell":
             # Short entry was predicated on ema20 < ema50. Invalidate when
             # ema20 is now ABOVE ema50 by at least `gap_pct`%.
-            if gap >= gap_pct:
-                return True, f"4h ema20-ema50 gap={gap:+.2f}% (short invalidated)"
-            return False, f"4h gap={gap:+.2f}% (short still valid)"
-        return False, f"unknown_side:{side}"
+            now_against = gap >= gap_pct
+            still = f"4h gap={gap:+.2f}% (short still valid)"
+        else:
+            return False, f"unknown_side:{side}"
+        if not now_against:
+            return False, still
+
+        # ── 2026-06-11 gap-flip semantics ──────────────────────────────
+        # The pre-2026-06-11 rule fired unconditionally here, which also
+        # killed positions ALREADY invalid at entry (born-invalid; a 4h
+        # gap can't move 2% in 30min) — i.e. every long in a 4h-bear
+        # regime. Fire ONLY when the gap actually FLIPPED after entry.
+        # Unknown entry-bar gap (no entry_ts, bar outside fetched window,
+        # NaN, fetch failure) → PRESERVE OLD BEHAVIOR (fire).
+        entry_gap = self._entry_gap_at_bar(base, entry_ts)
+        if entry_gap is not None:
+            born_invalid = ((entry_gap <= -gap_pct) if side == "buy"
+                            else (entry_gap >= gap_pct))
+            if born_invalid:
+                return False, (
+                    f"4h gap={gap:+.2f}% but {entry_gap:+.2f}% at entry — "
+                    f"born-invalid — exempt ({side})")
+            flip = f"flipped after entry (entry gap {entry_gap:+.2f}%)"
+        else:
+            flip = "entry gap unknown — old-rule fire"
+        if side == "buy":
+            return True, f"4h ema20-ema50 gap={gap:+.2f}% {flip} (long invalidated)"
+        return True, f"4h ema20-ema50 gap={gap:+.2f}% {flip} (short invalidated)"
+
+    def _entry_gap_at_bar(self, base: str, entry_ts: float):
+        """4h EMA20/50 gap (%) at the bar containing `entry_ts` (epoch sec).
+
+        Computed over the prefix of a fresh 250-bar 4h window ending at the
+        entry bar (250 x 4h ≈ 41 days >> any hold time), memoized per
+        (base, int(entry_ts)) — one OHLCV fetch per position lifetime, and
+        only on the would-fire path (caller checks the current gap first).
+
+        Returns None when uncomputable (entry_ts<=0, no exchanges, entry bar
+        before the window, <50 bars of EMA warmup up to the entry bar, NaN
+        EMAs, fetch failure) — caller treats None as "unknown" and preserves
+        the old fire-on-current-gap behavior (fail-conservative).
+        """
+        try:
+            if not entry_ts or entry_ts <= 0:
+                return None
+            # .get() (not key-in + index): the >512 clear() below can race
+            # this read across SL/TP worker threads; a KeyError here would
+            # fall to the broad except → None → old-rule fire on a position
+            # the rule intends to exempt (2026-06-11 review).
+            _memo_hit = self._entry_gap_memo.get((base, int(entry_ts)))
+            if _memo_hit is not None:
+                return _memo_hit
+            key = (base, int(entry_ts))
+            if not self._exchanges:
+                return None
+
+            import pandas as pd
+
+            from utils.indicators import ema
+
+            try:
+                from config import ANALYSIS_ONLY_BASES
+                _perp_only = base in ANALYSIS_ONLY_BASES
+            except ImportError:
+                _perp_only = False
+            # Mirror _fetch_exchange_indicators venue order exactly: spot
+            # across ALL exchanges first, perp fallback second — so the
+            # entry-gap EMAs come from the same series family as the cached
+            # current-gap EMAs (basis differences matter at the ±0.15%
+            # decision boundary; 2026-06-11 review).
+            raw = None
+            if not _perp_only:
+                for exchange in self._exchanges.values():
+                    raw = exchange.fetch_ohlcv(f"{base}/USDT", "4h",
+                                               limit=250, market_type="spot")
+                    if raw and len(raw) >= 50:
+                        break
+            if not raw or len(raw) < 50:
+                for exchange in self._exchanges.values():
+                    raw = exchange.fetch_ohlcv(f"{base}/USDT:USDT", "4h",
+                                               limit=250, market_type="futures")
+                    if raw and len(raw) >= 50:
+                        break
+            if not raw or len(raw) < 50:
+                return None
+
+            # Entry bar = LAST bar whose open timestamp <= entry time.
+            # ccxt ts is epoch ms (bar open); entry_ts is epoch seconds.
+            entry_ms = float(entry_ts) * 1000.0
+            idx = -1
+            for i, candle in enumerate(raw):
+                if float(candle[0]) <= entry_ms:
+                    idx = i
+                else:
+                    break
+            # idx < 49 → entry predates the window, or fewer than 50 bars
+            # of recursive-EMA warmup before the entry bar → unknown.
+            if idx < 49:
+                return None
+
+            close = pd.Series([float(c[4]) for c in raw[: idx + 1]])
+            e20 = float(ema(close, 20).iloc[-1])
+            e50 = float(ema(close, 50).iloc[-1])
+            if pd.isna(e20) or pd.isna(e50) or e50 <= 0:
+                return None
+            entry_gap = (e20 - e50) / e50 * 100.0
+
+            if len(self._entry_gap_memo) > 512:
+                self._entry_gap_memo.clear()
+            self._entry_gap_memo[key] = entry_gap
+            logger.info(
+                f"[MCP-Brain] entry-bar 4h gap {base} @ {int(entry_ts)}: "
+                f"{entry_gap:+.2f}% (bar {idx}/{len(raw) - 1})")
+            return entry_gap
+        except Exception as e:
+            logger.debug(f"[MCP-Brain] entry-gap compute failed ({base}): {e}")
+            return None
 
     def _fetch_exchange_indicators(self, coins: list) -> dict:
         """Fetch OHLCV from primary exchange for 3 TFs and compute indicators.
