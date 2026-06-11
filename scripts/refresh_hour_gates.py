@@ -34,6 +34,15 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# 2026-06-11: informational CI enrichment (gate rule unchanged).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+try:
+    from core.stats_inference import mean_ci, wilson_interval
+except ImportError:  # degraded standalone run: skip CI fields
+    mean_ci = wilson_interval = None
+
 MIN_TRADES_PER_HOUR = 8
 WR_BLOCK_THRESHOLD  = 35.0    # percent
 PNL_BLOCK_THRESHOLD = -3.0    # USDT total
@@ -61,31 +70,43 @@ def _load_hour_stats(db_path: Path, lookback_days: int,
     conn = sqlite3.connect(str(db_path))
     try:
         cur = conn.cursor()
+        # Per-row fetch (not GROUP BY) so per-trade pnls are available for
+        # the informational mean CI (2026-06-11). Output keys preserved.
         cur.execute(
             """
             SELECT
                 CAST(strftime('%H', datetime(ts_entry, 'unixepoch')) AS INTEGER) AS hr,
-                COUNT(*) AS n,
-                SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0
-                         THEN 1 ELSE 0 END) AS wins,
-                SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl
+                realized_pnl + COALESCE(partial_realized_pnl, 0) AS pnl
             FROM trades
             WHERE status='CLOSED' AND ts_entry >= ? AND mode = ?
-            GROUP BY hr
-            ORDER BY hr
             """,
             (cutoff, mode or _default_mode()),
         )
-        out: dict[int, dict] = {}
-        for hr, n, wins, pnl in cur.fetchall():
+        by_hr: dict[int, list] = {}
+        for hr, pnl in cur.fetchall():
             if hr is None:
                 continue
-            out[int(hr)] = {
-                "n":   int(n or 0),
-                "wins": int(wins or 0),
-                "wr":  round(100.0 * (wins or 0) / max(1, n or 0), 2),
-                "pnl": round(float(pnl or 0.0), 4),
+            by_hr.setdefault(int(hr), []).append(float(pnl or 0.0))
+        out: dict[int, dict] = {}
+        for hr, pnls in sorted(by_hr.items()):
+            n = len(pnls)
+            wins = sum(1 for p in pnls if p > 0)
+            row = {
+                "n":   n,
+                "wins": wins,
+                "wr":  round(100.0 * wins / max(1, n), 2),
+                "pnl": round(sum(pnls), 4),
             }
+            if wilson_interval is not None:
+                lo, hi = wilson_interval(wins, n)
+                m, mlo, mhi = mean_ci(pnls)
+                row["wr_ci95"] = [round(100.0 * lo, 2), round(100.0 * hi, 2)]
+                row["pnl_mean"] = round(m, 4)
+                row["pnl_mean_ci95"] = [
+                    None if mlo != mlo else round(mlo, 4),
+                    None if mhi != mhi else round(mhi, 4),
+                ]
+            out[hr] = row
         return out
     finally:
         conn.close()
@@ -135,6 +156,9 @@ def build_evidence(db_path: Path, lookback_days: int = 60,
         "neutral": neutral,
         # Allow-list for the HOUR_GATE_PROFIT_ONLY gate (2026-06-11)
         "profitable": profitable,
+        # CI fields in stats are INFORMATIONAL ONLY — the gate rule is
+        # unchanged (n>=8 AND whole-trade pnl > 0, owner directive).
+        "ci_note": "informational only; gate rule unchanged (n>=8 AND pnl>0)",
         "stats":   stats,
     }
 

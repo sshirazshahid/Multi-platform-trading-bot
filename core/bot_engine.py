@@ -1737,6 +1737,14 @@ class BotEngine:
             mean = float(exp.get("mean", 0.0))
             n = int(exp.get("n", 0))
             wr = float(exp.get("win_rate", 0.0))
+            # 2026-06-11: informational CI tag — is this negative mean a
+            # statistical SIGNAL or NOISE? Tiers/reason strings untouched.
+            _ci = exp.get("mean_ci95")
+            if _ci and len(_ci) == 2 and mean < 0.0 and _ci[1] == _ci[1]:
+                _tag = "NOISE(ci straddles 0)" if _ci[1] > 0.0 else "SIGNAL"
+                logger.info(
+                    f"[EV-CI] {symbol} {side} mean=${mean:+.2f} n={n} "
+                    f"ci95=[{_ci[0]:+.2f},{_ci[1]:+.2f}] {_tag}")
             if mean < -0.50 and n >= 5:
                 _reason = f"ev_catastrophic_${mean:+.2f}_n{n}_wr{wr:.0%}"
                 if RISK.get("ev_catastrophic_block_enabled", False):
@@ -2593,8 +2601,14 @@ class BotEngine:
 
         # Compute position size from size_pct (apply correlation + meta-filter reduction)
         size_fraction = size_pct / 100.0
+        # 2026-06-11: group-bucket taper superseded by the Portfolio ES
+        # soft-cap later in this chain (real EWMA covariance vs static
+        # buckets that assume zero cross-group corr — measured BTC/DOT
+        # rho~0.85). check_correlation still runs above for can_add
+        # logging/audit. Re-arm the bucket taper via
+        # RISK["corr_group_taper_enabled"]=True (e.g. if ES_RISK is off).
         corr_mult = corr_info.get("size_multiplier", 1.0) if total_bal > 0 else 1.0
-        if corr_mult < 1.0:
+        if corr_mult < 1.0 and RISK.get("corr_group_taper_enabled", False):
             size_fraction *= corr_mult
             logger.info(
                 f"[Claude] {symbol} size reduced {corr_mult:.0%} "
@@ -2733,7 +2747,67 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size ×{_regime_size_mult:.2f} "
                 f"(regime soft-mult — Phase 22)")
+
+        # ── PORTFOLIO ES SOFT-CAP (2026-06-11) ────────────────────────
+        # Supersedes the group-bucket corr taper with a real portfolio
+        # risk measure: EWMA-cov parametric ES_97.5 of the open book +
+        # candidate (signed legs — longs/shorts net). SOFT taper only
+        # (floor 0.25) — never blocks. Fail-OPEN on any data gap/error.
+        try:
+            from config import ES_RISK as _ES_CFG
+        except ImportError:
+            _ES_CFG = {"enabled": False}
+        if _ES_CFG.get("enabled", False) and total_bal > 0:
+            try:
+                _pr = getattr(self, "_portfolio_risk", None)
+                if _pr is None:
+                    from core.portfolio_risk import PortfolioRisk
+                    _pr = PortfolioRisk(self.active_exchanges, _ES_CFG)
+                    self._portfolio_risk = _pr
+                _cand_lev = leverage if market_type == "futures" else 1
+                _cand_usd = mtype_bal * size_fraction * _cand_lev
+                _es = _pr.evaluate_candidate(
+                    open_positions=self.tracker.get_open(),
+                    cand_base=symbol.split("/")[0].upper(),
+                    cand_side=side, cand_notional_usd=_cand_usd,
+                    equity=total_bal)
+                if _es.factor < 1.0:
+                    size_fraction *= _es.factor
+                    logger.info(
+                        f"[PortfolioES] {symbol} size x{_es.factor:.2f} "
+                        f"(ES proj ${_es.es_projected_usd:.0f} > budget "
+                        f"${_es.budget_usd:.0f}, q={_ES_CFG.get('q', 0.975)})")
+            except Exception as _ese:
+                logger.debug(f"[PortfolioES] skipped ({_ese}) — fail-open 1.0x")
         notional = mtype_bal * size_fraction
+
+        # ── VOL-TARGET RISK-BUDGET CEILING (2026-06-11) ──
+        # Cap margin so worst-case loss at the planned SL is at most
+        # per_trade_risk_pct of this pocket. min() with the multiplier-
+        # chain notional: the chain still de-risks below budget; the
+        # budget only trims the wide-SL tail. Uses the POST-Phase-28
+        # sl_pct (the SL actually placed). Fail-open: any error or
+        # degenerate sl leaves notional unchanged.
+        try:
+            from config import VOL_TARGET_SIZING as _VTS
+        except ImportError:
+            _VTS = {"enabled": False}
+        if _VTS.get("enabled", False) and sl_pct > 0:
+            try:
+                from core.vol_target import risk_budget_margin as _rbm
+                _lev_eff = leverage if market_type == "futures" else 1
+                _budget = _rbm(mtype_bal, sl_pct, _lev_eff,
+                               float(_VTS.get("per_trade_risk_pct", 0.005)))
+                if _budget < notional:
+                    logger.info(
+                        f"[VolTarget] {symbol} margin ${notional:.2f} -> "
+                        f"${_budget:.2f} (risk "
+                        f"{float(_VTS.get('per_trade_risk_pct', 0.005)):.2%} "
+                        f"of ${mtype_bal:.0f} @ SL {sl_pct:.2f}% x {_lev_eff}x)")
+                    notional = _budget
+            except Exception as _vte:
+                logger.debug(f"[VolTarget] skipped ({_vte}) — chain notional kept")
+
         # 2026-04-24 (cost-floor logic) → 2026-04-28 (L99 ALL-IN):
         # min-notional floor reduced to the exchange-side minimum ($5).
         # User directive: maximum aggression — let small trades through;
@@ -2922,6 +2996,32 @@ class BotEngine:
                 logger.debug(f"[Engine] SL/TP monitor: {e}")
             stop_event.wait(10)  # Check every 10 seconds
 
+    def _heartbeat_portfolio_es(self):
+        """Live ES snapshot of the open book for the dashboard.
+        Fail-quiet → None (2026-06-11 Portfolio ES soft-cap)."""
+        try:
+            from config import ES_RISK as _cfg
+            if not _cfg.get("enabled", False):
+                return None
+            _pr = getattr(self, "_portfolio_risk", None)
+            if _pr is None:
+                from core.portfolio_risk import PortfolioRisk
+                _pr = PortfolioRisk(self.active_exchanges, _cfg)
+                self._portfolio_risk = _pr
+            _eq = sum(
+                b.get("spot", 0) + b.get("futures", 0)
+                for ex, b in self._balances.items()
+                if ex not in _UNIFIED_EXCHANGES
+            ) + sum(
+                b.get("spot", 0)
+                for ex, b in self._balances.items()
+                if ex in _UNIFIED_EXCHANGES
+            )
+            _pr.evaluate_book(self.tracker.get_open(), _eq)
+            return _pr.last_snapshot()
+        except Exception:
+            return None
+
     def _write_heartbeat(self):
         """Write heartbeat file for external monitoring."""
         try:
@@ -2953,6 +3053,8 @@ class BotEngine:
                 ex_name: self.tracker.count_open(exchange=ex.name)
                 for ex_name, ex in self.active_exchanges.items()
             },
+            # 2026-06-11: live portfolio ES vs budget (None = unavailable)
+            "portfolio_es": self._heartbeat_portfolio_es(),
             "last_trade_time": last_trade_time,
             "active_exchanges": list(self.active_exchanges.keys()),
             "halted_exchanges": list(self._exchange_halted),

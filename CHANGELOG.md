@@ -8,6 +8,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-06-11 — quant infrastructure upgrade, owner: "technically/mathematically/financially advanced")
+Risk / execution / measurement only — NO new signal families (~17 screened
+NO_EDGE under frozen gates; "advanced" machinery pretending alpha would be
+re-litigation). All engine changes apply on RESTART.
+- **Vol-target risk-budget sizing** (`core/vol_target.risk_budget_margin` +
+  `VOL_TARGET_SIZING`, default ON): margin capped so loss-at-SL ≤ 0.5% of
+  the pocket. Ceiling-only min() with the multiplier chain — can only
+  shrink, never grow. With the ATR-based SL this equalizes per-trade risk
+  (previously varied 2.3× with SL width) and makes notional ~ 1/ATR.
+- **Portfolio Expected-Shortfall soft-cap** (`core/portfolio_risk.py` +
+  `ES_RISK`, default ON): EWMA (RiskMetrics λ=0.94) covariance on 1h
+  returns → parametric ES₉₇.₅ of the open book in USD (signed legs net
+  longs/shorts) → soft size taper (floor 0.25, never blocks) when
+  projected ES exceeds 0.5% of equity (2% measured to never bind at paper
+  scale). Static corr-bucket taper demoted behind
+  `RISK["corr_group_taper_enabled"]`. Live ES on heartbeat + dashboard.
+- **Statistical inference layer** (`core/stats_inference.py`: Wilson CI,
+  stdlib Student-t, Welch + bootstrap-delta verdicts): informational CI
+  fields in hour-gate evidence and `recent_expectancy` (+`[EV-CI]`
+  NOISE/SIGNAL log) — gate rules unchanged (owner directives stand).
+- **Weekly experiment scorecard** (`scripts/weekly_scorecard.py` +
+  `scripts/experiments.json` registry, wired into `retrain_weekly.ps1`):
+  pre/post inference (Wilson/t/bootstrap/Welch + BH-FDR across
+  experiments) on every active experiment (Claude-off, gap-flip, 180min
+  cooldown, hour gate) with honesty baked in: bundle-level attribution
+  disclaimer, "IMPROVED = screening not confirmation", fee shares labeled
+  modeled. Set each experiment's `start_ts` at the activating restart.
+- **Maker-first groundwork (B-lite)**: venue+fill-aware `_fee_rate`
+  (Bybit/Bitget taker was undercharged 5bps vs real 6bps; LIVE maker
+  fills were booked at taker), and removed the raw
+  `timeInForce="PostOnly"` in `smart_executor` (Bybit-only vocabulary —
+  would break Binance USD-M live maker orders; latent since 2026-05-29).
+  The full honest paper maker-fill model (pending post-only orders
+  resolved against subsequent candles, TTL→taker fallback) is blueprinted
+  (4-agent trace, Jun 11) and queued as its own change — prize measured
+  at −64% fees all-maker on the Jun-11 tape.
+  Tests +41 (suite 1707→1748).
+
 ### Changed (2026-06-11 — three efficiency tunes, owner: "ship it all")
 - **entry_invalidated gap-flip semantics** (`mcp_brain.is_entry_invalidated`
   + `order_manager` + `ENTRY_STALENESS_EXIT["require_flip_after_entry"]`):

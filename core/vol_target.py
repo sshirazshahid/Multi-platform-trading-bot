@@ -129,3 +129,34 @@ class VolTarget:
         if notional > ceiling_notional:
             return ceiling_notional
         return notional
+
+
+def risk_budget_margin(balance_usd, sl_pct, leverage, risk_pct):
+    """Margin (USD) such that loss at the planned SL == risk_pct of balance.
+
+    2026-06-11 (Task A — vol-target entry sizing): used by
+    bot_engine._execute_open as a CEILING on the multiplier-chain margin:
+    min(chain_notional, risk_budget_margin(...)). Because the SL distance
+    is ATR-derived, capping loss-at-SL also makes notional ~ 1/ATR —
+    equal risk AND approximately equal vol contribution per position.
+
+    Args:
+        balance_usd: market-type pocket balance (USD).
+        sl_pct: SL distance in PERCENT units (1.5 == 1.5%) — matches
+            _execute_open's sl_pct, post Phase-28 asymmetry.
+        leverage: effective leverage (1 for spot).
+        risk_pct: per-trade risk budget as a FRACTION (0.005 == 0.5%).
+
+    Returns float('inf') on degenerate input so callers using
+    min(ceiling, budget) fail open to the existing chain notional.
+    """
+    try:
+        balance_usd = float(balance_usd)
+        sl_frac = float(sl_pct) / 100.0
+        lev = max(1, int(leverage))
+        risk_pct = float(risk_pct)
+    except (TypeError, ValueError):
+        return float("inf")
+    if balance_usd <= 0 or sl_frac <= 0 or risk_pct <= 0:
+        return float("inf")
+    return (risk_pct * balance_usd) / (lev * sl_frac)

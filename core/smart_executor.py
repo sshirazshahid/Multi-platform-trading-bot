@@ -136,8 +136,13 @@ class SmartExecutor:
             _MO = {"enabled": False, "max_wait_sec": 120}
         _maker_only = bool(_MO.get("enabled"))
         if _maker_only:
+            # postOnly boolean ONLY — ccxt translates it per venue
+            # (Binance USD-M wants timeInForce=GTX, Bybit v5 wants
+            # timeInForce=PostOnly). The previous explicit
+            # timeInForce="PostOnly" string passed raw was Bybit-only
+            # vocabulary and would break Binance live maker orders
+            # (latent: PAPER bypasses this path; found 2026-06-11).
             params["postOnly"] = True
-            params["timeInForce"] = "PostOnly"
 
         entry_price = self.get_entry_price(exchange, symbol, side, market_type)
         if entry_price <= 0:

@@ -25,9 +25,21 @@ _DEFAULT_SPOT_FEE    = 0.001
 _DEFAULT_FUTURES_FEE = 0.0005
 
 
-def _fee_rate(market_type: str) -> float:
+def _fee_rate(market_type: str, exchange: str = None, fill: str = "taker") -> float:
+    """Fee rate, venue- and fill-aware (2026-06-11).
+
+    Default args keep every legacy call site bit-identical (Binance-taker
+    rates). Pass exchange/fill to book real venue maker/taker rates —
+    previously LIVE maker fills were booked at Binance taker, and
+    Bybit/Bitget taker (6bps) was undercharged as 5bps."""
     try:
         from config import FEE
+        mk = "futures" if market_type == "futures" else "spot"
+        ex = (exchange or "").lower()
+        if ex and f"{ex}_{mk}_{fill}" in FEE:
+            return FEE[f"{ex}_{mk}_{fill}"]
+        if fill == "maker" and f"{mk}_maker" in FEE:
+            return FEE[f"{mk}_maker"]
         if market_type == "futures":
             return FEE.get("futures_taker", _DEFAULT_FUTURES_FEE)
         return FEE.get("spot_taker", _DEFAULT_SPOT_FEE)

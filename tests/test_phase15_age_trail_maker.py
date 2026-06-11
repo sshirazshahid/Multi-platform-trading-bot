@@ -77,7 +77,11 @@ def test_smart_executor_supports_maker_only():
     assert "MAKER_ONLY" in src
     assert "postOnly" in src
     assert "skipped_maker_only" in src
-    assert "PostOnly" in src  # timeInForce hint
+    # 2026-06-11: the explicit timeInForce="PostOnly" assignment was
+    # REMOVED — that string is Bybit v5 vocabulary; passed raw it breaks
+    # Binance USD-M maker orders (ccxt wants GTX there and translates the
+    # postOnly boolean itself per venue).
+    assert 'params["timeInForce"] = "PostOnly"' not in src
 
 
 def test_smart_executor_maker_only_branch_lives_before_market_fallback():

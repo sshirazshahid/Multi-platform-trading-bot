@@ -893,9 +893,14 @@ class OrderManager:
                 _fill_type     = order.get("_fill_type")
                 fill_price     = order.get("average") or order.get("price") or fill_price
                 pos.entry_price = float(fill_price)
-                # Recalculate entry_fee based on actual fill price
+                # Recalculate entry_fee based on actual fill price.
+                # 2026-06-11: venue+fill-aware — LIVE maker fills were
+                # previously booked at Binance taker rate.
                 from core.position_tracker import _fee_rate
-                pos.entry_fee = pos.size * pos.entry_price * _fee_rate(pos.market_type)
+                pos.entry_fee = pos.size * pos.entry_price * _fee_rate(
+                    pos.market_type, pos.exchange,
+                    "maker" if _fill_type in ("maker", "maker_partial")
+                    else "taker")
                 pos.total_fees = pos.entry_fee + pos.exit_fee
 
                 # ── Post-order verification ──

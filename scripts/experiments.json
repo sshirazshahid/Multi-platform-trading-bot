@@ -1,0 +1,45 @@
+{
+  "_comment": "Registry for scripts/weekly_scorecard.py. start_ts = epoch seconds of the bot RESTART that activated the change (NOT commit time — all four below shipped 2026-06-11 but apply on restart). start_ts=0 -> NOT_STARTED, skipped; set it after the activating restart (or pass --default-start-ts for ad-hoc runs). New experiments self-register by appending an entry. NOTE: all four share one activation restart, so attribution is BUNDLE-level until they diverge.",
+  "experiments": [
+    {
+      "id": "claude_portfolio_mode_off",
+      "label": "CLAUDE_PORTFOLIO_MODE=off (pure-algo entries + deterministic exits)",
+      "start_ts": 0,
+      "end_ts": null,
+      "mode": "PAPER",
+      "baseline_days": 14,
+      "min_n": 20,
+      "aux": "claude_calls"
+    },
+    {
+      "id": "gap_flip_staleness_exit",
+      "label": "entry_invalidated gap-flip (require_flip_after_entry=True)",
+      "start_ts": 0,
+      "end_ts": null,
+      "mode": "PAPER",
+      "baseline_days": 14,
+      "min_n": 20,
+      "aux": "entry_invalidated"
+    },
+    {
+      "id": "post_sl_cooldown_180m",
+      "label": "Phase-29 180min hard cooldown re-armed",
+      "start_ts": 0,
+      "end_ts": null,
+      "mode": "PAPER",
+      "baseline_days": 14,
+      "min_n": 20,
+      "aux": "repeat_sl"
+    },
+    {
+      "id": "hour_gate_profit_only",
+      "label": "HOUR_GATE_PROFIT_ONLY allow-list",
+      "start_ts": 0,
+      "end_ts": null,
+      "mode": "PAPER",
+      "baseline_days": 14,
+      "min_n": 20,
+      "aux": "profitable_hour_share"
+    }
+  ]
+}

@@ -481,12 +481,21 @@ class Warehouse:
             n = len(pnls)
             if n < min_n:
                 return None
-            return {
+            out = {
                 "n": n,
                 "mean": sum(pnls) / n,
                 "sum": sum(pnls),
                 "win_rate": sum(1 for p in pnls if p > 0) / n,
             }
+            # 2026-06-11: informational 95% t-CI on the mean — makes
+            # noise-vs-signal visible in [EV-CI] logs. Tier thresholds
+            # stay point-estimate (owner rule); closed form, O(n), no rng.
+            try:
+                from core.stats_inference import mean_ci
+                out["mean_ci95"] = list(mean_ci(pnls)[1:])
+            except Exception:
+                pass
+            return out
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] recent_expectancy error: {e}")
             return None

@@ -3161,6 +3161,24 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             dl_bar, daily_used, daily_loss_limit,
             pnl_str_short(daily_pnl)))
 
+        # 2026-06-11: live Portfolio Expected Shortfall vs budget (from
+        # heartbeat; EWMA-cov parametric ES of the open book, soft-cap).
+        try:
+            _hb_es = (_file_cache.load("data/heartbeat.json") or {}).get(
+                "portfolio_es") or {}
+            if _hb_es.get("es_open_usd") is not None:
+                _es_v = float(_hb_es.get("es_open_usd") or 0.0)
+                _es_b = _hb_es.get("budget_usd")
+                _es_c = GREEN if (_es_b is None or _es_v <= float(_es_b)) else RED
+                row("  Portfolio ES: {}{}  (97.5%/4h, legs:{}{})".format(
+                    col("${:.2f}".format(_es_v), _es_c),
+                    "" if _es_b is None else " / budget ${:.2f}".format(float(_es_b)),
+                    _hb_es.get("legs", 0),
+                    ", taper x{:.2f}".format(float(_hb_es.get("factor", 1.0)))
+                    if float(_hb_es.get("factor", 1.0)) < 1.0 else ""))
+        except Exception:
+            pass
+
         # Position usage — count ONLY futures. The bot's
         # max_open_positions cap applies to bot-tracked positions; spot
         # holdings (manual coins like SUI/BTC etc.) are not gated by it,

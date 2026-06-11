@@ -87,7 +87,14 @@ RunStep "run_signal_postmortem" @(
     "--lookback-days", "7"
 )
 
-# 6. Summary — read latest pointer per market so the log reflects the outcome.
+# 6. Weekly experiment scorecard — pre/post inference on every active
+#    experiment in scripts/experiments.json (2026-06-11). Exit 0 even on
+#    NOT_STARTED/NO_DATA (a degraded report is not a pipeline failure).
+RunStep "weekly_scorecard" @(
+    "scripts\weekly_scorecard.py"
+)
+
+# 7. Summary — read latest pointer per market so the log reflects the outcome.
 foreach ($market in @("futures", "spot")) {
     $latest = Join-Path $Root "data\models\ensemble_${market}_latest.json"
     if (Test-Path $latest) {

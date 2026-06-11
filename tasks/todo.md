@@ -268,3 +268,21 @@ stock perps) for research, while NEVER routing them to live/paper orders until s
 - [x] 3-lens review fixes: risk_state atomic write + note_sl_hit lock +
       ledger snapshot; entry-gap memo race + exact venue mirror; config
       comment lie. Suite 1707 green.
+
+## 2026-06-11 - Quant infrastructure upgrade (review)
+- [x] Vol-target risk-budget sizing (ceiling-only, 0.5%/trade, ON).
+- [x] Portfolio ES soft-cap (EWMA cov, ES97.5 4h, 0.5% equity budget,
+      floor 0.25, never blocks; corr buckets demoted behind flag;
+      heartbeat + dashboard ES line).
+- [x] core/stats_inference.py (Wilson/t/Welch/bootstrap) + CI fields in
+      hour evidence & recent_expectancy ([EV-CI] log; gate rules UNCHANGED).
+- [x] weekly_scorecard.py + experiments.json registry + retrain_weekly
+      step 6 (BH-FDR, bundle-attribution honesty). SET start_ts AT RESTART.
+- [x] B-lite: venue/fill-aware fees (Bybit/Bitget 6bps fix; maker fills
+      booked as maker) + smart_executor raw PostOnly TIF removed
+      (Binance live maker breaker, latent since 05-29).
+- [ ] QUEUED (blueprinted, own change): honest paper maker-fill model
+      (pending post-only resolver in order_manager + sim; ~150 lines;
+      prize -64% fees all-maker on Jun-11 tape; measure fill rate +
+      adverse selection >=2wk before any live fallback flip).
+- [x] Suite 1748 green; 2-lens adversarial review before merge.

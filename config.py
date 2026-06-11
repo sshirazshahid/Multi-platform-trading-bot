@@ -606,6 +606,43 @@ RISK = {
 
 RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 
+# 2026-06-11 — per-trade risk-budget (vol-target) sizing.
+# Margin is capped so loss-at-SL <= per_trade_risk_pct of the market-type
+# balance. CEILING-ONLY vs the multiplier chain: it can only SHRINK a
+# trade, never grow one, so every existing de-risk multiplier keeps full
+# authority. With the ATR-based SL (1.5x ATR1h clamped 1.5-3.5%) this
+# equalizes loss-at-SL across volatility regimes (notional ~ 1/ATR) —
+# previously per-trade risk varied 2.3x purely with SL width. At PAPER
+# size_pct=0.06/3x it binds only when sl% > ~2.78% (the wide-vol tail);
+# at a live size_pct=0.50 posture it would become the de facto sizer
+# (~0.5% risk per trade) — surface that before any live flip.
+VOL_TARGET_SIZING = {
+    "enabled":            True,
+    "per_trade_risk_pct": 0.005,   # 0.5% of pocket at the planned SL
+}
+
+# 2026-06-11 — PORTFOLIO ES SOFT-CAP (core/portfolio_risk.py).
+# Parametric 97.5% Expected Shortfall of the open book (EWMA RiskMetrics
+# covariance, 1h returns, signed USD legs so longs/shorts net). SOFT size
+# taper on new entries only — NEVER blocks (UNBLOCK stance); floor 0.25.
+# Fail-OPEN on any data gap (factor 1.0). budget_pct=0.005: the ES_97.5,4h
+# budget = 0.5% of equity = half the max_daily_loss halt (1.0%) — the
+# ex-ante cap engages before the ex-post circuit breaker. A 2% budget was
+# measured to NEVER bind at paper scale; 0.5% binds at ~$2-3k of
+# same-direction correlated gross notional (measured EWMA pairwise rho
+# 0.85-0.94 on majors, 1h vols 0.6-1.2%).
+ES_RISK = {
+    "enabled":        True,
+    "q":              0.975,   # ES confidence (0.95 | 0.975 | 0.99)
+    "lambda":         0.94,    # RiskMetrics EWMA decay (per 1h bar)
+    "horizon_hours":  4.0,     # ~typical holding period (age cutoffs 4h/2h/1.5h)
+    "budget_pct":     0.005,   # ES budget as fraction of total equity
+    "floor":          0.25,    # min taper factor — soft cap, never 0
+    "bars":           240,     # 10d of 1h; >99.99% EWMA mass at lambda=0.94
+    "min_bars":       60,      # min aligned rows per leg else drop leg
+    "cache_ttl_sec":  1800,    # per-base closes cache
+}
+
 # ==============================================================
 # LEVERAGE TIER SYSTEM (2026-04-17 — size raised to 5% to clear exchange min notionals)
 # NOTE: signed CONTROLLED_LIVE checklist (Apr 16) pinned 1% sizing — NOW OUT OF SYNC.
