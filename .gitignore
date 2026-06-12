@@ -111,3 +111,21 @@ data/liquidations_status.json
 data/tv_cache/
 data/tv_history.jsonl
 data/tv_status.json
+
+# 2026-06-12: privacy — real balances/positions/trade history/audit logs must never
+# be published (repo is public; see reports/prediction_market_risk_review_2026-06-12.md).
+# Untracked from the index only: files stay on disk and the bot keeps writing them.
+# data/ as a whole stays trackable — market-level files (research/, claude_analysis*,
+# index CSVs, sentiment caches) are intentionally NOT ignored.
+data/profiles/
+data/compliance/
+data/claude_audit/
+data/blacklist.json
+data/capital_allocator.json
+data/claude_schema_failures.jsonl
+data/email_preview.html
+data/positions_extra.json
+data/prediction_agent_log.jsonl
+data/sl_widened.json
+data/spot_portfolio.json.bak*
+data/spot_recommendations.jsonl

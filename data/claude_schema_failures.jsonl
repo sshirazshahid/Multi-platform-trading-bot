@@ -1,4 +1,0 @@
-{"ts": 1776189515.22272, "task": "pre_trade_review", "error": "decision='YOLO' not in ['ALLOW', 'REVIEW', 'SKIP']", "response": {"decision": "YOLO", "confidence": 4, "red_flags": [], "commentary": ""}}
-{"ts": 1776189515.2237105, "task": "pre_trade_review", "error": "unknown keys rejected: ['override_stop']", "response": {"decision": "ALLOW", "confidence": 4, "red_flags": [], "commentary": "", "override_stop": true}}
-{"ts": 1776189515.224719, "task": "pre_trade_review", "error": "missing required keys: ['commentary', 'red_flags']", "response": {"decision": "ALLOW", "confidence": 4}}
-{"ts": 1776189515.225721, "task": "pre_trade_review", "error": "confidence=99 outside [1, 5]", "response": {"decision": "ALLOW", "confidence": 99, "red_flags": [], "commentary": ""}}
