@@ -7,11 +7,13 @@ Usage:
     text = call_claude(prompt, system_prompt="...", model="sonnet")
 """
 
+import hashlib
 import json
 import os
 import random
 import shutil
 import subprocess
+import threading
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,12 @@ _BREVITY_DIRECTIVE = (
 
 # ── Audit log ──────────────────────────────────────────────────────────
 AUDIT_DIR = Path("data/claude_audit")
+# Provenance bundle (2026-06-12, A1): audit-write failures were silently
+# swallowed — best-effort counter file makes provenance loss visible.
+AUDIT_FAILURES_FILE = Path("data/claude_audit_failures.json")
+# E-9: shadow-predictor thread + 4 caller modules append multi-KB lines to
+# the same monthly file (exceeds Windows append atomicity) — serialize.
+_AUDIT_LOCK = threading.Lock()
 
 def _audit_log(entry: dict):
     """Append a JSONL audit entry for every Claude API call."""
@@ -51,10 +59,27 @@ def _audit_log(entry: dict):
         month = datetime.now(timezone.utc).strftime("%Y-%m")
         path = AUDIT_DIR / f"calls_{month}.jsonl"
         entry["ts"] = datetime.now(timezone.utc).isoformat()
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
-    except Exception:
-        pass
+        line = json.dumps(entry, default=str) + "\n"
+        with _AUDIT_LOCK:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+    except Exception as e:
+        logger.warning(f"[ClaudeClient] audit write FAILED: {e}")
+        try:
+            data = {}
+            if AUDIT_FAILURES_FILE.exists():
+                try:
+                    data = json.loads(
+                        AUDIT_FAILURES_FILE.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    data = {}
+            data["count"] = int(data.get("count", 0) or 0) + 1
+            data["last_ts"] = datetime.now(timezone.utc).isoformat()
+            data["last_err"] = str(e)[:200]
+            AUDIT_FAILURES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            AUDIT_FAILURES_FILE.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            pass
 
 
 
@@ -86,14 +111,23 @@ def call_claude_cli(
     model: str = "claude-opus-4-8",
     timeout: int = 120,
     effort: str = "max",
+    meta_out: dict | None = None,
 ) -> str | None:
     """
     Call Claude via the Claude Code CLI in non-interactive mode.
     Retries once on transient failures with exponential backoff.
     Logs every call (input + output) to audit trail.
     Returns the response text, or None on any failure.
+
+    meta_out (provenance bundle 2026-06-12): optional out-param. When a dict
+    is passed, it is populated with {"attempt": <1-based final attempt>,
+    "raw": <response text or None>}. Existing call sites pass nothing and
+    are unaffected.
     """
     global _last_error
+    if meta_out is not None:
+        meta_out["attempt"] = 0
+        meta_out["raw"] = None
     # Owner directive (2026-05-29): force EVERY bot Claude call to Opus 4.8 at
     # max effort, regardless of the model/effort each caller passed (older
     # callers still request "sonnet"/"haiku"/"low"). Escape hatch via env:
@@ -121,6 +155,8 @@ def call_claude_cli(
         cmd.extend(["--system-prompt", system_prompt])
 
     for attempt in range(MAX_CLI_RETRIES):
+        if meta_out is not None:
+            meta_out["attempt"] = attempt + 1
         t0 = _time.time()
         audit = {
             "attempt": attempt + 1,
@@ -128,6 +164,9 @@ def call_claude_cli(
             "effort": effort,
             "timeout": timeout,
             "prompt_len": len(prompt),
+            # Provenance bundle (2026-06-12, S4): full prompt persisted —
+            # sampling machinery deliberately deleted from scope.
+            "prompt": prompt,
             "system_prompt_len": len(system_prompt),
         }
         try:
@@ -204,7 +243,14 @@ def call_claude_cli(
             audit["status"] = "success"
             audit["cost_usd"] = cost
             audit["response_len"] = len(text)
+            # Provenance: persist the exact text the parser will consume +
+            # its sha256 (joins audit row ↔ decision rows downstream).
+            audit["raw_response"] = text
+            audit["response_sha256"] = hashlib.sha256(
+                text.encode("utf-8")).hexdigest()
             _audit_log(audit)
+            if meta_out is not None:
+                meta_out["raw"] = text
             return text
 
         except subprocess.TimeoutExpired:
