@@ -286,3 +286,11 @@ stock perps) for research, while NEVER routing them to live/paper orders until s
       prize -64% fees all-maker on Jun-11 tape; measure fill rate +
       adverse selection >=2wk before any live fallback flip).
 - [x] Suite 1748 green; 2-lens adversarial review before merge.
+
+## Deferred from /autoplan provenance-bundle review (2026-06-12, plan APPROVED)
+- [ ] P2 Retention policy: zip mcp_decisions archives + calls_*.jsonl older than 3 months (S)
+- [ ] P2 Dashboard provenance panel: source/repaired/orphan % (S-M)
+- [ ] P1-if-triggered: deep exit-side label repair — escalates if post-restart NULL r_multiple >=2% (M)
+- [ ] P2 OWNER: stagger experiment knobs (one-at-a-time reversion) for clean attribution (operational)
+- [ ] P3 Prompt-builder section structure -> named truncation attribution (M)
+- [ ] P3 Claude-path candidates.decision_id post-parse UPDATE linkage (S)

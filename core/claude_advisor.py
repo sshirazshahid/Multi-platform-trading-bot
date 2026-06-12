@@ -1,7 +1,14 @@
 """
-core/claude_advisor.py — advisory-only ClaudeCode wrapper (spec §5, §9, §10).
+core/claude_advisor.py — schema-validated Claude wrapper for advisory tasks
+(spec §5, §9, §10).
 
-Every Claude call goes through `call_advisory(task, payload)`:
+NOTE (doc-rot fix 2026-06-12, per the 2026-06-07 wiring audit): the LIVE
+decision path is Claude-PRIMARY with algorithmic fallback — core/mcp_brain.py
+calls utils.claude_client directly and does NOT route through this module.
+This module is not in the live decision path; it serves the offline advisory
+tasks defined in core/claude_schemas.SCHEMAS.
+
+Every call through this module goes through `call_advisory(task, payload)`:
 
   1. Load the task prompt template from prompts/claude/<task>.md
   2. Substitute `{{KEY}}` placeholders from payload

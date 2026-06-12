@@ -1,4 +1,6 @@
 {
   "model": "opus",
-  "enabledPlugins": {}
+  "enabledPlugins": {
+    "ecc@ecc": true
+  }
 }

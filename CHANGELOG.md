@@ -8,6 +8,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-06-12 — decision provenance bundle; /autoplan-reviewed, owner-approved)
+Record fidelity, not new signals: every entry/exit decision becomes reconstructable
+end-to-end (raw LLM response → parse/clamps → order → warehouse row). Root cause of
+the Jun-4 "attribution corrupt" finding. All engine changes apply on RESTART.
+- **Provenance core**: `decision_id` (uuid4 per action) + `source: claude|algo` +
+  pre-clamp `sl/tp/leverage/size_pct_raw` + `repaired`/`attempt`/`response_sha256`
+  minted at parse and threaded `mcp_brain → bot_engine → order_manager → warehouse`
+  (`trades.decision_id`, `trades.exit_decision_id`, `candidates.decision_id`,
+  idempotent ALTERs). Parse-time leverage/size clamps record-only (`_execute_open`
+  ignores LLM sizing by design); symbol check is LOG-ONLY (`symbol_unlisted`).
+- **Rejection taxonomy**: reason stashes at all 45 `_execute_open` exits + 19
+  `open_position` exits (meta-test enforces coverage) + `cycle_cap` rows for
+  actions dropped by the per-cycle cap; logged as `{"type":"rejection"}` rows
+  keyed by decision_id. Spot-fallback retry now forwards
+  `candidate_id/mcp_score/model_version/decision_id` (fixes silent kwarg drop).
+- **Raw LLM capture**: full `prompt` + `raw_response` per call in
+  `data/claude_audit/calls_*.jsonl` (thread-locked appends); audit-write failures
+  surface in `data/claude_audit_failures.json` instead of being swallowed;
+  truncation logs `(orig_len, cut_len, tail_80)`.
+- **Decision-log archive rotation**: `mcp_decisions.jsonl` 2MB rotation now
+  archive-renames to `mcp_decisions.<ts>.jsonl` (was: destructive truncate to
+  last 500 lines, which would have erased the reconciliation substrate).
+- **Reconciliation consumer**: `scripts/decision_reconciliation.py` — per-source
+  WR/expectancy, orphan taxonomy (monitor advice / cycle-capped / ghost-import
+  exemptions), decisions↔orders diff, NULL-`r_multiple` <2% label-quality gate —
+  plus weekly-scorecard provenance-health line and line-streaming reads.
+- **Atomic state writes**: `utils/atomic_io.py` (temp+rename) for
+  `knowledge_model.json` + `trailing_peaks.json` — crash mid-write no longer
+  wipes learned state. Stale `position_advice` discarded on warm restart
+  (declared behavior change, bounded by the existing 10-min gate).
+- **Guards & ops**: frozen-inventory venue-write test (AST scan, zero new ccxt
+  write sites allowed unaudited) + zero-`withdraw` invariant; gitignore pins for
+  `data/claude_audit/` + `data/mcp_decisions*` with pin tests; `/daily-sync` +
+  `/decision` project commands; `data/decisions/` ADR records; doc-rot fixed
+  (advisory-only headers, stale `total_pnl` gotcha). Tests 1,748 → 1,808.
+
 ### Added (2026-06-11 — quant infrastructure upgrade, owner: "technically/mathematically/financially advanced")
 Risk / execution / measurement only — NO new signal families (~17 screened
 NO_EDGE under frozen gates; "advanced" machinery pretending alpha would be

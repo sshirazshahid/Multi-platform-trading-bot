@@ -80,6 +80,7 @@ data/positions.json.bak
 data/risk_state.json
 data/mcp_state.json
 data/mcp_decisions.jsonl
+data/mcp_decisions.*.jsonl
 data/mcp_accuracy.json
 data/execution_stats.json
 data/kelly_stats.json

@@ -1,12 +1,16 @@
 """
-core/claude_schemas.py — strict schemas for every ClaudeCode advisory task.
+core/claude_schemas.py — strict schemas for the ClaudeCode advisory tasks.
 
-Spec Appendix A: ClaudeCode is advisory *only*. It cannot place/modify/cancel
-orders, override stops, change leverage, move funds, or self-modify. Every
-response from Claude goes through `validate(task, response)` — if the shape
-doesn't match exactly, the response is rejected, logged to
-`data/claude_schema_failures.jsonl`, and the bot behaves as if no review
-happened.
+NOTE (doc-rot fix 2026-06-12, per the 2026-06-07 wiring audit): system-wide,
+Claude is no longer advisory-only — the LIVE decision path is Claude-PRIMARY
+with algorithmic fallback (core/mcp_brain.py), and it does not route through
+these schemas. The spec Appendix A constraints below apply to the
+claude_advisor tasks these schemas gate (outside the live decision path):
+within them, Claude cannot place/modify/cancel orders, override stops, change
+leverage, move funds, or self-modify. Every response goes through
+`validate(task, response)` — if the shape doesn't match exactly, the response
+is rejected, logged to `data/claude_schema_failures.jsonl`, and the bot
+behaves as if no review happened.
 
 This file intentionally uses no third-party JSON-schema library. We are
 describing four small, flat response shapes; a ~100-line explicit validator
