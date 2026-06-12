@@ -187,6 +187,10 @@ class OrderManager:
         self.executor    = SmartExecutor()
         self.sim         = SimExecutionModel()  # DRY_RUN realism
         self.mcp_brain   = None  # Set by bot_engine after construction
+        # Provenance (2026-06-12): last open_position rejection reason —
+        # read by bot_engine when open_position returns None so the
+        # rejection row carries the order-manager-level cause.
+        self.last_open_reject: str | None = None
         # Exchange registry for paths (like _finalize_close) that don't
         # receive an exchange parameter. BotEngine populates this via
         # set_exchanges() after constructing its exchange dict.
@@ -574,13 +578,20 @@ class OrderManager:
                       sl: float, tp: float, leverage: int = 1,
                       order_type: str = "market", price: float = None,
                       candidate_id: int = None, mcp_score: float = None,
-                      model_version: str = None):
+                      model_version: str = None,
+                      decision_id: str | None = None):
+
+        # Provenance: reset per attempt; every internal reject stashes a
+        # reason here before returning None.
+        self.last_open_reject = None
 
         if self.blacklist.is_blacklisted(symbol):
             logger.warning(f"[Orders] {symbol} blacklisted — skipped.")
+            self.last_open_reject = "blacklisted"
             return None
 
         if not self.risk.can_trade(self.tracker.count_open()):
+            self.last_open_reject = "risk_can_trade_block"
             return None
 
         # Kelly criterion: block trade if strategy has negative edge
@@ -598,10 +609,12 @@ class OrderManager:
             strategy, mcp_approved=mcp_approved)
         if blocked:
             logger.warning(f"[Orders] KELLY BLOCK: {block_reason}")
+            self.last_open_reject = "kelly_block"
             return None
 
         if size <= 0:
             logger.warning(f"[Orders] Invalid size {size} for {symbol}")
+            self.last_open_reject = "invalid_size"
             return None
 
         # MINIMUM NOTIONAL gate
@@ -613,6 +626,7 @@ class OrderManager:
             except Exception: _ep = 0
         if _ep > 0 and size * _ep < 5.0:
             logger.debug(f"[Orders] {symbol}: ${size * _ep:.2f} < $5 min — skip")
+            self.last_open_reject = "below_min_notional"
             return None
 
         min_size = exchange.get_min_order_size(symbol)
@@ -635,6 +649,7 @@ class OrderManager:
                 logger.warning(
                     f"[Orders] Size {size:.8f} (${notional:.2f}) too small "
                     f"for {symbol} — skipping")
+                self.last_open_reject = "size_below_exchange_min"
                 return None
 
         # Check if futures is disabled on this exchange (permission error)
@@ -643,6 +658,7 @@ class OrderManager:
             if side == "sell":
                 logger.debug(f"[Orders] Futures disabled on {exchange.name}, "
                              f"SHORT not possible on spot — skipping {symbol}")
+                self.last_open_reject = "futures_disabled_short"
                 return None
             # Fallback to spot for BUY signals
             logger.info(f"[Orders] Futures disabled on {exchange.name}, "
@@ -667,6 +683,7 @@ class OrderManager:
                     logger.warning(
                         f"[Orders] {symbol}: leverage setup failed entirely on "
                         f"{exchange.name}; aborting trade")
+                    self.last_open_reject = "leverage_setup_failed"
                     return None
                 if applied != safe_lev:
                     ratio = applied / safe_lev
@@ -752,6 +769,7 @@ class OrderManager:
             entry_mid  = _mid_from_ticker(ticker)
         if not fill_price:
             logger.error(f"[Orders] Cannot get price for {symbol}")
+            self.last_open_reject = "no_price"
             return None
         fill_price = float(fill_price)
 
@@ -772,6 +790,7 @@ class OrderManager:
 
         # ── Price Band Sanity Check ──
         if not self._check_price_band(symbol, side, fill_price, exchange, market_type):
+            self.last_open_reject = "price_band_failed"
             return None
 
         # Round quantity to exchange precision (Bitget: 0.1)
@@ -783,6 +802,7 @@ class OrderManager:
                     logger.warning(
                         f"[Orders] {symbol}: rounded qty {rounded_size} "
                         f"(${notional_check:.2f}) too small after rounding")
+                    self.last_open_reject = "rounded_size_too_small"
                     return None
                 logger.debug(
                     f"[Orders] {symbol}: qty {size:.8f} -> {rounded_size:.8f} "
@@ -822,6 +842,7 @@ class OrderManager:
                 leverage=leverage,
             )
             if not ok:
+                self.last_open_reject = "paper_wallet_reject"
                 return None
             logger.info(
                 f"[Orders] [DRY] {side.upper()} {size:.6f} {symbol} "
@@ -850,6 +871,7 @@ class OrderManager:
                     logger.info(
                         f"[Orders] {symbol}: spread too wide "
                         f"({spread_info['spread_pct']*100:.3f}%) — skip")
+                    self.last_open_reject = "spread_too_wide"
                     return None
                 # Prefer the order-book mid over the ticker mid for LIVE —
                 # check_spread fetches a fresh top-of-book snapshot.
@@ -881,6 +903,7 @@ class OrderManager:
                         logger.info(
                             f"[Orders] {symbol}: no fill "
                             f"({(order or {}).get('status') or 'empty'}) — no position opened")
+                    self.last_open_reject = "no_fill"
                     return None
                 if 0 < _fill_sz < size:
                     logger.warning(
@@ -926,6 +949,7 @@ class OrderManager:
                         f"{str(e)[:100]}")
                     # Auto-blacklist to prevent repeated warnings each cycle
                     self.blacklist.add(symbol, reason=f"skip_pair:{str(e)[:60]}")
+                    self.last_open_reject = "skip_pair_error"
                     return None
                 # Handle position mode mismatch — retry without positionSide
                 if _is_position_mode_error(e) and market_type == "futures":
@@ -944,6 +968,7 @@ class OrderManager:
                             logger.info(
                                 f"[Orders] {symbol}: one-way retry no fill "
                                 f"({(order or {}).get('status') or 'empty'}) — skipping")
+                            self.last_open_reject = "no_fill_oneway_retry"
                             return None
                         if 0 < _f2 < size:
                             logger.warning(
@@ -964,6 +989,7 @@ class OrderManager:
                             f"@ {fill_price:.4f} | id={pos.id} | {strategy}")
                     except Exception as e2:
                         logger.error(f"[Orders] Order failed (one-way retry): {e2}")
+                        self.last_open_reject = "order_failed_oneway_retry"
                         return None
                 elif _is_permission_error(e) and market_type == "futures":
                     self._futures_disabled.add(ex_name_lower)
@@ -973,14 +999,22 @@ class OrderManager:
                         f"— falling back to SPOT for buy signals.")
                     if side == "buy":
                         spot_symbol = symbol.replace(":USDT", "")
+                        # E-7: forward ALL provenance kwargs — this retry
+                        # previously dropped candidate_id/mcp_score/
+                        # model_version (pre-existing data loss).
                         return self.open_position(
                             exchange, spot_symbol, "buy", "spot",
-                            strategy, size, sl, tp, leverage=1)
+                            strategy, size, sl, tp, leverage=1,
+                            candidate_id=candidate_id, mcp_score=mcp_score,
+                            model_version=model_version,
+                            decision_id=decision_id)
+                    self.last_open_reject = "futures_permission_denied"
                     return None
                 else:
                     logger.error(f"[Orders] Order failed on {exchange.name}: {e}")
                     self.notifier.error(
                         f"Order FAILED: {symbol} {side.upper()}\n{str(e)[:200]}")
+                    self.last_open_reject = "order_failed"
                     return None
 
         self.tracker.add(pos)
@@ -1031,6 +1065,7 @@ class OrderManager:
                 mcp_score=float(mcp_score) if mcp_score is not None else None,
                 model_version=str(model_version) if model_version else None,
                 fill_type=_fill_type,
+                decision_id=str(decision_id) if decision_id else None,
             )
         except Exception as _we:
             # 2026-05-25 — Bug 3 fix: was logger.debug, so a transient
@@ -1486,7 +1521,15 @@ class OrderManager:
 
     def close_position(self, exchange: BaseExchange, position: Position,
                        reason: str, price: float = None,
-                       order_type: str = "market"):
+                       order_type: str = "market",
+                       decision_id: str | None = None):
+
+        # Provenance: stash the CLOSE decision's id on the position so
+        # _finalize_close (fired via PositionTracker.on_close on EVERY close
+        # path) can thread it into record_trade_close(exit_decision_id=...).
+        # Deterministic exits (SL/TP/trailing) pass nothing → NULL (plan 0E).
+        if decision_id:
+            position._exit_decision_id = decision_id
 
         close_side = "sell" if position.side == "buy" else "buy"
 
@@ -1871,6 +1914,7 @@ class OrderManager:
                     fee=float(getattr(pos, "total_fees", 0.0)),
                     entry_stop_px=round(entry_stop_px, 8) if entry_stop_px else None,
                     partial_realized_pnl=round(partial_pnl, 8) if partial_pnl else None,
+                    exit_decision_id=getattr(pos, "_exit_decision_id", None),
                 )
             except Exception as _wce:
                 logger.warning(

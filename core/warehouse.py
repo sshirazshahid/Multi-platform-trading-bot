@@ -259,6 +259,19 @@ class Warehouse:
                     conn.execute(f"ALTER TABLE trades ADD COLUMN {_alpha_col}")
                 except sqlite3.OperationalError:
                     pass
+            # Provenance bundle (2026-06-12): decision_id joins trades AND
+            # candidates to mcp_decisions.jsonl rows; exit_decision_id
+            # attributes the CLOSE decision. NULL is legitimate (deterministic
+            # SL/TP/trailing exits, manual/ghost/reconciled rows — plan 0E).
+            for _prov_col in ("decision_id TEXT", "exit_decision_id TEXT"):
+                try:
+                    conn.execute(f"ALTER TABLE trades ADD COLUMN {_prov_col}")
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                conn.execute("ALTER TABLE candidates ADD COLUMN decision_id TEXT")
+            except sqlite3.OperationalError:
+                pass
             # Phase 13.5b: predictions.candidate_id added for clean
             # predictions→trades join. NULL on legacy rows.
             try:
@@ -365,6 +378,7 @@ class Warehouse:
         mcp_score: float | None = None,
         model_version: str | None = None,
         fill_type: str | None = None,
+        decision_id: str | None = None,
     ) -> int:
         """Insert an OPEN trade row. Idempotent on (exchange, symbol, ts_entry, side)."""
         try:
@@ -372,11 +386,13 @@ class Warehouse:
                 """INSERT OR IGNORE INTO trades(
                     candidate_id, ts_entry, exchange, symbol, market_type,
                     side, strategy_family, entry_px, size, leverage,
-                    fee, slippage, status, mode, mcp_score, model_version, fill_type)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    fee, slippage, status, mode, mcp_score, model_version,
+                    fill_type, decision_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (candidate_id, ts_entry, exchange, symbol, market_type,
                  side, strategy_family, entry_px, size, leverage,
-                 fee, slippage, "OPEN", mode, mcp_score, model_version, fill_type),
+                 fee, slippage, "OPEN", mode, mcp_score, model_version,
+                 fill_type, decision_id),
             )
             if cur.rowcount > 0:
                 return int(cur.lastrowid)
@@ -404,6 +420,7 @@ class Warehouse:
         slippage: float | None = None,
         entry_stop_px: float | None = None,
         partial_realized_pnl: float | None = None,
+        exit_decision_id: str | None = None,
     ) -> None:
         """Update a trade row to CLOSED.
 
@@ -429,11 +446,12 @@ class Warehouse:
                     hold_sec=?, exit_reason=?, status='CLOSED',
                     fee=COALESCE(?, fee), slippage=COALESCE(?, slippage),
                     entry_stop_px=COALESCE(?, entry_stop_px),
-                    partial_realized_pnl=COALESCE(?, partial_realized_pnl)
+                    partial_realized_pnl=COALESCE(?, partial_realized_pnl),
+                    exit_decision_id=COALESCE(?, exit_decision_id)
                 WHERE id=?""",
                 (ts_exit, exit_px, realized_pnl, r_multiple,
                  hold_sec, exit_reason, fee, slippage, entry_stop_px,
-                 partial_realized_pnl, trade_id),
+                 partial_realized_pnl, exit_decision_id, trade_id),
             )
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_close error: {e}")

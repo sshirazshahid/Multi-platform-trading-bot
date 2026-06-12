@@ -1603,7 +1603,10 @@ class BotEngine:
             self._cycle += 1
             return
 
-        # Cap actions per cycle
+        # Cap actions per cycle — provenance: the dropped tail is logged as
+        # rejection rows so capped decisions never silently vanish (E-4).
+        for _dropped in actions[MAX_ACTIONS_PER_CYCLE:]:
+            self._log_rejection(_dropped, "cycle_cap", stage="cycle_cap")
         actions = actions[:MAX_ACTIONS_PER_CYCLE]
 
         executed = 0
@@ -1612,6 +1615,13 @@ class BotEngine:
                 if action["type"] == "OPEN":
                     if self._execute_open(action):
                         executed += 1
+                    else:
+                        # Provenance: _execute_open stashes reject_reason at
+                        # every exit; unset stash logs as "unspecified".
+                        self._log_rejection(
+                            action,
+                            action.get("reject_reason", "unspecified"),
+                            stage="execute_open")
                 elif action["type"] == "CLOSE":
                     if self._execute_close(action):
                         executed += 1
@@ -1626,6 +1636,23 @@ class BotEngine:
         self._cycle += 1
         logger.info(
             f"[Claude] Cycle complete: {executed}/{len(actions)} actions executed")
+
+    def _log_rejection(self, action: dict, reason: str, stage: str):
+        """Provenance (2026-06-12): route an action rejection to the MCP
+        decision log, keyed by the action's decision_id. Safe no-op when the
+        brain ref is None or lacks log_rejection (old versions / tests)."""
+        try:
+            brain = getattr(self, "mcp_brain", None)
+            if brain is None or not hasattr(brain, "log_rejection"):
+                return
+            brain.log_rejection(
+                action.get("decision_id"),
+                action.get("symbol", ""),
+                reason,
+                stage,
+            )
+        except Exception as e:
+            logger.debug(f"[Provenance] rejection log skipped: {e}")
 
     def _btc_cross_regime_multiplier(self, side: str) -> tuple:
         """Phase 31 (2026-05-05): BTC cross-regime soft veto.
@@ -1782,6 +1809,7 @@ class BotEngine:
 
         if not symbol or not ex_name or side not in ("buy", "sell"):
             logger.warning(f"[Claude] Invalid OPEN action: {action}")
+            action["reject_reason"] = "invalid_action_fields"
             return False
 
         # Phase 23 (2026-05-04): per-symbol cooldown — see __init__ context.
@@ -1793,6 +1821,7 @@ class BotEngine:
             _cool_until = self._dust_skip_cooldown.get(symbol, 0.0)
             if _cool_until > 0:
                 if _t_p23.time() < _cool_until:
+                    action["reject_reason"] = "symbol_cooldown_active"
                     return False
                 # cooldown expired — clear it
                 del self._dust_skip_cooldown[symbol]
@@ -1809,6 +1838,7 @@ class BotEngine:
             logger.info(
                 f"[AnalysisOnly] BLOCKED open {ex_name}:{symbol} {side} — "
                 f"analysis/data-collection only (unscreened; no live entry)")
+            action["reject_reason"] = "analysis_only_symbol"
             return False
 
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
@@ -1825,6 +1855,7 @@ class BotEngine:
             if _sl_active:
                 logger.info(
                     f"[Risk29] BLOCKED open {symbol} {side} — {_sl_reason}")
+                action["reject_reason"] = "sl_cooldown_active"
                 return False
         except Exception as _e:
             logger.debug(f"[Risk29] sl-cooldown check skipped: {_e}")
@@ -1837,6 +1868,7 @@ class BotEngine:
             logger.info(
                 f"[Mode] OBSERVATION — skipping execution for {ex_name}:{symbol} {side}"
             )
+            action["reject_reason"] = "observation_mode"
             return False
 
         # (B) CONTROLLED_LIVE requires the env latch in addition to config.
@@ -1846,6 +1878,7 @@ class BotEngine:
                 "[Mode] OPERATING_MODE=CONTROLLED_LIVE but CONTROLLED_LIVE_ENABLED "
                 "env var is not 'true'. Refusing to place live orders. Aborting."
             )
+            action["reject_reason"] = "live_latch_missing"
             return False
 
         # (C) Universe gate. In TRADING_MODE=all the discovery pipeline
@@ -1867,6 +1900,7 @@ class BotEngine:
                     f"(TRADING_MODE={TRADING_MODE}, universe size="
                     f"{len(UNIVERSE_WHITELIST)})"
                 )
+                action["reject_reason"] = "outside_universe_whitelist"
                 return False
 
         # (C.2) Short gate — 2026-04-24, gated behind SHORT_GATE_ENABLED
@@ -1890,6 +1924,7 @@ class BotEngine:
                     f"over last {sell_n} SELL closes < 45% threshold. "
                     f"Auto-lifts once recovery WR ≥ 45%."
                 )
+                action["reject_reason"] = "sell_wr_gate"
                 return False
 
         # (C.3a) Side-aware AutoMutator short blacklist (May 2026).
@@ -1904,6 +1939,7 @@ class BotEngine:
                         f"[AutoMutator] SHORT-blacklisted: {symbol} "
                         f"(active short ban)"
                     )
+                    action["reject_reason"] = "short_blacklisted"
                     return False
             except Exception as _ame:
                 logger.debug(f"[AutoMutator] short blacklist probe failed: {_ame}")
@@ -1939,6 +1975,7 @@ class BotEngine:
                     logger.info(
                         f"[ShortFilter] BLOCKED {symbol} sell -- {_ssf_d.reason}"
                     )
+                    action["reject_reason"] = "short_filter_blocked"
                     return False
             except Exception as _ssfe:
                 logger.debug(f"[ShortFilter] gate skipped ({_ssfe}) -- defaulting to ALLOW")
@@ -1962,6 +1999,7 @@ class BotEngine:
                 _paused, _preason, _ = _bvp.update_and_evaluate(_ei_bvp)
                 if _paused:
                     logger.info(f"[BtcVolPause] WAIT -- {_preason} -- skipping new entry {symbol}")
+                    action["reject_reason"] = "btc_vol_pause"
                     return False
             except Exception as _bvpe:
                 logger.debug(f"[BtcVolPause] gate skipped ({_bvpe}) -- defaulting to ALLOW")
@@ -1970,6 +2008,7 @@ class BotEngine:
         # below once strategy_family is known.
         if self.risk and self.risk.is_symbol_paused(symbol):
             logger.info(f"[Risk/Spec12] {symbol} is paused — skipping")
+            action["reject_reason"] = "symbol_paused"
             return False
 
         # (E) Meta-filter quality gate (spec §8). The feature snapshot was
@@ -2165,6 +2204,7 @@ class BotEngine:
                         )
                 except Exception:
                     pass
+                action["reject_reason"] = "cell_filter_non_star"
                 return False
             if not _is_star:
                 if _score < _band_min:
@@ -2182,6 +2222,7 @@ class BotEngine:
                             )
                     except Exception:
                         pass
+                    action["reject_reason"] = "cell_filter_score_below_band"
                     return False
                 if _score > _band_max:
                     logger.info(
@@ -2198,6 +2239,7 @@ class BotEngine:
                             )
                     except Exception:
                         pass
+                    action["reject_reason"] = "cell_filter_score_above_band"
                     return False
 
         # ── PHASE 27 (2026-05-05): GRADUATED EV TEST-BEFORE-TRADE ────────
@@ -2236,6 +2278,7 @@ class BotEngine:
                     )
             except Exception:
                 pass
+            action["reject_reason"] = "ev_negative_cell"
             return False
 
         # ── 2026-05-03 (Phase 16) → 2026-05-04 (Phase 22): Regime-aware gate
@@ -2304,6 +2347,7 @@ class BotEngine:
                             )
                     except Exception:
                         pass
+                    action["reject_reason"] = "regime_blocked"
                     return False
         except Exception as _re:
             logger.debug(f"[Regime] check skipped ({_re}) — defaulting to ALLOW")
@@ -2314,6 +2358,7 @@ class BotEngine:
         symbol_key = symbol if ":" in symbol else f"{symbol}:USDT"
         if symbol in BLACKLIST_HARD or symbol_key in BLACKLIST_HARD:
             logger.info(f"[Claude] BLOCKED by blacklist: {symbol}")
+            action["reject_reason"] = "blacklist_hard"
             return False
         if self.auto_mutator:
             dyn_bl = self.auto_mutator.get_effective_blacklist()
@@ -2322,6 +2367,7 @@ class BotEngine:
                 # opt-in; the mutator keeps TRACKING loss clusters either way.
                 if RISK.get("auto_mutator_block_enabled", False):
                     logger.info(f"[Claude] BLOCKED by dynamic (post-mortem) blacklist: {symbol}")
+                    action["reject_reason"] = "blacklist_dynamic"
                     return False
                 logger.info(
                     f"[Claude] dynamic blacklist hit {symbol} — NOT blocked "
@@ -2330,6 +2376,7 @@ class BotEngine:
                 logger.info(
                     "[Claude] BLOCKED: shorts disabled by AutoMutator "
                     "(counter-trend short losses in recent post-mortems)")
+                action["reject_reason"] = "shorts_disabled_automutator"
                 return False
 
         # (a2) Caution symbol — soft gate. Knowledge-model WR<35% triggers
@@ -2357,6 +2404,7 @@ class BotEngine:
                         logger.info(
                             f"[Claude] BLOCKED: {symbol} is caution symbol "
                             f"(<35% WR, conf={confidence:.2f} < 0.90)")
+                        action["reject_reason"] = "caution_symbol_low_conf"
                         return False
             except Exception:
                 pass
@@ -2364,6 +2412,7 @@ class BotEngine:
         # (b) Spot — buy-only (no short on spot)
         if market_type == "spot" and side == "sell":
             logger.warning("[Claude] BLOCKED: Cannot short on spot")
+            action["reject_reason"] = "spot_short_not_possible"
             return False
 
         # (c) BTC macro trend + side filter
@@ -2372,6 +2421,7 @@ class BotEngine:
             logger.info(
                 f"[Claude] BLOCKED: SHORT {symbol} requires BTC 4h macro-bear, "
                 f"current trend={btc_trend}")
+            action["reject_reason"] = "short_requires_btc_bear"
             return False
         # 2026-04-12: Removed bear-macro long-blocking gate. The scoring
         # engine already requires per-coin 4h+1h EMA20>50 alignment for
@@ -2390,6 +2440,7 @@ class BotEngine:
             mcp_score=float(action.get("mcp_score") or action.get("score") or 0.0),
         )
         if tier_params is None:
+            action["reject_reason"] = "no_leverage_tier"
             return False
 
         # Tier controls leverage; algorithm's ATR-based SL/TP are preferred
@@ -2455,11 +2506,13 @@ class BotEngine:
             logger.info(
                 f"[Claude] BLOCKED: {symbol} R:R {actual_rr:.2f}:1 "
                 f"< {min_rr:.1f}:1 minimum (SL={sl_pct}% TP={tp_pct}%)")
+            action["reject_reason"] = "rr_below_min"
             return False
 
         exchange = self.active_exchanges.get(ex_name)
         if not exchange:
             logger.warning(f"[Claude] Exchange '{ex_name}' not connected")
+            action["reject_reason"] = "exchange_not_connected"
             return False
 
         # ── Exchange health gate — block new trades on halted exchanges ──
@@ -2467,6 +2520,7 @@ class BotEngine:
             logger.warning(
                 f"[Claude] BLOCKED: {ex_name} is HALTED (API unreachable) "
                 f"— no new trades until recovered")
+            action["reject_reason"] = "exchange_halted"
             return False
 
         # ── Strategy gate: block caution (<50% WR) and fee-heavy strategies ──
@@ -2475,6 +2529,7 @@ class BotEngine:
         # (D.1) Per-family pause (spec §12) — now that strategy_family is known.
         if strategy_name and self.risk and self.risk.is_family_paused(strategy_name):
             logger.info(f"[Risk/Spec12] strategy family '{strategy_name}' is paused — skipping")
+            action["reject_reason"] = "family_paused"
             return False
 
         if strategy_name and RISK.get("caution_strategy_block_enabled", False):
@@ -2485,11 +2540,13 @@ class BotEngine:
                     logger.info(
                         f"[Claude] BLOCKED: strategy '{strategy_name}' is caution "
                         f"(<50% WR) — auto-disabled")
+                    action["reject_reason"] = "caution_strategy"
                     return False
                 if strategy_name in km.get_fee_heavy_strategies():
                     logger.info(
                         f"[Claude] BLOCKED: strategy '{strategy_name}' is fee-heavy "
                         f"(fees >20% of gross profit) — auto-disabled")
+                    action["reject_reason"] = "fee_heavy_strategy"
                     return False
             except Exception:
                 pass
@@ -2501,17 +2558,20 @@ class BotEngine:
                 logger.info(
                     f"[Claude] BLOCKED by universe filter: {symbol} — "
                     f"{', '.join(uf_result['reasons'])}")
+                action["reject_reason"] = "universe_filter_blocked"
                 return False
 
         # Risk manager circuit breakers
         if not self.risk.can_trade(self.tracker.count_open()):
             logger.warning(f"[Claude] BLOCKED by risk manager: {self.risk.halt_reason}")
+            action["reject_reason"] = "risk_halted"
             return False
 
         # Per-exchange position limit
         ex_open = self.tracker.count_open(exchange=exchange.name)
         if ex_open >= MAX_PER_EXCHANGE:
             logger.info(f"[Claude] {ex_name}: {ex_open}/{MAX_PER_EXCHANGE} positions — full")
+            action["reject_reason"] = "exchange_position_limit"
             return False
 
         # Total position limit (from config, not module constant)
@@ -2519,6 +2579,7 @@ class BotEngine:
         _max_positions = RISK.get("max_open_positions", 8)
         if total_open >= _max_positions:
             logger.info(f"[Claude] Total {total_open}/{_max_positions} — full")
+            action["reject_reason"] = "total_position_limit"
             return False
 
         # No duplicate base asset across ANY exchange.
@@ -2534,6 +2595,7 @@ class BotEngine:
         if already_has:
             logger.info(
                 f"[Claude] {base_asset} already open (any exchange) — skip")
+            action["reject_reason"] = "symbol_already_open"
             return False
 
         # Correlation check — prevent over-concentration in correlated assets
@@ -2556,6 +2618,7 @@ class BotEngine:
                     f"'{corr_info.get('group', '?')}' at "
                     f"{corr_info.get('current_pct', 0)*100:.0f}% exposure "
                     f"(max {corr_info.get('max_pct', 0)*100:.0f}%)")
+                action["reject_reason"] = "correlation_exposure_cap"
                 return False
 
         # Balance check
@@ -2592,6 +2655,7 @@ class BotEngine:
                     logger.debug(f"[Claude] Auto-transfer failed: {e}")
             if mtype_bal < min_trade_bal:
                 logger.info(f"[Claude] {ex_name} {market_type} balance ${mtype_bal:.2f} < ${min_trade_bal}")
+                action["reject_reason"] = "balance_below_min"
                 return False
 
         # Add :USDT suffix for futures
@@ -2686,6 +2750,7 @@ class BotEngine:
                             f"actual win-rate {_calibrated:.0%} for raw conf "
                             f"{_raw_conf:.0%} (Phase 40 hard-refuse < 30%, "
                             f"30min cooldown).")
+                        action["reject_reason"] = "calibrator_hard_refuse"
                         return False
                     logger.info(
                         f"[Claude] {symbol} calibrator predicts {_calibrated:.0%} "
@@ -2818,6 +2883,7 @@ class BotEngine:
             logger.info(
                 f"[Claude] Notional ${notional:.2f} < ${min_notional:.2f} minimum "
                 f"(mtype_bal=${mtype_bal:.2f})")
+            action["reject_reason"] = "notional_below_min"
             return False
 
         # ── Hard loss clamp — final safety rail ──
@@ -2827,6 +2893,7 @@ class BotEngine:
         # with 0.8% SL on 2% of balance only risks 0.32% — well under the $2 cap.
         _clamp_lev = leverage if market_type == "futures" else 1
         if not self._within_loss_clamp(mtype_bal, notional, _clamp_lev, sl_pct / 100.0):
+            action["reject_reason"] = "loss_clamp_exceeded"
             return False
 
         # Get current price for sizing
@@ -2835,8 +2902,10 @@ class BotEngine:
             price = float(ticker.get("last", 0) or 0)
         except Exception as e:
             logger.warning(f"[Claude] fetch_ticker {trade_symbol}: {e}")
+            action["reject_reason"] = "ticker_fetch_failed"
             return False
         if price <= 0:
+            action["reject_reason"] = "price_invalid"
             return False
 
         # Compute SL/TP prices
@@ -2869,6 +2938,7 @@ class BotEngine:
                     f"[Claude] {symbol}: size {size:.8f} < step {step} "
                     f"(need ${min_notional:.0f} at {leverage}x, "
                     f"have ${notional:.0f}) — skip + 30min cooldown")
+                action["reject_reason"] = "size_below_step"
                 return False
         except Exception:
             pass
@@ -2897,9 +2967,12 @@ class BotEngine:
                 candidate_id=_cid if (_cid or 0) > 0 else None,
                 mcp_score=action.get("mcp_score"),
                 model_version=action.get("model_version"),
+                decision_id=action.get("decision_id"),
             )
             if pos is None:
                 logger.info("[Claude] open_position returned None — rejected by order manager")
+                _omr = getattr(self.order_mgr, "last_open_reject", None)
+                action["reject_reason"] = f"order_manager:{_omr or 'unspecified'}"
                 return False
             # Warehouse record_trade_open now happens inside open_position
             # (before SL placement) so fail-closed paths don't lose the row.
@@ -2916,6 +2989,7 @@ class BotEngine:
                     self.risk.note_order_rejection(symbol, str(e))
             except Exception:
                 pass
+            action["reject_reason"] = "open_position_exception"
             return False
 
     def _execute_close(self, action: dict) -> bool:
@@ -2960,7 +3034,11 @@ class BotEngine:
             f"on {target.exchange} | {reason[:60]}")
 
         try:
-            self.order_mgr.close_position(exchange, target, reason)
+            # Provenance: thread the CLOSE decision's id so the warehouse row
+            # receives exit_decision_id via _finalize_close.
+            self.order_mgr.close_position(
+                exchange, target, reason,
+                decision_id=action.get("decision_id"))
             return True
         except Exception as e:
             logger.error(f"[Claude] close_position failed: {e}")

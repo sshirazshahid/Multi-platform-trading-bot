@@ -236,7 +236,9 @@ def test_execute_open_checks_cooldown_early():
     """Cooldown check must run before MCP/risk eval — cheap early exit."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     eo_idx = src.index("def _execute_open(self, action: dict)")
-    head = src[eo_idx:eo_idx + 3000]
+    # Window widened 3000→3500 (2026-06-12): provenance reject_reason stashes
+    # added ~3 one-liner lines before this point; check order is unchanged.
+    head = src[eo_idx:eo_idx + 3500]
     assert "self.risk.is_sl_cooldown_active(" in head
 
 

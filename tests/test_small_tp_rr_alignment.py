@@ -29,7 +29,9 @@ def test_portfolio_prompt_no_stale_wide_target_policy():
 def test_claude_futures_ingestion_normalizes_sl_and_tp_together():
     src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
     parse_idx = src.index("# Parse actions")
-    parse_block = src[parse_idx:parse_idx + 6000]
+    # Window widened 6000→10000 (2026-06-12): provenance bundle added
+    # pre-clamp/decision_id capture between the clamps and the action dict.
+    parse_block = src[parse_idx:parse_idx + 10000]
 
     assert "_claude_tp_clamped = min(2.0, max(1.8, _raw_tp))" in parse_block
     assert "_max_sl_for_rr = min(1.6, _claude_tp_clamped / 1.2)" in parse_block

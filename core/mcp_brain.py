@@ -40,12 +40,14 @@ Safety:
   - Never trades on incomplete or stale data
 """
 
+import hashlib
 import json
 import math
 import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1090,14 +1092,19 @@ class MCPBrain:
                         f"backoff={'active' if self._claude_backoff_until > time.time() else 'none'}")
 
                 # ── Decisions/advice: only restore if recent (<10 min) ──
+                # Provenance fix #6 (DECLARED BEHAVIOR CHANGE, 2026-06-12):
+                # reloaded position_advice is DISCARDED on restart so stale
+                # advice (and its decision_ids) is never consumed; the next
+                # monitor cycle re-derives it fresh. Timing/budget fields
+                # above are kept.
                 if age_min < 10:
                     self._last_decisions = data.get("decisions", {})
-                    self._last_position_advice = data.get("position_advice", {})
                     n_dec = len(self._last_decisions)
-                    n_adv = len(self._last_position_advice)
+                    n_adv_dropped = len(data.get("position_advice", {}) or {})
                     logger.info(
-                        f"[MCP-Brain] Restored state: {n_dec} decisions, "
-                        f"{n_adv} position advices ({age_min:.1f}min old)")
+                        f"[MCP-Brain] Restored state: {n_dec} decisions "
+                        f"({age_min:.1f}min old); dropped {n_adv_dropped} "
+                        f"reloaded position advices (stale-advice guard)")
                 else:
                     logger.info(f"[MCP-Brain] Stale decisions ({age_min:.0f}min old) — starting fresh")
         except Exception as e:
@@ -1646,8 +1653,16 @@ class MCPBrain:
     # ──────────────────────────────────────────────────────────────────
 
     def _call_claude(self, prompt: str, system_prompt: str,
-                      call_type: str = "portfolio") -> dict:
-        """Call Claude CLI with rate limiting, JSON parsing, and repair."""
+                      call_type: str = "portfolio",
+                      meta_out: dict | None = None) -> dict:
+        """Call Claude CLI with rate limiting, JSON parsing, and repair.
+
+        meta_out (provenance bundle 2026-06-12): optional out-param dict.
+        When provided it is populated with {"attempt", "raw"} by
+        call_claude_cli plus {"repaired": True} when the _repair_json path
+        was used and {"truncated": {orig_len, cut_len, tail_80}} when the
+        prompt cap fired.
+        """
         if not self._check_rate_limit():
             return {}
 
@@ -1662,6 +1677,19 @@ class MCPBrain:
         # Cap prompt size — smaller = faster first-token
         max_prompt = 8000 if call_type == "portfolio" else 5000
         if len(prompt) > max_prompt:
+            # Provenance (E-10 honest version): record what was cut. Named
+            # section attribution needs a prompt-builder restructure (TODO).
+            _trunc = {
+                "orig_len": len(prompt),
+                "cut_len": len(prompt) - max_prompt,
+                "tail_80": prompt[max_prompt - 80:max_prompt],
+            }
+            if meta_out is not None:
+                meta_out["truncated"] = _trunc
+            logger.info(
+                f"[MCP-Brain] Prompt truncated ({call_type}): "
+                f"orig_len={_trunc['orig_len']} cut_len={_trunc['cut_len']} "
+                f"tail_80={_trunc['tail_80']!r}")
             prompt = prompt[:max_prompt] + "\n[TRUNCATED]"
 
         model = MODEL_ENTRY if call_type == "portfolio" else MODEL_MONITOR
@@ -1671,7 +1699,8 @@ class MCPBrain:
         effort = "medium"
 
         # Claude Code CLI only — no API fallback
-        raw = call_claude_cli(prompt, system_prompt, model, timeout, effort)
+        raw = call_claude_cli(prompt, system_prompt, model, timeout, effort,
+                              meta_out=meta_out)
         if raw is None:
             self._claude_consecutive_fails += 1
             reason = getattr(_claude_mod, '_last_error', 'unknown')
@@ -1703,6 +1732,8 @@ class MCPBrain:
         except json.JSONDecodeError:
             repaired = self._repair_json(text)
             if repaired:
+                if meta_out is not None:
+                    meta_out["repaired"] = True
                 logger.info("[MCP-Brain] JSON repaired from truncated response")
                 return repaired
             logger.warning(f"[MCP-Brain] Unparseable response: {text[:200]}")
@@ -1868,6 +1899,15 @@ class MCPBrain:
                         f"[MCP-Brain] Algorithmic fallback: {len(actions)} actions")
             except Exception as e:
                 logger.error(f"[MCP-Brain] Algorithmic scoring failed: {e}")
+
+        # Provenance backstop (2026-06-12): after the Claude/algo merge every
+        # action must carry a fresh decision_id + source. Both builders tag at
+        # source; this guards any path that slipped through. Ids are NEVER
+        # reused from _last_decisions or restored state.
+        for a in actions:
+            if isinstance(a, dict) and not a.get("decision_id"):
+                a["decision_id"] = str(uuid.uuid4())
+                a.setdefault("source", "algo")
 
         self._last_trade_actions = actions
         self._log_decisions({"actions": actions}, "portfolio")
@@ -2136,10 +2176,20 @@ class MCPBrain:
 
         prompt = "\n\n".join(sections)
 
-        # Call Claude
-        result = self._call_claude(prompt, _PORTFOLIO_SYSTEM_PROMPT, "portfolio")
+        # Call Claude — meta carries attempt/raw/repaired/truncated (provenance)
+        _meta: dict = {}
+        result = self._call_claude(prompt, _PORTFOLIO_SYSTEM_PROMPT, "portfolio",
+                                   meta_out=_meta)
         if not result:
             return []
+
+        _raw_resp = _meta.get("raw")
+        _resp_sha = (hashlib.sha256(_raw_resp.encode("utf-8")).hexdigest()
+                     if isinstance(_raw_resp, str) and _raw_resp else None)
+        # Analyzed coin set for LOG-ONLY symbol validation (plan S5: out-of-set
+        # symbols are flagged, never rejected at parse).
+        _analyzed_bases = {
+            str(c).split("/")[0].split(":")[0].upper() for c in (coins or [])}
 
         # Parse actions
         actions = []
@@ -2229,14 +2279,49 @@ class MCPBrain:
                 _claude_tp_clamped = _raw_tp
                 _claude_sl_clamped = _raw_sl
 
-            actions.append({
+            # ── Provenance bundle (2026-06-12): parse-time ingestion bounds.
+            # Pre-clamp raws recorded; leverage/size clamped to config bounds
+            # (executed leverage/size still come from the tier selector — E-8:
+            # these are recorded values, not order inputs). Symbol validation
+            # is LOG-ONLY: the action always flows (plan amendment S5).
+            _lev_raw = self._safe_int(a.get("leverage"), 5)
+            _size_raw = self._safe_float(a.get("size_pct"), 3.0)
+            try:
+                _tiers = getattr(_cfg_clamp, "LEVERAGE_TIERS", {}) or {}
+                _max_lev = max(
+                    int(t.get("leverage", 1) or 1) for t in _tiers.values()
+                ) if _tiers else 10
+            except (ValueError, TypeError):
+                _max_lev = 10
+            _lev = min(max(1, _lev_raw), _max_lev)
+            if 0.0 < _size_raw <= 100.0:
+                _size = _size_raw
+            elif _size_raw > 100.0:
+                _size = 100.0
+            else:  # <= 0: fall back to the parse default
+                _size = 3.0
+            _clamped = {}
+            if _lev != _lev_raw:
+                _clamped["leverage"] = {"from": _lev_raw, "to": _lev}
+            if _size != _size_raw:
+                _clamped["size_pct"] = {"from": _size_raw, "to": _size}
+            _sym_base = (a.get("symbol") or "").split("/")[0].split(":")[0].upper()
+            _symbol_unlisted = bool(_sym_base) and _sym_base not in _analyzed_bases
+            if _clamped or _symbol_unlisted:
+                logger.warning(
+                    f"[Provenance] parse bounds {a.get('symbol', '?')}: "
+                    f"clamped={_clamped or None} "
+                    f"symbol_unlisted={_symbol_unlisted} "
+                    f"(log-only; action still flows)")
+
+            _action = {
                 "type":        atype,
                 "symbol":      a.get("symbol", ""),
                 "exchange":    (a.get("exchange") or "").lower(),
                 "market_type": _market_type,
                 "side":        (a.get("side") or "").lower(),
-                "leverage":    self._safe_int(a.get("leverage"), 5),
-                "size_pct":    self._safe_float(a.get("size_pct"), 3.0),
+                "leverage":    _lev,
+                "size_pct":    _size,
                 "sl_pct":      _claude_sl_clamped,
                 "tp_pct":      _claude_tp_clamped,
                 "confidence":  final_conf,
@@ -2245,7 +2330,21 @@ class MCPBrain:
                 "mcp_score":   algo_score,
                 "reason":      reason,
                 "position_id": a.get("position_id", ""),
-            })
+                # Provenance: one fresh id per ACTION; one sha per response.
+                "decision_id": str(uuid.uuid4()),
+                "source":      "claude",
+                "response_sha256": _resp_sha,
+                "repaired":    bool(_meta.get("repaired", False)),
+                "attempt":     _meta.get("attempt"),
+                "sl_pct_raw":  _raw_sl,
+                "tp_pct_raw":  _raw_tp,
+                "leverage_raw": _lev_raw,
+                "size_pct_raw": _size_raw,
+                "symbol_unlisted": _symbol_unlisted,
+            }
+            if _clamped:
+                _action["clamped"] = _clamped
+            actions.append(_action)
 
         # Log assessment
         assessment = result.get("market_assessment", "")
@@ -2357,6 +2456,11 @@ class MCPBrain:
                 logger.error(f"[MCP-Brain] Algorithmic monitor failed: {e}")
 
         if advice:
+            # Provenance backstop — mirror of the analyze_portfolio merge
+            for adv in advice.values():
+                if isinstance(adv, dict) and not adv.get("decision_id"):
+                    adv["decision_id"] = str(uuid.uuid4())
+                    adv.setdefault("source", "algo")
             self._last_position_advice = advice
             self._log_decisions(advice, "position_monitor")
             self._save_state()
@@ -2542,9 +2646,15 @@ class MCPBrain:
 
         prompt = "\n".join(sections)
 
-        result = self._call_claude(prompt, _POSITION_MONITOR_SYSTEM_PROMPT, "monitor")
+        _meta: dict = {}
+        result = self._call_claude(prompt, _POSITION_MONITOR_SYSTEM_PROMPT,
+                                   "monitor", meta_out=_meta)
         if not result:
             return {}
+
+        _raw_resp = _meta.get("raw")
+        _resp_sha = (hashlib.sha256(_raw_resp.encode("utf-8")).hexdigest()
+                     if isinstance(_raw_resp, str) and _raw_resp else None)
 
         # Parse position advice — Claude returns {positions: {id: {action, confidence, reason}}}
         raw_positions = result.get("positions", result)  # fallback: result itself might be the dict
@@ -2564,6 +2674,12 @@ class MCPBrain:
                     "confidence": min(1.0, max(0.0,
                         self._safe_float(adv.get("confidence"), 0.6))),
                     "reason": (adv.get("reason") or "")[:100],
+                    # Provenance: fresh id per advice action (never reused)
+                    "decision_id": str(uuid.uuid4()),
+                    "source": "claude",
+                    "response_sha256": _resp_sha,
+                    "repaired": bool(_meta.get("repaired", False)),
+                    "attempt": _meta.get("attempt"),
                 }
                 if action != "HOLD":
                     logger.info(
@@ -2576,6 +2692,11 @@ class MCPBrain:
                     "action": "HOLD",
                     "confidence": 0.5,
                     "reason": "no Claude response",
+                    "decision_id": str(uuid.uuid4()),
+                    "source": "claude",
+                    "response_sha256": _resp_sha,
+                    "repaired": bool(_meta.get("repaired", False)),
+                    "attempt": _meta.get("attempt"),
                 }
 
         return advice
@@ -3787,6 +3908,9 @@ class MCPBrain:
                 ),
                 "position_id": "",
                 "candidate_id": result.get("_candidate_id", -1),
+                # Provenance: algo-built actions mint their own fresh ids
+                "decision_id": str(uuid.uuid4()),
+                "source": "algo",
             })
             logger.info(
                 f"[MCP-Algo] OPEN {coin}/USDT {side} on {best_ex} "
@@ -3856,6 +3980,8 @@ class MCPBrain:
                     "confidence": 0.80,
                     "reason": reason,
                     "position_id": p["id"],
+                    "decision_id": str(uuid.uuid4()),
+                    "source": "algo",
                 })
                 logger.info(f"[MCP-Algo] CLOSE {p.get('symbol','')} — {reason}")
 
@@ -3997,7 +4123,11 @@ class MCPBrain:
                 conf = 0.50
                 reason = f"pnl={pnl_pct:+.1f}% trend={trend_with} macd={macd_with}"
 
-            advice[pid] = {"action": action, "confidence": conf, "reason": reason}
+            advice[pid] = {
+                "action": action, "confidence": conf, "reason": reason,
+                # Provenance: fresh id per parse — never reused across runs
+                "decision_id": str(uuid.uuid4()), "source": "algo",
+            }
             if action != "HOLD":
                 logger.info(
                     f"[MCP-Algo] Position {pid[:8]}: {action} "
@@ -4009,21 +4139,50 @@ class MCPBrain:
     # LOGGING
     # ──────────────────────────────────────────────────────────────────
 
-    def _log_decisions(self, decisions: dict, dtype: str = "entry"):
+    def _append_decision_line(self, record: dict):
+        """Shared append path for decision + rejection rows.
+
+        Rotation (E-1 CRITICAL fix, 2026-06-12): the old truncate-to-500-lines
+        destroyed the week's history and made the reconciler report phantom
+        orphans. At >2MB the file is now ARCHIVE-RENAMED to
+        mcp_decisions.<YYYYMMDD-HHMMSS>.jsonl and a fresh active file is
+        created at the SAME filename (health_watchdog tails it). History is
+        bounded per-file but never destroyed.
+        """
         try:
             DECISION_LOG.parent.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now(timezone.utc).isoformat()
             with open(DECISION_LOG, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "ts": ts, "type": dtype, "decisions": decisions
-                }, default=str) + "\n")
-            # Rotate: keep last 1000 lines (~every few hours)
+                f.write(json.dumps(record, default=str) + "\n")
             if DECISION_LOG.stat().st_size > 2_000_000:  # > 2MB
-                lines = DECISION_LOG.read_text(encoding="utf-8").splitlines()
-                DECISION_LOG.write_text(
-                    "\n".join(lines[-500:]) + "\n", encoding="utf-8")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                archive = DECISION_LOG.with_name(
+                    f"{DECISION_LOG.stem}.{stamp}{DECISION_LOG.suffix}")
+                DECISION_LOG.replace(archive)
+                DECISION_LOG.touch()
+                logger.info(
+                    f"[MCP-Brain] Decision log rotated → {archive.name}")
         except Exception:
             pass
+
+    def _log_decisions(self, decisions: dict, dtype: str = "entry"):
+        self._append_decision_line({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "type": dtype, "decisions": decisions,
+        })
+
+    def log_rejection(self, decision_id: str | None, symbol: str,
+                      reason: str, stage: str):
+        """Provenance (2026-06-12): link an execution-layer rejection back to
+        the decision that produced the action. Same file as decisions so the
+        reconciler joins on decision_id without a new store (plan 0E)."""
+        self._append_decision_line({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "type": "rejection",
+            "decision_id": decision_id,
+            "symbol": symbol,
+            "reason": reason,
+            "stage": stage,
+        })
 
     def last_decisions(self) -> dict:
         return self._last_decisions
