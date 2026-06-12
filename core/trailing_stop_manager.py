@@ -15,6 +15,7 @@ from pathlib import Path
 from loguru import logger
 
 from config import RISK
+from utils.atomic_io import atomic_write_json
 
 PEAKS_FILE = Path("data/trailing_peaks.json")
 PARAMS_FILE = Path("data/trailing_params.json")
@@ -290,7 +291,9 @@ class TrailingStopManager:
     def _save_peaks(self):
         try:
             PEAKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PEAKS_FILE.write_text(json.dumps(self._tracking, indent=2, default=str), encoding="utf-8")
+            # Atomic write (tmp + os.replace) — a torn trailing_peaks.json loses
+            # every live peak on restart (TD-2, plan 2026-06-12; mirrors risk_manager).
+            atomic_write_json(PEAKS_FILE, self._tracking, indent=2, default=str)
         except Exception as e:
             logger.debug(f"[Trail] Save: {e}")
 

@@ -37,6 +37,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from utils.atomic_io import atomic_write_json
+
 MODEL_FILE  = Path("data/knowledge_model.json")
 BACKUP_FILE = Path("data/knowledge_model.bak.json")
 
@@ -461,10 +463,10 @@ class KnowledgeModel:
             # Backup before write
             if MODEL_FILE.exists():
                 shutil.copy2(MODEL_FILE, BACKUP_FILE)
-            MODEL_FILE.write_text(
-                json.dumps(self._model, indent=2, default=str),
-                encoding="utf-8"
-            )
+            # Atomic write (tmp + os.replace) — a torn knowledge_model.json
+            # sends _load() down the "starting fresh" path on the next boot
+            # (TD-2, plan 2026-06-12; mirrors risk_manager._save_state).
+            atomic_write_json(MODEL_FILE, self._model, indent=2, default=str)
         except Exception as e:
             logger.error(f"[Knowledge] Save error: {e}")
 
