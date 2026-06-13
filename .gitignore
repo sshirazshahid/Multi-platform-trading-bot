@@ -131,3 +131,14 @@ data/sl_widened.json
 data/spot_portfolio.json.bak*
 data/spot_recommendations.jsonl
 .gstack/
+
+# Scratch / scraped-research clutter (2026-06-14 working-tree hygiene)
+.repo_study/
+*.bundle
+data/_*
+/ouci.html
+/scribd_page.html
+/ugent.html
+/sd_abs.txt
+/ssrn.txt
+/_fd2024_manuscript.pdf
