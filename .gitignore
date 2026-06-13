@@ -130,3 +130,4 @@ data/prediction_agent_log.jsonl
 data/sl_widened.json
 data/spot_portfolio.json.bak*
 data/spot_recommendations.jsonl
+.gstack/

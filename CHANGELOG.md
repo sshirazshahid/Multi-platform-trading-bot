@@ -8,6 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-06-14 — daily-counter rollover decoupled from entry path)
+The UTC-day rollover of `daily_pnl`/`trades_today` lived only in `risk_manager.can_trade()`,
+which is reached only via the entry-execution path (`bot_engine._execute_open`). When entries
+were gated upstream for >1 day (the 2026-06-11 `CLAUDE_PORTFOLIO_MODE=off` experiment routed to
+the algo-only SCALP path → 0 ALLOW over 45,750 candidates in 48h), `can_trade()` was never
+called, so the counters froze at their 06-11 values across two day-boundaries and
+dashboards/notifiers reading `risk_state.json` reported a 2-day-stale "today". Extracted
+`risk_manager.roll_day_if_needed()` (idempotent, side-effect-free within a day), call it once per
+portfolio cycle in `bot_engine._claude_portfolio_cycle`, and route the two existing entry-path
+rollovers through it (DRY). Pure correctness fix; no behavior change to gating, sizing, or exits.
++3 tests (`tests/test_daily_counter_rollover.py`). Applies on RESTART.
+- Hygiene: gitignore `.gstack/` (gstack-generated artifacts in the repo root).
+
 ### Added (2026-06-12 — decision provenance bundle; /autoplan-reviewed, owner-approved)
 Record fidelity, not new signals: every entry/exit decision becomes reconstructable
 end-to-end (raw LLM response → parse/clamps → order → warehouse row). Root cause of
