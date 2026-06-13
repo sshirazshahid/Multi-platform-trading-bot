@@ -28,6 +28,10 @@ from pathlib import Path
 def _engine(tmp_path, monkeypatch, profitable, *, age_days=0.0):
     """Bare BotEngine + a synthetic evidence file in an isolated cwd."""
     monkeypatch.chdir(tmp_path)
+    # Force the gate ON so these tests exercise the gate logic deterministically,
+    # independent of the operator's runtime HOUR_GATE_PROFIT_ONLY in .env (which
+    # is a legitimate override and must not turn the suite red). 2026-06-14.
+    monkeypatch.setattr("config.HOUR_GATE_PROFIT_ONLY", True)
     (tmp_path / "data").mkdir(exist_ok=True)
     p = tmp_path / "data" / "hour_gate_evidence.json"
     p.write_text(json.dumps({
@@ -78,6 +82,7 @@ def test_empty_profitable_fails_open(tmp_path, monkeypatch):
 
 def test_missing_file_fails_open(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("config.HOUR_GATE_PROFIT_ONLY", True)  # gate ON, no evidence -> fail open
     (tmp_path / "data").mkdir(exist_ok=True)
     from core.bot_engine import BotEngine
     eng = BotEngine.__new__(BotEngine)
@@ -99,8 +104,11 @@ def test_evidence_cached_not_reread(tmp_path, monkeypatch):
 
 
 def test_config_knob_default_on():
-    from config import HOUR_GATE_PROFIT_ONLY
-    assert HOUR_GATE_PROFIT_ONLY is True
+    """The shipped DEFAULT (env unset) is ON. Pin the default LITERAL in config.py,
+    not the env-resolved value: an operator setting HOUR_GATE_PROFIT_ONLY=false in
+    .env is a legitimate runtime override and must not turn this test red. 2026-06-14."""
+    src = Path("config.py").read_text(encoding="utf-8")
+    assert 'os.getenv("HOUR_GATE_PROFIT_ONLY", "true")' in src
 
 
 def test_classify_hour_consumes_evidence():
