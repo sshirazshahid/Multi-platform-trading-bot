@@ -1556,6 +1556,17 @@ class BotEngine:
             logger.warning("[Claude] MCP Brain not available — skipping portfolio cycle")
             return
 
+        # 2026-06-13: roll daily counters at cycle start, decoupled from the
+        # entry path. can_trade() (the other rollover caller) is only reached
+        # via _execute_open, so when entries are gated upstream for >1 day the
+        # daily_pnl/trades_today counters froze at stale values and dashboards
+        # read a stale "today". This keeps them fresh regardless of entries.
+        if self.risk:
+            try:
+                self.risk.roll_day_if_needed()
+            except Exception as e:
+                logger.debug(f"[Risk] day-rollover check: {e}")
+
         # Refresh closed-loop mutations from latest post-mortems
         if self.auto_mutator:
             try:
@@ -4112,8 +4123,10 @@ class BotEngine:
         """
         try:
             from config import (
-                AUTO_SMALL_TP_ENABLED, AUTO_SMALL_TP_MIN_AGE_MIN,
-                AUTO_SMALL_TP_MIN_PNL_FRAC, AUTO_SMALL_TP_MAX_PNL_FRAC,
+                AUTO_SMALL_TP_ENABLED,
+                AUTO_SMALL_TP_MAX_PNL_FRAC,
+                AUTO_SMALL_TP_MIN_AGE_MIN,
+                AUTO_SMALL_TP_MIN_PNL_FRAC,
                 STAR_SYMBOLS,
             )
         except ImportError:
@@ -4166,8 +4179,10 @@ class BotEngine:
         """
         try:
             from config import (
-                AGE_AWARE_SL_ENABLED, AGE_AWARE_SL_MIN_AGE_MIN,
-                AGE_AWARE_SL_MIN_PNL_FRAC, AGE_AWARE_SL_MAX_PNL_FRAC,
+                AGE_AWARE_SL_ENABLED,
+                AGE_AWARE_SL_MAX_PNL_FRAC,
+                AGE_AWARE_SL_MIN_AGE_MIN,
+                AGE_AWARE_SL_MIN_PNL_FRAC,
                 FEE,
             )
         except ImportError:

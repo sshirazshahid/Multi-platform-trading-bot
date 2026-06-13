@@ -370,16 +370,34 @@ class RiskManager:
 
     # ── Trading gate with SMART RECOVERY ─────────────────────────────
 
-    def can_trade(self, open_position_count: int) -> bool:
-        # New-day rollover: in long-running processes the load-state path
-        # only fires at startup, so a midnight crossing must be picked up
-        # here. Without this the daily counters never reset.
+    def roll_day_if_needed(self) -> bool:
+        """Reset daily counters (daily_pnl, opens_today) on a UTC-day crossing.
+
+        Idempotent and side-effect-free within a day, so it is safe to call
+        every portfolio cycle. 2026-06-13: previously the rollover lived only
+        inside can_trade()/note_trade_opened(), both reached only via the
+        entry-execution path (bot_engine._execute_open). When entries were
+        gated upstream for >1 day (CLAUDE_PORTFOLIO_MODE=off → algo-only SCALP
+        path produced 0 ALLOW), can_trade() was never called, so the counters
+        froze at their pre-gate values across UTC day boundaries and
+        dashboards/notifiers reading risk_state.json reported a stale "today"
+        PnL. Calling this once per cycle decouples the rollover from entries.
+        Returns True if a rollover occurred.
+        """
         today = _utc_today()
         if today != self._trading_day:
             self._daily_pnl = 0.0
             self._trading_day = today
             self._opens_today = 0
             self._save_state()
+            return True
+        return False
+
+    def can_trade(self, open_position_count: int) -> bool:
+        # New-day rollover: in long-running processes the load-state path
+        # only fires at startup, so a midnight crossing must be picked up
+        # here. Without this the daily counters never reset.
+        self.roll_day_if_needed()
 
         # 2026-05-28 — SOFT daily-loss circuit breaker (opt-in replacement for
         # the removed global halts; config.DAILY_LOSS_BREAKER). Blocks only NEW
@@ -427,11 +445,7 @@ class RiskManager:
         # Roll over the counter on a UTC-midnight crossing the same way
         # can_trade() does, so a long-running process that opens its first
         # post-midnight trade doesn't carry yesterday's count forward.
-        today = _utc_today()
-        if today != self._trading_day:
-            self._daily_pnl = 0.0
-            self._trading_day = today
-            self._opens_today = 0
+        self.roll_day_if_needed()
         self._opens_today += 1
         self._save_state()
 
