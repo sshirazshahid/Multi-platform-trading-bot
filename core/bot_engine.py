@@ -1600,7 +1600,13 @@ class BotEngine:
             f"{len(open_positions)} open positions, "
             f"balance=${risk_envelope.get('total_balance', 0):.0f}")
 
-        actions = self.mcp_brain.analyze_portfolio(
+        # Signal source switch (2026-06-15): SIGNAL_SOURCE=tsmom routes entry selection
+        # through the long-only TSMOM capital-preservation signal instead of the MCP/Claude
+        # scoring path. Same action-dict contract, so everything below is unchanged. Default
+        # "mcp" preserves production behaviour. See config.SIGNAL_SOURCE / core/tsmom_signal.py.
+        from config import SIGNAL_SOURCE
+        _signal = self._tsmom_signal() if SIGNAL_SOURCE == "tsmom" else self.mcp_brain
+        actions = _signal.analyze_portfolio(
             coins=all_coins,
             open_positions=open_positions,
             exchange_balances=dict(self._balances),
@@ -1647,6 +1653,20 @@ class BotEngine:
         self._cycle += 1
         logger.info(
             f"[Claude] Cycle complete: {executed}/{len(actions)} actions executed")
+
+    def _tsmom_signal(self):
+        """Lazily build + cache the long-only TSMOM signal (SIGNAL_SOURCE=tsmom path).
+
+        Reuses the engine's live exchange clients (self.exchanges) so it pulls candles from
+        the same venues as the MCP path. Built lazily because exchanges are wired after
+        mcp_brain in __init__; only constructed if the flag actually selects it.
+        """
+        cached = getattr(self, "_tsmom", None)
+        if cached is None:
+            from core.tsmom_signal import TSMOMSignal
+            cached = TSMOMSignal(exchanges=self.exchanges)
+            self._tsmom = cached
+        return cached
 
     def _log_rejection(self, action: dict, reason: str, stage: str):
         """Provenance (2026-06-12): route an action rejection to the MCP
@@ -2465,13 +2485,25 @@ class BotEngine:
         except Exception:
             algo_sl = 0.0
             algo_tp = 0.0
-        _used_action_sltp = algo_sl > 0 and algo_tp > 0
-        if _used_action_sltp:
-            sl_pct = algo_sl
-            tp_pct = algo_tp
+        # Phase 2b: a tsmom OPEN gets a WIDE disaster stop (the signal's sl_pct,
+        # ~8%), NO take-profit (tp_pct=0 — the exit is the daily momentum flip),
+        # leverage 1, and bypasses the scalp R:R gate below. Without this the
+        # tier-fallback silently swaps the 8% stop for a ~1.5% scalp stop and the
+        # R:R gate rejects the entry (tp=0 -> R:R=0). See core/tsmom_signal.py.
+        from core.tsmom_signal import is_tsmom_action, tsmom_entry_shape
+        _is_tsmom_entry = is_tsmom_action(action)
+        if _is_tsmom_entry:
+            sl_pct, tp_pct, leverage, _tsmom_bypass_rr = tsmom_entry_shape(action)
+            _used_action_sltp = False
         else:
-            sl_pct = tier_params["sl_pct"] * 100.0
-            tp_pct = tier_params["tp_pct"] * 100.0
+            _tsmom_bypass_rr = False
+            _used_action_sltp = algo_sl > 0 and algo_tp > 0
+            if _used_action_sltp:
+                sl_pct = algo_sl
+                tp_pct = algo_tp
+            else:
+                sl_pct = tier_params["sl_pct"] * 100.0
+                tp_pct = tier_params["tp_pct"] * 100.0
 
         min_rr = RISK.get("min_rr_ratio", 1.8)
         if _used_action_sltp:
@@ -2512,8 +2544,10 @@ class BotEngine:
                 f"{_orig_size:.1f}%→{size_pct:.1f}% (Phase 28)")
 
         # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
+        # Phase 2b: tsmom has no take-profit (R:R undefined) — its only price rail
+        # is the wide disaster stop, so the R:R gate does not apply.
         actual_rr = tp_pct / sl_pct if sl_pct > 0 else 0
-        if actual_rr < min_rr:
+        if actual_rr < min_rr and not _tsmom_bypass_rr:
             logger.info(
                 f"[Claude] BLOCKED: {symbol} R:R {actual_rr:.2f}:1 "
                 f"< {min_rr:.1f}:1 minimum (SL={sl_pct}% TP={tp_pct}%)")
@@ -2926,6 +2960,11 @@ class BotEngine:
         else:
             stop_loss   = price * (1 + sl_pct / 100)
             take_profit = price * (1 - tp_pct / 100)
+        # Phase 2b: tsmom has NO take-profit. tp_pct=0 would make take_profit==entry
+        # (fires on the first tick); force a literal 0 so the TP triggers stay inert
+        # (the wide stop + momentum-flip CLOSE are the only exits).
+        if _is_tsmom_entry:
+            take_profit = 0.0
 
         # Compute size in base units
         if market_type == "futures":
@@ -2971,7 +3010,10 @@ class BotEngine:
             _cid = action.get("candidate_id")
             pos = self.order_mgr.open_position(
                 exchange, trade_symbol, side, market_type,
-                strategy="claude_portfolio",
+                # Phase 2b: thread the signal source into the persisted
+                # Position.strategy tag so exit gating can identify a tsmom
+                # position at monitor time (rides positions.json + warehouse).
+                strategy=action.get("source") or "claude_portfolio",
                 size=size, price=price,
                 sl=stop_loss, tp=take_profit,
                 leverage=leverage,
@@ -4346,8 +4388,13 @@ class BotEngine:
             # discovered) positions don't have full Position state (stop_loss,
             # entry_price, side as a Position attr) and are handled in the
             # source=='exchange' branch of the MCP-advice loop below.
+            from core.tsmom_signal import is_tsmom_position as _is_tsmom_pos
             for pid_local, p_local in list(tracker_map.items()):
                 try:
+                    # Phase 2b: tsmom positions own their exit (momentum flip) —
+                    # skip the deterministic small-TP capture + age→BE tightener.
+                    if _is_tsmom_pos(p_local):
+                        continue
                     if self._maybe_capture_small_tp(p_local):
                         continue  # Area 5 fired — position closing; skip Area 4
                     self._maybe_tighten_aged_position(p_local)
@@ -4380,6 +4427,12 @@ class BotEngine:
                 if source == "tracker":
                     p = tracker_map.get(pid)
                     if not p:
+                        continue
+
+                    # Phase 2b: tsmom positions are held to their momentum-flip
+                    # CLOSE — no MCP advice (TAKE_PROFIT/TIGHTEN/BREAKEVEN) may
+                    # clip or ratchet them. The wide disaster stop is the only rail.
+                    if _is_tsmom_pos(p):
                         continue
 
                     if action == "TAKE_PROFIT":

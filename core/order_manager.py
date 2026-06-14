@@ -2279,6 +2279,37 @@ class OrderManager:
                         exchange, pos, "take_profit", wick_px)
                     continue
 
+            # ── TSMOM capital-preservation exit policy (Phase 2b) ───────
+            # A position opened by the long-only TSMOM signal is HELD until its
+            # own daily momentum-flip CLOSE (emitted from the portfolio cycle).
+            # Suppress every scalp early-exit below (partial-TP, scalp wall,
+            # trailing, breakeven, fixed TP, entry-staleness, age/stale) but KEEP
+            # a wide disaster stop: the wick-stop above already enforced
+            # pos.stop_loss (the ~8% entry stop) in paper; here we add the
+            # all-modes hard-max-loss backstop and a LIVE polled SL trigger that
+            # is independent of take_profit (so zeroing TP can't disable the stop,
+            # the coupling the exit audit flagged). Then skip the scalp machinery.
+            from core.tsmom_signal import is_tsmom_position as _is_tsmom_pos
+            if _is_tsmom_pos(pos):
+                from config import TSMOM_HARD_MAX_LOSS_PCT as _TSMOM_HML
+                _t_net_pnl, _t_net_pct, _ = self._net_pnl_at_price(pos, price)
+                if abs(_t_net_pct) >= _TSMOM_HML and _t_net_pnl < 0:
+                    logger.error(
+                        f"[Orders] TSMOM HARD MAX LOSS: {pos.symbol} "
+                        f"{pos.side.upper()} @ {price:.4f} net={_t_net_pct:+.2f}% "
+                        f"— disaster close")
+                    self.close_position(exchange, pos, "hard_max_loss", price)
+                    continue
+                if (not self.dry_run and not _exchange_handles_sltp
+                        and pos.stop_loss and float(pos.stop_loss) > 0
+                        and pos.side == "buy" and price <= float(pos.stop_loss)):
+                    logger.warning(
+                        f"[Orders] TSMOM STOP LOSS: {pos.symbol} @ {price:.4f} "
+                        f"(SL={float(pos.stop_loss):.4f})")
+                    self.close_position(exchange, pos, "stop_loss", price)
+                    continue
+                continue  # hold to the momentum-flip CLOSE; skip all scalp exits
+
             # ── PARTIAL TAKE PROFIT ──
             try:
                 from config import PARTIAL_TP

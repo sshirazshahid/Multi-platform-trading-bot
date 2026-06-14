@@ -1261,6 +1261,26 @@ SCALP_TIER_ENABLED = (os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false"
 CLAUDE_PORTFOLIO_MODE = os.getenv("CLAUDE_PORTFOLIO_MODE", "throttled").lower()
 CLAUDE_THROTTLE_N = max(1, int(os.getenv("CLAUDE_THROTTLE_N", "3")))
 
+# ── Signal source (2026-06-15) ──────────────────────────────────────────────
+#   "mcp"   - multi-factor scoring v3.1 / Claude-portfolio path (DEFAULT, unchanged prod)
+#   "tsmom" - long-only time-series-momentum on validated majors (core/tsmom_signal.py).
+#             Capital-preservation variant: long while the daily trend is up, else flat;
+#             NEVER shorts. Validated 2026-06-15 (reports/tsmom_validation_2026-06-15.md) as a
+#             drawdown-halver, NOT a profit engine. PAPER-only research path.
+# ⚠ tsmom changes ENTRY selection only; bot_engine's scalp EXIT stack (ATR stop / trailing /
+#   mcp_take_profit / entry_invalidated) still fires and will clip trends — gate those before
+#   trusting PAPER results. Flag is fully reversible: SIGNAL_SOURCE=mcp restores prod.
+SIGNAL_SOURCE = os.getenv("SIGNAL_SOURCE", "mcp").lower()
+if SIGNAL_SOURCE not in ("mcp", "tsmom"):
+    raise ValueError(f"SIGNAL_SOURCE must be 'mcp' or 'tsmom', got {SIGNAL_SOURCE!r}")
+
+# Phase 2b: a tsmom long is held to its momentum-flip exit, so the scalp early
+# exits (TP/partial/trailing/BE/age/staleness/3%-hard-loss) are suppressed for
+# it — but a WIDE disaster stop remains. The entry stop is ~8% (the signal's
+# sl_pct); this hard-max-loss backstop sits just BEYOND it so the 8% stop / wick
+# / exchange-SL fire first and this only catches a gap-through catastrophe.
+TSMOM_HARD_MAX_LOSS_PCT = float(os.getenv("TSMOM_HARD_MAX_LOSS_PCT", "9.0"))
+
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
     # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade
