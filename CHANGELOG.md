@@ -8,6 +8,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-06-15 — long-only TSMOM signal layer + capital-preservation exit gate; default-off)
+Applies the systematic-design research (`reports/systematic_design_research_2026-06-15.md`) as a
+reversible, validate-first signal redesign. Keeps all infrastructure; swaps only the signal layer,
+behind a flag, defaulting to the existing path so nothing changes until explicitly enabled.
+- **Validation gate first.** `scripts/tsmom_validation_backtest.py` → `reports/tsmom_validation_2026-06-15.md`:
+  long-only TSMOM (28d lookback, vol-targeted) on BTC/ETH/SOL/BNB/XRP, IS 2021-24 / OOS 2025-26, after
+  cost. NO_GO on the strict *profit* gate (2/5 positive OOS Sharpe) but beat buy-and-hold risk-adjusted
+  on 4/5 and roughly **halved drawdown** — a capital preserver, not a profit engine. Owner re-scoped the
+  objective to capital preservation and approved building it in PAPER.
+- **Signal** (`core/tsmom_signal.py`): `TSMOMSignal.analyze_portfolio()` emits the exact `mcp_brain`
+  action-dict. Long-only (never shorts), majors-only universe, daily 28d momentum — OPEN on positive /
+  CLOSE on flip / hold otherwise, leverage 1, vol-targeted size, fresh `decision_id` + `source="tsmom"`.
+- **Flag** `SIGNAL_SOURCE=mcp|tsmom` (config.py, default `mcp`, raises on bad value);
+  `bot_engine._claude_portfolio_cycle` branches at the call site via a lazy `_tsmom_signal()` builder.
+- **Exit gate (Phase 2b).** A tsmom position is held to its momentum-flip CLOSE: a single
+  `is_tsmom_position` branch in `order_manager.check_sl_tp` enforces disaster-stops-only (widened
+  `TSMOM_HARD_MAX_LOSS_PCT=9%` + a live SL trigger independent of `take_profit`) then skips partial-TP /
+  trailing / breakeven / fixed-TP / entry-staleness / age-stale; `_run_mcp_position_monitor` skips tsmom
+  in its deterministic pre-pass and MCP advice loop. Entry shaping (`tsmom_entry_shape`) keeps the ~8%
+  disaster stop (was silently downgraded to a ~1.5% tier stop), sets `take_profit=0`, leverage 1, and
+  bypasses the R:R gate. Source threaded into the persisted `Position.strategy` tag so the policy follows
+  how a position was opened, immune to a mid-flight flag flip. Disaster stops preserved end-to-end
+  (wick / hard-max-loss / live-SL / exchange-SL). Exit surfaces mapped by an adversarially-verified audit.
+- Tests: `tests/test_tsmom_signal.py` (16) + `tests/test_tsmom_exit_gate.py` (7); suite +29 (1834 green).
+- Known residual (CONTROLLED_LIVE-only): `position_tracker` ghost-sync auto-close bypasses the gate but
+  skips PAPER positions; to address before any live use. Plan: `tasks/plan_tsmom_redesign_2026-06-15.md`.
+
 ### Fixed (2026-06-14 — daily-counter rollover decoupled from entry path)
 The UTC-day rollover of `daily_pnl`/`trades_today` lived only in `risk_manager.can_trade()`,
 which is reached only via the entry-execution path (`bot_engine._execute_open`). When entries
