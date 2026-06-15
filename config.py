@@ -1281,6 +1281,14 @@ if SIGNAL_SOURCE not in ("mcp", "tsmom"):
 # / exchange-SL fire first and this only catches a gap-through catastrophe.
 TSMOM_HARD_MAX_LOSS_PCT = float(os.getenv("TSMOM_HARD_MAX_LOSS_PCT", "9.0"))
 
+# CLAUDE.md §2 (R2): hard portfolio-exposure circuit breaker. The constitution caps
+# total open exposure at 12% of capital, but nothing enforced it (only a position
+# COUNT limit existed). bot_engine._execute_open rejects a new entry that would push
+# total open GROSS NOTIONAL over this % of equity. Set 0 to disable. Reversible knob.
+# Note: gross notional includes leverage, so at futures_max_leverage=2 a single ~5%
+# margin trade is ~10% notional — 12% allows ~1-2 leveraged positions by design.
+MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "12.0"))
+
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
     # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade

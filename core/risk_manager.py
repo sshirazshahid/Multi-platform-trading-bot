@@ -27,6 +27,25 @@ def _utc_today() -> date:
     (audit 2026-06-03: code had drifted to local date()). Single source of truth."""
     return datetime.now(timezone.utc).date()
 
+
+def exposure_breached(open_positions, new_notional: float, equity: float,
+                      max_pct: float) -> bool:
+    """CLAUDE.md §2 (R2) helper: would adding ``new_notional`` (gross market notional,
+    leverage included) push total open GROSS NOTIONAL over ``max_pct`` of ``equity``?
+
+    Pure + side-effect-free so it's unit-testable without the engine. Fail-open on bad
+    inputs (returns False) — a glitchy equity reading must never wedge all entries.
+    """
+    if equity is None or max_pct is None or equity <= 0 or max_pct <= 0:
+        return False
+    gross = float(new_notional or 0.0)
+    for p in open_positions or []:
+        try:
+            gross += abs(float(getattr(p, "size", 0) or 0) * float(getattr(p, "entry_price", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return (gross / equity * 100.0) > float(max_pct)
+
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
 # 2 consecutive losses on a symbol → pause that symbol 6h.

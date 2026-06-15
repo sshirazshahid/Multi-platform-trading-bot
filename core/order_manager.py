@@ -1779,6 +1779,16 @@ class OrderManager:
                 self.risk.note_sl_hit(pos.symbol, pos.side)
             except Exception as _e:
                 logger.debug(f"[Risk29] note_sl_hit failed: {_e}")
+        # CLAUDE.md §4: structured markdown journal of the exit (best-effort, every
+        # close path funnels through here, so one wire captures SL/TP/trailing/flip).
+        try:
+            from core import journal as _journal
+            _journal.log_action(
+                "CLOSE", pos.symbol, getattr(pos, "side", ""),
+                f"reason={reason} pnl=${(pos.pnl or 0.0):+.2f} "
+                f"strat={getattr(pos, 'strategy', '')}")
+        except Exception:
+            pass
         is_win  = (pos.pnl or 0) > 0
         # 2026-05-24 — Was `pos.pnl_pct or 0.0` which converts None → 0.0
         # and trips the _SPEC12_SCRATCH_PCT (0.5%) gate in

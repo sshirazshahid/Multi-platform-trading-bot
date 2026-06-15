@@ -2979,11 +2979,39 @@ class BotEngine:
         if _is_tsmom_entry:
             take_profit = 0.0
 
+        # CLAUDE.md §2 (R4): hard leverage cap. LEVERAGE_TIERS can hand back 3x
+        # (STANDARD/SCALP), but the constitution caps active leverage at 2.5x and the
+        # existing config futures_max_leverage was never actually binding. Clamp here so
+        # no entry — on any signal path — exceeds it. tsmom already passes leverage=1.
+        if market_type == "futures":
+            from config import RISK as _RISK_LEV
+            _lev_cap = _RISK_LEV.get("futures_max_leverage", 2)
+            if leverage > _lev_cap:
+                logger.info(f"[Risk] §2 leverage clamp: {symbol} {leverage}x -> {_lev_cap}x")
+                leverage = _lev_cap
+
         # Compute size in base units
         if market_type == "futures":
             size = (notional * leverage) / price
         else:
             size = notional / price
+
+        # CLAUDE.md §2 (R2): portfolio-exposure circuit breaker. Reject if this entry
+        # would push total open GROSS NOTIONAL over MAX_PORTFOLIO_EXPOSURE_PCT of equity.
+        # Nothing else enforced the constitution's 12% cap (only a position-COUNT limit).
+        try:
+            from config import MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP
+            from core.risk_manager import exposure_breached as _exp_breached
+            _equity = sum(float(v.get("spot", 0) or 0) + float(v.get("futures", 0) or 0)
+                          for v in self._balances.values()) or 0.0
+            if _exp_breached(self.tracker.get_open(), size * price, _equity, _MAX_EXP):
+                logger.warning(
+                    f"[Risk] §2 EXPOSURE CAP: {symbol} would exceed {_MAX_EXP:g}% of "
+                    f"${_equity:.0f} open exposure — blocked")
+                action["reject_reason"] = "portfolio_exposure_cap"
+                return False
+        except Exception as _ee:
+            logger.debug(f"[Risk] exposure-cap check skipped: {_ee}")
 
         # Pre-check: will this size survive exchange rounding?
         # BTC at $83k with step=0.001 needs min $83 notional (or $16.6 at 5x).
@@ -3042,6 +3070,15 @@ class BotEngine:
                 return False
             # Warehouse record_trade_open now happens inside open_position
             # (before SL placement) so fail-closed paths don't lose the row.
+            # CLAUDE.md §4: structured markdown journal of the action (best-effort).
+            try:
+                from core import journal as _journal
+                _journal.log_action(
+                    "OPEN", trade_symbol, side,
+                    f"{leverage}x size={size:.6g} notional=${notional:.0f} "
+                    f"SL={sl_pct:.2f}% conf={confidence:.0%} src={action.get('source', '')}")
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"[Claude] open_position failed: {e}")

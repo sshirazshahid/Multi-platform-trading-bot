@@ -142,3 +142,6 @@ data/_*
 /sd_abs.txt
 /ssrn.txt
 /_fd2024_manuscript.pdf
+
+# Runtime trade journals (CLAUDE.md §4 action log) — artifacts, not source
+journal/
