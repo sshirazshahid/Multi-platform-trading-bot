@@ -1616,6 +1616,18 @@ class BotEngine:
             news_context=news_context,
         )
 
+        # TSMOM observability (2026-06-15): periodically log WHY it's holding, so a
+        # quiet bot in a downtrend is legible (cures the recurring "why no trades?").
+        # Throttled to ~30 min; uses the per-major 28d momentum from this cycle.
+        if SIGNAL_SOURCE == "tsmom":
+            import time as _t_w
+            if _t_w.time() - getattr(self, "_tsmom_watch_last", 0.0) >= 1800:
+                try:
+                    logger.info(f"[TSMOM] watching majors: {_signal.watch_summary()}")
+                except Exception:
+                    pass
+                self._tsmom_watch_last = _t_w.time()
+
         if not actions:
             logger.info(f"[{_sig_tag}] No actions this cycle")
             self._cycle += 1

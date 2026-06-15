@@ -62,6 +62,9 @@ class TSMOMSignal:
         self.timeframe = timeframe
         # need lookback + a vol window + a little slack
         self._min_bars = self.lookback + _VOL_WINDOW + 2
+        # observability: per-major hold/trade state from the latest cycle (so a
+        # quiet bot in a downtrend can explain itself). Populated by analyze_portfolio.
+        self.last_status: list = []
 
     # ── public contract ──────────────────────────────────────────────────────
     def analyze_portfolio(self, coins: list, open_positions: list,
@@ -75,22 +78,51 @@ class TSMOMSignal:
         """
         open_long_bases = self._open_long_bases(open_positions)
         actions: list = []
+        status: list = []
 
         for base in self._candidates(coins):
             closes, ex_name = self._daily_closes(base)
             if len(closes) < self._min_bars:
+                status.append({"base": base, "state": "no_data", "mom_pct": None})
                 continue  # insufficient history — skip, never guess
 
-            mom_positive = closes[-1] > closes[-1 - self.lookback]
+            mom_pct = (closes[-1] / closes[-1 - self.lookback] - 1.0) * 100.0
+            mom_positive = mom_pct > 0          # close today > close `lookback` bars ago
             pos = open_long_bases.get(base)
 
             if mom_positive and pos is None:
                 actions.append(self._open_action(base, ex_name, closes))
+                state = "open_long"
             elif (not mom_positive) and pos is not None:
                 actions.append(self._close_action(pos))
-            # else: hold the long, or stay in cash — emit nothing.
+                state = "close_flip"
+            elif mom_positive and pos is not None:
+                state = "hold_long"             # already long + still trending up
+            else:
+                state = "flat"                  # negative momentum, no position -> stay in cash
+            status.append({"base": base, "state": state,
+                           "mom_pct": round(mom_pct, 1), "positive": mom_positive})
 
+        self.last_status = status
         return actions
+
+    def watch_summary(self) -> str:
+        """One-line human summary of the latest cycle's per-major state — explains
+        WHY tsmom is quiet (long-only: it stays in cash until a major's 28d momentum
+        turns positive). Empty until analyze_portfolio has run once."""
+        st = self.last_status
+        if not st:
+            return "no majors evaluated yet"
+        tag = {"open_long": "OPEN", "close_flip": "CLOSE", "hold_long": "HOLD", "flat": "flat"}
+        parts = []
+        for s in st:
+            if s.get("state") == "no_data":
+                parts.append(f"{s['base']}=no_data")
+            else:
+                parts.append(f"{s['base']} {s['mom_pct']:+.0f}% [{tag.get(s['state'], s['state'])}]")
+        n_up = sum(1 for s in st if s.get("positive"))
+        return (f"{n_up}/{len(st)} majors in 28d uptrend | " + " ".join(parts)
+                + " | long-only: opens when 28d momentum > 0")
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _candidates(self, coins: list) -> list:

@@ -213,3 +213,34 @@ def test_tsmom_entry_shape_never_has_take_profit_or_leverage():
         _sl, tp, lev, _b = tsmom_entry_shape(action)
         assert tp == 0.0
         assert lev == 1
+
+
+# ── observability: watch_summary explains the quiet (downtrend) state ─────────
+
+def test_watch_summary_empty_before_run():
+    sig = _signal({"BTC": _rising()})
+    assert sig.watch_summary() == "no majors evaluated yet"
+
+
+def test_watch_summary_reports_downtrend_holds():
+    sig = _signal({"BTC": _falling(), "ETH": _falling()})
+    sig.analyze_portfolio(coins=["BTC", "ETH"], open_positions=[], **ENV)
+    s = sig.watch_summary()
+    assert "0/2 majors in 28d uptrend" in s
+    assert "[flat]" in s
+
+
+def test_watch_summary_reports_uptrend_open():
+    sig = _signal({"BTC": _rising()})
+    sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    s = sig.watch_summary()
+    assert "1/1 majors in 28d uptrend" in s
+    assert "[OPEN]" in s
+
+
+def test_last_status_records_momentum_and_state():
+    sig = _signal({"BTC": _falling()})
+    sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    assert sig.last_status and sig.last_status[0]["base"] == "BTC"
+    assert sig.last_status[0]["mom_pct"] < 0      # falling -> negative 28d momentum
+    assert sig.last_status[0]["state"] == "flat"   # negative + no position = stay in cash
