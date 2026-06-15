@@ -15,7 +15,6 @@ This matches the existing convention in prompts/claude/*.md.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 

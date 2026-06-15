@@ -188,7 +188,6 @@ class DataCoordinator:
             return {}
 
         results: dict[str, bool] = {}
-        tasks = []
 
         # Determine which feeds need refresh
         feed_specs = [

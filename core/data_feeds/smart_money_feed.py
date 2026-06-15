@@ -81,7 +81,6 @@ class SmartMoneyFeed:
         sm_data = self._fetch_smart_money()
         social_data = self._fetch_social_hype()
 
-        coin_set = {c.upper() for c in coins}
         result: dict[str, dict] = {}
 
         for coin in coins:

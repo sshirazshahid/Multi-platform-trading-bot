@@ -5,7 +5,7 @@ Prints a snapshot every 60s: live uPnL, daily PnL, open positions,
 new trades detected in log, cycle timing, errors.
 """
 from __future__ import annotations
-import json, os, sys, time, re
+import json, os, sys, time
 from pathlib import Path
 from datetime import datetime, timezone
 

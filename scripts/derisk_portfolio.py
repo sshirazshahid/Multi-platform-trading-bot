@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 REPORTS = ROOT / "reports"
 
 from index_strategy_total_return import DIV_YIELD, _strat_ret  # noqa: E402
-from nifty_sma_backtest import _max_drawdown, fetch_index, metrics  # noqa: E402
+from nifty_sma_backtest import fetch_index, metrics  # noqa: E402
 from vol_targeting_walkforward import vol_target_position  # noqa: E402
 
 INDICES = {

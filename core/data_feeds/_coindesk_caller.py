@@ -20,7 +20,6 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from loguru import logger
 
 _BASE_URL = "https://data-api.cryptocompare.com"
 _TIMEOUT = 12

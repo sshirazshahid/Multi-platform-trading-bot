@@ -197,23 +197,10 @@ class AutoMutator:
         # 2026-05-27: auto_mutator_blacklist (short) permanently disabled
         # (was gated by HALT_MECHANISMS["auto_mutator_blacklist"] = False). Block removed.
 
-        # ── 2) Counter-trend short losses ───────────────────────────
-        short_counter_trend = sum(
-            1 for a in losses
-            if a.get("side") == "sell"
-            and any("counter-trend" in m.lower() or "counter trend" in m.lower()
-                    for m in a.get("mistakes", []))
-        )
-        # 2026-05-27: auto_mutator_short_block permanently disabled
+        # 2026-05-27: auto_mutator_short_block (counter-trend short losses) permanently disabled
         # (was gated by HALT_MECHANISMS["auto_mutator_short_block"] = False). Block removed.
 
-        # ── 3) Leverage-amplified losses ────────────────────────────
-        leverage_losses = sum(
-            1 for a in losses
-            if any("leverage" in m.lower() and "amplif" in m.lower()
-                   for m in a.get("mistakes", []))
-        )
-        # 2026-05-27: auto_mutator_leverage_cap permanently disabled
+        # 2026-05-27: auto_mutator_leverage_cap (leverage-amplified losses) permanently disabled
         # (was gated by HALT_MECHANISMS["auto_mutator_leverage_cap"] = False). Block removed.
 
         self._state["last_scan_at"] = now

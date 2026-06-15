@@ -21,7 +21,6 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
@@ -198,7 +197,6 @@ class PredictionTracker:
         for r in resolved:
             prediction = r.get("prediction", "WEAK_CONFIRM")
             won = r["_outcome"]["won"]
-            pnl = r["_outcome"].get("realized_pnl", 0) or 0
 
             if prediction == "CONFIRM":
                 confirm_trades.append(r)

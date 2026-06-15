@@ -24,7 +24,6 @@ def decompose(rows):
     n = len(rows)
     fees = sum((r.get("fee") or 0.0) for r in rows)
     net = sum((r.get("realized_pnl") or 0.0) for r in rows)
-    notional = sum((r.get("entry_px") or 0.0)*(r.get("size") or 0.0) for r in rows)
     wins = sum(1 for r in rows if (r.get("realized_pnl") or 0.0) > 0)
     return {"n": n, "fees": fees, "net_pnl": net, "gross_pnl": net+fees,
             "win_rate": wins/n if n else 0.0}

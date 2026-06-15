@@ -196,8 +196,6 @@ def main() -> int:
         if btc is None:
             coverage.append(f"BTC {tf}: MISSING (skip whole tf)")
             continue
-        btc_ts = btc["ts"].to_numpy()
-        btc_close = btc["close"].to_numpy(dtype=float)
         for coin in COINS:
             df = _get(coin, tf, cache)
             if df is None or len(df) < 200:
