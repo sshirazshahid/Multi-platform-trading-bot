@@ -1595,16 +1595,17 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Claude] News context error: {e}")
 
-        logger.info(
-            f"[Claude] Portfolio cycle: {len(all_coins)} coins, "
-            f"{len(open_positions)} open positions, "
-            f"balance=${risk_envelope.get('total_balance', 0):.0f}")
-
         # Signal source switch (2026-06-15): SIGNAL_SOURCE=tsmom routes entry selection
         # through the long-only TSMOM capital-preservation signal instead of the MCP/Claude
         # scoring path. Same action-dict contract, so everything below is unchanged. Default
         # "mcp" preserves production behaviour. See config.SIGNAL_SOURCE / core/tsmom_signal.py.
         from config import SIGNAL_SOURCE
+        _sig_tag = "TSMOM" if SIGNAL_SOURCE == "tsmom" else "Claude"
+        logger.info(
+            f"[{_sig_tag}] Portfolio cycle: {len(all_coins)} coins, "
+            f"{len(open_positions)} open positions, "
+            f"balance=${risk_envelope.get('total_balance', 0):.0f}")
+
         _signal = self._tsmom_signal() if SIGNAL_SOURCE == "tsmom" else self.mcp_brain
         actions = _signal.analyze_portfolio(
             coins=all_coins,
@@ -1616,7 +1617,7 @@ class BotEngine:
         )
 
         if not actions:
-            logger.info("[Claude] No actions this cycle")
+            logger.info(f"[{_sig_tag}] No actions this cycle")
             self._cycle += 1
             return
 
@@ -4281,6 +4282,18 @@ class BotEngine:
         MCP Brain is the SOLE authority on hold/close/take-profit for the entire portfolio."""
         if not self.mcp_brain or not self.mcp_brain.is_enabled:
             return
+        # 2026-06-15: under SIGNAL_SOURCE=tsmom the bot makes NO Claude/MCP decisions.
+        # tsmom owns entries + its own momentum-flip exits, and the deterministic SL/TP
+        # loop (its own 10s thread) keeps disaster stops live. Skip the MCP advisory
+        # monitor entirely so the bot is purely tsmom. Logged once to avoid 90s spam.
+        from config import SIGNAL_SOURCE as _SIG_MON
+        if _SIG_MON == "tsmom":
+            if not getattr(self, "_tsmom_monitor_off_logged", False):
+                logger.info(
+                    "[Engine] TSMOM mode — MCP position monitor disabled "
+                    "(deterministic SL/TP still active; no Claude/MCP advisory).")
+                self._tsmom_monitor_off_logged = True
+            return
         try:
             # ── Phase 1: Bot-tracked positions ──
             open_positions = self.tracker.get_open()
@@ -4726,8 +4739,18 @@ class BotEngine:
             logger.warning(f"[LiveGate] check error (non-fatal): {_e}")
 
         logger.info("[Engine] Bot started — Ctrl+C to stop")
+        # 2026-06-15: announce the active signal source up front so it's unambiguous
+        # which engine is deciding trades (the cycle/monitor logs alone read "[Claude]").
+        from config import SIGNAL_SOURCE as _SIG_RUN
+        if _SIG_RUN == "tsmom":
+            logger.info(
+                "[Engine] Signal source: TSMOM (long-only majors, capital-preservation) "
+                "— Claude/MCP entry scoring AND position monitor DISABLED")
+        else:
+            logger.info(f"[Engine] Signal source: {_SIG_RUN} (Claude/MCP scoring path)")
         self.notifier.alert(
             f"Bot started | {TRADING_MODE.upper()} | "
+            f"signal={_SIG_RUN} | "
             f"{'DRY RUN $' + str(int(self.order_mgr.wallet.start_balance)) if DRY_RUN else 'LIVE'}"
         )
 

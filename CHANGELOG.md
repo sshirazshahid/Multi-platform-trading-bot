@@ -8,6 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-06-15 — TSMOM mode was invisible: relabel + disable MCP monitor under tsmom)
+After setting `SIGNAL_SOURCE=tsmom` and restarting, the bot looked like it was "still Claude/MCP".
+Investigation found the entry path WAS correctly routing to tsmom (the post-flip run dropped the
+`mcp_brain.analyze_portfolio -> algorithmic` log line and sat in cash, which is correct tsmom
+behaviour when majors aren't trending up), but tsmom was indistinguishable from MCP because:
+(1) the portfolio cycle hardcoded a `[Claude]` log prefix, (2) nothing announced the active signal
+at startup, and (3) the MCP position monitor (`_run_mcp_position_monitor`) kept making Claude/MCP
+advisory calls every 90s. Fixes in `core/bot_engine.py`: the cycle log is now source-aware
+(`[TSMOM]` vs `[Claude]`); startup logs `Signal source: TSMOM ...`; and under `SIGNAL_SOURCE=tsmom`
+the MCP position monitor is skipped entirely (the deterministic 10s SL/TP thread and tsmom's own
+momentum-flip exits still run, so disaster stops stay live) — so tsmom mode makes **no** Claude/MCP
+decisions. +2 tests (`tests/test_tsmom_mode_wiring.py`). Note: `run_confluence_paper.py` is a
+SEPARATE standalone paper test (imports nothing from `core/`) and is unaffected by `SIGNAL_SOURCE`.
+
 ### Added (2026-06-15 — long-only TSMOM signal layer + capital-preservation exit gate; default-off)
 Applies the systematic-design research (`reports/systematic_design_research_2026-06-15.md`) as a
 reversible, validate-first signal redesign. Keeps all infrastructure; swaps only the signal layer,
