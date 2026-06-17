@@ -1281,6 +1281,17 @@ if SIGNAL_SOURCE not in ("mcp", "tsmom"):
 # / exchange-SL fire first and this only catches a gap-through catastrophe.
 TSMOM_HARD_MAX_LOSS_PCT = float(os.getenv("TSMOM_HARD_MAX_LOSS_PCT", "9.0"))
 
+# "Loosen the triggers" knob (owner decision 2026-06-18). The long-only momentum
+# lookback in DAYS. Validated default is 28d (medium-term TSMOM). A SHORTER window
+# recognises a fresh uptrend sooner, so the bot trades a recovering tape instead of
+# waiting for the whole 28d window to clear — at the cost of more whipsaw (the exact
+# trade-off the 2026-06-15 validation flagged). Fully reversible: set back to 28.
+# This moves only WHEN an uptrend is recognised; long-only and the disaster stop are
+# unchanged (it still never buys a falling window and never shorts).
+TSMOM_LOOKBACK_DAYS = int(os.getenv("TSMOM_LOOKBACK_DAYS", "28"))
+if TSMOM_LOOKBACK_DAYS < 2:
+    raise ValueError(f"TSMOM_LOOKBACK_DAYS must be >= 2, got {TSMOM_LOOKBACK_DAYS}")
+
 # CLAUDE.md §2 (R2): hard portfolio-exposure circuit breaker. The constitution caps
 # total open exposure at 12% of capital, but nothing enforced it (only a position
 # COUNT limit existed). bot_engine._execute_open rejects a new entry that would push

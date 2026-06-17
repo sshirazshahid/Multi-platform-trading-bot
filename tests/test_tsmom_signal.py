@@ -169,6 +169,50 @@ def test_unknown_symbol_no_data_skipped():
     assert actions == []
 
 
+# ── "loosen the triggers" (owner 2026-06-18): lookback is configurable ───────
+# A SHORTER lookback detects a fresh up-turn that the 28d window still scores as
+# down. This is the whole point of the loosen: trade the recovery instead of
+# waiting for the long window to clear. Long-only is unchanged — it still only
+# OPENs when the (now shorter) momentum window is positive.
+
+def _decline_then_rebound():
+    """52 daily closes: a deep decline, then a 10-bar partial rebound. The price
+    NOW is still well below where it was 28 bars ago (28d momentum negative) but
+    ABOVE where it was 10 bars ago (10d momentum positive)."""
+    decline = [300.0 - 4.0 * i for i in range(42)]      # idx 0..41 -> bottoms at 136
+    rebound = [136.0 + 3.0 * j for j in range(1, 11)]   # idx 42..51 -> recovers to 166
+    return decline + rebound                            # 52 bars, end-anchored
+
+
+def test_long_lookback_stays_flat_on_partial_rebound():
+    # 28d window: now (166) vs 28 bars ago (208) -> negative -> no entry.
+    sig = TSMOMSignal(exchanges={"binance": FakeExchange({"BTC": _decline_then_rebound()})},
+                      universe={"BTC"}, lookback_days=28)
+    actions = sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    assert all(a["type"] != "OPEN" for a in actions)
+
+
+def test_short_lookback_opens_long_on_recovery_the_28d_gate_misses():
+    # 10d window: now (166) vs 10 bars ago (136) -> positive -> long entry.
+    sig = TSMOMSignal(exchanges={"binance": FakeExchange({"BTC": _decline_then_rebound()})},
+                      universe={"BTC"}, lookback_days=10)
+    actions = sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    opens = [a for a in actions if a["type"] == "OPEN"]
+    assert len(opens) == 1
+    assert opens[0]["side"] == "buy" and opens[0]["leverage"] == 1   # still long-only, unleveraged
+
+
+def test_watch_summary_reflects_configured_lookback():
+    # The observability line must state the ACTUAL lookback, not a hardcoded 28.
+    sig = TSMOMSignal(exchanges={"binance": FakeExchange({"BTC": _rising()})},
+                      universe={"BTC"}, lookback_days=10)
+    sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    s = sig.watch_summary()
+    assert "in 10d uptrend" in s
+    assert "10d momentum > 0" in s
+    assert "28d" not in s
+
+
 # ── Phase 2b helpers: identity + entry shape ─────────────────────────────────
 
 def test_is_tsmom_action():

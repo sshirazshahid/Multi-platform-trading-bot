@@ -108,8 +108,9 @@ class TSMOMSignal:
 
     def watch_summary(self) -> str:
         """One-line human summary of the latest cycle's per-major state — explains
-        WHY tsmom is quiet (long-only: it stays in cash until a major's 28d momentum
-        turns positive). Empty until analyze_portfolio has run once."""
+        WHY tsmom is quiet (long-only: it stays in cash until a major's momentum
+        over the configured lookback turns positive). Empty until analyze_portfolio
+        has run once."""
         st = self.last_status
         if not st:
             return "no majors evaluated yet"
@@ -121,8 +122,8 @@ class TSMOMSignal:
             else:
                 parts.append(f"{s['base']} {s['mom_pct']:+.0f}% [{tag.get(s['state'], s['state'])}]")
         n_up = sum(1 for s in st if s.get("positive"))
-        return (f"{n_up}/{len(st)} majors in 28d uptrend | " + " ".join(parts)
-                + " | long-only: opens when 28d momentum > 0")
+        return (f"{n_up}/{len(st)} majors in {self.lookback}d uptrend | " + " ".join(parts)
+                + f" | long-only: opens when {self.lookback}d momentum > 0")
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _candidates(self, coins: list) -> list:

@@ -1677,7 +1677,9 @@ class BotEngine:
         cached = getattr(self, "_tsmom", None)
         if cached is None:
             from core.tsmom_signal import TSMOMSignal
-            cached = TSMOMSignal(exchanges=self.exchanges)
+            from config import TSMOM_LOOKBACK_DAYS
+            cached = TSMOMSignal(exchanges=self.exchanges,
+                                 lookback_days=TSMOM_LOOKBACK_DAYS)
             self._tsmom = cached
         return cached
 
