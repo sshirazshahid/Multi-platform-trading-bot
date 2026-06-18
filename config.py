@@ -1237,6 +1237,15 @@ RANGE_STABILITY_FILTER_ENABLED = (
     os.getenv("RANGE_STABILITY_FILTER_ENABLED", "true").lower() != "false"
 )
 
+# Chop-gate floor: Kaufman Efficiency Ratio threshold for the range-stability
+# filter (core/pair_discovery.py). Symbols whose 10d ER < this are rejected as
+# "severe chop". Owner tuning 2026-06-18: lowered 0.20 -> 0.10 via .env to admit
+# moderately-choppy recovering majors under the loosened 10d TSMOM lookback.
+# Reversible (set back to 0.20). UniverseFilter reads this to override its default.
+MIN_TREND_EFFICIENCY = float(os.getenv("MIN_TREND_EFFICIENCY", "0.20"))
+if not 0.0 <= MIN_TREND_EFFICIENCY <= 1.0:
+    raise ValueError(f"MIN_TREND_EFFICIENCY must be in [0,1], got {MIN_TREND_EFFICIENCY}")
+
 # 2026-05-24 — Kill switch for the 2026-05-22 throughput-raise stack.
 # Default ON. Flip to false via env to revert: drops SCALP tier, restores
 # the pre-UNBLOCK_ALL blacklist + hour gates, and disables the mcp_brain

@@ -426,6 +426,14 @@ class UniverseFilter:
         self._cache: dict[str, dict] = {}   # symbol -> {result, ts}
         self._cache_ttl = 300               # 5 min cache
         self._reject_counts: dict[str, int] = {}  # tracking rejects
+        # Owner-tunable chop-gate floor (2026-06-18): override the class default
+        # from centralized config so the ER threshold can be lowered without a
+        # code edit. Keeps check()'s comparison and its log message in sync.
+        try:
+            from config import MIN_TREND_EFFICIENCY as _min_eff
+            self.MIN_TREND_EFFICIENCY = float(_min_eff)
+        except Exception:
+            pass  # config unavailable → keep the class default (0.20)
 
     def check(self, exchange, symbol: str, market_type: str = "spot") -> dict:
         """
