@@ -11,24 +11,24 @@ load_dotenv()
 # ==============================================================
 # EXCHANGE CREDENTIALS
 # ==============================================================
-BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
-BINANCE_TESTNET    = os.getenv("BINANCE_TESTNET", "false").lower() == "true"
+BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "false").lower() == "true"
 
 
-BYBIT_API_KEY    = os.getenv("BYBIT_API_KEY", "")
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY", "")
 BYBIT_SECRET_KEY = os.getenv("BYBIT_SECRET_KEY", "")
 
-BITGET_API_KEY    = os.getenv("BITGET_API_KEY", "")
+BITGET_API_KEY = os.getenv("BITGET_API_KEY", "")
 BITGET_SECRET_KEY = os.getenv("BITGET_SECRET_KEY", "")
 BITGET_PASSPHRASE = os.getenv("BITGET_PASSPHRASE", "")
 
 # ==============================================================
 # NOTIFICATIONS
 # ==============================================================
-GMAIL_SENDER         = os.getenv("GMAIL_SENDER", "")
-GMAIL_APP_PASSWORD   = os.getenv("GMAIL_APP_PASSWORD", "")
-GMAIL_RECIPIENT      = os.getenv("GMAIL_RECIPIENT", "")
+GMAIL_SENDER = os.getenv("GMAIL_SENDER", "")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+GMAIL_RECIPIENT = os.getenv("GMAIL_RECIPIENT", "")
 EMAIL_SUBJECT_PREFIX = os.getenv("EMAIL_SUBJECT_PREFIX", "[TradingBot]")
 
 # ==============================================================
@@ -52,9 +52,7 @@ EMAIL_SUBJECT_PREFIX = os.getenv("EMAIL_SUBJECT_PREFIX", "[TradingBot]")
 _VALID_MODES = {"OBSERVATION", "PAPER", "CONTROLLED_LIVE"}
 OPERATING_MODE = os.getenv("OPERATING_MODE", "PAPER").upper()
 if OPERATING_MODE not in _VALID_MODES:
-    raise ValueError(
-        f"OPERATING_MODE must be one of {_VALID_MODES}, got {OPERATING_MODE!r}"
-    )
+    raise ValueError(f"OPERATING_MODE must be one of {_VALID_MODES}, got {OPERATING_MODE!r}")
 
 # Legacy DRY_RUN is now derived from the mode. Any existing code path that
 # branches on DRY_RUN gets paper execution unless we are explicitly CONTROLLED_LIVE.
@@ -76,21 +74,21 @@ DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "100.0"))
 # ==============================================================
 FEE = {
     # Binance (also generic fallback)
-    "spot_taker":           0.001,
-    "spot_maker":           0.001,
-    "futures_taker":        0.0005,
-    "futures_maker":        0.0002,
+    "spot_taker": 0.001,
+    "spot_maker": 0.001,
+    "futures_taker": 0.0005,
+    "futures_maker": 0.0002,
     # Binance explicit keys (arb engine looks up "{exchange}_spot_taker")
-    "binance_spot_taker":   0.001,
+    "binance_spot_taker": 0.001,
     "binance_futures_taker": 0.0005,
     # Bybit
-    "bybit_spot_taker":     0.001,
-    "bybit_spot_maker":     0.001,
-    "bybit_futures_taker":  0.0006,
-    "bybit_futures_maker":  0.0001,
+    "bybit_spot_taker": 0.001,
+    "bybit_spot_maker": 0.001,
+    "bybit_futures_taker": 0.0006,
+    "bybit_futures_maker": 0.0001,
     # Bitget
-    "bitget_spot_taker":    0.001,
-    "bitget_spot_maker":    0.001,
+    "bitget_spot_taker": 0.001,
+    "bitget_spot_maker": 0.001,
     "bitget_futures_taker": 0.0006,
     "bitget_futures_maker": 0.0002,
 }
@@ -111,40 +109,40 @@ FEE = {
 # These knobs make DRY_RUN's execution match LIVE closely enough that a
 # paper P&L curve should predict a live P&L curve within ~1 sigma.
 SLIPPAGE = {
-    "enabled":        True,     # Master switch for the slippage model.
-    "pct_open":       0.0005,   # 5 bps on open — cross spread + walk book
-    "pct_close":      0.0005,   # 5 bps on close
-    "pct_stop_loss":  0.0010,   # 10 bps on stop-out — SL fills worse in fast moves
-    "wick_sl_tp":     True,     # Use last 1m candle high/low for SL/TP trigger
-    "funding":        True,     # Charge funding every 8h on paper futures
-    "prefer_book":    True,     # Prefer ticker bid/ask over ticker last when available
+    "enabled": True,  # Master switch for the slippage model.
+    "pct_open": 0.0005,  # 5 bps on open — cross spread + walk book
+    "pct_close": 0.0005,  # 5 bps on close
+    "pct_stop_loss": 0.0010,  # 10 bps on stop-out — SL fills worse in fast moves
+    "wick_sl_tp": True,  # Use last 1m candle high/low for SL/TP trigger
+    "funding": True,  # Charge funding every 8h on paper futures
+    "prefer_book": True,  # Prefer ticker bid/ask over ticker last when available
 }
 
 # ==============================================================
 # TRADING MODE
 # ==============================================================
-TRADING_MODE             = os.getenv("TRADING_MODE",             "usdt_only")
-PORTFOLIO_MIN_VALUE_USD  = float(os.getenv("PORTFOLIO_MIN_VALUE_USD", "2.0"))
-PORTFOLIO_RESCAN_MINUTES = int(os.getenv("PORTFOLIO_RESCAN_MINUTES",   "60"))
+TRADING_MODE = os.getenv("TRADING_MODE", "usdt_only")
+PORTFOLIO_MIN_VALUE_USD = float(os.getenv("PORTFOLIO_MIN_VALUE_USD", "2.0"))
+PORTFOLIO_RESCAN_MINUTES = int(os.getenv("PORTFOLIO_RESCAN_MINUTES", "60"))
 
 # ==============================================================
 # CLAUDE PORTFOLIO — Claude Code is the SOLE decision authority
 # ==============================================================
 CLAUDE_PORTFOLIO = {
-    "enabled":              True,
-    "scan_interval_min":    1,        # 1 min — was 5 (2026-05-20). User directive:
-                                      # "don't miss a single second to miss a profitable
-                                      # trade". Pairs with parallel _fetch_exchange_indicators
-                                      # so 60s cycle stays under wall-time budget. Engine sees
-                                      # 60 chances/hour vs prior 12. ENTRY_COOLDOWN dropped
-                                      # to 50s in mcp_brain.py to track.
-    "position_monitor_sec": 30,       # Position monitor every 30s (consumed by bot_engine)
-    "max_actions_per_cycle": 12,      # PAPER aggressive (2026-05-31): was 4 — allow opens across all 3 venues per cycle. Revert to 4 before live.
-    "model":                "sonnet", # Claude model for portfolio analysis
-    "max_prompt_chars":     6000,     # Cap prompt size
-    "max_per_exchange":     20,       # PAPER 2026-05-30: was 2 — allow ~10-20 positions/exchange for data-gathering. Revert to 2 before live.
-    "news_interval_min":    30,       # News scan interval in minutes (bot_engine)
-    "learn_interval_min":   60,       # Learning engine interval in minutes (bot_engine)
+    "enabled": True,
+    "scan_interval_min": 1,  # 1 min — was 5 (2026-05-20). User directive:
+    # "don't miss a single second to miss a profitable
+    # trade". Pairs with parallel _fetch_exchange_indicators
+    # so 60s cycle stays under wall-time budget. Engine sees
+    # 60 chances/hour vs prior 12. ENTRY_COOLDOWN dropped
+    # to 50s in mcp_brain.py to track.
+    "position_monitor_sec": 30,  # Position monitor every 30s (consumed by bot_engine)
+    "max_actions_per_cycle": 12,  # PAPER aggressive (2026-05-31): was 4 — allow opens across all 3 venues per cycle. Revert to 4 before live.
+    "model": "sonnet",  # Claude model for portfolio analysis
+    "max_prompt_chars": 6000,  # Cap prompt size
+    "max_per_exchange": 20,  # PAPER 2026-05-30: was 2 — allow ~10-20 positions/exchange for data-gathering. Revert to 2 before live.
+    "news_interval_min": 30,  # News scan interval in minutes (bot_engine)
+    "learn_interval_min": 60,  # Learning engine interval in minutes (bot_engine)
 }
 
 # ==============================================================
@@ -177,21 +175,21 @@ PAIR_OVERRIDES = {
     # tier. Per-side schema lets us tighten short TPs without touching longs.
     #
     # Proven winners — push R:R higher
-    "ARB/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 3.5},  # R:R 2.33, ARB is STAR
+    "ARB/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 3.5},  # R:R 2.33, ARB is STAR
     "ORDI/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 4.5},  # R:R 3.00, fastest pair
     "ATOM/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.5},  # R:R 1.67, ATOM is STAR
-    "DOT/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 3.0},  # R:R 2.00
+    "DOT/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 3.0},  # R:R 2.00
     # High-WR pairs — tighten TP to reach within Phase 15 horizon
-    "ETH/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 75% WR, fast capture
-    "FET/USDT:USDT":  {"sl_pct": 1.5, "tp_pct": 2.2},  # 57% WR
+    "ETH/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.2},  # 75% WR, fast capture
+    "FET/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.2},  # 57% WR
     "ALGO/USDT:USDT": {"sl_pct": 1.5, "tp_pct": 2.0},  # 56% WR
     # Asymmetric R:R + per-side tuning: shorts tighter than longs
-    "BNB/USDT:USDT":  {
-        "long":  {"sl_pct": 1.5, "tp_pct": 2.0},
+    "BNB/USDT:USDT": {
+        "long": {"sl_pct": 1.5, "tp_pct": 2.0},
         "short": {"sl_pct": 1.5, "tp_pct": 1.6},  # tighter R:R for the harder side
     },
     "DOGE/USDT:USDT": {
-        "long":  {"sl_pct": 1.5, "tp_pct": 2.0},
+        "long": {"sl_pct": 1.5, "tp_pct": 2.0},
         "short": {"sl_pct": 1.5, "tp_pct": 1.6},
     },
     # Note: SOL/XRP/AAVE/AVAX/LINK left to fall through to ATR defaults.
@@ -225,7 +223,7 @@ MAKER_ONLY = {
     # realized maker-fill RATE and FEE saving, NOT profitability (known-negative).
     # Also: paper bypasses the executor, so judge ONLY on LIVE fills. Revert with
     # MAKER_ONLY_ENABLED=false.
-    "enabled":      os.getenv("MAKER_ONLY_ENABLED", "true").lower() == "true",
+    "enabled": os.getenv("MAKER_ONLY_ENABLED", "true").lower() == "true",
     "max_wait_sec": int(os.getenv("MAKER_ONLY_MAX_WAIT_SEC", "120")),
 }
 
@@ -237,29 +235,29 @@ MAKER_ONLY = {
 # VWAP + Long = 61.9% WR — strongest signal in the dataset.
 # B1 MACD (25% WR) and B3 15m timing (35% WR) are anti-predictive.
 SCALP_MODE = {
-    "enabled":           os.getenv("SCALP_MODE_ENABLED", "true").lower() == "true",
-    "entry_threshold":   int(os.getenv("SCALP_ENTRY_THRESHOLD", "65")),
+    "enabled": os.getenv("SCALP_MODE_ENABLED", "true").lower() == "true",
+    "entry_threshold": int(os.getenv("SCALP_ENTRY_THRESHOLD", "65")),
     # 2026-05-28: tightened SL/TP for $1-2/trade target at $130+ notional.
     # Old 1.0/1.8 produced $0.62/$1.12 per trade at $62 notional — too small.
     # New 0.8/1.3 at $136 notional (35% × 3x × $130 pocket):
     #   TP hit: $136 × 1.3% = $1.77   SL hit: $136 × 0.8% = $1.09
     #   R:R = 1.625:1, clears min_rr_ratio 1.2:1
-    "sl_pct":            float(os.getenv("SCALP_SL_PCT", "0.8")),
-    "tp_pct":            float(os.getenv("SCALP_TP_PCT", "1.3")),
+    "sl_pct": float(os.getenv("SCALP_SL_PCT", "0.8")),
+    "tp_pct": float(os.getenv("SCALP_TP_PCT", "1.3")),
     # 2026-05-28: raised for 15m-1h candle entries; 60min/45min was killing winners
-    "time_wall_min":     int(os.getenv("SCALP_TIME_WALL_MIN", "180")),
-    "stale_close_min":   int(os.getenv("SCALP_STALE_MIN", "120")),
-    "stale_min_profit":  float(os.getenv("SCALP_STALE_PROFIT", "0.3")),
-    "trailing_enabled":  os.getenv("SCALP_TRAILING", "false").lower() == "true",
-    "longs_only":        os.getenv("SCALP_LONGS_ONLY", "true").lower() == "true",
-    "min_atr_pct":       float(os.getenv("SCALP_MIN_ATR", "0.8")),
-    "max_spread_bps":    float(os.getenv("SCALP_MAX_SPREAD_BPS", "10")),
+    "time_wall_min": int(os.getenv("SCALP_TIME_WALL_MIN", "180")),
+    "stale_close_min": int(os.getenv("SCALP_STALE_MIN", "120")),
+    "stale_min_profit": float(os.getenv("SCALP_STALE_PROFIT", "0.3")),
+    "trailing_enabled": os.getenv("SCALP_TRAILING", "false").lower() == "true",
+    "longs_only": os.getenv("SCALP_LONGS_ONLY", "true").lower() == "true",
+    "min_atr_pct": float(os.getenv("SCALP_MIN_ATR", "0.8")),
+    "max_spread_bps": float(os.getenv("SCALP_MAX_SPREAD_BPS", "10")),
     "vwap_distance_max_pct": float(os.getenv("SCALP_VWAP_MAX", "0.3")),
-    "peak_hours":        {22, 23, 0},
+    "peak_hours": {22, 23, 0},
     "partial_tp": {
-        "enabled":       True,
-        "fraction":      0.5,
-        "at_pct":        1.0,
+        "enabled": True,
+        "fraction": 0.5,
+        "at_pct": 1.0,
         "move_sl_to_be": True,
     },
 }
@@ -281,17 +279,17 @@ SCALP_MODE = {
 # placing orders. Live path is untouched. Auto-disables on kill criteria.
 # Default TRUE per user directive 2026-05-02 (Option 4 multi-agent build).
 SHADOW_MODE = {
-    "enabled":         os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true",
+    "enabled": os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true",
     "tick_interval_s": int(os.getenv("SHADOW_TICK_INTERVAL_S", "300")),  # 5 min
-    "alt_notional":    float(os.getenv("SHADOW_ALT_NOTIONAL", "200.0")),
+    "alt_notional": float(os.getenv("SHADOW_ALT_NOTIONAL", "200.0")),
     "kill_fee_burn_x": float(os.getenv("SHADOW_KILL_FEE_BURN_X", "2.0")),
-    "kill_wr_floor":   float(os.getenv("SHADOW_KILL_WR_FLOOR", "0.30")),
+    "kill_wr_floor": float(os.getenv("SHADOW_KILL_WR_FLOOR", "0.30")),
     "kill_min_decisions": int(os.getenv("SHADOW_KILL_MIN_DECISIONS", "100")),
     "kill_max_halts_7d": int(os.getenv("SHADOW_KILL_MAX_HALTS_7D", "3")),
 }
 
 MODEL_GATE = {
-    "enabled":           os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
+    "enabled": os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model
     # logged but didn't gate.
     # 2026-05-01 (stop-bleed plan): flipped to FALSE. The live ensemble
@@ -312,21 +310,21 @@ MODEL_GATE = {
     # for hours/days until either market regime shifts or the next weekly
     # retrain produces stronger predictions. Revert via env override:
     #   MODEL_GATE_SHADOW=true python main.py
-    "shadow_only":       os.getenv("MODEL_GATE_SHADOW", "false").lower() == "true",
+    "shadow_only": os.getenv("MODEL_GATE_SHADOW", "false").lower() == "true",
     "threshold_futures": float(os.getenv("MODEL_GATE_THRESHOLD_FUTURES", "0.55")),
-    "threshold_spot":    float(os.getenv("MODEL_GATE_THRESHOLD_SPOT",    "0.58")),
+    "threshold_spot": float(os.getenv("MODEL_GATE_THRESHOLD_SPOT", "0.58")),
 }
 
 # ==============================================================
 # SMART SCANNER (legacy — kept for reference, not used by Claude Portfolio mode)
 # ==============================================================
 SCANNER = {
-    "min_confidence":        0.45,
-    "scan_interval_min":     15,
-    "min_adx_trend":         22,
+    "min_confidence": 0.45,
+    "scan_interval_min": 15,
+    "min_adx_trend": 22,
     "futures_adx_threshold": 28,
-    "max_atr_pct":           0.08,
-    "timeframes":            ["1d", "4h", "1h", "15m", "1m"],
+    "max_atr_pct": 0.08,
+    "timeframes": ["1d", "4h", "1h", "15m", "1m"],
 }
 
 # ==============================================================
@@ -365,12 +363,36 @@ SCANNER = {
 # 3 exchanges. MCP Brain's scoring engine + meta-filter + risk engine provide
 # the quality gate — narrow universe was starving the bot of opportunities.
 _TOP_SPOT = [
-    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
-    "UNI/USDT", "LTC/USDT", "BCH/USDT", "NEAR/USDT", "APT/USDT",
-    "FIL/USDT", "ARB/USDT", "OP/USDT", "ATOM/USDT", "SUI/USDT",
-    "SEI/USDT", "INJ/USDT", "FET/USDT", "RENDER/USDT", "TIA/USDT",
-    "ALGO/USDT", "IOTA/USDT", "VET/USDT", "PEPE/USDT", "WIF/USDT",
+    "BTC/USDT",
+    "ETH/USDT",
+    "BNB/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+    "ADA/USDT",
+    "AVAX/USDT",
+    "LINK/USDT",
+    "DOT/USDT",
+    "UNI/USDT",
+    "LTC/USDT",
+    "BCH/USDT",
+    "NEAR/USDT",
+    "APT/USDT",
+    "FIL/USDT",
+    "ARB/USDT",
+    "OP/USDT",
+    "ATOM/USDT",
+    "SUI/USDT",
+    "SEI/USDT",
+    "INJ/USDT",
+    "FET/USDT",
+    "RENDER/USDT",
+    "TIA/USDT",
+    "ALGO/USDT",
+    "IOTA/USDT",
+    "VET/USDT",
+    "PEPE/USDT",
+    "WIF/USDT",
     # 2026-05-31: added XLM — liquid top-coin listed on all 3 venues (owner-directed).
     "XLM/USDT",
 ]
@@ -383,8 +405,8 @@ _TOP_FUTURES = [s.replace("/USDT", "/USDT:USDT") for s in _TOP_SPOT]
 
 TRADING_PAIRS = {
     "binance": {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
-    "bybit":   {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
-    "bitget":  {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
+    "bybit": {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
+    "bitget": {"spot": list(_TOP_SPOT), "futures": list(_TOP_FUTURES)},
 }
 
 UNIVERSE_WHITELIST = set(_TOP_SPOT) | set(_TOP_FUTURES)
@@ -400,44 +422,47 @@ MEME_COINS = {"DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "TURBO", "LOOM"}
 COMMODITIES = {
     # symbol_base → metadata
     "XAU": {
-        "name":         "Gold",
-        "emoji":        "🥇",
-        "atr_mult":     1.5,    # wider SL for Gold (less volatile intraday)
-        "min_adx":      18,     # Gold trends strongly — lower ADX threshold
-        "corr_asset":   "USD",  # inversely correlated with USD strength
+        "name": "Gold",
+        "emoji": "🥇",
+        "atr_mult": 1.5,  # wider SL for Gold (less volatile intraday)
+        "min_adx": 18,  # Gold trends strongly — lower ADX threshold
+        "corr_asset": "USD",  # inversely correlated with USD strength
     },
     "XAG": {
-        "name":         "Silver",
-        "emoji":        "🥈",
-        "atr_mult":     1.8,    # Silver more volatile than Gold
-        "min_adx":      20,
-        "corr_asset":   "XAU",  # follows Gold with amplification
+        "name": "Silver",
+        "emoji": "🥈",
+        "atr_mult": 1.8,  # Silver more volatile than Gold
+        "min_adx": 20,
+        "corr_asset": "XAU",  # follows Gold with amplification
     },
     "WTI": {
-        "name":         "Oil (WTI)",
-        "emoji":        "🛢️",
-        "atr_mult":     2.0,    # Oil can be very volatile
-        "min_adx":      22,
-        "corr_asset":   "USD",  # oil priced in USD
+        "name": "Oil (WTI)",
+        "emoji": "🛢️",
+        "atr_mult": 2.0,  # Oil can be very volatile
+        "min_adx": 22,
+        "corr_asset": "USD",  # oil priced in USD
     },
-    "CL": {                     # alternative symbol for Oil on some exchanges
-        "name":         "Oil (WTI)",
-        "emoji":        "🛢️",
-        "atr_mult":     2.0,
-        "min_adx":      22,
-        "corr_asset":   "USD",
+    "CL": {  # alternative symbol for Oil on some exchanges
+        "name": "Oil (WTI)",
+        "emoji": "🛢️",
+        "atr_mult": 2.0,
+        "min_adx": 22,
+        "corr_asset": "USD",
     },
 }
+
 
 def is_commodity(symbol: str) -> bool:
     """Return True if the symbol base is a commodity (Gold/Silver/Oil)."""
     base = symbol.split("/")[0].upper()
     return base in COMMODITIES
 
+
 def get_commodity_meta(symbol: str) -> dict:
     """Return commodity metadata for a symbol, or {} if not a commodity."""
     base = symbol.split("/")[0].upper()
     return COMMODITIES.get(base, {})
+
 
 # ==============================================================
 # ANALYSIS-ONLY INSTRUMENTS (2026-06-02; entry block LIFTED 2026-06-11)
@@ -458,10 +483,24 @@ def get_commodity_meta(symbol: str) -> dict:
 ANALYSIS_ONLY_ENFORCED = os.getenv("ANALYSIS_ONLY_ENFORCED", "false").lower() == "true"
 ANALYSIS_ONLY_BASES = {
     # commodities (gold, silver, WTI, Brent, copper)
-    "XAU", "XAG", "CL", "BZ", "COPPER", "WTI",
+    "XAU",
+    "XAG",
+    "CL",
+    "BZ",
+    "COPPER",
+    "WTI",
     # equity perps
-    "TSLA", "NVDA", "AMZN", "AAPL", "GOOGL", "META", "MSFT", "MSTR", "COIN",
+    "TSLA",
+    "NVDA",
+    "AMZN",
+    "AAPL",
+    "GOOGL",
+    "META",
+    "MSFT",
+    "MSTR",
+    "COIN",
 }
+
 
 def is_analysis_only(symbol: str) -> bool:
     """True if the symbol is entry-blocked as an analysis-only instrument.
@@ -492,6 +531,7 @@ def is_analysis_only(symbol: str) -> bool:
                     return True
     return False
 
+
 # ==============================================================
 # RISK MANAGEMENT — HIGH-WR TIERED MECHANISM (2026-04-11 rewrite)
 #
@@ -515,7 +555,7 @@ RISK = {
     # toward historical WR) already handling these cases organically,
     # the binary block is a redundant double-veto contradicting the
     # "engine should decide" directive. Flip True to restore.
-    "caution_symbol_block_enabled":   False,
+    "caution_symbol_block_enabled": False,
     "caution_strategy_block_enabled": False,
     # 2026-05-04 (Phase 22): regime VOLATILE soft-multiplier instead of
     # hard block. Phase 16's hard block was rejecting 10+ proposals/hour
@@ -524,8 +564,8 @@ RISK = {
     # multiplier (default — tunable). Trade through volatile regime at
     # 40% size; capture momentum upside, cap drawdown vs full-size.
     # Flip regime_volatile_block_enabled=True to restore Phase 16 behavior.
-    "regime_volatile_block_enabled":  False,
-    "regime_volatile_size_mult":      0.4,
+    "regime_volatile_block_enabled": False,
+    "regime_volatile_size_mult": 0.4,
     # 2026-04-24: raised from 0.01 → 0.05 on explicit user direction after the
     # 386-trade postmortem (WR 41.7%, avg_win $0.12 vs avg_loss $0.18, negative
     # expectancy because per-trade costs dominate at $0.10-0.30 gross). At $377
@@ -533,8 +573,8 @@ RISK = {
     # structural cost floor. 5% × 3x = ~$56 notional makes individual P&L
     # moves meaningfully larger than fees+spread+slippage. Supersedes the
     # 2026-04-16 signed-checklist value; user accepted the trade-off.
-    "max_position_pct":     0.05,
-    "max_open_positions":   60,       # PAPER 2026-05-30: was 8 — ~20/exchange × 3. Revert to 8 before live.
+    "max_position_pct": 0.05,
+    "max_open_positions": 60,  # PAPER 2026-05-30: was 8 — ~20/exchange × 3. Revert to 8 before live.
     # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed.
     # 2026-04-28 (L99): KEPT at 0.015. Daily-loss halt is the last
     # post-trade circuit breaker — at 99x leverage a single -1% move
@@ -543,9 +583,9 @@ RISK = {
     # 2026-05-01: tightened 1.5% → 1.0% per capital-preservation pass.
     # At $791 balance: 1.0% = $7.91 daily loss limit. Triggers same-day
     # halt, recovers next UTC day. Goal: cap any one bad day's damage.
-    "max_daily_loss_pct":   0.010,
-    "default_stop_loss":    0.020,    # 2.0% fallback SL (ATR-based is primary)
-    "default_take_profit":  0.060,    # 6.0% fallback TP (~3:1 R:R vs 2% SL)
+    "max_daily_loss_pct": 0.010,
+    "default_stop_loss": 0.020,  # 2.0% fallback SL (ATR-based is primary)
+    "default_take_profit": 0.060,  # 6.0% fallback TP (~3:1 R:R vs 2% SL)
     # 2026-04-27: leverage cut 3 → 2. Last 7d at 3x: 46 closed trades, 16 wins,
     # net −$3.19. Single APT outlier was −$3.28 (−9.5% margin = −3.17% price ×
     # 3x). At 2x the same price move is −6.34% margin = ~−$2.13 worst case;
@@ -561,17 +601,17 @@ RISK = {
     # 1.5% SL = $6 loss = 1.5% of balance. Survivable; supports ~2-3
     # concurrent positions per exchange pocket.
     "futures_max_leverage": 2,
-    "default_leverage":     2,
-    "min_rr_ratio":         1.2,      # 1.2:1 — high-WR strategies don't need large R:R
-    "trailing_stop":        True,
+    "default_leverage": 2,
+    "min_rr_ratio": 1.2,  # 1.2:1 — high-WR strategies don't need large R:R
+    "trailing_stop": True,
     # 2026-04-28 retune (Phase 11) — converged trailing on mcp_take_profit
     # distribution; activation 1.5→2.0%, lock_fraction tier 0.40→0.55.
     # 2026-05-03 (Phase 15) — combined with the 4h→1.25h AGE_LIMIT cut,
     # trailing must engage faster or AGE_LIMIT fires before trailing locks.
     # Activation 2.0%→1.2% and lock_fraction (small-win tier) 0.55→0.65
     # to capture the 30-60min profitable cell before its 75min expiry.
-    "trailing_activation":  0.012,    # 1.2% — engage earlier under tighter age cap
-    "trailing_distance":    0.008,    # 0.8% — tighter trail to lock faster
+    "trailing_activation": 0.012,  # 1.2% — engage earlier under tighter age cap
+    "trailing_distance": 0.008,  # 0.8% — tighter trail to lock faster
     # 2026-04-28 (L99): KEPT at 0.12. Drawdown halt is the from-peak
     # circuit breaker; at 99x leverage it's the only thing standing
     # between a few bad trades and a wiped account. Removal would
@@ -580,8 +620,8 @@ RISK = {
     # 8% = $63 max drawdown before halt. Combined with 1% daily loss limit,
     # bot has at most ~8 bad days before forced halt. Recovery requires
     # operator-cleared peak (or 4h auto-cooldown for consec_global halts).
-    "max_drawdown_pct":     0.08,
-    "position_sizing_mode": "tiered", # leverage tier drives sizing; kelly is a sanity check
+    "max_drawdown_pct": 0.08,
+    "position_sizing_mode": "tiered",  # leverage tier drives sizing; kelly is a sanity check
     # 2026-04-29 (Phase 14) — age cutoffs tightened from 6h/4h/3h.
     # 2026-05-03 (Phase 15) — hold-time analysis on 186 trades.
     # 2026-05-28 — RELAXED for 15m-1h candle trading. The 1.0h stale kill
@@ -591,17 +631,17 @@ RISK = {
     #   - max_position_age: 4h (was 1.25h) — hard ceiling
     #   - max_stale: 3h (was 1h) — flat-only, profitable trades exempt
     #   - max_loss_age: 1.5h (was 0.75h) — losers still cut, but not at 45m
-    "max_position_age_hours": 4.0,    # hard ceiling — force-close losing positions
-    "max_stale_hours":       3.0,     # flat positions (-0.3% to 0%) cut; profitable exempt
-    "max_loss_age_hours":    1.5,     # losing positions cut at 90min
-    "max_loss_age_pct":      0.3,     # threshold for what counts as "losing" (unchanged)
+    "max_position_age_hours": 4.0,  # hard ceiling — force-close losing positions
+    "max_stale_hours": 3.0,  # flat positions (-0.3% to 0%) cut; profitable exempt
+    "max_loss_age_hours": 1.5,  # losing positions cut at 90min
+    "max_loss_age_pct": 0.3,  # threshold for what counts as "losing" (unchanged)
     # 2026-04-27: hard cap on trade count per UTC day. The bot did 52 trades
     # on 2026-04-27 — overtrading on negative-EV strategies amplifies the
     # bleed regardless of per-trade SL discipline.
     # 2026-04-28 (UNBLOCK_ALL): user directive "Dont block any trades" —
     # raised from 20 to 200 so the daily cap effectively never binds.
     # Restore by reverting to 20 if you want the data-driven cap back.
-    "max_trades_per_day":   200,
+    "max_trades_per_day": 200,
 }
 
 RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
@@ -617,8 +657,8 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # at a live size_pct=0.50 posture it would become the de facto sizer
 # (~0.5% risk per trade) — surface that before any live flip.
 VOL_TARGET_SIZING = {
-    "enabled":            True,
-    "per_trade_risk_pct": 0.005,   # 0.5% of pocket at the planned SL
+    "enabled": True,
+    "per_trade_risk_pct": 0.005,  # 0.5% of pocket at the planned SL
 }
 
 # 2026-06-11 — PORTFOLIO ES SOFT-CAP (core/portfolio_risk.py).
@@ -632,15 +672,15 @@ VOL_TARGET_SIZING = {
 # same-direction correlated gross notional (measured EWMA pairwise rho
 # 0.85-0.94 on majors, 1h vols 0.6-1.2%).
 ES_RISK = {
-    "enabled":        True,
-    "q":              0.975,   # ES confidence (0.95 | 0.975 | 0.99)
-    "lambda":         0.94,    # RiskMetrics EWMA decay (per 1h bar)
-    "horizon_hours":  4.0,     # ~typical holding period (age cutoffs 4h/2h/1.5h)
-    "budget_pct":     0.005,   # ES budget as fraction of total equity
-    "floor":          0.25,    # min taper factor — soft cap, never 0
-    "bars":           240,     # 10d of 1h; >99.99% EWMA mass at lambda=0.94
-    "min_bars":       60,      # min aligned rows per leg else drop leg
-    "cache_ttl_sec":  1800,    # per-base closes cache
+    "enabled": True,
+    "q": 0.975,  # ES confidence (0.95 | 0.975 | 0.99)
+    "lambda": 0.94,  # RiskMetrics EWMA decay (per 1h bar)
+    "horizon_hours": 4.0,  # ~typical holding period (age cutoffs 4h/2h/1.5h)
+    "budget_pct": 0.005,  # ES budget as fraction of total equity
+    "floor": 0.25,  # min taper factor — soft cap, never 0
+    "bars": 240,  # 10d of 1h; >99.99% EWMA mass at lambda=0.94
+    "min_bars": 60,  # min aligned rows per leg else drop leg
+    "cache_ttl_sec": 1800,  # per-base closes cache
 }
 
 # ==============================================================
@@ -673,54 +713,54 @@ LEVERAGE_TIERS = {
         # 2026-05-12 (phase51): 2→3x per user directive. Covers all allowed-
         # hour signals at conf>=55%. The 3x era (90 trades) was the only
         # historically profitable leverage era (+$0.28 net vs -$5.07 at 2x).
-        "leverage":               3,
-        "size_pct":               0.06,   # PAPER: 0.06 (raised from 0.03 — 0.03 fell under $5 min after de-risk multipliers). Revert to 0.50 before live.
-        "sl_pct":                 0.015,
-        "tp_pct":                 0.0375,   # 2.5:1 R:R
-        "min_confidence":         0.50,     # PAPER aggressive (2026-05-31): was 0.55 — lowered to the 0.50 worst-band boundary (NOT below; see test_math_tune). Revert to 0.55 before live.
-        "requires_whitelist":     False,
-        "requires_allowed_hour":  True,
-        "requires_peak_hour":     False,
-        "requires_btc_aligned":   False,
+        "leverage": 3,
+        "size_pct": 0.06,  # PAPER: 0.06 (raised from 0.03 — 0.03 fell under $5 min after de-risk multipliers). Revert to 0.50 before live.
+        "sl_pct": 0.015,
+        "tp_pct": 0.0375,  # 2.5:1 R:R
+        "min_confidence": 0.50,  # PAPER aggressive (2026-05-31): was 0.55 — lowered to the 0.50 worst-band boundary (NOT below; see test_math_tune). Revert to 0.55 before live.
+        "requires_whitelist": False,
+        "requires_allowed_hour": True,
+        "requires_peak_hour": False,
+        "requires_btc_aligned": False,
     },
     "STRONG": {
         # 2026-05-12 (phase51): 2→4x. Whitelist + BTC-aligned any allowed hour.
-        "leverage":               4,
-        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
-        "sl_pct":                 0.015,
-        "tp_pct":                 0.0375,
-        "min_confidence":         0.72,
-        "requires_whitelist":     True,
-        "requires_allowed_hour":  True,
-        "requires_peak_hour":     False,
-        "requires_btc_aligned":   True,
+        "leverage": 4,
+        "size_pct": 0.06,  # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
+        "sl_pct": 0.015,
+        "tp_pct": 0.0375,
+        "min_confidence": 0.72,
+        "requires_whitelist": True,
+        "requires_allowed_hour": True,
+        "requires_peak_hour": False,
+        "requires_btc_aligned": True,
     },
     "CONVICTION": {
         # 2026-05-12 (phase51): 2→5x per user directive. Whitelist + peak hour
         # + BTC aligned. Tightest standard conditions — highest-conviction setups.
-        "leverage":               5,
-        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
-        "sl_pct":                 0.015,
-        "tp_pct":                 0.0375,
-        "min_confidence":         0.80,
-        "requires_whitelist":     True,
-        "requires_allowed_hour":  True,
-        "requires_peak_hour":     True,
-        "requires_btc_aligned":   True,
+        "leverage": 5,
+        "size_pct": 0.06,  # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
+        "sl_pct": 0.015,
+        "tp_pct": 0.0375,
+        "min_confidence": 0.80,
+        "requires_whitelist": True,
+        "requires_allowed_hour": True,
+        "requires_peak_hour": True,
+        "requires_btc_aligned": True,
     },
     "AGGRESSIVE": {
         # 2026-05-12 (phase51): 2→10x per user directive. Fires only at conf
         # >=85% during peak hours on whitelist symbols with BTC aligned.
         # Anti-EV score cap removed in bot_engine (was from bug-era data).
-        "leverage":               10,
-        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
-        "sl_pct":                 0.015,
-        "tp_pct":                 0.0375,
-        "min_confidence":         0.85,
-        "requires_whitelist":     True,
-        "requires_allowed_hour":  True,
-        "requires_peak_hour":     True,
-        "requires_btc_aligned":   True,
+        "leverage": 10,
+        "size_pct": 0.06,  # PAPER: 0.06 (was 0.03). Revert to 0.50 before live.
+        "sl_pct": 0.015,
+        "tp_pct": 0.0375,
+        "min_confidence": 0.85,
+        "requires_whitelist": True,
+        "requires_allowed_hour": True,
+        "requires_peak_hour": True,
+        "requires_btc_aligned": True,
     },
     # 2026-05-22 — SCALP tier added per user directive: "Higher trades,
     # small TPs. Even 1-2 USDT or 1-2% gain per trade (FUTURES)". This is
@@ -742,15 +782,15 @@ LEVERAGE_TIERS = {
         #   35% × 3x × 0.8% SL = 0.84% balance/loss = ~$1.09 per SL hit
         #   35% × 3x × 1.3% TP = 1.37% balance/win  = ~$1.77 per TP hit
         #   R:R = 1.625:1. At 55% WR: EV = +$0.48/trade.
-        "leverage":               3,
-        "size_pct":               0.06,   # PAPER: 0.06 (was 0.03/0.35). Revert to 0.35 before live.
-        "sl_pct":                 0.008,   # 0.8% price (matches SCALP_MODE)
-        "tp_pct":                 0.013,   # 1.3% price = 1.625:1 R:R
-        "min_confidence":         0.50,    # FLOOR — do NOT lower: the 0.40-0.50 conf band is the anti-monotonic worst-WR cohort (~23-27%), guarded by test_math_tune_2026_05_24. Aggression comes from the prompt + cadence knobs, not from admitting the worst band.
-        "requires_whitelist":     False,
-        "requires_allowed_hour":  True,
-        "requires_peak_hour":     False,
-        "requires_btc_aligned":   False,
+        "leverage": 3,
+        "size_pct": 0.06,  # PAPER: 0.06 (was 0.03/0.35). Revert to 0.35 before live.
+        "sl_pct": 0.008,  # 0.8% price (matches SCALP_MODE)
+        "tp_pct": 0.013,  # 1.3% price = 1.625:1 R:R
+        "min_confidence": 0.50,  # FLOOR — do NOT lower: the 0.40-0.50 conf band is the anti-monotonic worst-WR cohort (~23-27%), guarded by test_math_tune_2026_05_24. Aggression comes from the prompt + cadence knobs, not from admitting the worst band.
+        "requires_whitelist": False,
+        "requires_allowed_hour": True,
+        "requires_peak_hour": False,
+        "requires_btc_aligned": False,
     },
 }
 
@@ -769,8 +809,8 @@ MAX_LOSS_PER_TRADE_PCT = 0.025
 MAX_LOSS_PER_TRADE_USD = 15.0
 
 # Consecutive-loss throttle — dynamic leverage downgrade + pause
-CONSEC_LOSS_DOWNGRADE_COUNT = 2   # 2 losses in a row → drop tier cap by 1
-CONSEC_LOSS_DOWNGRADE_HOURS = 4   # downgrade lasts 4h
+CONSEC_LOSS_DOWNGRADE_COUNT = 2  # 2 losses in a row → drop tier cap by 1
+CONSEC_LOSS_DOWNGRADE_HOURS = 4  # downgrade lasts 4h
 # Phase 49 (2026-05-10): PAUSE disabled. The L-streak counts ghost_sync /
 # ghost_reconciled / sl_placement_failed closes which are EXCHANGE-side
 # events (network outage forced closes), not bot decisions. Penalizing
@@ -779,11 +819,11 @@ CONSEC_LOSS_DOWNGRADE_HOURS = 4   # downgrade lasts 4h
 # losses, not halting". Tier DOWNGRADE (above) still applies as a softer
 # risk-management measure: bot keeps trading but at smaller size during
 # losing streaks. To re-enable pause, set hours back to 0.5.
-CONSEC_LOSS_PAUSE_COUNT     = 999  # effectively disabled
-CONSEC_LOSS_PAUSE_HOURS     = 0    # pause disabled
+CONSEC_LOSS_PAUSE_COUNT = 999  # effectively disabled
+CONSEC_LOSS_PAUSE_HOURS = 0  # pause disabled
 
 # Volatility-adaptive leverage cap — high-ATR symbols clamp to STANDARD
-HIGH_ATR_PCT_THRESHOLD = 0.025    # ATR% > 2.5% → max leverage = STANDARD (2x)
+HIGH_ATR_PCT_THRESHOLD = 0.025  # ATR% > 2.5% → max leverage = STANDARD (2x)
 
 # 2026-04-27: hard kill-switch on shorts. Last 7d futures: 9 sells averaging
 # −$0.16/trade vs 37 buys averaging −$0.05 (3.4× worse), with the worst
@@ -820,17 +860,17 @@ WHITELIST_SYMBOLS = {
     # the strategy_family that's actually firing today.
     #
     # Tier hints (sized up via leverage-tier selector):
-    "ATOM/USDT:USDT",   # ⭐ n=14, +$2.06, 43% WR, $0.147/trade
-    "ARB/USDT:USDT",    # ⭐ n=18, +$1.20, 44% WR, $0.067/trade
-    "DOGE/USDT:USDT",   # ⭐ n=10, +$4.83, 50% WR, $0.483/trade — TOP CONTRIBUTOR (added 2026-05-01)
-    "ETH/USDT:USDT",    #   n=8,  +$0.45, 75% WR — high-WR, small absolute mean
-    "MANA/USDT:USDT",   #   n=3,  +$0.37, 33% WR — thin sample, tentative
-    "BTC/USDT:USDT",    #   macro anchor, always tradeable
-    "AVAX/USDT:USDT",   #   n=4,  near-zero — neutral, kept as tier hint
+    "ATOM/USDT:USDT",  # ⭐ n=14, +$2.06, 43% WR, $0.147/trade
+    "ARB/USDT:USDT",  # ⭐ n=18, +$1.20, 44% WR, $0.067/trade
+    "DOGE/USDT:USDT",  # ⭐ n=10, +$4.83, 50% WR, $0.483/trade — TOP CONTRIBUTOR (added 2026-05-01)
+    "ETH/USDT:USDT",  #   n=8,  +$0.45, 75% WR — high-WR, small absolute mean
+    "MANA/USDT:USDT",  #   n=3,  +$0.37, 33% WR — thin sample, tentative
+    "BTC/USDT:USDT",  #   macro anchor, always tradeable
+    "AVAX/USDT:USDT",  #   n=4,  near-zero — neutral, kept as tier hint
     # Tentative thin-sample symbols (n<3 in claude_portfolio):
     "LUMIA/USDT:USDT",  # historical positive
     "ORDI/USDT:USDT",
-    "DOT/USDT:USDT",    # n=6 in claude_portfolio, marginal -$0.038/trade
+    "DOT/USDT:USDT",  # n=6 in claude_portfolio, marginal -$0.038/trade
     "FET/USDT:USDT",
     "BCH/USDT:USDT",
     "GRASS/USDT:USDT",
@@ -856,8 +896,8 @@ WHITELIST_SYMBOLS = {
 # Phase 12 missed DOGE because the analysis filter cut it; today's data
 # (n>=8, mean>$0.05) puts it well above the sample-size guard.
 STAR_SYMBOLS = {
-    "ATOM/USDT:USDT",   # n=14, +$1.86 sum, 43% WR (all-time)
-    "ARB/USDT:USDT",    # n=35, +$1.15 sum, 49% WR (all-time)
+    "ATOM/USDT:USDT",  # n=14, +$1.86 sum, 43% WR (all-time)
+    "ARB/USDT:USDT",  # n=35, +$1.15 sum, 49% WR (all-time)
     # DOGE removed Phase 39 (2026-05-09): was n=10/+$4.83 at Phase 12.2;
     # now n=18/-$3.71 (56% WR but asymmetric — losses swamp wins).
     # Moved to BLACKLIST_HARD.
@@ -878,11 +918,11 @@ STAR_SYMBOLS = {
 #
 # Rollback: enabled=False → existing TA path runs unchanged.
 SPOT_STRATEGY = {
-    "enabled":              True,
-    "dust_cutoff_usd":      25.0,   # Component A — sell positions worth less
-    "min_position_usd":     50.0,   # Component B — below this, no rules apply
-    "drawdown_half_pct":    0.25,   # SCALE_OUT trigger (half-exit, peak resets)
-    "drawdown_full_pct":    0.40,   # SELL trigger (full exit)
+    "enabled": True,
+    "dust_cutoff_usd": 25.0,  # Component A — sell positions worth less
+    "min_position_usd": 50.0,  # Component B — below this, no rules apply
+    "drawdown_half_pct": 0.25,  # SCALE_OUT trigger (half-exit, peak resets)
+    "drawdown_full_pct": 0.40,  # SELL trigger (full exit)
 }
 
 # 2026-05-01 — Expectancy Filter (Tier 1.2 from predictive-strategy stack).
@@ -941,11 +981,11 @@ EXPECTANCY_FILTER = {
     #   mean < -0.50 (n>=5):     ×0.0  HARD BLOCK (catastrophic only)
     # Whitelist still bypasses entirely. Per user directive:
     #   "Test before it trades. No bias. Just data. Self-correcting."
-    "enabled":              True,
-    "min_expected_dollar": -0.50,   # catastrophic-only floor
-    "min_expected_star":   -0.50,
-    "lookback_days":        30,
-    "min_sample_size":      5,
+    "enabled": True,
+    "min_expected_dollar": -0.50,  # catastrophic-only floor
+    "min_expected_star": -0.50,
+    "lookback_days": 30,
+    "min_sample_size": 5,
     # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —
     # a symbol on this list trades regardless of recent expectancy. Per-trade
     # SL, MODEL_GATE, and Spec §12 streak halt still apply.
@@ -973,7 +1013,7 @@ EXPECTANCY_FILTER = {
 # cooldown stays ON — 2026-06-11 (owner-approved): 180 min per
 # (symbol, side) after a stop_loss, re-armed as a HARD BLOCK (the
 # 2026-05-27 advisory-only mode blocked nothing; see risk_manager).
-SHORT_GATE_ENABLED        = False  # rolling 30-trade SELL WR < 45% pause
+SHORT_GATE_ENABLED = False  # rolling 30-trade SELL WR < 45% pause
 SPEC12_SYMBOL_PAUSE_ENABLED = False  # per-symbol pause after 2 consec losses
 SPEC12_FAMILY_PAUSE_ENABLED = False  # per-family pause after 3 consec losses
 
@@ -992,9 +1032,9 @@ SPEC12_FAMILY_PAUSE_ENABLED = False  # per-family pause after 3 consec losses
 # `min_hold_minutes`: don't fire in the first 30 minutes — entries that
 # fired right before a brief 4h cross deserve a chance to resolve.
 ENTRY_STALENESS_EXIT = {
-    "enabled":               True,
-    "invalidation_gap_pct":  0.15,   # min EMA gap (in WRONG direction) to fire
-    "min_hold_minutes":      30,     # grace period after entry
+    "enabled": True,
+    "invalidation_gap_pct": 0.15,  # min EMA gap (in WRONG direction) to fire
+    "min_hold_minutes": 30,  # grace period after entry
     # 2026-06-11 gap-flip semantics: fire ONLY when the 4h gap actually
     # FLIPPED after entry. Born-invalid positions (gap already >= threshold
     # against the side AT THE ENTRY BAR) are exempt forever — SL/TP/trailing
@@ -1046,11 +1086,11 @@ ENTRY_STALENESS_EXIT = {
 # Restore tightening by setting enabled=True + star_only=False (BAND
 # tier active, score 70-84 only) or star_only=True (STAR-only mode).
 CELL_FILTER = {
-    "enabled":         False,   # was True with star_only=True
-    "star_only":       True,    # ignored when enabled=False
-    "score_band_min":  70.0,
-    "score_band_max":  84.0,
-    "star_overrides":  True,
+    "enabled": False,  # was True with star_only=True
+    "star_only": True,  # ignored when enabled=False
+    "score_band_min": 70.0,
+    "score_band_max": 84.0,
+    "star_overrides": True,
 }
 
 # 2026-04-13: Cleared. All prior losses were under the old broken engine
@@ -1189,8 +1229,8 @@ BLACKLIST_HARD: set = set()
 # trades. Hours cleared; WEEKDAY_CONFIDENCE_MULT handles day-level risk.
 BLOCKED_HOURS_UTC = set()
 ALLOWED_HOURS_UTC = set(range(24)) - BLOCKED_HOURS_UTC
-PEAK_HOURS_UTC    = {1, 5, 8, 10, 16, 18, 20}    # sizing hint: CONVICTION tier
-WARMUP_HOURS_UTC  = {2, 3, 6, 7, 11, 13, 14, 15, 22}  # sizing hint: half-size (H17 removed)
+PEAK_HOURS_UTC = {1, 5, 8, 10, 16, 18, 20}  # sizing hint: CONVICTION tier
+WARMUP_HOURS_UTC = {2, 3, 6, 7, 11, 13, 14, 15, 22}  # sizing hint: half-size (H17 removed)
 
 # 2026-06-11 (owner: "Trade only in those hours where its profitable"):
 # dynamic profit-only hour gate — entries allowed ONLY during UTC hours
@@ -1218,13 +1258,13 @@ HOUR_GATE_PROFIT_ONLY = os.getenv("HOUR_GATE_PROFIT_ONLY", "true").lower() == "t
 WEEKDAY_CONFIDENCE_MULT = {
     # 2026-05-27 (UNBLOCK directive): soft sizing hints only, floor at 0.85
     # so weekday never tanks confidence enough to block a valid trade.
-    0: 1.00,   # Sun: 51% WR, near-breakeven — neutral
-    1: 0.85,   # Mon: 19% WR, -$39 — mild penalty (was 0.50, too aggressive)
-    2: 0.85,   # Tue: 36% WR, -$67 — mild penalty (was 0.65)
-    3: 0.90,   # Wed: 28% WR, +$0.86 — slight penalty
-    4: 1.10,   # Thu: 45% WR, +$4.28 — slight boost (best day)
-    5: 1.00,   # Fri: 46% WR, -$2.92 — neutral
-    6: 1.00,   # Sat: 43% WR, +$0.59 — neutral
+    0: 1.00,  # Sun: 51% WR, near-breakeven — neutral
+    1: 0.85,  # Mon: 19% WR, -$39 — mild penalty (was 0.50, too aggressive)
+    2: 0.85,  # Tue: 36% WR, -$67 — mild penalty (was 0.65)
+    3: 0.90,  # Wed: 28% WR, +$0.86 — slight penalty
+    4: 1.10,  # Thu: 45% WR, +$4.28 — slight boost (best day)
+    5: 1.00,  # Fri: 46% WR, -$2.92 — neutral
+    6: 1.00,  # Sat: 43% WR, +$0.59 — neutral
 }
 
 # 2026-05-25 — Range-stability / chop filter (no-edge-forensics bundle).
@@ -1253,7 +1293,7 @@ if not 0.0 <= MIN_TREND_EFFICIENCY <= 1.0:
 #
 # Used when the reclassified ghost data (Commit 1) shows the SCALP cohort
 # is genuinely catastrophic rather than an attribution artifact.
-SCALP_TIER_ENABLED = (os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false")
+SCALP_TIER_ENABLED = os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false"
 
 # ── Claude-dependence control (owner 2026-06-07: "make the bot less dependent on ClaudeCode") ──
 # The live decision path is Claude-PRIMARY (every cycle calls Opus 4.8 via CLI). Measured this
@@ -1314,8 +1354,12 @@ if not SCALP_TIER_ENABLED:
     # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade
     # all-time analysis. Net-negative across all strategies combined.
     BLACKLIST_HARD = {
-        "APT/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
-        "ETH/USDT:USDT", "DOGE/USDT:USDT", "BTC/USDT:USDT",
+        "APT/USDT:USDT",
+        "SOL/USDT:USDT",
+        "XRP/USDT:USDT",
+        "ETH/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "BTC/USDT:USDT",
     }
     # Phase-44 (2026-05-10) BLOCKED_HOURS_UTC — REAL-trade filter
     # catastrophic losers retained from Phase 39.
@@ -1328,8 +1372,8 @@ if not SCALP_TIER_ENABLED:
 # engine now requires per-coin 4h+1h EMA alignment — that IS the trend
 # filter. Demanding BTC alignment on top was redundant.
 SHORTS_REQUIRE_BTC_BEAR = False
-BTC_TREND_TIMEFRAME     = "4h"
-BTC_TREND_EMA_PERIOD    = 200
+BTC_TREND_TIMEFRAME = "4h"
+BTC_TREND_EMA_PERIOD = 200
 
 # Short-side filter (May 2026, evidence-based). Warehouse: 126 shorts net
 # -$54 vs 210 longs net -$4. Filter blocks SELL when BTC is up-aligned on
@@ -1340,8 +1384,8 @@ BTC_TREND_EMA_PERIOD    = 200
 # Raised thresholds: min_mcp_score=75, min_confidence=0.70.
 SHORT_SIDE_FILTER = {
     # 2026-05-27 (UNBLOCK directive): if MCP Brain scored it, don't second-guess.
-    "enabled":        os.getenv("SHORT_SIDE_FILTER_ENABLED", "false").lower() == "true",
-    "min_mcp_score":  float(os.getenv("SHORT_MIN_MCP_SCORE", "75")),
+    "enabled": os.getenv("SHORT_SIDE_FILTER_ENABLED", "false").lower() == "true",
+    "min_mcp_score": float(os.getenv("SHORT_MIN_MCP_SCORE", "75")),
     "min_confidence": float(os.getenv("SHORT_MIN_CONFIDENCE", "0.70")),
 }
 
@@ -1354,51 +1398,51 @@ SHORT_SIDE_FILTER = {
 # Fail-OPEN on missing BTC data / warmup. NEW ENTRIES ONLY (never exits/SL).
 # Lowers cost + variance + trade count; does NOT add alpha.
 BTC_VOL_PAUSE = {
-    "enabled":                 os.getenv("BTC_VOL_PAUSE_ENABLED", "true").lower() == "true",
-    "timeframe":               "1h",
-    "vol_spike_mult":          float(os.getenv("BTC_VOL_SPIKE_MULT", "2.0")),
-    "hysteresis_mult":         float(os.getenv("BTC_VOL_HYSTERESIS_MULT", "1.5")),
-    "clear_minutes":           float(os.getenv("BTC_VOL_CLEAR_MIN", "30")),
-    "min_samples":             int(os.getenv("BTC_VOL_MIN_SAMPLES", "24")),   # ~1d warmup (hourly)
+    "enabled": os.getenv("BTC_VOL_PAUSE_ENABLED", "true").lower() == "true",
+    "timeframe": "1h",
+    "vol_spike_mult": float(os.getenv("BTC_VOL_SPIKE_MULT", "2.0")),
+    "hysteresis_mult": float(os.getenv("BTC_VOL_HYSTERESIS_MULT", "1.5")),
+    "clear_minutes": float(os.getenv("BTC_VOL_CLEAR_MIN", "30")),
+    "min_samples": int(os.getenv("BTC_VOL_MIN_SAMPLES", "24")),  # ~1d warmup (hourly)
     "append_min_interval_sec": 3600,
-    "buffer_max":              1000,
+    "buffer_max": 1000,
 }
 
 # 2026-05-27 (454-trade hardening): min hold time gate.
 # Trades closed <15 min = 43% of total, 31% WR, -$41.25. Only profitable
 # bucket is 15m-1h (64% WR, +$4.41). Guard in position monitor.
-MIN_HOLD_CLOSE_MINUTES   = int(os.getenv("MIN_HOLD_CLOSE_MINUTES", "15"))
-MIN_HOLD_STRONG_CONF     = float(os.getenv("MIN_HOLD_STRONG_CONF", "0.80"))
+MIN_HOLD_CLOSE_MINUTES = int(os.getenv("MIN_HOLD_CLOSE_MINUTES", "15"))
+MIN_HOLD_STRONG_CONF = float(os.getenv("MIN_HOLD_STRONG_CONF", "0.80"))
 
 # ==============================================================
 # BLACKLISTING
 # ==============================================================
 BLACKLIST = {
     "consecutive_sl_limit": 3,
-    "auto_expiry_hours":    24,
+    "auto_expiry_hours": 24,
     "volatility_spike_pct": 0.15,
-    "manual_list":          [],
+    "manual_list": [],
 }
 
 # ==============================================================
 # AUTO-OPTIMIZATION
 # ==============================================================
 AUTO_OPTIMIZE = {
-    "enabled": True,       # ENABLED — auto-tune every Sunday 2am UTC
-    "symbol":  "BTC/USDT",
-    "days":    30,
+    "enabled": True,  # ENABLED — auto-tune every Sunday 2am UTC
+    "symbol": "BTC/USDT",
+    "days": 30,
 }
 
 # ==============================================================
 # DCA
 # ==============================================================
 DCA = {
-    "interval_hours":   3,        # Every 3h (was 4 — more frequent accumulation)
-    "amount_usdt":      6.0,      # $6 per buy — meets Binance NOTIONAL filter ($5 min)
-    "dip_buy_pct":      0.03,     # Buy extra at 3% dip (was 5% — catch more dips)
-    "dip_multiplier":   2.0,      # 2x on dips
-    "max_daily_buys":   8,        # Up to 8/day (was 6)
-    "take_profit_pct":  0.03,     # Take profit at 3% — lock in gains, reuse capital faster
+    "interval_hours": 3,  # Every 3h (was 4 — more frequent accumulation)
+    "amount_usdt": 6.0,  # $6 per buy — meets Binance NOTIONAL filter ($5 min)
+    "dip_buy_pct": 0.03,  # Buy extra at 3% dip (was 5% — catch more dips)
+    "dip_multiplier": 2.0,  # 2x on dips
+    "max_daily_buys": 8,  # Up to 8/day (was 6)
+    "take_profit_pct": 0.03,  # Take profit at 3% — lock in gains, reuse capital faster
 }
 
 # ==============================================================
@@ -1410,32 +1454,32 @@ REBALANCING = {
         "ETH": 0.30,
         "BNB": 0.20,
     },
-    "interval_hours":  24,
-    "threshold_pct":   0.05,
-    "min_trade_usdt":  10.0,
+    "interval_hours": 24,
+    "threshold_pct": 0.05,
+    "min_trade_usdt": 10.0,
 }
 
 # ==============================================================
 # CUSTOM RULES
 # ==============================================================
 CUSTOM_RULES = {
-    "name":       "My Custom Strategy",
-    "timeframe":  "1h",
-    "lookback":   100,
+    "name": "My Custom Strategy",
+    "timeframe": "1h",
+    "lookback": 100,
     "indicators": {
-        "rsi":      {"type": "rsi", "period": 14},
+        "rsi": {"type": "rsi", "period": 14},
         "ema_fast": {"type": "ema", "period": 9},
         "ema_slow": {"type": "ema", "period": 21},
     },
-    "entry_long":  [
-        {"indicator": "rsi",      "op": "<",  "value": 35},
-        {"indicator": "ema_fast", "op": ">",  "indicator2": "ema_slow"},
+    "entry_long": [
+        {"indicator": "rsi", "op": "<", "value": 35},
+        {"indicator": "ema_fast", "op": ">", "indicator2": "ema_slow"},
     ],
     "entry_short": [
-        {"indicator": "rsi",      "op": ">",  "value": 65},
-        {"indicator": "ema_fast", "op": "<",  "indicator2": "ema_slow"},
+        {"indicator": "rsi", "op": ">", "value": 65},
+        {"indicator": "ema_fast", "op": "<", "indicator2": "ema_slow"},
     ],
-    "exit_long":  [{"indicator": "rsi", "op": ">", "value": 60}],
+    "exit_long": [{"indicator": "rsi", "op": ">", "value": 60}],
     "exit_short": [{"indicator": "rsi", "op": "<", "value": 40}],
 }
 
@@ -1444,25 +1488,40 @@ CUSTOM_RULES = {
 # Claude Portfolio mode does NOT use these for entry/exit decisions.
 # ==============================================================
 SUPERTREND = {
-    "timeframe": "1h", "htf_timeframe": "4h",
-    "atr_period": 10, "atr_multiplier": 3.0,
-    "rsi_period": 14, "rsi_min": 30, "rsi_max": 70,
-    "volume_ma": 20, "min_volume_mult": 1.2,   # tightened from 0.7 — whipsaws in low-vol
-    "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
-    "lookback_candles": 120, "min_atr_pct": 0.002, "max_atr_pct": 0.08,
+    "timeframe": "1h",
+    "htf_timeframe": "4h",
+    "atr_period": 10,
+    "atr_multiplier": 3.0,
+    "rsi_period": 14,
+    "rsi_min": 30,
+    "rsi_max": 70,
+    "volume_ma": 20,
+    "min_volume_mult": 1.2,  # tightened from 0.7 — whipsaws in low-vol
+    "atr_sl_mult": 2.0,
+    "atr_tp_mult": 4.0,
+    "lookback_candles": 120,
+    "min_atr_pct": 0.002,
+    "max_atr_pct": 0.08,
 }
 
 MEAN_REVERSION = {
     "timeframe": "1h",
-    "bb_period": 20, "bb_std": 2.0,
-    "rsi_period": 14, "rsi_oversold": 30, "rsi_overbought": 70,
-    "rsi_exit_long": 55, "rsi_exit_short": 45,
+    "bb_period": 20,
+    "bb_std": 2.0,
+    "rsi_period": 14,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "rsi_exit_long": 55,
+    "rsi_exit_short": 45,
     "bb_squeeze_min": 0.008,
-    "volume_ma": 20, "min_volume_mult": 0.8,
-    "sl_bb_mult": 0.5, "tp_midline": False,
+    "volume_ma": 20,
+    "min_volume_mult": 0.8,
+    "sl_bb_mult": 0.5,
+    "tp_midline": False,
     "tp_range_pct": 0.6,
     "lookback_candles": 100,
-    "trend_filter": True, "trend_ema_period": 200,
+    "trend_filter": True,
+    "trend_ema_period": 200,
     "range_lookback": 20,
     "max_range_pct": 0.06,
     "max_hold_candles": 4,
@@ -1470,44 +1529,143 @@ MEAN_REVERSION = {
 }
 
 MULTI_TF = {
-    "htf_timeframe": "1h", "mtf_timeframe": "15m", "ltf_timeframe": "5m",
-    "trend_ema": 200, "structure_fast": 9, "structure_slow": 21,
-    "entry_fast": 5, "entry_slow": 13,
-    "rsi_period": 14, "rsi_oversold": 35, "rsi_overbought": 65,
-    "adx_period": 14, "adx_min": 22,
-    "atr_period": 14, "atr_sl_mult": 1.5,
-    "target_rr_min": 1.2, "target_rr_max": 1.6,
-    "max_trades_per_day": 3, "lookback_candles": 250,
+    "htf_timeframe": "1h",
+    "mtf_timeframe": "15m",
+    "ltf_timeframe": "5m",
+    "trend_ema": 200,
+    "structure_fast": 9,
+    "structure_slow": 21,
+    "entry_fast": 5,
+    "entry_slow": 13,
+    "rsi_period": 14,
+    "rsi_oversold": 35,
+    "rsi_overbought": 65,
+    "adx_period": 14,
+    "adx_min": 22,
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,
+    "target_rr_min": 1.2,
+    "target_rr_max": 1.6,
+    "max_trades_per_day": 3,
+    "lookback_candles": 250,
     "vwap_pullback_pct": 0.002,
 }
 
+# ==============================================================
+# BREAKOUT STRATEGY PROFILES (research / backtest only — NOT wired
+# into the live Claude-Portfolio pipeline). All thresholds live here.
+# ==============================================================
+ASIAN_RANGE_BREAKOUT = {
+    "timeframe": "1h",
+    "lookback_candles": 250,
+    # Asian session window (UTC hours, inclusive) used to build the range.
+    "session_start_hour": 0,
+    "session_end_hour": 6,
+    # Entry buffer above/below the session range to avoid false pokes.
+    "breakout_buffer_pct": 0.0015,  # 0.15%
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,  # SL distance = ATR * mult
+    "rr": 2.0,  # reward:risk
+    "min_range_pct": 0.003,  # ignore degenerate flat sessions
+    "max_range_pct": 0.05,  # ignore blown-out sessions
+}
+
+DOW_SWING = {
+    "timeframe": "4h",
+    "lookback_candles": 250,
+    # Confirmed fractal pivots define swing structure.
+    "swing_left": 2,
+    "swing_right": 2,
+    "breakout_buffer_pct": 0.0010,  # 0.10% beyond the prior swing
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,
+    "rr": 2.0,
+    "trend_filter": True,
+    "trend_ema_period": 200,
+}
+
+BB_SQUEEZE = {
+    "timeframe": "1h",
+    "lookback_candles": 200,
+    "bb_period": 20,
+    "bb_std": 2.0,
+    "kc_period": 20,
+    "kc_mult": 1.5,
+    "breakout_buffer_pct": 0.0010,  # 0.10% beyond band on release
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,
+    "rr": 2.0,
+    "min_squeeze_bars": 6,  # require coiling before the release
+}
+
+SCALP_PROFILE = {
+    "timeframe": "15m",
+    "lookback_candles": 200,
+    "swing_left": 2,
+    "swing_right": 2,
+    "breakout_buffer_pct": 0.0008,  # 0.08%
+    "atr_period": 14,
+    "atr_sl_mult": 1.2,  # tighter stop for scalps
+    "rr": 1.5,
+    "max_hold_candles": 8,
+}
+
+# Pairs the breakout research profiles screen against.
+BREAKOUT_PAIRS = [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "BNB/USDT",
+    "XRP/USDT",
+]
+
 GRID_TRADING = {
     "timeframe": "1h",
-    "grid_levels": 8, "grid_spacing": 0.006,
+    "grid_levels": 8,
+    "grid_spacing": 0.006,
     "order_size_pct": 0.015,
-    "upper_offset": 0.04, "lower_offset": 0.04,
+    "upper_offset": 0.04,
+    "lower_offset": 0.04,
     "rebalance_after": 12,
-    "volatility_check": True, "atr_pause_pct": 0.03,
+    "volatility_check": True,
+    "atr_pause_pct": 0.03,
 }
 
 TREND_FOLLOWING = {
     "timeframe": "15m",
-    "fast_ema": 9, "slow_ema": 21, "trend_ema": 50,
-    "rsi_period": 14, "rsi_oversold": 30, "rsi_overbought": 70,
-    "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
-    "atr_period": 14, "atr_sl_mult": 2.5, "atr_tp_mult": 6.5,
-    "volume_ma": 20, "min_volume_mult": 1.0, "lookback_candles": 100,
+    "fast_ema": 9,
+    "slow_ema": 21,
+    "trend_ema": 50,
+    "rsi_period": 14,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "atr_period": 14,
+    "atr_sl_mult": 2.5,
+    "atr_tp_mult": 6.5,
+    "volume_ma": 20,
+    "min_volume_mult": 1.0,
+    "lookback_candles": 100,
 }
 
 SCALPING = {
     "timeframe": "1m",
-    "fast_ema": 5, "slow_ema": 13,
-    "rsi_period": 7, "rsi_oversold": 30, "rsi_overbought": 70,
-    "bb_period": 20, "bb_std": 2.0,
+    "fast_ema": 5,
+    "slow_ema": 13,
+    "rsi_period": 7,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "bb_period": 20,
+    "bb_std": 2.0,
     "volume_spike_mult": 1.5,
-    "orderbook_depth": 10, "imbalance_ratio": 1.3,
-    "min_spread_pct": 0.00005, "max_spread_pct": 0.003,
-    "stop_loss": 0.006, "take_profit": 0.015,
+    "orderbook_depth": 10,
+    "imbalance_ratio": 1.3,
+    "min_spread_pct": 0.00005,
+    "max_spread_pct": 0.003,
+    "stop_loss": 0.006,
+    "take_profit": 0.015,
     "lookback_candles": 50,
 }
 
@@ -1515,17 +1673,17 @@ SCALPING = {
 # NEWS MONITORING (24/7 Enhanced Scanner)
 # ==============================================================
 NEWS = {
-    "scan_interval_min":       30,    # Default scan interval (minutes)
-    "fast_scan_interval_min":  10,    # When volatility is high (F&G < 20 or > 80)
-    "max_headlines":           50,    # Max headlines to keep per scan
-    "breaking_news_alert":     True,  # Log breaking news at WARNING level
-    "sentiment_history_days":  7,     # Days of per-coin sentiment history to keep
+    "scan_interval_min": 30,  # Default scan interval (minutes)
+    "fast_scan_interval_min": 10,  # When volatility is high (F&G < 20 or > 80)
+    "max_headlines": 50,  # Max headlines to keep per scan
+    "breaking_news_alert": True,  # Log breaking news at WARNING level
+    "sentiment_history_days": 7,  # Days of per-coin sentiment history to keep
 }
 
 # ==============================================================
 # STRATEGY ENABLE FLAGS — only Trend Pullback + Range Mean Reversion active
 # ==============================================================
-ENABLE_DCA       = False
+ENABLE_DCA = False
 ENABLE_REBALANCE = False
 
 # ==============================================================
@@ -1571,13 +1729,13 @@ PARTIAL_TP = {
 # Complements the deterministic SPOT-PROTECT-V1 25%/40% peak-DD rules
 # with model-aware risk reduction. No-op when no spot model is promoted.
 SPOT_PROTECT_V2 = {
-    "enabled":      True,
+    "enabled": True,
     "drawdown_pct": 0.15,
-    "p_win_floor":  0.40,
+    "p_win_floor": 0.40,
 }
 
 SPOT_PORTFOLIO = {
-    "enabled":                  True,
+    "enabled": True,
     # 2026-05-01 (under-supervision readiness pass): flip to False so
     # SPOT-PROTECT-V1 (peak-DD half/full exits at -25%/-40%) actually
     # places SELL orders. Was True since 2026-04-14 learning-first pivot.
@@ -1586,13 +1744,13 @@ SPOT_PORTFOLIO = {
     # only sells what's already deeply drawn down — not hair-trigger.
     # Hedge_via_futures STAYS off (no perp overlay on spot DD).
     # Sell_on_structure_break STAYS off (we only act on peak-DD).
-    "recommendation_only":      False,
-    "scan_interval_min":        30,
-    "cost_basis_method":        "average",
-    "scale_out_threshold_pct":  0.20,
-    "sell_on_structure_break":  False,   # disabled — only peak-DD triggers exits
-    "hedge_via_futures":        False,   # disabled — no derivatives overlay
-    "hedge_drawdown_pct":       0.10,
+    "recommendation_only": False,
+    "scan_interval_min": 30,
+    "cost_basis_method": "average",
+    "scale_out_threshold_pct": 0.20,
+    "sell_on_structure_break": False,  # disabled — only peak-DD triggers exits
+    "hedge_via_futures": False,  # disabled — no derivatives overlay
+    "hedge_drawdown_pct": 0.10,
 }
 
 # ==============================================================
@@ -1610,24 +1768,24 @@ CAPITAL_ALLOCATION = {
     # threshold_usd 10.0 (won't sweep tiny amounts), max_transfer_pct
     # 0.20 (≤20% of futures wallet per cycle), min_transfer_usdt 5.0.
     # On a $400 wallet, max sweep per 15-min cycle is ~$80.
-    "enabled":                    True,
-    "recommendation_only":        False,  # real transfers (futures→spot)
-    "cycle_interval_min":         15,
+    "enabled": True,
+    "recommendation_only": False,  # real transfers (futures→spot)
+    "cycle_interval_min": 15,
     "accumulation_threshold_usd": 10.0,
-    "spot_targets":               {"BTC": 0.50, "ETH": 0.50},
-    "hedge_drawdown_pct":         0.10,
-    "max_transfer_pct":           0.20,
-    "min_transfer_usdt":          5.0,
-    "rebalance_threshold_pct":    0.60,
+    "spot_targets": {"BTC": 0.50, "ETH": 0.50},
+    "hedge_drawdown_pct": 0.10,
+    "max_transfer_pct": 0.20,
+    "min_transfer_usdt": 5.0,
+    "rebalance_threshold_pct": 0.60,
 }
 
 # ==============================================================
 # STRATEGY GATE — auto-disable underperformers
 # ==============================================================
 STRATEGY_GATE = {
-    "min_win_rate":          0.50,    # disable below 50% WR
-    "min_sample_size":       15,      # need 15+ trades before judging
-    "fee_alert_ratio":       0.20,    # alert if fees > 20% of gross profit
+    "min_win_rate": 0.50,  # disable below 50% WR
+    "min_sample_size": 15,  # need 15+ trades before judging
+    "fee_alert_ratio": 0.20,  # alert if fees > 20% of gross profit
     "auto_disable_fee_heavy": True,
 }
 
@@ -1635,10 +1793,10 @@ STRATEGY_GATE = {
 # SCALING CONDITIONS — scale risk only after proving edge
 # ==============================================================
 SCALING = {
-    "min_live_trades":        200,
-    "min_win_rate":           0.60,
+    "min_live_trades": 200,
+    "min_win_rate": 0.60,
     "max_drawdown_for_scale": 0.10,
-    "scale_factor":           1.5,
+    "scale_factor": 1.5,
 }
 
 # 2026-05-19 Patch #0 — Ghost-class reroute instrumentation (log-only).
@@ -1684,7 +1842,7 @@ MCP_TP_GRACE_SEC: int = 1800
 # routine bleed). Disable with DAILY_LOSS_BREAKER_ENABLED=false; tune with
 # DAILY_LOSS_BREAKER_PCT.
 DAILY_LOSS_BREAKER = {
-    "enabled":      os.getenv("DAILY_LOSS_BREAKER_ENABLED", "true").lower() == "true",
+    "enabled": os.getenv("DAILY_LOSS_BREAKER_ENABLED", "true").lower() == "true",
     "max_loss_pct": float(os.getenv("DAILY_LOSS_BREAKER_PCT", "0.02")),
 }
 
@@ -1695,8 +1853,8 @@ DAILY_LOSS_BREAKER = {
 # ==============================================================
 
 # Area 1 — Ghost path accuracy
-GHOST_LEDGER_WINDOW_H = 24       # was 6; widen to catch lagged ledger writes
-GHOST_PENDING_REQUEUE = True     # two-pass reconcile: ghost_sync upgrades on next sync
+GHOST_LEDGER_WINDOW_H = 24  # was 6; widen to catch lagged ledger writes
+GHOST_PENDING_REQUEUE = True  # two-pass reconcile: ghost_sync upgrades on next sync
 
 # Area 4 — Age-aware SL→breakeven tightening
 # 2026-05-24 — Raised min profit threshold from 0.0001 (essentially any
@@ -1705,11 +1863,11 @@ GHOST_PENDING_REQUEUE = True     # two-pass reconcile: ghost_sync upgrades on ne
 # wick-knocked at breakeven before reaching configured TP (1.8%).
 # Raising the floor lets each winner build a real cushion before its SL
 # gets ratcheted to entry.
-AGE_AWARE_SL_ENABLED      = True
-AGE_AWARE_SL_MIN_AGE_MIN  = 60   # fire at age >= 60 min
+AGE_AWARE_SL_ENABLED = True
+AGE_AWARE_SL_MIN_AGE_MIN = 60  # fire at age >= 60 min
 # Profit band [low, high). Was [0.0001, 0.02]; now [0.005, 0.02].
-AGE_AWARE_SL_MIN_PNL_FRAC = 0.005   # >= 0.5% (was 0.0001 — too aggressive)
-AGE_AWARE_SL_MAX_PNL_FRAC = 0.02    # < 2% (trailing stop owns above)
+AGE_AWARE_SL_MIN_PNL_FRAC = 0.005  # >= 0.5% (was 0.0001 — too aggressive)
+AGE_AWARE_SL_MAX_PNL_FRAC = 0.02  # < 2% (trailing stop owns above)
 
 # Area 5 — Deterministic small-TP capture
 # 2026-05-24 — DISABLED per realized-R diagnostic. Memory
@@ -1719,10 +1877,10 @@ AGE_AWARE_SL_MAX_PNL_FRAC = 0.02    # < 2% (trailing stop owns above)
 # pre-fix sample — 5× R loss. With this off, trades reach configured
 # TP via the normal order_manager.check_sl_tp path, restoring the
 # 1.2:1 R:R the SCALP tier was designed for.
-AUTO_SMALL_TP_ENABLED        = False
-AUTO_SMALL_TP_MIN_AGE_MIN    = 30   # fire at age >= 30 min (vestigial when disabled)
-AUTO_SMALL_TP_MIN_PNL_FRAC   = 0.01 # >= +1.0%
-AUTO_SMALL_TP_MAX_PNL_FRAC   = 0.02 # < +2% (trailing stop owns above)
+AUTO_SMALL_TP_ENABLED = False
+AUTO_SMALL_TP_MIN_AGE_MIN = 30  # fire at age >= 30 min (vestigial when disabled)
+AUTO_SMALL_TP_MIN_PNL_FRAC = 0.01  # >= +1.0%
+AUTO_SMALL_TP_MAX_PNL_FRAC = 0.02  # < +2% (trailing stop owns above)
 
 # ==============================================================
 # DATA FEEDS — External enrichment for MCP Brain scoring
@@ -1738,23 +1896,21 @@ AUTO_SMALL_TP_MAX_PNL_FRAC   = 0.02 # < +2% (trailing stop owns above)
 # ==============================================================
 DATA_FEEDS = {
     # ── Master switches ────────────────────────────────────────────
-    "funding_enabled":      True,
-    "oi_enabled":           True,
-    "orderbook_enabled":    True,
-    "news_enabled":         True,
-    "smart_money_enabled":  True,
-
+    "funding_enabled": True,
+    "oi_enabled": True,
+    "orderbook_enabled": True,
+    "news_enabled": True,
+    "smart_money_enabled": True,
     # ── Cache TTLs (seconds) ───────────────────────────────────────
     # Each feed refreshes independently at its own cadence.
     # Staleness threshold = TTL * staleness_multiplier.
-    "funding_ttl":          300,    # 5 min (FR settles 3x/day but predicted rate drifts)
-    "oi_ttl":               180,    # 3 min (OI updates every ~10s on Binance)
-    "orderbook_ttl":        60,     # 1 min (most volatile source)
-    "news_ttl":             600,    # 10 min (news doesn't move faster than this)
-    "smart_money_ttl":      900,    # 15 min (on-chain aggregate, slow-moving)
-    "staleness_multiplier": 2.0,    # >2x TTL = data marked stale, use neutral defaults
-    "max_workers":          5,      # ThreadPoolExecutor workers for parallel refresh
-
+    "funding_ttl": 300,  # 5 min (FR settles 3x/day but predicted rate drifts)
+    "oi_ttl": 180,  # 3 min (OI updates every ~10s on Binance)
+    "orderbook_ttl": 60,  # 1 min (most volatile source)
+    "news_ttl": 600,  # 10 min (news doesn't move faster than this)
+    "smart_money_ttl": 900,  # 15 min (on-chain aggregate, slow-moving)
+    "staleness_multiplier": 2.0,  # >2x TTL = data marked stale, use neutral defaults
+    "max_workers": 5,  # ThreadPoolExecutor workers for parallel refresh
     # ── Scoring weights (MCP Brain bonus points) ───────────────────
     # B11: Funding rate alignment bonus
     #   FR z-score aligns with proposed side (extreme neg FR + long = bonus)
@@ -1765,20 +1921,18 @@ DATA_FEEDS = {
     #   time-series funding IC mean -0.055, t=-3.70 (significantly negative).
     #   A +7 bonus on an anti-predictive signal was inflating live entry scores.
     #   Mechanism kept; re-enable only if a funding signal clears IR>=0.50.
-    "b11_funding_enabled":     False,
-    "b11_funding_points":      7,       # points awarded when FR aligns
-    "b11_fr_zscore_threshold": 1.5,     # |z| must exceed this to qualify
-
+    "b11_funding_enabled": False,
+    "b11_funding_points": 7,  # points awarded when FR aligns
+    "b11_fr_zscore_threshold": 1.5,  # |z| must exceed this to qualify
     # B12: OI-price divergence confirmation bonus
     #   "continuation" signal when entering WITH the trend
     # ⚠ DISABLED 2026-05-30: OI-divergence (H5 = sign(dPrice)*dOI) was finally
     #   screened on 28 syms x 100 daily bars (scripts/run_oi_edge_screen.py) and
     #   FAILED stage-1 by a wide margin (IR -0.06 @1d, -0.07 @3d vs the 0.50 bar;
     #   DSR~0). NO_EDGE. Removing the +8 stops noise from inflating entry scores.
-    "b12_oi_enabled":          False,
-    "b12_oi_points":           8,       # points for continuation signal
-    "b12_oi_conviction_min":   0.3,     # minimum conviction to award
-
+    "b12_oi_enabled": False,
+    "b12_oi_points": 8,  # points for continuation signal
+    "b12_oi_conviction_min": 0.3,  # minimum conviction to award
     # B13: Smart money alignment bonus
     #   Coin in top-20 smart money inflow AND proposed side = buy
     # ⚠ DISABLED 2026-05-30 (owner directive): UNSCREENABLE with available data —
@@ -1788,8 +1942,7 @@ DATA_FEEDS = {
     #   the unproven +5 bonus rather than let it gate entries ungated. Mechanism
     #   kept; to revisit, log the daily ranking forward ~60-90d then screen.
     "b13_smart_money_enabled": False,
-    "b13_smart_money_points":  5,       # points when smart money confirms
-
+    "b13_smart_money_points": 5,  # points when smart money confirms
     # ── VETO gates (block entry, not just reduce score) ────────────
     # V1: OI exhaustion veto — price up + OI down with high conviction
     #   Blocks LONG entries when the move is short-covering, not new money
@@ -1798,21 +1951,17 @@ DATA_FEEDS = {
     #   noise, not protection — and blocking longs on noise contradicts the
     #   owner's UNBLOCK_ALL stance. Cost/risk vetoes V2/V3 stay ON. (Re-enabling
     #   trades fewer/more is a turnover knob, not an edge — owner's call.)
-    "v1_oi_exhaustion_veto":           False,
+    "v1_oi_exhaustion_veto": False,
     "v1_oi_exhaustion_conviction_min": 0.5,
-
     # V2: News veto — negative-impact news on specific coin in last 2h
-    "v2_news_veto":                    True,
-
+    "v2_news_veto": True,
     # V3: Slippage veto — estimated slippage > threshold
-    "v3_slippage_veto":                True,
-    "v3_slippage_max_bps":             30.0,    # max 30 bps slippage
-
+    "v3_slippage_veto": True,
+    "v3_slippage_max_bps": 30.0,  # max 30 bps slippage
     # V4: Social FOMO veto — extreme hype + positive sentiment = crowded
     #   Reduces position size by multiplier rather than hard block
-    "v4_fomo_size_reduction":          True,
-    "v4_fomo_size_multiplier":         0.5,     # half size on FOMO signal
-
+    "v4_fomo_size_reduction": True,
+    "v4_fomo_size_multiplier": 0.5,  # half size on FOMO signal
     # ── B6 orderbook-imbalance bonus ───────────────────────────────
     # ⚠ DISABLED 2026-05-30 (owner directive): the B6 bonus (+7) rewards live
     #   L2 orderbook imbalance + funding direction. It is UNSCREENABLE — L2
@@ -1826,13 +1975,12 @@ DATA_FEEDS = {
     "b6_orderbook_enabled": False,
     # When B6 is on, `enhanced_b6_enabled` picks the enhanced orderbook feed
     # (imbalance momentum, depth ratio) over the basic Binance depth fetch.
-    "enhanced_b6_enabled":  True,
-    "enhanced_b6_points":   7,      # was 5 in legacy B6
-
+    "enhanced_b6_enabled": True,
+    "enhanced_b6_points": 7,  # was 5 in legacy B6
     # ── Short-side filter integration ──────────────────────────────
     # Short side uses STRICTER thresholds on data feed signals
-    "short_side_stricter_feeds":  True,
-    "short_fr_zscore_threshold":  1.0,  # lower bar = more shorts filtered
+    "short_side_stricter_feeds": True,
+    "short_fr_zscore_threshold": 1.0,  # lower bar = more shorts filtered
 }
 
 # Convenience: per-feed env-var overrides for operational toggling
