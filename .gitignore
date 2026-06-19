@@ -145,3 +145,12 @@ data/_*
 
 # Runtime trade journals (CLAUDE.md §4 action log) — artifacts, not source
 journal/
+
+# NautilusTrader rebuild (isolated subtree): venv + generated artifacts only
+ntrader/venv_nt/
+ntrader/catalog/
+ntrader/data/
+ntrader/reports/
+ntrader/**/__pycache__/
+ntrader/__pycache__/
+ntrader/.pytest_cache/

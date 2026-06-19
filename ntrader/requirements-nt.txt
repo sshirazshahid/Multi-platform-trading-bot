@@ -1,0 +1,6 @@
+# Isolated NautilusTrader rebuild — Phase 0+1.
+# Installed ONLY into nt/venv_nt (a separate venv), NEVER the bot's venv/.
+nautilus_trader==1.228.0
+pandas
+pyarrow
+numpy
