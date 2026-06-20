@@ -33,6 +33,29 @@ agents/MCP ship log-only and cannot be promoted to live without an honest leak-f
   test_close_hook_failure_does_not_lose_close (test_position_tracker.py).
 - Result: tests/ 1902 → 1914 passing (12 new), 0 regressions. Ruff clean on edits.
 
+## Phase 2 — edge validation (verified; code already shipped)
+- Found the honest gate ALREADY enforced: core/promotion_gate.py MIN_DSR=0.10,
+  MAX_PBO=0.5, MIN_OOS_WR=0.55, MIN_AUC=0.60. test_promotion_gate_honest.py
+  already rejects the exact PBO=1.0/DSR=0.0008 overfit profile (18 gate tests green).
+- Leak-check infra present + tested: core/walk_forward.py embargo+purge
+  (test_walk_forward_embargo.py, 13 green) and scripts/leak_check_embargo.py
+  (embargo >= 96-bar horizon). Cannot RE-RUN the retrain here: load_dataset needs
+  warehouse training data, and data/models/ is empty in this fresh clone (so the
+  gate auto-bypasses to rule-only — no overfit model is live).
+- Fixed stale config.py MODEL_GATE comment (still claimed gate loosened to
+  min_dsr=0.0/max_pbo=1.0). Now documents the resolved honest thresholds.
+- NET: nothing to promote (no edge, no model); honest gate guards future retrains.
+
+## Phase 3 — agent/MCP infra (shadow-first) — next
+## Phase 4 — research (futures+spot) — pending (needs live data / API keys)
+
+## Environment limits hit
+- No git remote ('origin') configured in sandbox → cannot push; commits are
+  local on branch harden/review-2026-06-20. User must attach a remote to push.
+- No exchange API keys + network egress allowlist → live OHLCV fetch, model
+  retrain, and live-data research/backtests cannot execute here (verified offline
+  via synthetic/mock data instead).
+
 ---
 
 # Task: UNBLOCK ALL trades — edge-opinion gates to soft sizing (2026-06-11) — shipped

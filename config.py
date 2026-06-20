@@ -294,13 +294,18 @@ MODEL_GATE = {
     # logged but didn't gate.
     # 2026-05-01 (stop-bleed plan): flipped to FALSE. The live ensemble
     # (reported AUC 0.76 / OOS WR 70.7% at p>=0.55) is now the entry authority.
-    # ⚠ HONESTY CAVEAT (2026-05-30 audit): the currently-promoted bundle
-    # (data/models/ensemble_futures_latest.json) reports PBO=1.0 (100% backtest-
-    # overfit probability) and deflated_sharpe≈0.0008 — it only promoted because
-    # the train_models gates were loosened to min_dsr=0.0 / max_pbo=1.0. AUC 0.76
-    # does NOT establish out-of-sample edge at PBO=1.0; this is consistent with
-    # the project-wide NO_EDGE record. Treat this as an UNPROVEN gate, not edge.
-    # Demote to logged-only with MODEL_GATE_SHADOW=true.
+    # ⚠ HISTORY (2026-05-30 audit): an earlier bundle promoted with PBO=1.0 and
+    # deflated_sharpe≈0.0008 only because the train_models gates were loosened to
+    # min_dsr=0.0 / max_pbo=1.0 — an UNPROVEN gate, not edge, consistent with the
+    # project-wide NO_EDGE record.
+    # RESOLVED (2026-06-20): the honest thresholds are now enforced in
+    # core/promotion_gate.py (MIN_DSR=0.10, MAX_PBO=0.5, MIN_OOS_WR=0.55,
+    # MIN_AUC=0.60); a model with that overfit profile is now REJECTED (see
+    # tests/test_promotion_gate_honest.py). No model bundle ships in data/models/,
+    # so the gate auto-bypasses to the rule-only path until an honest model is
+    # trained. Re-running the leak-check (scripts/leak_check_embargo.py, embargo
+    # >= 96-bar label horizon) requires warehouse training data. To force
+    # logged-only behaviour regardless, set MODEL_GATE_SHADOW=true.
     # Candidates with p_win_ensemble < threshold_futures (0.55) are
     # blocked at core/mcp_brain.py:~2509-2526. When no model bundle is
     # loaded (fresh install / artifact missing) the gate auto-bypasses
