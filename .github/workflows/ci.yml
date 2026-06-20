@@ -198,6 +198,45 @@ jobs:
           path: htmlcov/
           retention-days: 7
 
+  research-labs:
+    name: Research labs (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The labs + data_io + MCP warehouse reader are stdlib-only by design;
+      # only pytest (+ ruff for lint) is needed. Scope ruff to the new modules
+      # because some pre-existing research/ files are not yet ruff-clean.
+      - name: Install tools
+        run: pip install pytest "ruff==0.9.6"
+
+      - name: Ruff check (research labs + mcp_server)
+        run: >
+          ruff check
+          research/dca_rebalance_lab.py research/funding_carry_lab.py
+          research/data_io.py research/run_spot_study.py mcp_server/
+
+      - name: Ruff format check (research labs + mcp_server)
+        run: >
+          ruff format --check
+          research/dca_rebalance_lab.py research/funding_carry_lab.py
+          research/data_io.py research/run_spot_study.py mcp_server/
+
+      - name: Test research labs + data_io + MCP reader
+        run: >
+          python -m pytest
+          tests/test_dca_rebalance_lab.py
+          tests/test_funding_carry_lab.py
+          tests/test_data_io.py
+          tests/test_trading_bot_mcp.py
+          tests/test_research_labs_realdata.py
+          -v
+
   security:
     name: Security
     runs-on: ubuntu-latest

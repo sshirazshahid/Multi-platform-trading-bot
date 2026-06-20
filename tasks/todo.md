@@ -1,3 +1,110 @@
+# Task: Full review + harden + extend (2026-06-20) — in progress
+
+Branch: `harden/review-2026-06-20`. Bot stays PAPER. Plan: Foundation → Edge validation
+→ Agent/MCP (shadow-first) → Research. Honesty guardrail: no edge is measured; new
+agents/MCP ship log-only and cannot be promoted to live without an honest leak-free gate.
+
+## Phase 0 — baseline (done)
+- Deps were uninstalled in sandbox; installed requirements.txt + pytest/ruff/pyarrow +
+  skill deps (jsonschema/pyyaml/scipy). `pip` works (PyPI reachable).
+- BASELINE test results (pre-change):
+  * `tests/` (bot): 1902 passed, 0 failed (after pyarrow install).
+  * full root (skills+bot): 2504 passed, 17 skipped, 1 failed.
+  * The 1 root failure = `skills/ftd-detector/.../test_fmp_client.py` — ENVIRONMENTAL
+    (network egress blocks financialmodelingprep.com, 403 host-not-in-allowlist). Not a
+    code bug; out of scope (equity skill, live API). Leave as-is.
+- Conclusion: suite is healthy; it simply had never been run here (missing deps). The
+  "make sure everything is tested and working" ask is largely satisfied by Phase 0.
+
+## Phase 1 — foundation (done)
+- [x] Backtest engine: original `timeframe` kwarg bug already resolved in current
+  code; the real remaining break was `auto_backtest.py` (dead `_make_strategy`
+  import + stale `OrderManager(exchanges=,dry_run=)` signature + `result.sharpe`).
+  Fixed all three with a local strategy factory; added 7 regression tests
+  (test_strategies_smoke.py) running all 6 strategies on a mock exchange.
+- [x] Spec §12 doc/code drift: all nine loss-driven halts were removed 2026-05-27
+  (replaced by soft daily-loss breaker). Rewrote the stale CLAUDE.md gotcha to
+  match; added test_five_global_losses_do_not_halt (test_risk_pauses.py).
+- [x] SL placement naked-exposure: `_sl_failed` was set but never read. Added
+  `OrderManager._reconcile_missing_sl` (re-attempts exchange SL each monitor
+  cycle, throttled 60s, clears flag on success) + wired into check_sl_tp; 4 tests.
+- [x] Wiring verification: confirmed close path → on_close → _finalize_close
+  (bot_engine.py:113). Added test_close_fires_on_close_hook +
+  test_close_hook_failure_does_not_lose_close (test_position_tracker.py).
+- Result: tests/ 1902 → 1914 passing (12 new), 0 regressions. Ruff clean on edits.
+
+## Phase 2 — edge validation (verified; code already shipped)
+- Found the honest gate ALREADY enforced: core/promotion_gate.py MIN_DSR=0.10,
+  MAX_PBO=0.5, MIN_OOS_WR=0.55, MIN_AUC=0.60. test_promotion_gate_honest.py
+  already rejects the exact PBO=1.0/DSR=0.0008 overfit profile (18 gate tests green).
+- Leak-check infra present + tested: core/walk_forward.py embargo+purge
+  (test_walk_forward_embargo.py, 13 green) and scripts/leak_check_embargo.py
+  (embargo >= 96-bar horizon). Cannot RE-RUN the retrain here: load_dataset needs
+  warehouse training data, and data/models/ is empty in this fresh clone (so the
+  gate auto-bypasses to rule-only — no overfit model is live).
+- Fixed stale config.py MODEL_GATE comment (still claimed gate loosened to
+  min_dsr=0.0/max_pbo=1.0). Now documents the resolved honest thresholds.
+- NET: nothing to promote (no edge, no model); honest gate guards future retrains.
+
+## Phase 3 — agent/MCP infra (shadow-first) — done
+- Multi-agent shadow ensemble ALREADY wired: core/shadow_runner.py builds
+  Trend/Scalp/MeanReversion/Pattern/Liquidity + RiskAgent + ExecutionAgent via
+  AgentCoordinator, writes warehouse.shadow_decisions, places NO orders, gated
+  by SHADOW_MODE_ENABLED. No rebuild needed.
+- NEW: read-only MCP server (mcp_server/) — trading_bot_mcp.py (FastMCP, stdio,
+  6 tools: list_tables, recent_trades, performance_summary, recent_candidates,
+  shadow_vs_live, query). Pure data layer warehouse_reader.py (no mcp dep);
+  opens warehouse mode=ro; freeform query guarded to single SELECT. Registered
+  via .mcp.json. 17 tests (test_trading_bot_mcp.py). Verified: 6 tools list,
+  read-only, graceful "warehouse not found" on fresh clone.
+- Documented shadow->live promotion criterion in CLAUDE.md + MCP README: agents
+  & MCP stay log-only; promote only after beating live on the honest gate.
+- Honesty: built as the user asked, but log-only — cannot degrade paper PnL and
+  cannot be promoted on a no-edge signal.
+- Full suite: 1933 passing, 0 failures.
+
+## Phase 4 — research (futures+spot) — done (offline scope)
+- Verified spot_manager + capital_allocator instantiate cleanly and ARE wired
+  into bot_engine (212-222) — no signature-drift bug like auto_backtest had.
+- Verified research harnesses import OK: strategy_lab, run_research,
+  portfolio_scanner, run_confluence_paper. Backtest engine proven on synthetic.
+- Could NOT run live pair discovery / strategy backtests: no API keys + network
+  egress restricted in sandbox. Per CLAUDE.md §5, did NOT fabricate edge.
+- Wrote research/pair_and_strategy_roadmap_2026_06_20.md: consolidated NO_EDGE
+  evidence + a runnable roadmap (new pairs to screen via discover_all, futures
+  + spot strategies to test, exact commands, honest after-cost exit criteria).
+
+# REVIEW (2026-06-20 session)
+- Branch harden/review-2026-06-20, 4 commits, bot stays PAPER throughout.
+- Tests: baseline 1902 -> 1933 passing (+31 new), 0 regressions, 0 failures.
+- Real bugs fixed: auto_backtest.py dead (3 bugs) -> works; _sl_failed never
+  read -> reconciliation hook re-protects naked positions; 2 stale docs (Spec
+  §12 halt, MODEL_GATE caveat) reconciled to code.
+- New: read-only MCP server (6 tools) for interrogating the bot's reasoning.
+- Honesty held: no live flip, no leverage re-enable, no overfit-model promotion;
+  agents/MCP are log-only and gated. The headline finding stands — NO measured
+  edge; profitability cannot be promised, only foundation + honest validation.
+- BLOCKER: no git remote in sandbox -> could not push. Commits are local on the
+  branch; attach origin to push. No API keys -> live data work deferred (roadmap).
+
+## Deep research (5-angle, ~50 sources) — appended to roadmap doc
+- External evidence independently CORROBORATES the internal NO_EDGE record:
+  retail algo edge rare (16/22 real-fee strategies lost; 5-7% profitable at 5yr);
+  directional ML OOS AUC ~0.55-0.65 not 0.76; leak-check is textbook-correct
+  (embargo >= label horizon, DSR, CPCV); LLM/agent layers add cost+variance, no
+  durable edge (validates log-only); only market-neutral/cost-aware edges have
+  support (funding carry, DCA + threshold rebalancing). See research/
+  pair_and_strategy_roadmap_2026_06_20.md §6 for citations + finalized roadmap.
+
+## Environment limits hit
+- No git remote ('origin') configured in sandbox → cannot push; commits are
+  local on branch harden/review-2026-06-20. User must attach a remote to push.
+- No exchange API keys + network egress allowlist → live OHLCV fetch, model
+  retrain, and live-data research/backtests cannot execute here (verified offline
+  via synthetic/mock data instead).
+
+---
+
 # Task: UNBLOCK ALL trades — edge-opinion gates to soft sizing (2026-06-11) — shipped
 
 ## Review (follow-up to symbols unblock; user saw "[EV] BLOCKED ... Phase 27" + said

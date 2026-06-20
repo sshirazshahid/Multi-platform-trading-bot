@@ -1389,6 +1389,46 @@ class OrderManager:
                 f"[Orders] Replace-SL re-place failed for {pos.symbol}: "
                 f"{str(e)[:150]}")
 
+    def _reconcile_missing_sl(self, exchange: BaseExchange, pos: Position) -> bool:
+        """Re-establish a missing exchange-side SL on a live futures position.
+
+        2026-06-20: ``_sl_failed`` was set at placement (see
+        ``_place_exchange_sl_tp`` fail-closed path) but never read again — a
+        position whose SL placement failed (and whose fail-closed market-close
+        also failed, leaving it open) survived only on the slower polled-SL
+        checks in ``check_sl_tp`` and never regained exchange-side protection.
+        This re-attempts placement once per minute per position. Local polled
+        SL still guards the position in the meantime, so this only *restores*
+        the always-on, wick-accurate exchange stop; it is not the sole rail.
+
+        Returns True when the position has (or regains) exchange-side SL.
+        """
+        if self.dry_run or getattr(pos, "market_type", None) != "futures":
+            return True
+        if not getattr(pos, "_sl_failed", False):
+            return True
+        if getattr(pos, "_exchange_sl", False):
+            pos._sl_failed = False  # already protected; clear the stale flag
+            return True
+        import time as _t
+        if _t.time() - getattr(pos, "_sl_retry_ts", 0.0) < 60:
+            return False  # throttle: don't hammer the venue every cycle
+        pos._sl_retry_ts = _t.time()
+        logger.warning(
+            f"[Orders] SL reconcile: re-attempting exchange SL for "
+            f"{pos.symbol} {pos.id[:8]} (naked since placement failure)")
+        try:
+            self._replace_exchange_sl(exchange, pos)
+        except Exception as e:
+            logger.error(
+                f"[Orders] SL reconcile failed for {pos.symbol}: {str(e)[:120]}")
+        if getattr(pos, "_exchange_sl", False):
+            pos._sl_failed = False
+            logger.info(
+                f"[Orders] SL reconcile OK: exchange SL restored for {pos.symbol}")
+            return True
+        return False
+
     # ── Close position ────────────────────────────────────────────────
 
     def partial_close_position(self, exchange: BaseExchange, position: Position,
@@ -2259,6 +2299,12 @@ class OrderManager:
             if not price:
                 continue
             price = float(price)
+
+            # ── SL reconciliation (2026-06-20) ──
+            # Restore exchange-side SL if a prior placement failed and left the
+            # position relying only on polled monitoring. No-op in paper / spot
+            # and when the SL is already attached.
+            self._reconcile_missing_sl(exchange, pos)
 
             # ── DRY_RUN realism: intrabar wick SL/TP (2026-04-11) ──
             # LIVE exchange-side SL/TP orders trigger on wick price (high/low

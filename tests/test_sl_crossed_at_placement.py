@@ -208,3 +208,66 @@ def test_unknown_sl_error_still_fail_closed_emergency(om):
                              pos.side, pos.symbol, pos.size, pos.market_type)
     # Unknown error → original fail-closed reason, not the downgraded one
     assert captured.get("reason") == "sl_placement_failed"
+
+
+# ── 7. SL reconciliation: re-establish a missing exchange SL (2026-06-20) ──
+
+
+def test_reconcile_restores_exchange_sl(om):
+    """A position left with _sl_failed=True must regain exchange-side SL on the
+    next monitor pass (the flag was previously set but never read/cleared)."""
+    ex = _make_exchange("Bybit", last=100.0)
+    pos = _make_position(om, side="buy", entry=101.0, sl=95.0, tp=110.0)
+    pos._sl_failed = True
+    pos._exchange_sl = False
+
+    def fake_replace(exchange, position):
+        position._exchange_sl = True  # simulate a successful re-placement
+
+    om._replace_exchange_sl = fake_replace
+    assert om._reconcile_missing_sl(ex, pos) is True
+    assert pos._sl_failed is False
+    assert pos._exchange_sl is True
+
+
+def test_reconcile_throttles_repeat_attempts(om):
+    """Reconciliation must not hammer the venue: a second call within the
+    throttle window does not re-attempt placement."""
+    import time
+    ex = _make_exchange("Bybit", last=100.0)
+    pos = _make_position(om, side="buy", entry=101.0, sl=95.0, tp=110.0)
+    pos._sl_failed = True
+    pos._exchange_sl = False
+    pos._sl_retry_ts = time.time()  # a retry just happened
+
+    calls = {"n": 0}
+    om._replace_exchange_sl = lambda e, p: calls.__setitem__("n", calls["n"] + 1)
+    assert om._reconcile_missing_sl(ex, pos) is False
+    assert calls["n"] == 0  # throttled — no re-attempt
+
+
+def test_reconcile_noop_when_already_protected(om):
+    """When the SL is healthy, reconciliation is a no-op and clears any stale
+    flag without touching the exchange."""
+    ex = _make_exchange("Bybit", last=100.0)
+    pos = _make_position(om, side="buy", entry=101.0, sl=95.0, tp=110.0)
+    pos._sl_failed = True
+    pos._exchange_sl = True  # already attached
+    calls = {"n": 0}
+    om._replace_exchange_sl = lambda e, p: calls.__setitem__("n", calls["n"] + 1)
+    assert om._reconcile_missing_sl(ex, pos) is True
+    assert pos._sl_failed is False
+    assert calls["n"] == 0
+
+
+def test_reconcile_noop_in_paper(om):
+    """Paper mode has no exchange orders to reconcile."""
+    ex = _make_exchange("Bybit", last=100.0)
+    pos = _make_position(om, side="buy", entry=101.0, sl=95.0, tp=110.0)
+    pos._sl_failed = True
+    pos._exchange_sl = False
+    om.dry_run = True
+    calls = {"n": 0}
+    om._replace_exchange_sl = lambda e, p: calls.__setitem__("n", calls["n"] + 1)
+    assert om._reconcile_missing_sl(ex, pos) is True
+    assert calls["n"] == 0
