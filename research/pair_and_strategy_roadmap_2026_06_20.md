@@ -138,3 +138,33 @@ A web research pass (~50 sources, adversarially checked) independently
    directional LLM prediction.
 6. Stay PAPER until 1–4 produce after-cost OOS edge. Expect null — that is a
    valid result.
+
+## 7. Live market snapshot (2026-06-20, via MCP)
+
+Pulled from live data (Crypto.com perps; CoinDesk funding/OI was unavailable —
+shared API key over monthly quota / hard-blocked, so live carry is unquantified
+here and must be run with the bot's own exchange keys).
+
+**Broad bear + chop, ~18-20% drawdown over 30 days:**
+
+| Asset | 2026-05-20 | 2026-06-20 | 30-day |
+|-------|-----------|-----------|--------|
+| BTC   | $77,487   | $63,360   | −18.2% |
+| ETH   | $2,128    | $1,713    | −19.5% |
+| SOL   | $86.09    | $70.94    | −17.6% |
+
+Path: sharp dump early June (BTC −6.5% Jun 1→2), then choppy range mid-late June.
+Daily moves 3–6% (elevated vol). BTC OI ~6.1k contracts on Crypto.com perp.
+
+**What the live regime implies for the plan (reinforces, does not change it):**
+- A long-biased / directional bot SHOULD be flat-to-defensive now; fighting a
+  −18% tape with longs is exactly the bleed the audits measured. TSMOM long-only
+  correctly emits no long signal here (capital-preservation) — good.
+- The bear+chop favors the planned pivots: (a) **delta-neutral funding carry**
+  (P3) is regime-agnostic and should be the futures focus; (b) **spot DCA /
+  accumulation** (P4) is at its best in a drawdown — this is a textbook lower-
+  cost-basis accumulation window, NOT a window to add directional leverage.
+- Elevated vol + chop means the universe Kaufman-efficiency gate will (correctly)
+  reject many pairs; widen stops, do not scalp into costs.
+- Action: keep PAPER; do not re-enable leverage or shorts into chop; run the
+  funding-carry screen with real keys to quantify live carry before any capital.
