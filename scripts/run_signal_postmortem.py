@@ -36,7 +36,7 @@ WAREHOUSE_PATH = Path("data/warehouse.sqlite")
 # Flag thresholds — a row that meets ANY of these produces an actionable.
 ACTIONABLE_MIN_TRADES = 5
 ACTIONABLE_WR_FLOOR_PCT = 35.0
-ACTIONABLE_PNL_FLOOR    = -3.0
+ACTIONABLE_PNL_FLOOR = -3.0
 
 
 def _load_trades(db: Path, lookback_days: int) -> list[dict]:
@@ -93,14 +93,14 @@ def _summarise(trades: list[dict], key_fn) -> list[dict]:
 
 def build_report(trades: list[dict], lookback_days: int) -> dict:
     by_symbol = _summarise(trades, lambda t: t.get("symbol"))
-    by_side   = _summarise(trades, lambda t: (t.get("side") or "").lower() or None)
-    by_exit   = _summarise(trades, lambda t: t.get("exit_reason"))
-    by_score  = _summarise(trades, lambda t: _bucket_score(t.get("mcp_score")))
-    by_hour   = _summarise(
+    by_side = _summarise(trades, lambda t: (t.get("side") or "").lower() or None)
+    by_exit = _summarise(trades, lambda t: t.get("exit_reason"))
+    by_score = _summarise(trades, lambda t: _bucket_score(t.get("mcp_score")))
+    by_hour = _summarise(
         trades,
-        lambda t: int(datetime.fromtimestamp(t.get("ts_entry") or 0,
-                                             tz=timezone.utc).hour)
-        if t.get("ts_entry") else None,
+        lambda t: int(datetime.fromtimestamp(t.get("ts_entry") or 0, tz=timezone.utc).hour)
+        if t.get("ts_entry")
+        else None,
     )
 
     actionables: list[dict] = []
@@ -111,40 +111,44 @@ def build_report(trades: list[dict], lookback_days: int) -> dict:
         ("exit_reason", by_exit, "key"),
     ):
         for r in rows:
-            if (r["n"] >= ACTIONABLE_MIN_TRADES
-                    and r["wr_pct"] < ACTIONABLE_WR_FLOOR_PCT
-                    and r["pnl"] < ACTIONABLE_PNL_FLOOR):
-                actionables.append({
-                    "group": grp_name,
-                    "key":   r[key],
-                    "n":     r["n"],
-                    "wr_pct": r["wr_pct"],
-                    "pnl":   r["pnl"],
-                })
+            if (
+                r["n"] >= ACTIONABLE_MIN_TRADES
+                and r["wr_pct"] < ACTIONABLE_WR_FLOOR_PCT
+                and r["pnl"] < ACTIONABLE_PNL_FLOOR
+            ):
+                actionables.append(
+                    {
+                        "group": grp_name,
+                        "key": r[key],
+                        "n": r["n"],
+                        "wr_pct": r["wr_pct"],
+                        "pnl": r["pnl"],
+                    }
+                )
     actionables.sort(key=lambda r: r["pnl"])
 
     total_pnl = round(sum(float(t.get("realized_pnl") or 0) for t in trades), 4)
     wins = sum(1 for t in trades if (t.get("realized_pnl") or 0) > 0)
 
     return {
-        "schema_version":  "1.0",
-        "generated_at":    datetime.now(timezone.utc).isoformat(),
-        "lookback_days":   lookback_days,
-        "trade_count":     len(trades),
-        "wr_pct":          round(100.0 * wins / max(1, len(trades)), 2),
-        "net_pnl":         total_pnl,
-        "by_symbol":       by_symbol,
-        "by_side":         by_side,
-        "by_exit_reason":  by_exit,
+        "schema_version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "lookback_days": lookback_days,
+        "trade_count": len(trades),
+        "wr_pct": round(100.0 * wins / max(1, len(trades)), 2),
+        "net_pnl": total_pnl,
+        "by_symbol": by_symbol,
+        "by_side": by_side,
+        "by_exit_reason": by_exit,
         "by_score_bucket": by_score,
-        "by_hour_utc":     by_hour,
-        "actionables":     actionables,
+        "by_hour_utc": by_hour,
+        "actionables": actionables,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db",  default="data/warehouse.sqlite", type=Path)
+    ap.add_argument("--db", default="data/warehouse.sqlite", type=Path)
     ap.add_argument("--out", default="reports", type=Path)
     ap.add_argument("--lookback-days", default=7, type=int)
     args = ap.parse_args()

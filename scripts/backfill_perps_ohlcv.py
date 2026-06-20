@@ -19,6 +19,7 @@ Usage:
     python scripts/backfill_perps_ohlcv.py --timeframes 1h --days 200
     python scripts/backfill_perps_ohlcv.py --list-only     # show listings, no fetch
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,8 +37,13 @@ from core.feature_store import load_ohlcv_window  # noqa: E402
 
 def _make_fetcher(client):
     def _fetch(symbol, timeframe, since_ms, limit):
-        return client.exchange.fetch_ohlcv(
-            symbol, timeframe, since=int(since_ms), limit=int(limit), params={}) or []
+        return (
+            client.exchange.fetch_ohlcv(
+                symbol, timeframe, since=int(since_ms), limit=int(limit), params={}
+            )
+            or []
+        )
+
     return _fetch
 
 
@@ -46,8 +52,13 @@ def _connected_clients() -> dict:
     from exchanges.binance_client import BinanceClient
     from exchanges.bitget_client import BitgetClient
     from exchanges.bybit_client import BybitClient
+
     out = {}
-    for name, ctor in (("binance", BinanceClient), ("bybit", BybitClient), ("bitget", BitgetClient)):
+    for name, ctor in (
+        ("binance", BinanceClient),
+        ("bybit", BybitClient),
+        ("bitget", BitgetClient),
+    ):
         try:
             c = ctor()
             if getattr(c, "_connected", False):
@@ -79,7 +90,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--timeframes", nargs="+", default=["1d", "4h", "1h"])
     ap.add_argument("--days", type=float, default=420.0)
-    ap.add_argument("--throttle", type=float, default=0.6, help="inter-call sleep (s) — protect the live bot")
+    ap.add_argument(
+        "--throttle", type=float, default=0.6, help="inter-call sleep (s) — protect the live bot"
+    )
     ap.add_argument("--list-only", action="store_true")
     args = ap.parse_args()
 
@@ -119,7 +132,9 @@ def main() -> int:
         print(f"  {base:<8} via {src:<8} " + "  ".join(f"{tf}={per[tf]}" for tf in args.timeframes))
 
     print(f"\nDONE. {grand:,} total bars cached -> data/ohlcv_cache/<BASE>-USDTUSDT_<tf>.parquet")
-    print("These are research-only (hard-blocked from live entry). Screen later once history is deep enough.")
+    print(
+        "These are research-only (hard-blocked from live entry). Screen later once history is deep enough."
+    )
     return 0
 
 

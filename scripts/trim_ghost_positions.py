@@ -43,6 +43,7 @@ Usage
     python scripts/trim_ghost_positions.py --commit --force   # ignore
                                                        # heartbeat
 """
+
 from __future__ import annotations
 
 import argparse
@@ -57,12 +58,14 @@ POS_PATH = ROOT / "data" / "positions.json"
 HB_PATH = ROOT / "data" / "heartbeat.json"
 
 # Reasons whose rows are STRUCTURAL noise, not real trades.
-GHOST_REASONS = frozenset({
-    "ghost_sync",
-    "ghost_reconciled",
-    "reconciled_no_context",
-    "paper_ghost_cleanup",
-})
+GHOST_REASONS = frozenset(
+    {
+        "ghost_sync",
+        "ghost_reconciled",
+        "reconciled_no_context",
+        "paper_ghost_cleanup",
+    }
+)
 
 
 def heartbeat_age_seconds() -> float | None:
@@ -79,10 +82,8 @@ def heartbeat_age_seconds() -> float | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Apply the trim (default is dry-run).")
-    ap.add_argument("--force", action="store_true",
-                    help="Bypass the live-bot heartbeat guard.")
+    ap.add_argument("--commit", action="store_true", help="Apply the trim (default is dry-run).")
+    ap.add_argument("--force", action="store_true", help="Bypass the live-bot heartbeat guard.")
     args = ap.parse_args()
 
     if not POS_PATH.exists():
@@ -146,8 +147,7 @@ def main() -> int:
     # If a backup with today's date already exists (re-run same day),
     # add a unix-second suffix so we don't clobber the first one.
     if backup_path.exists():
-        backup_path = POS_PATH.with_suffix(
-            f".json.bak.{today}-{int(time.time())}")
+        backup_path = POS_PATH.with_suffix(f".json.bak.{today}-{int(time.time())}")
     backup_path.write_bytes(POS_PATH.read_bytes())
     print()
     print(f"Backup written: {backup_path}")

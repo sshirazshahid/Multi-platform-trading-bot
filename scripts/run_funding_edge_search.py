@@ -12,6 +12,7 @@ No look-ahead: everything is indexed by the 8h funding-settlement boundary t.
 - fwd_ret(h)  = open[t+h]/open[t] - 1   (strictly future).
 - Carry PnL   = funding realized in (t, t+1] = funding[t+1] (future settle).
 """
+
 from __future__ import annotations
 
 import sys
@@ -72,11 +73,18 @@ def fetch(ex, symbols):
         if len(fr) < 60 or len(oh) < 60:
             print(f"  skip {sym}: thin (fr={len(fr)}, oh={len(oh)})")
             continue
-        f = pd.Series({pd.Timestamp(r["timestamp"], unit="ms", tz="UTC").floor("8h"):
-                       float(r["fundingRate"]) for r in fr})
+        f = pd.Series(
+            {
+                pd.Timestamp(r["timestamp"], unit="ms", tz="UTC").floor("8h"): float(
+                    r["fundingRate"]
+                )
+                for r in fr
+            }
+        )
         # price at boundary t = the 8h bar OPEN at t
-        p = pd.Series({pd.Timestamp(o[0], unit="ms", tz="UTC").floor("8h"): float(o[1])
-                       for o in oh})
+        p = pd.Series(
+            {pd.Timestamp(o[0], unit="ms", tz="UTC").floor("8h"): float(o[1]) for o in oh}
+        )
         fund[sym], price[sym] = f[~f.index.duplicated()], p[~p.index.duplicated()]
         if ex.enableRateLimit:
             time.sleep(ex.rateLimit / 1000)
@@ -124,7 +132,9 @@ def eval_signal(name, signal, sign, P, h, oos, n_trials):
     half = r.size // 2
     both_halves_pos = bool(r.iloc[:half].mean() > 0 and r.iloc[half:].mean() > 0)
     return {
-        "name": name, "h": h, "n_oos": int(r.size),
+        "name": name,
+        "h": h,
+        "n_oos": int(r.size),
         "sharpe_net": float(sharpe(r.to_numpy())),
         "mean_net": float(r.mean()),
         "dsr": dsr_for_returns(r, n_trials=n_trials),
@@ -143,26 +153,37 @@ def carry_eval(F, P, oos, n_trials):
     Fi, pri, fni = F.iloc[oos], pr.iloc[oos], f_next.iloc[oos]
     out = []
     for t in range(len(Fi)):
-        fr_row, pr_row, fn_row = Fi.iloc[t].to_numpy(), pri.iloc[t].to_numpy(), fni.iloc[t].to_numpy()
+        fr_row, pr_row, fn_row = (
+            Fi.iloc[t].to_numpy(),
+            pri.iloc[t].to_numpy(),
+            fni.iloc[t].to_numpy(),
+        )
         m = np.isfinite(fr_row) & np.isfinite(pr_row) & np.isfinite(fn_row)
         n = int(m.sum())
         if n < 10:
-            out.append(np.nan); continue
+            out.append(np.nan)
+            continue
         idx = np.where(m)[0]
         order = idx[np.argsort(fr_row[idx])]  # ascending funding
         k = max(1, int(round(n * QUANTILE)))
         longs, shorts = order[:k], order[-k:]  # long low-funding, short high-funding
         price_pnl = pr_row[longs].mean() - pr_row[shorts].mean()
-        carry_pnl = fn_row[shorts].mean() - fn_row[longs].mean()  # receive on shorts (high +funding)
+        carry_pnl = (
+            fn_row[shorts].mean() - fn_row[longs].mean()
+        )  # receive on shorts (high +funding)
         out.append(price_pnl + carry_pnl - cost)
     r = pd.Series(out, index=Fi.index).dropna()
     if r.size < 4:
         return None
     half = r.size // 2
     return {
-        "name": "H4_carry", "h": 1, "n_oos": int(r.size),
-        "sharpe_net": float(sharpe(r.to_numpy())), "mean_net": float(r.mean()),
-        "dsr": dsr_for_returns(r, n_trials=n_trials), "pval": sharpe_pvalue(r),
+        "name": "H4_carry",
+        "h": 1,
+        "n_oos": int(r.size),
+        "sharpe_net": float(sharpe(r.to_numpy())),
+        "mean_net": float(r.mean()),
+        "dsr": dsr_for_returns(r, n_trials=n_trials),
+        "pval": sharpe_pvalue(r),
         "both_halves_pos": bool(r.iloc[:half].mean() > 0 and r.iloc[half:].mean() > 0),
         "ls_net": r,
     }
@@ -173,19 +194,20 @@ def main():
     syms = universe()
     print(f"universe: {len(syms)} symbols; fetching {DAYS}d funding + 8h OHLCV...")
     F, P = fetch(ex, syms)
-    print(f"usable panel: {F.shape[0]} bars x {F.shape[1]} symbols "
-          f"({F.index[0]} -> {F.index[-1]})")
+    print(f"usable panel: {F.shape[0]} bars x {F.shape[1]} symbols ({F.index[0]} -> {F.index[-1]})")
     if F.shape[1] < 10 or F.shape[0] < 60:
-        print("INSUFFICIENT DATA — abort."); return
+        print("INSUFFICIENT DATA — abort.")
+        return
     if not verify_timestamps(ex, F.columns[0], F):
-        print("FUNDING TIMESTAMP ALIGNMENT FAILED — abort (look-ahead risk)."); return
+        print("FUNDING TIMESTAMP ALIGNMENT FAILED — abort (look-ahead risk).")
+        return
 
     recent_ret = P / P.shift(1) - 1.0
     # pre-registered features (direction baked in; pass sign=+1, no sign-snoop)
     feats = {
-        "H1_reversal":   (-F, 1.0),                      # long low funding
-        "H2_momentum":   (F.diff(), 1.0),                # long rising funding
-        "H3_divergence": (F * recent_ret, 1.0),          # long funding/price-aligned
+        "H1_reversal": (-F, 1.0),  # long low funding
+        "H2_momentum": (F.diff(), 1.0),  # long rising funding
+        "H3_divergence": (F * recent_ret, 1.0),  # long funding/price-aligned
     }
     horizons = list(HORIZONS.values())
     n_trials = len(feats) * len(horizons) + 1  # +1 for carry
@@ -210,7 +232,8 @@ def main():
     _, oos_sl = split(F.index, SPLIT_FRAC, 1)
     carry = carry_eval(F, P, oos_sl, n_trials)
     if carry:
-        carry["ir_is"] = float("nan"); carry["passes_s1"] = True  # carry is not an IC test
+        carry["ir_is"] = float("nan")
+        carry["passes_s1"] = True  # carry is not an IC test
         results.append(carry)
         ls_by_key["H4_carry_1"] = carry["ls_net"]
 
@@ -219,26 +242,37 @@ def main():
     fdr_flags = fdr_bh(pvals, q=FDR_Q)
 
     print("\n" + "=" * 100)
-    print(f"{'signal':16} {'h':>3} {'IR_is':>7} {'S1':>3} {'Shrp_net':>9} "
-          f"{'mean_net':>10} {'DSR':>6} {'pval':>6} {'2halves':>8} {'FDR':>4}")
+    print(
+        f"{'signal':16} {'h':>3} {'IR_is':>7} {'S1':>3} {'Shrp_net':>9} "
+        f"{'mean_net':>10} {'DSR':>6} {'pval':>6} {'2halves':>8} {'FDR':>4}"
+    )
     print("-" * 100)
     for r, fdr in zip(results, fdr_flags):
-        print(f"{r['name']:16} {r['h']:>3} {r['ir_is']:>7.3f} "
-              f"{'Y' if r['passes_s1'] else 'n':>3} {r['sharpe_net']:>9.3f} "
-              f"{r['mean_net']:>10.5f} {r['dsr']:>6.3f} {r['pval']:>6.3f} "
-              f"{'Y' if r['both_halves_pos'] else 'n':>8} {'Y' if fdr else 'n':>4}")
+        print(
+            f"{r['name']:16} {r['h']:>3} {r['ir_is']:>7.3f} "
+            f"{'Y' if r['passes_s1'] else 'n':>3} {r['sharpe_net']:>9.3f} "
+            f"{r['mean_net']:>10.5f} {r['dsr']:>6.3f} {r['pval']:>6.3f} "
+            f"{'Y' if r['both_halves_pos'] else 'n':>8} {'Y' if fdr else 'n':>4}"
+        )
     print("-" * 100)
-    print(f"PBO (8 partitions, {len(ls_by_key)} signals): {pbo_val:.3f}  "
-          f"(gate <= {PBO_MAX})   n_trials(DSR)={n_trials}")
+    print(
+        f"PBO (8 partitions, {len(ls_by_key)} signals): {pbo_val:.3f}  "
+        f"(gate <= {PBO_MAX})   n_trials(DSR)={n_trials}"
+    )
 
     # verdict per frozen gates
     promoted = []
     for r, fdr in zip(results, fdr_flags):
-        inherited = (r["passes_s1"] and r["dsr"] >= DSR_MIN_INHERITED
-                     and pbo_val <= PBO_MAX and fdr and r["mean_net"] > 0)
+        inherited = (
+            r["passes_s1"]
+            and r["dsr"] >= DSR_MIN_INHERITED
+            and pbo_val <= PBO_MAX
+            and fdr
+            and r["mean_net"] > 0
+        )
         promote = inherited and r["dsr"] >= DSR_MIN_PROMOTE and r["both_halves_pos"]
         if promote:
-            promoted.append(f"{r['name']}@{r['h']*8}h")
+            promoted.append(f"{r['name']}@{r['h'] * 8}h")
     print("=" * 100)
     if promoted:
         print(f"CANDIDATE(S) (need further OOS/paper-forward): {promoted}")
@@ -246,8 +280,10 @@ def main():
         print("VERDICT: NO_EDGE — no hypothesis cleared the frozen gates.")
         ic_irs = [r["ir_is"] for r in results if not np.isnan(r.get("ir_is", np.nan))]
         best = max(ic_irs) if ic_irs else float("nan")
-        print(f"  best stage-1 signed IR among IC signals = {best:.3f} (gate {IR_MIN}); "
-              "carry net-of-cost mean < 0.")
+        print(
+            f"  best stage-1 signed IR among IC signals = {best:.3f} (gate {IR_MIN}); "
+            "carry net-of-cost mean < 0."
+        )
 
 
 if __name__ == "__main__":

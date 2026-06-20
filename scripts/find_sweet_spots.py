@@ -12,6 +12,7 @@ Dimensions: hour-of-day (UTC), side, base, mcp_score bucket, strategy_family,
 hold-time bucket. Metric: per-trade realized PnL (USD), win-rate, count.
 Output: reports/sweet_spots_<date>.md  (durable record). Run anytime; safe + read-only.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -23,17 +24,19 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-MIN_N = 8            # min trades in a slice to even consider it (both halves)
-IS_FRAC = 0.60       # chronological in-sample fraction
+MIN_N = 8  # min trades in a slice to even consider it (both halves)
+IS_FRAC = 0.60  # chronological in-sample fraction
 
 
 def _load():
     con = sqlite3.connect(str(ROOT / "data" / "warehouse.sqlite"))
     cur = con.cursor()
-    q = ("SELECT ts_entry, symbol, side, strategy_family, realized_pnl, r_multiple, "
-         "hold_sec, mcp_score, exit_reason FROM trades "
-         "WHERE mode='PAPER' AND status='CLOSED' AND realized_pnl IS NOT NULL "
-         "ORDER BY ts_entry")
+    q = (
+        "SELECT ts_entry, symbol, side, strategy_family, realized_pnl, r_multiple, "
+        "hold_sec, mcp_score, exit_reason FROM trades "
+        "WHERE mode='PAPER' AND status='CLOSED' AND realized_pnl IS NOT NULL "
+        "ORDER BY ts_entry"
+    )
     out = []
     for ts, sym, side, fam, pnl, r, hold, score, exitr in cur.execute(q):
         try:
@@ -42,14 +45,19 @@ def _load():
                 tsf /= 1000.0
         except (TypeError, ValueError):
             continue
-        out.append({
-            "ts": tsf, "base": str(sym).split("/")[0].split(":")[0],
-            "side": (side or "?").lower(), "fam": fam or "?",
-            "pnl": float(pnl), "r": (float(r) if r is not None else None),
-            "hold": (float(hold) if hold is not None else None),
-            "score": (float(score) if score is not None else None),
-            "hour": datetime.fromtimestamp(tsf, timezone.utc).hour,
-        })
+        out.append(
+            {
+                "ts": tsf,
+                "base": str(sym).split("/")[0].split(":")[0],
+                "side": (side or "?").lower(),
+                "fam": fam or "?",
+                "pnl": float(pnl),
+                "r": (float(r) if r is not None else None),
+                "hold": (float(hold) if hold is not None else None),
+                "score": (float(score) if score is not None else None),
+                "hour": datetime.fromtimestamp(tsf, timezone.utc).hour,
+            }
+        )
     return out
 
 
@@ -138,48 +146,72 @@ def main() -> int:
             holds = is_sweet and on >= MIN_N and oavg > 0
             rows.append((v, isn, iswr, isavg, on, owr, oavg, is_sweet, holds))
             if is_sweet:
-                rec = {"dimension": name, "value": v, "is_n": isn, "is_wr": round(iswr, 1),
-                       "is_avg_pnl": round(isavg, 4), "oos_n": on, "oos_wr": round(owr, 1),
-                       "oos_avg_pnl": round(oavg, 4)}
+                rec = {
+                    "dimension": name,
+                    "value": v,
+                    "is_n": isn,
+                    "is_wr": round(iswr, 1),
+                    "is_avg_pnl": round(isavg, 4),
+                    "oos_n": on,
+                    "oos_wr": round(owr, 1),
+                    "oos_avg_pnl": round(oavg, 4),
+                }
                 (held if holds else washed).append(rec)
         dim_tables.append((name, rows))
 
     # ---- report ----
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    L = [f"# Trading 'Sweet Spots' — conditional performance ({now})", "",
-         "_Anti-data-mining: candidates are found IN-SAMPLE (older 60%) and only count if "
-         "they ALSO hold OUT-OF-SAMPLE (newer 40%). On a no-edge sample, in-sample slices that "
-         "look good are usually noise; an honest sweet spot must survive OOS._", "",
-         "_Scope caveat (audit #4/#15): this conditions on the bot's OWN executed trades, so it "
-         "can only attribute which TAKEN trades did better — it cannot discover an edge in "
-         "untaken conditions. 'Held' = positive in BOTH halves (sign agreement only), NOT a "
-         "significance test; treat any survivor as a weak hypothesis, never go-live evidence._", "",
-         f"**Sample:** {base_n} closed PAPER trades | overall WR {base_wr:.0f}% | "
-         f"avg PnL ${base_avg:+.3f}/trade  (IS {is_n}@{is_wr:.0f}%/${is_avg:+.3f}, "
-         f"OOS {oos_n}@{oos_wr:.0f}%/${oos_avg:+.3f})", "",
-         f"## Verdict: {len(held)} sweet spot(s) HELD out-of-sample, {len(washed)} washed out", ""]
+    L = [
+        f"# Trading 'Sweet Spots' — conditional performance ({now})",
+        "",
+        "_Anti-data-mining: candidates are found IN-SAMPLE (older 60%) and only count if "
+        "they ALSO hold OUT-OF-SAMPLE (newer 40%). On a no-edge sample, in-sample slices that "
+        "look good are usually noise; an honest sweet spot must survive OOS._",
+        "",
+        "_Scope caveat (audit #4/#15): this conditions on the bot's OWN executed trades, so it "
+        "can only attribute which TAKEN trades did better — it cannot discover an edge in "
+        "untaken conditions. 'Held' = positive in BOTH halves (sign agreement only), NOT a "
+        "significance test; treat any survivor as a weak hypothesis, never go-live evidence._",
+        "",
+        f"**Sample:** {base_n} closed PAPER trades | overall WR {base_wr:.0f}% | "
+        f"avg PnL ${base_avg:+.3f}/trade  (IS {is_n}@{is_wr:.0f}%/${is_avg:+.3f}, "
+        f"OOS {oos_n}@{oos_wr:.0f}%/${oos_avg:+.3f})",
+        "",
+        f"## Verdict: {len(held)} sweet spot(s) HELD out-of-sample, {len(washed)} washed out",
+        "",
+    ]
 
     if held:
         L.append("### ✅ Held in BOTH halves (candidates — still need more data to trust)")
-        L += ["| dimension | value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t |",
-              "|---|---|---|---|---|---|---|---|"]
+        L += [
+            "| dimension | value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
         for r in held:
-            L.append(f"| {r['dimension']} | {r['value']} | {r['is_n']} | {r['is_wr']}% | "
-                     f"${r['is_avg_pnl']:+.3f} | {r['oos_n']} | {r['oos_wr']}% | ${r['oos_avg_pnl']:+.3f} |")
+            L.append(
+                f"| {r['dimension']} | {r['value']} | {r['is_n']} | {r['is_wr']}% | "
+                f"${r['is_avg_pnl']:+.3f} | {r['oos_n']} | {r['oos_wr']}% | ${r['oos_avg_pnl']:+.3f} |"
+            )
         L.append("")
     else:
         L.append("### No in-sample sweet spot survived out-of-sample.")
-        L.append("_This is the expected, honest result in a no-edge regime: the good-looking "
-                 "in-sample slices were data-mining noise, not durable conditions._")
+        L.append(
+            "_This is the expected, honest result in a no-edge regime: the good-looking "
+            "in-sample slices were data-mining noise, not durable conditions._"
+        )
         L.append("")
 
     if washed:
         L.append("### ⚠ Looked good in-sample, FAILED out-of-sample (do NOT trade these — overfit)")
-        L += ["| dimension | value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t |",
-              "|---|---|---|---|---|---|---|---|"]
+        L += [
+            "| dimension | value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
         for r in sorted(washed, key=lambda x: x["is_avg_pnl"], reverse=True)[:15]:
-            L.append(f"| {r['dimension']} | {r['value']} | {r['is_n']} | {r['is_wr']}% | "
-                     f"${r['is_avg_pnl']:+.3f} | {r['oos_n']} | {r['oos_wr']}% | ${r['oos_avg_pnl']:+.3f} |")
+            L.append(
+                f"| {r['dimension']} | {r['value']} | {r['is_n']} | {r['is_wr']}% | "
+                f"${r['is_avg_pnl']:+.3f} | {r['oos_n']} | {r['oos_wr']}% | ${r['oos_avg_pnl']:+.3f} |"
+            )
         L.append("")
 
     L.append("## Full per-dimension breakdown (in-sample, slices with n>=%d)" % MIN_N)
@@ -187,18 +219,24 @@ def main() -> int:
         if not rows:
             continue
         L.append(f"### {name}")
-        L += ["| value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t | flag |",
-              "|---|---|---|---|---|---|---|---|"]
+        L += [
+            "| value | IS n | IS WR | IS $/t | OOS n | OOS WR | OOS $/t | flag |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
         for v, isn, iswr, isavg, on, owr, oavg, sweet, holds in rows:
             flag = "HELD" if holds else ("overfit" if sweet else "")
-            L.append(f"| {v} | {isn} | {iswr:.0f}% | ${isavg:+.3f} | {on} | {owr:.0f}% | "
-                     f"${oavg:+.3f} | {flag} |")
+            L.append(
+                f"| {v} | {isn} | {iswr:.0f}% | ${isavg:+.3f} | {on} | {owr:.0f}% | "
+                f"${oavg:+.3f} | {flag} |"
+            )
         L.append("")
 
     L.append("---")
-    L.append("_Recorded by scripts/find_sweet_spots.py. Descriptive backward-looking analysis "
-             "of realized PnL by condition — NOT a forward trade signal. 'Held' candidates are "
-             "hypotheses on small samples, not validated edges; re-check as trade count grows._")
+    L.append(
+        "_Recorded by scripts/find_sweet_spots.py. Descriptive backward-looking analysis "
+        "of realized PnL by condition — NOT a forward trade signal. 'Held' candidates are "
+        "hypotheses on small samples, not validated edges; re-check as trade count grows._"
+    )
 
     out = ROOT / "reports" / f"sweet_spots_{date.today().isoformat()}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -208,8 +246,10 @@ def main() -> int:
     print(f"Sample: {base_n} closed PAPER trades | WR {base_wr:.0f}% | ${base_avg:+.3f}/trade")
     print(f"VERDICT: {len(held)} held out-of-sample, {len(washed)} washed out (overfit)")
     for r in held:
-        print(f"  HELD: {r['dimension']}={r['value']}  IS {r['is_n']}@{r['is_wr']}%/${r['is_avg_pnl']:+.3f}"
-              f"  OOS {r['oos_n']}@{r['oos_wr']}%/${r['oos_avg_pnl']:+.3f}")
+        print(
+            f"  HELD: {r['dimension']}={r['value']}  IS {r['is_n']}@{r['is_wr']}%/${r['is_avg_pnl']:+.3f}"
+            f"  OOS {r['oos_n']}@{r['oos_wr']}%/${r['oos_avg_pnl']:+.3f}"
+        )
     print(f"\nFull record: {out}")
     return 0
 

@@ -31,6 +31,7 @@ Usage:
     python scripts/backfill_warehouse_closes.py            # preview (dry run)
     python scripts/backfill_warehouse_closes.py --commit   # apply updates
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,13 +69,13 @@ def _open_log(p: Path):
     if p.suffix == ".zip":
         import io
         import zipfile
+
         try:
             with zipfile.ZipFile(p) as zf:
                 # Each daily zip contains one log file; iterate inner members
                 for name in zf.namelist():
                     with zf.open(name) as raw:
-                        yield from io.TextIOWrapper(raw, encoding="utf-8",
-                                                   errors="replace")
+                        yield from io.TextIOWrapper(raw, encoding="utf-8", errors="replace")
         except (zipfile.BadZipFile, OSError):
             return
     else:
@@ -100,18 +101,20 @@ def parse_close_events(log_files: list[Path]) -> list[dict]:
             if not m:
                 continue
             try:
-                events.append({
-                    "ts": _parse_log_ts(m.group("ts")),
-                    "symbol": m.group("symbol"),
-                    "gross_pnl": float(m.group("gross")),
-                    "fees": float(m.group("fees")),
-                    "realized_pnl": float(m.group("net")),
-                    "reason": m.group("reason").strip(),
-                    "log_file": str(p.name),
-                    "exchange": None,
-                    "side": None,
-                    "source": "log",
-                })
+                events.append(
+                    {
+                        "ts": _parse_log_ts(m.group("ts")),
+                        "symbol": m.group("symbol"),
+                        "gross_pnl": float(m.group("gross")),
+                        "fees": float(m.group("fees")),
+                        "realized_pnl": float(m.group("net")),
+                        "reason": m.group("reason").strip(),
+                        "log_file": str(p.name),
+                        "exchange": None,
+                        "side": None,
+                        "source": "log",
+                    }
+                )
             except (ValueError, AttributeError):
                 continue
     events.sort(key=lambda e: e["ts"])
@@ -127,6 +130,7 @@ def parse_close_events_from_positions_json(path: Path) -> list[dict]:
     `close_time` floats — a more durable source for backfilling older leaks.
     """
     import json
+
     events: list[dict] = []
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
@@ -143,18 +147,20 @@ def parse_close_events_from_positions_json(path: Path) -> list[dict]:
         if ct is None or sym is None:
             continue
         try:
-            events.append({
-                "ts": float(ct),
-                "symbol": str(sym),
-                "gross_pnl": float(c.get("gross_pnl") or 0.0),
-                "fees": float(c.get("total_fees") or 0.0),
-                "realized_pnl": float(c.get("pnl") or 0.0),
-                "reason": str(c.get("close_reason") or "reconciled_from_positions_json"),
-                "log_file": "positions.json",
-                "exchange": str(c.get("exchange") or "").lower() or None,
-                "side": (str(c.get("side")).lower() if c.get("side") else None),
-                "source": "positions_json",
-            })
+            events.append(
+                {
+                    "ts": float(ct),
+                    "symbol": str(sym),
+                    "gross_pnl": float(c.get("gross_pnl") or 0.0),
+                    "fees": float(c.get("total_fees") or 0.0),
+                    "realized_pnl": float(c.get("pnl") or 0.0),
+                    "reason": str(c.get("close_reason") or "reconciled_from_positions_json"),
+                    "log_file": "positions.json",
+                    "exchange": str(c.get("exchange") or "").lower() or None,
+                    "side": (str(c.get("side")).lower() if c.get("side") else None),
+                    "source": "positions_json",
+                }
+            )
         except (ValueError, TypeError):
             continue
     events.sort(key=lambda e: e["ts"])
@@ -162,8 +168,11 @@ def parse_close_events_from_positions_json(path: Path) -> list[dict]:
 
 
 def find_match(
-    open_row: dict, events: list[dict], used: set[int],
-    *, max_hold_sec: int = 24 * 3600,
+    open_row: dict,
+    events: list[dict],
+    used: set[int],
+    *,
+    max_hold_sec: int = 24 * 3600,
 ) -> int | None:
     """Return the index into `events` that best matches an OPEN warehouse row.
 
@@ -201,19 +210,22 @@ def find_match(
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
-        "--commit", action="store_true",
+        "--commit",
+        action="store_true",
         help="Actually UPDATE the warehouse. Default is dry-run (preview).",
     )
     ap.add_argument(
-        "--max-hold-hours", type=float, default=24.0,
-        help="Max acceptable hold duration to consider a close a match. "
-             "Defaults to 24h.",
+        "--max-hold-hours",
+        type=float,
+        default=24.0,
+        help="Max acceptable hold duration to consider a close a match. Defaults to 24h.",
     )
     ap.add_argument(
-        "--force-ambiguous", action="store_true",
+        "--force-ambiguous",
+        action="store_true",
         help="Also commit matches for symbols with >1 OPEN row. These are "
-             "FIFO-by-time pairings that may misassign side/exchange because "
-             "the close log line carries neither. Default: skip them.",
+        "FIFO-by-time pairings that may misassign side/exchange because "
+        "the close log line carries neither. Default: skip them.",
     )
     args = ap.parse_args()
 
@@ -253,9 +265,11 @@ def main() -> int:
     # event. 12h is comfortably longer than the MCP monitor's hold window
     # and the freqtrade AgeFilter cutoff.
     import time as _time
+
     min_age_cutoff = _time.time() - 12 * 3600
     open_rows = [
-        dict(r) for r in conn.execute(
+        dict(r)
+        for r in conn.execute(
             "SELECT id, ts_entry, exchange, symbol, side, mode "
             "FROM trades WHERE status='OPEN' AND ts_entry < ? "
             "ORDER BY ts_entry ASC",
@@ -278,6 +292,7 @@ def main() -> int:
     # a separate "ambiguous" bucket that is NOT committed unless the
     # operator passes --force-ambiguous.
     from collections import Counter
+
     _sym_counts = Counter(r["symbol"] for r in open_rows)
     _ambiguous_syms = {s for s, c in _sym_counts.items() if c > 1}
 
@@ -303,40 +318,49 @@ def main() -> int:
     print()
     if matches:
         print("matched (will UPDATE on --commit):")
-        print("  {:>5}  {:<24}  {:<7}  {:<26}  {:>10}  {:<24}".format(
-            "id", "symbol", "side", "open_time", "net_pnl", "reason"))
+        print(
+            "  {:>5}  {:<24}  {:<7}  {:<26}  {:>10}  {:<24}".format(
+                "id", "symbol", "side", "open_time", "net_pnl", "reason"
+            )
+        )
         for row, ev in matches[:50]:
-            ot = datetime.fromtimestamp(
-                float(row["ts_entry"]), tz=timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%SZ")
-            print("  {:>5}  {:<24}  {:<7}  {:<26}  {:>+10.4f}  {:<24}".format(
-                row["id"], row["symbol"], row["side"], ot,
-                ev["realized_pnl"], ev["reason"][:24]))
+            ot = datetime.fromtimestamp(float(row["ts_entry"]), tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%SZ"
+            )
+            print(
+                "  {:>5}  {:<24}  {:<7}  {:<26}  {:>+10.4f}  {:<24}".format(
+                    row["id"], row["symbol"], row["side"], ot, ev["realized_pnl"], ev["reason"][:24]
+                )
+            )
         if len(matches) > 50:
             print(f"  ... and {len(matches) - 50} more")
     if unmatched:
         print()
         print(f"unmatched OPEN rows ({len(unmatched)}) — leave as-is:")
         for row in unmatched[:20]:
-            ot = datetime.fromtimestamp(
-                float(row["ts_entry"]), tz=timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%SZ")
+            ot = datetime.fromtimestamp(float(row["ts_entry"]), tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%SZ"
+            )
             print(f"  id={row['id']:>5}  {row['symbol']:<24}  {row['side']:<7}  {ot}")
         if len(unmatched) > 20:
             print(f"  ... and {len(unmatched) - 20} more")
 
     if ambiguous:
         print()
-        print(f"AMBIGUOUS matches ({len(ambiguous)}) — symbol has >1 OPEN "
-              f"row; close log lacks side/exchange so FIFO pairing may "
-              f"misassign. {'WILL commit (--force-ambiguous)' if args.force_ambiguous else 'SKIPPED — re-run with --force-ambiguous to apply'}:")
+        print(
+            f"AMBIGUOUS matches ({len(ambiguous)}) — symbol has >1 OPEN "
+            f"row; close log lacks side/exchange so FIFO pairing may "
+            f"misassign. {'WILL commit (--force-ambiguous)' if args.force_ambiguous else 'SKIPPED — re-run with --force-ambiguous to apply'}:"
+        )
         for row, ev in ambiguous[:20]:
-            ot = datetime.fromtimestamp(
-                float(row["ts_entry"]), tz=timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%SZ")
-            print(f"  id={row['id']:>5}  {row['symbol']:<24}  "
-                  f"{row['side']:<7}  {row.get('exchange','?'):<8}  {ot}  "
-                  f"net={ev['realized_pnl']:+.4f}")
+            ot = datetime.fromtimestamp(float(row["ts_entry"]), tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%SZ"
+            )
+            print(
+                f"  id={row['id']:>5}  {row['symbol']:<24}  "
+                f"{row['side']:<7}  {row.get('exchange', '?'):<8}  {ot}  "
+                f"net={ev['realized_pnl']:+.4f}"
+            )
         if len(ambiguous) > 20:
             print(f"  ... and {len(ambiguous) - 20} more")
         if args.force_ambiguous:
@@ -364,8 +388,7 @@ def main() -> int:
                 "  ts_exit=?, realized_pnl=?, exit_reason=?, "
                 "  fee=COALESCE(fee, ?), hold_sec=?, status='CLOSED' "
                 "WHERE id=? AND status='OPEN'",
-                (ts_exit, ev["realized_pnl"], ev["reason"],
-                 ev["fees"], hold_sec, row["id"]),
+                (ts_exit, ev["realized_pnl"], ev["reason"], ev["fees"], hold_sec, row["id"]),
             )
             n_applied += 1
         except sqlite3.Error as e:

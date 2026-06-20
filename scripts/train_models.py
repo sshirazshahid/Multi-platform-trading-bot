@@ -23,6 +23,7 @@ Usage:
   python scripts/train_models.py --quick                   # n_splits=3
   python scripts/train_models.py --no-save                 # evaluate only
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,6 +86,7 @@ GBM_LR_GRID = [0.03, 0.08]
 # Data loading
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _coerce(v) -> float:
     if v is None:
         return 0.0
@@ -109,11 +111,12 @@ def _effective_embargo(requested: int, label_horizon: int) -> int:
 def _load_label_horizon(market: str, default: int = 96) -> int:
     """Largest label_horizon_bars for this market from the warehouse labels."""
     import sqlite3
+
     try:
         c = sqlite3.connect("data/warehouse.sqlite")
         row = c.execute(
-            "SELECT MAX(label_horizon_bars) FROM labels WHERE market_type=?",
-            (market,)).fetchone()
+            "SELECT MAX(label_horizon_bars) FROM labels WHERE market_type=?", (market,)
+        ).fetchone()
         c.close()
         return int(row[0]) if row and row[0] else default
     except Exception:
@@ -175,6 +178,7 @@ def load_dataset(market_type: str, warehouse=None):
 # Walk-forward driver (model-agnostic via build_model factory)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _walk_forward_oos(X, y, *, n_splits: int, embargo_bars: int, build_model):
     """Anchored walk-forward CV. Returns (oos_proba, fold_metrics, fold_pnl_matrix).
 
@@ -191,9 +195,14 @@ def _walk_forward_oos(X, y, *, n_splits: int, embargo_bars: int, build_model):
 
     for fold_i, (train_idx, test_idx) in enumerate(wf.split(X)):
         if len(train_idx) < 12 or len(test_idx) < 4:
-            folds.append({"fold": fold_i, "skipped": True,
-                          "train_n": int(len(train_idx)),
-                          "test_n": int(len(test_idx))})
+            folds.append(
+                {
+                    "fold": fold_i,
+                    "skipped": True,
+                    "train_n": int(len(train_idx)),
+                    "test_n": int(len(test_idx)),
+                }
+            )
             continue
         try:
             m = build_model().fit(X[train_idx], y[train_idx])
@@ -211,18 +220,22 @@ def _walk_forward_oos(X, y, *, n_splits: int, embargo_bars: int, build_model):
         # Paper-PnL for the threshold = +1 win / -1 loss on each test row.
         pnl = np.where(y[test_idx] == 1, 1.0, -1.0)
         fold_pnl.append(pnl[(p >= 0.5)])  # decisions at the median, used by PBO
-        folds.append({
-            "fold": fold_i, "skipped": False,
-            "train_n": int(len(train_idx)),
-            "test_n": int(len(test_idx)),
-            "auc": auc, "brier": brier,
-        })
+        folds.append(
+            {
+                "fold": fold_i,
+                "skipped": False,
+                "train_n": int(len(train_idx)),
+                "test_n": int(len(test_idx)),
+                "auc": auc,
+                "brier": brier,
+            }
+        )
 
     if fold_pnl:
         max_n = max(len(p) for p in fold_pnl) or 1
         mat = np.full((len(fold_pnl), max_n), np.nan)
         for i, p in enumerate(fold_pnl):
-            mat[i, :len(p)] = p
+            mat[i, : len(p)] = p
     else:
         mat = np.zeros((0, 0))
     return oos, folds, mat
@@ -231,6 +244,7 @@ def _walk_forward_oos(X, y, *, n_splits: int, embargo_bars: int, build_model):
 def _summarise(y, oos_proba, *, n_trials: int):
     """OOS metrics across all folds + Deflated Sharpe at τ=0.55."""
     from sklearn.metrics import brier_score_loss, roc_auc_score
+
     if not oos_proba:
         return {"n_oos": 0}
     idx = sorted(oos_proba.keys())
@@ -257,19 +271,22 @@ def _summarise(y, oos_proba, *, n_trials: int):
             out["paper_sharpe_ci95"] = (float(lo), float(hi))
         except Exception:
             pass
-    out["deflated_sharpe"] = float(deflated_sharpe(
-        sr_observed=out["paper_sharpe_at_0_55"],
-        n_trials=int(n_trials),
-        n_obs=max(2, int(paper.size)),
-        # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
-        sr_var=1.0 / max(2, int(paper.size)),
-    ))
+    out["deflated_sharpe"] = float(
+        deflated_sharpe(
+            sr_observed=out["paper_sharpe_at_0_55"],
+            n_trials=int(n_trials),
+            n_obs=max(2, int(paper.size)),
+            # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
+            sr_var=1.0 / max(2, int(paper.size)),
+        )
+    )
     return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ensemble weights
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _ensemble_weights(p_lr: np.ndarray, p_gbm: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     """Constrained least squares: minimize ||w_lr * p_lr + w_gbm * p_gbm - y||^2
@@ -293,8 +310,16 @@ def _ensemble_weights(p_lr: np.ndarray, p_gbm: np.ndarray, y: np.ndarray) -> tup
 # Main per-market trainer
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
-                     no_save: bool, auto_promote: bool = False):
+
+def train_one_market(
+    market: str,
+    *,
+    tag: str,
+    n_splits: int,
+    embargo_bars: int,
+    no_save: bool,
+    auto_promote: bool = False,
+):
     print("=" * 72)
     print(f"TRAIN — market={market} tag={tag}")
     print("=" * 72)
@@ -310,13 +335,17 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     _embargo_in = embargo_bars
     embargo_bars = _effective_embargo(embargo_bars, _horizon)
     if embargo_bars != _embargo_in:
-        print(f"embargo clamped {_embargo_in} -> {embargo_bars} "
-              f"(label horizon={_horizon}) to prevent CV leakage")
+        print(
+            f"embargo clamped {_embargo_in} -> {embargo_bars} "
+            f"(label horizon={_horizon}) to prevent CV leakage"
+        )
     n_pos = int(y.sum())
     n_neg = int(n_total - n_pos)
     print(f"data source: {source}")
-    print(f"dataset: n={n_total}, wins={n_pos} ({n_pos/n_total:.1%}), "
-          f"losses={n_neg} ({n_neg/n_total:.1%})")
+    print(
+        f"dataset: n={n_total}, wins={n_pos} ({n_pos / n_total:.1%}), "
+        f"losses={n_neg} ({n_neg / n_total:.1%})"
+    )
     if n_total < 30:
         print("ABORT: < 30 rows. Cannot fit reliably.")
         return None
@@ -326,7 +355,10 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     best_lr = None  # (C, oos, summary, fold_pnl)
     for C in LR_C_GRID:
         oos, _folds, mat = _walk_forward_oos(
-            X, y, n_splits=n_splits, embargo_bars=embargo_bars,
+            X,
+            y,
+            n_splits=n_splits,
+            embargo_bars=embargo_bars,
             build_model=lambda C=C: LRModel(C=C),
         )
         s = _summarise(y, oos, n_trials=len(LR_C_GRID))
@@ -346,7 +378,10 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     best_gbm = None
     for lr in GBM_LR_GRID:
         oos, _folds, mat = _walk_forward_oos(
-            X, y, n_splits=n_splits, embargo_bars=embargo_bars,
+            X,
+            y,
+            n_splits=n_splits,
+            embargo_bars=embargo_bars,
             build_model=lambda lr=lr: GBMModel(learning_rate=lr, max_iter=200),
         )
         s = _summarise(y, oos, n_trials=len(GBM_LR_GRID))
@@ -380,11 +415,9 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     # ── Ensemble weights on calibrated OOS preds ────────────────────
     w_lr, w_gbm = _ensemble_weights(p_lr_cal, p_gbm_cal, y_oos)
     p_ens = w_lr * p_lr_cal + w_gbm * p_gbm_cal
-    print(
-        f"\nEnsemble weights: LR={w_lr:.2f}  GBM={w_gbm:.2f}\n"
-        f"Ensemble OOS:"
-    )
+    print(f"\nEnsemble weights: LR={w_lr:.2f}  GBM={w_gbm:.2f}\nEnsemble OOS:")
     from sklearn.metrics import brier_score_loss, roc_auc_score
+
     try:
         ens_auc = float(roc_auc_score(y_oos, p_ens))
     except ValueError:
@@ -392,8 +425,7 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     ens_brier = float(brier_score_loss(y_oos, p_ens))
     ens_wr_55 = float(y_oos[p_ens >= 0.55].mean()) if (p_ens >= 0.55).any() else float("nan")
     ens_n_55 = int((p_ens >= 0.55).sum())
-    print(f"  AUC={ens_auc:.3f}  Brier={ens_brier:.3f}  "
-          f"WR@0.55={ens_wr_55:.3f} (n={ens_n_55})")
+    print(f"  AUC={ens_auc:.3f}  Brier={ens_brier:.3f}  WR@0.55={ens_wr_55:.3f} (n={ens_n_55})")
 
     # ── PBO on the ensemble fold-pnl matrix ─────────────────────────
     # Use the LR-best fold matrix as the PBO sample (GBM matrix could be
@@ -486,13 +518,15 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     paper_ens = np.where(y_oos == 1, 1.0, -1.0)[p_ens >= 0.55]
     if paper_ens.size > 1:
         ens_sharpe = float(sharpe(paper_ens))
-        ens_dsr = float(deflated_sharpe(
-            sr_observed=ens_sharpe,
-            n_trials=len(LR_C_GRID) + len(GBM_LR_GRID),
-            n_obs=int(paper_ens.size),
-            # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
-            sr_var=1.0 / max(2, int(paper_ens.size)),
-        ))
+        ens_dsr = float(
+            deflated_sharpe(
+                sr_observed=ens_sharpe,
+                n_trials=len(LR_C_GRID) + len(GBM_LR_GRID),
+                n_obs=int(paper_ens.size),
+                # per-prediction Sharpe -> null variance ~ 1/n_obs (else sr_var=1.0 makes DSR ~0 always)
+                sr_var=1.0 / max(2, int(paper_ens.size)),
+            )
+        )
     else:
         ens_sharpe = 0.0
         ens_dsr = 0.0
@@ -517,6 +551,7 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
     # audit row is appended to data/models/audit.jsonl.
     if auto_promote:
         from core.promotion_gate import promote_if_eligible
+
         # Reload the row we just inserted so we feed the gate the same shape
         # production would see (avoids field-name drift between record_model_version
         # and the gate's expectations).
@@ -526,8 +561,10 @@ def train_one_market(market: str, *, tag: str, n_splits: int, embargo_bars: int,
         )
         if rows:
             promoted = promote_if_eligible(rows[0], market_type=market)
-            print(f"promotion gate: {'PROMOTED' if promoted else 'HELD'} "
-                  f"(see data/models/audit.jsonl for reasons)")
+            print(
+                f"promotion gate: {'PROMOTED' if promoted else 'HELD'} "
+                f"(see data/models/audit.jsonl for reasons)"
+            )
         else:
             print("promotion gate: SKIPPED — model_versions row vanished")
     return model_version
@@ -537,13 +574,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--market", choices=["futures", "spot", "both"], default="both")
     parser.add_argument("--tag", default="v1")
-    parser.add_argument("--quick", action="store_true",
-                        help="3-split CV instead of 5 (faster, less robust)")
-    parser.add_argument("--no-save", action="store_true",
-                        help="evaluate only; don't write model artifact or version row")
-    parser.add_argument("--auto-promote", action="store_true",
-                        help="after each market trains, run the promotion gate; "
-                             "on pass rewrite data/models/ensemble_{market}_latest.json")
+    parser.add_argument(
+        "--quick", action="store_true", help="3-split CV instead of 5 (faster, less robust)"
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="evaluate only; don't write model artifact or version row",
+    )
+    parser.add_argument(
+        "--auto-promote",
+        action="store_true",
+        help="after each market trains, run the promotion gate; "
+        "on pass rewrite data/models/ensemble_{market}_latest.json",
+    )
     args = parser.parse_args()
 
     n_splits = 3 if args.quick else 5
@@ -552,8 +596,12 @@ def main() -> int:
     markets = ["futures", "spot"] if args.market == "both" else [args.market]
     for m in markets:
         train_one_market(
-            m, tag=args.tag, n_splits=n_splits, embargo_bars=embargo_bars,
-            no_save=args.no_save, auto_promote=args.auto_promote,
+            m,
+            tag=args.tag,
+            n_splits=n_splits,
+            embargo_bars=embargo_bars,
+            no_save=args.no_save,
+            auto_promote=args.auto_promote,
         )
     return 0
 

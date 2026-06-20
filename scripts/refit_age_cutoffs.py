@@ -26,6 +26,7 @@ EXIT CODES
     0 — success (whether JSON was written or not)
     1 — no warehouse data / unrecoverable error
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,7 +39,7 @@ from pathlib import Path
 # ── Tier definitions (mcp_score bands; mirror config STANDARD/CONVICTION/AGGRESSIVE) ─
 # Phase 51 (2026-05-14) tiered leverage scheme keys off the SAME score bands.
 TIERS = {
-    "STANDARD":   (65, 74),
+    "STANDARD": (65, 74),
     "CONVICTION": (75, 84),
     "AGGRESSIVE": (85, 200),  # 101 is the theoretical max, 200 is a safe upper bound
 }
@@ -62,6 +63,7 @@ STAR_SYMBOLS_DEFAULT = {
 # ─────────────────────────────────────────────────────────────────────
 # Data loading
 # ─────────────────────────────────────────────────────────────────────
+
 
 def load_trades(warehouse_path: Path, days: int) -> list[dict]:
     """Pull CLOSED trades from warehouse over the last `days` days.
@@ -92,19 +94,23 @@ def load_trades(warehouse_path: Path, days: int) -> list[dict]:
             age_min = (ts_exit - ts_entry) / 60.0
             if age_min < 0:
                 continue  # data hygiene
-            rows.append({
-                "ts_entry": ts_entry,
-                "ts_exit": ts_exit,
-                "mcp_score": float(r["mcp_score"]),
-                "realized_pnl": float(r["realized_pnl"]),
-                "exit_reason": r["exit_reason"] or "",
-                "symbol": r["symbol"] or "",
-                "age_min": age_min,
-            })
+            rows.append(
+                {
+                    "ts_entry": ts_entry,
+                    "ts_exit": ts_exit,
+                    "mcp_score": float(r["mcp_score"]),
+                    "realized_pnl": float(r["realized_pnl"]),
+                    "exit_reason": r["exit_reason"] or "",
+                    "symbol": r["symbol"] or "",
+                    "age_min": age_min,
+                }
+            )
     return rows
 
 
-def split_fit_holdout(rows: list[dict], fit_days: int, holdout_days: int) -> tuple[list[dict], list[dict]]:
+def split_fit_holdout(
+    rows: list[dict], fit_days: int, holdout_days: int
+) -> tuple[list[dict], list[dict]]:
     """Split rows into fit (older) and holdout (newer) by ts_entry.
 
     Uses an absolute time cut: rows with ts_entry < now - holdout_days * 86400
@@ -122,6 +128,7 @@ def split_fit_holdout(rows: list[dict], fit_days: int, holdout_days: int) -> tup
 # ─────────────────────────────────────────────────────────────────────
 # Replay model
 # ─────────────────────────────────────────────────────────────────────
+
 
 def _replay_pnl_under_cutoff(rows: list[dict], cutoff_min: float) -> float:
     """Sum PnL over `rows` assuming any trade whose age_min > cutoff_min
@@ -155,6 +162,7 @@ def _replay_pnl_under_cutoff(rows: list[dict], cutoff_min: float) -> float:
 # Fit / validate
 # ─────────────────────────────────────────────────────────────────────
 
+
 def fit_cutoff_for_tier(
     rows: list[dict],
     tier_score_lo: float,
@@ -167,10 +175,7 @@ def fit_cutoff_for_tier(
     Returns (c_star_min, fit_pnl) on success; (None, None) when the tier
     sample is below `min_sample`.
     """
-    tier_rows = [
-        r for r in rows
-        if tier_score_lo <= r["mcp_score"] <= tier_score_hi
-    ]
+    tier_rows = [r for r in rows if tier_score_lo <= r["mcp_score"] <= tier_score_hi]
     if len(tier_rows) < min_sample:
         return None, None
 
@@ -206,33 +211,43 @@ def validate_on_holdout(
 # Orchestration
 # ─────────────────────────────────────────────────────────────────────
 
+
 def _filter_out_stars(rows: list[dict], star_symbols: set) -> list[dict]:
     return [r for r in rows if r["symbol"] not in star_symbols]
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--days", type=int, default=60,
-                   help="total warehouse window (default 60).")
-    p.add_argument("--fit-days", type=int, default=45,
-                   help="fit window in days (default 45).")
-    p.add_argument("--holdout-days", type=int, default=15,
-                   help="holdout window in days (default 15).")
-    p.add_argument("--min-sample", type=int, default=20,
-                   help="minimum fit rows per tier (default 20).")
-    p.add_argument("--current-cutoff-min", type=float,
-                   default=DEFAULT_CURRENT_CUTOFF_MIN,
-                   help="current cutoff (min) for strict-improvement compare "
-                        f"(default {DEFAULT_CURRENT_CUTOFF_MIN} = 1.25h).")
-    p.add_argument("--warehouse",
-                   default=str(Path(__file__).resolve().parents[1] / "data" / "warehouse.sqlite"),
-                   help="path to warehouse.sqlite.")
-    p.add_argument("--out",
-                   default=str(Path(__file__).resolve().parents[1] / "data" / "models" / "age_cutoffs.json"),
-                   help="output path for age_cutoffs.json.")
-    p.add_argument("--commit", action="store_true",
-                   help="actually write the JSON if validation passes "
-                        "(without this, prints only).")
+    p.add_argument("--days", type=int, default=60, help="total warehouse window (default 60).")
+    p.add_argument("--fit-days", type=int, default=45, help="fit window in days (default 45).")
+    p.add_argument(
+        "--holdout-days", type=int, default=15, help="holdout window in days (default 15)."
+    )
+    p.add_argument(
+        "--min-sample", type=int, default=20, help="minimum fit rows per tier (default 20)."
+    )
+    p.add_argument(
+        "--current-cutoff-min",
+        type=float,
+        default=DEFAULT_CURRENT_CUTOFF_MIN,
+        help="current cutoff (min) for strict-improvement compare "
+        f"(default {DEFAULT_CURRENT_CUTOFF_MIN} = 1.25h).",
+    )
+    p.add_argument(
+        "--warehouse",
+        default=str(Path(__file__).resolve().parents[1] / "data" / "warehouse.sqlite"),
+        help="path to warehouse.sqlite.",
+    )
+    p.add_argument(
+        "--out",
+        default=str(Path(__file__).resolve().parents[1] / "data" / "models" / "age_cutoffs.json"),
+        help="output path for age_cutoffs.json.",
+    )
+    p.add_argument(
+        "--commit",
+        action="store_true",
+        help="actually write the JSON if validation passes (without this, prints only).",
+    )
     args = p.parse_args(argv)
 
     warehouse = Path(args.warehouse)
@@ -245,8 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     print(f"[refit] warehouse: {warehouse}")
-    print(f"[refit] window:    {args.days}d "
-          f"({args.fit_days}d fit / {args.holdout_days}d holdout)")
+    print(f"[refit] window:    {args.days}d ({args.fit_days}d fit / {args.holdout_days}d holdout)")
     print(f"[refit] current cutoff (min): {args.current_cutoff_min}")
 
     rows = load_trades(warehouse, args.days)
@@ -255,11 +269,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     rows_no_star = _filter_out_stars(rows, STAR_SYMBOLS_DEFAULT)
-    print(f"[refit] loaded {len(rows)} closed trades "
-          f"({len(rows_no_star)} after STAR filter).")
+    print(f"[refit] loaded {len(rows)} closed trades ({len(rows_no_star)} after STAR filter).")
 
     fit_rows, holdout_rows = split_fit_holdout(
-        rows_no_star, args.fit_days, args.holdout_days,
+        rows_no_star,
+        args.fit_days,
+        args.holdout_days,
     )
     print(f"[refit] split: fit={len(fit_rows)}, holdout={len(holdout_rows)}")
 
@@ -273,7 +288,10 @@ def main(argv: list[str] | None = None) -> int:
 
     for tier_name, (lo, hi) in TIERS.items():
         c_star, fit_pnl = fit_cutoff_for_tier(
-            fit_rows, lo, hi, DEFAULT_CANDIDATES_MIN,
+            fit_rows,
+            lo,
+            hi,
+            DEFAULT_CANDIDATES_MIN,
             min_sample=args.min_sample,
         )
         if c_star is None:
@@ -298,7 +316,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"holdout: current=${current_h:+.2f} -> proposed=${proposed_h:+.2f}"
             )
         else:
-            current_h = _replay_pnl_under_cutoff(holdout_rows, args.current_cutoff_min) if holdout_rows else 0.0
+            current_h = (
+                _replay_pnl_under_cutoff(holdout_rows, args.current_cutoff_min)
+                if holdout_rows
+                else 0.0
+            )
             proposed_h = _replay_pnl_under_cutoff(holdout_rows, c_star) if holdout_rows else 0.0
             rejection_log.append(
                 f"  {tier_name:<10s} REJECT c*={c_star:.0f}min fit_pnl=${fit_pnl:+.2f} "

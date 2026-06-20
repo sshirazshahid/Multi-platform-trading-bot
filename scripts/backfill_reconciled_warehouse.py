@@ -20,6 +20,7 @@ Usage:
     python scripts/backfill_reconciled_warehouse.py            # dry-run preview
     python scripts/backfill_reconciled_warehouse.py --commit   # apply
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,8 +39,9 @@ def _is_reconciled(close_reason: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Actually write to the warehouse. Default: dry-run.")
+    ap.add_argument(
+        "--commit", action="store_true", help="Actually write to the warehouse. Default: dry-run."
+    )
     args = ap.parse_args()
 
     if not POSITIONS.exists():
@@ -58,6 +60,7 @@ def main() -> int:
     # Import the warehouse API lazily (writes go through the idempotent path).
     sys.path.insert(0, str(ROOT))
     from core.warehouse import get_warehouse
+
     wh = get_warehouse()
     conn = wh._conn()
 
@@ -90,9 +93,21 @@ def main() -> int:
         if hit:
             already += 1
             continue
-        to_write.append(dict(ex=ex, sym=sym, side=side, ot=ot, ct=ct,
-                             pnl=pnl, entry=entry, size=size, exit_p=exit_p,
-                             lev=lev, reason=reason))
+        to_write.append(
+            dict(
+                ex=ex,
+                sym=sym,
+                side=side,
+                ot=ot,
+                ct=ct,
+                pnl=pnl,
+                entry=entry,
+                size=size,
+                exit_p=exit_p,
+                lev=lev,
+                reason=reason,
+            )
+        )
 
     print(f"  already in warehouse: {already}")
     print(f"  skipped (missing key fields): {skipped_bad}")
@@ -100,8 +115,7 @@ def main() -> int:
     print()
     for w in to_write[:30]:
         ts = datetime.fromtimestamp(w["ct"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-        print(f"  {w['ex']:<8} {w['sym']:<22} {w['side']:<5} "
-              f"pnl={w['pnl']:+.4f}  closed={ts}")
+        print(f"  {w['ex']:<8} {w['sym']:<22} {w['side']:<5} pnl={w['pnl']:+.4f}  closed={ts}")
     if len(to_write) > 30:
         print(f"  ... and {len(to_write) - 30} more")
 
@@ -114,19 +128,24 @@ def main() -> int:
     for w in to_write:
         try:
             tid = wh.record_trade_open(
-                exchange=w["ex"], symbol=w["sym"], side=w["side"],
+                exchange=w["ex"],
+                symbol=w["sym"],
+                side=w["side"],
                 ts_entry=w["ot"],
                 entry_px=w["entry"] if w["entry"] > 0 else 0.0,
                 size=w["size"] if w["size"] > 0 else 0.0,
-                leverage=w["lev"], market_type="futures",
+                leverage=w["lev"],
+                market_type="futures",
                 strategy_family="reconciled_exchange",
                 mode="CONTROLLED_LIVE",
             )
             if tid and tid > 0:
                 wh.record_trade_close(
-                    trade_id=tid, ts_exit=w["ct"],
+                    trade_id=tid,
+                    ts_exit=w["ct"],
                     exit_px=w["exit_p"] if w["exit_p"] > 0 else 0.0,
-                    realized_pnl=w["pnl"], exit_reason=w["reason"],
+                    realized_pnl=w["pnl"],
+                    exit_reason=w["reason"],
                 )
                 written += 1
         except Exception as e:

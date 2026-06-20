@@ -45,7 +45,7 @@ Warehouse = _mod.Warehouse
 
 
 POSITIONS_JSON = ROOT / "data" / "positions.json"
-MCP_DECISIONS  = ROOT / "data" / "mcp_decisions.jsonl"
+MCP_DECISIONS = ROOT / "data" / "mcp_decisions.jsonl"
 
 
 def _ex(name: str) -> str:
@@ -73,12 +73,12 @@ def import_positions(wh: Warehouse, path: Path = POSITIONS_JSON) -> dict:
     for row in rows:
         try:
             ts_entry = float(row.get("open_time") or 0)
-            ts_exit  = row.get("close_time")
+            ts_exit = row.get("close_time")
             if not ts_entry:
                 stats["skipped"] += 1
                 continue
 
-            ex_norm  = _ex(row.get("exchange", "unknown"))
+            ex_norm = _ex(row.get("exchange", "unknown"))
             sym_norm = row.get("symbol", "")
             side_norm = row.get("side", "")
 
@@ -172,8 +172,9 @@ def import_positions(wh: Warehouse, path: Path = POSITIONS_JSON) -> dict:
     return stats
 
 
-def import_mcp_decisions(wh: Warehouse, path: Path = MCP_DECISIONS,
-                         max_rows: int | None = None) -> dict:
+def import_mcp_decisions(
+    wh: Warehouse, path: Path = MCP_DECISIONS, max_rows: int | None = None
+) -> dict:
     """Import every MCP decision row as a warehouse candidate.
 
     mcp_decisions.jsonl is one JSON object per line. Schema is fluid across
@@ -225,8 +226,7 @@ def import_mcp_decisions(wh: Warehouse, path: Path = MCP_DECISIONS,
                         confidence=action.get("confidence"),
                         decision=decision,
                         skip_reason=action.get("reason") if decision == "SKIP" else None,
-                        features={"action_raw": action,
-                                  "cycle_ts": row.get("timestamp")},
+                        features={"action_raw": action, "cycle_ts": row.get("timestamp")},
                     )
                     if cid > 0:
                         stats["candidates"] += 1
@@ -250,12 +250,20 @@ def pull_exchange_fills(wh: Warehouse, days: int = 90) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Back-populate the warehouse from local artifacts.")
-    ap.add_argument("--mcp", action="store_true",
-                    help="Also import candidates from data/mcp_decisions.jsonl")
-    ap.add_argument("--pull-exchange", action="store_true",
-                    help="(stub) Pull fills from connected exchanges (not yet implemented)")
-    ap.add_argument("--mcp-max-rows", type=int, default=None,
-                    help="Cap the number of mcp_decisions rows to import (debug).")
+    ap.add_argument(
+        "--mcp", action="store_true", help="Also import candidates from data/mcp_decisions.jsonl"
+    )
+    ap.add_argument(
+        "--pull-exchange",
+        action="store_true",
+        help="(stub) Pull fills from connected exchanges (not yet implemented)",
+    )
+    ap.add_argument(
+        "--mcp-max-rows",
+        type=int,
+        default=None,
+        help="Cap the number of mcp_decisions rows to import (debug).",
+    )
     args = ap.parse_args()
 
     wh = Warehouse()
@@ -280,8 +288,10 @@ def main() -> int:
 
     after = wh.counts()
     print(f"[import] warehouse after:  {after}")
-    print(f"[import] delta: candidates +{after['candidates'] - before['candidates']} "
-          f"| trades +{after['trades'] - before['trades']}")
+    print(
+        f"[import] delta: candidates +{after['candidates'] - before['candidates']} "
+        f"| trades +{after['trades'] - before['trades']}"
+    )
     print(f"[import] totals: {total}")
     return 0
 

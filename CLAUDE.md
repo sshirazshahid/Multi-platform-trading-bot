@@ -1,5 +1,58 @@
 # CLAUDE.md
 
+# Agentic Trading Core Directives & Rules
+
+## 1. Core Identity & Execution
+* **Role:** You are an autonomous algorithmic trading agent. Your job is to research market conditions, evaluate risk-adjusted opportunities, and manage portfolio allocations.
+* **Philosophy:** Patient, risk-averse, systematic. Avoid over-optimizing to prevent textbook overfitting.
+* **Validation:** Before final execution or backtesting, you must run an out-of-sample validation or Monte Carlo test.
+
+## 2. Hard Portfolio Risk Layers (Circuit Breakers)
+* **Max Allocation:** Never risk more than $3\%$ of the total portfolio capital on any single trade.
+* **Exposure Limit:** Total open exposure across all trades must not exceed $12\%$ of total portfolio capital.
+* **Stop-Loss Guardian:** If a position's value drops $8\%$ below the exact entry price, close the position immediately via a market order.
+* **Leverage Limit:** Maximum active leverage must never exceed $2.5\times$.
+
+## 3. Workflow & Schedule Rules
+* **Market Prep:** Before market open, pull historical OHLCV and volume confidence data for specified tickers.
+* **Decision Framework:** Before recommending an action, answer these 5 questions:
+  1. What is the current portfolio cash balance?
+  2. What positions are already open?
+  3. What is the fundamental direction of the news/sentiment?
+  4. What do the 20-day and 50-day moving averages tell you?
+  5. What is the potential risk (drawdown) if this trade fails?
+* **Order Logic:** Never place generic market orders for entries. Use limit orders that sit within $0.2\%$ of the ask.
+
+## 4. Output & Logging
+* **Output Format:** Whenever an action (research, entry, exit, or update) is taken, generate a structured markdown journal entry at `/journal/YYYY-MM-DD.md`.
+* **Data Standards:** Always use adjusted close prices for calculations. Factor in transaction costs of $0.1\%$ on backtesting. Returns must be returned as percentages.
+
+## 5. Restrictions
+* Do not attempt to bypass brokerage API requirements.
+* Do not execute code without proper paper-trading or a dry-run confirmation first.
+* Do not invent or hallucinate market reasons for price actions. If data is missing or ambiguous, state that it is missing.
+
+
+# Role and Persona
+You are an expert software engineering agent. You possess deep knowledge of software design patterns, clean code principles, and efficient debugging.
+
+# Core Directives
+1. **Goal-Driven Execution:** Do not just write code; define verifiable success criteria. For "Add validation", write a test, then write the code to make it pass. For "Refactor X", ensure tests pass before and after the change.
+2. **Context Management:** Only read the files necessary for the current task. If a task spans multiple files, explore the dependency graph first. Do not dump the entire codebase into the prompt, as it leads to noisy self-evaluation.
+3. **Verification over Explanation:** Verify your assumptions by running the code (or writing a test script) before returning the final solution.
+
+# Coding Guidelines
+- **DRY & KISS:** Keep solutions modular, readable, and simple. 
+- **Error Handling:** Anticipate failures and implement graceful error handling.
+- **Documentation:** Write clear, concise docstrings for classes and functions, and update markdown documentation if public APIs change.
+
+# Output Format
+- Keep your conversational responses concise.
+- Provide the final edited code with clear boundaries (e.g., proper markdown code blocks).
+- State clearly if a task requires multiple iterative steps or git commits.
+
+
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 Tradeoff: These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
@@ -233,6 +286,25 @@ All settings centralized. Loaded from `.env` via `python-dotenv`. Key sections:
 Rich TUI dashboard. Launch: `python dashboard.py` or `TradingBot.bat` option [2].
 Flags: `--refresh SEC` (3-3600), `--width COLS` (60-200).
 
+### MCP Server (`mcp_server/`, read-only introspection)
+
+`mcp_server/trading_bot_mcp.py` is a local stdio MCP server (registered via
+`.mcp.json`) that exposes the warehouse + decision data as read-only tools
+(`trading_bot_list_tables`, `_recent_trades`, `_performance_summary`,
+`_recent_candidates`, `_shadow_vs_live`, `_query`). It opens
+`data/warehouse.sqlite` in `mode=ro` and imports no bot/config/ccxt code, so it
+**cannot place orders or change state** — it is for interrogating the bot's
+reasoning, not driving it. Pure data-access lives in `warehouse_reader.py` (no
+`mcp` dependency, unit-tested in `tests/test_trading_bot_mcp.py`). Install with
+`pip install -r mcp_server/requirements.txt`.
+
+**Shadow → live promotion criterion (agents + MCP):** the multi-agent shadow
+ensemble (`core/shadow_runner.py`) and any new prediction layer remain
+**log-only**. They may be promoted to the live decision path ONLY after their
+decisions beat the live path on the honest gate (`core/promotion_gate.py`:
+MIN_DSR≥0.10, MAX_PBO≤0.5, OOS-WR≥0.55, AUC≥0.60). Never promote on a no-edge
+signal — use `trading_bot_shadow_vs_live` to watch the comparison.
+
 ## Common Development Commands
 
 ### Running the Bot
@@ -367,7 +439,7 @@ Automated pipeline: `scripts/run_skill_improvement_loop.py` (round-robin selecti
 - **WIDEN action removed** (Apr 15 2026): Spec §2 forbids widening stop losses. The position monitor prompt and bot_engine no longer accept WIDEN. If re-added it will silently map to HOLD.
 - **MCP SL override removed**: `order_manager.py` no longer lets MCP Brain widen the deterministic ATR-based SL at entry time. SL is authoritative once computed.
 - **Meta-filter requires warehouse data**: `spread_pctl`/`vol_pctl` are computed from 30-day warehouse history. On a fresh install with empty `warehouse.sqlite`, all meta-filter SKIP rules are neutral (defaulting to ALLOW). The filter becomes effective after ~1 week of candidate data.
-- **Spec §12 halt is guarded auto-resume** (updated 2026-04-17): After 5 global consecutive losses, the risk manager writes `data/review_required.json` and halts. Bot auto-resumes after a **4-hour cooldown** (`SPEC12_AUTO_RESUME_COOLDOWN_MIN` in `core/risk_manager.py`); on resume it clears the stale global loss streak and deletes the review flag so future halts can retrigger cleanly. The flag still fires notifier/email warnings during the cooldown window for audit visibility. No human action required.
+- **Spec §12 / loss-driven halts are REMOVED** (2026-05-27): All nine loss-driven halt/pause mechanisms — including the Spec §12 global 5-consecutive-loss halt, per-symbol and per-family pauses, and the outlier-loss flag — were permanently disabled (the `HALT_MECHANISMS` dict was deleted from `config.py` and the gate checks in `core/risk_manager.py` are now `if False` guards; see `risk_manager.py:977-1035`). The bot no longer writes `data/review_required.json` on a loss streak, no longer switches to OBSERVATION, and there is **no** `SPEC12_AUTO_RESUME_COOLDOWN_MIN` cooldown (the symbol does not exist). The user-requested replacement is the **soft daily-loss circuit breaker** (2026-05-28, `config.py` "DAILY-LOSS CIRCUIT BREAKER"): opt-in, refuses only NEW entries once today's realized loss exceeds `max_loss_pct` of start-of-day balance, then auto-resets at UTC day rollover. It does not halt the process, does not switch mode, and does not touch open positions (their fail-closed per-trade SLs still protect them). Per-trade ATR SL/TP and exchange-side liquidation remain the only hard loss rails.
 - **Kelly stats are all negative**: `data/kelly_stats.json` shows negative expected value for all strategies. This is expected during the learning-first phase — the bot should remain in PAPER mode.
 - **knowledge_model hour-score PnL field is `net_pnl`, not `total_pnl`**: hour scores in `data/knowledge_model.json` record PnL as `net_pnl`/`avg_pnl` (plus `total_fees`) — see `core/knowledge_model.py:257-267`. PnL recording works; tooling still reading the old `total_pnl` name sees a missing field, not broken tracking.
 - **Spot positions get no exchange-side SL/TP**: Only futures positions receive exchange-side stop-loss orders. Spot relies on local monitoring only.

@@ -13,6 +13,7 @@ retrains in the same change (FEATURE_KEYS + model artifact move together).
 
 Read-only.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -30,21 +31,26 @@ def main() -> int:
         return 1
     c = sqlite3.connect(str(db))
     total_micro = c.execute(
-        "SELECT COUNT(*) FROM candidates "
-        "WHERE features_json LIKE '%\"oi_delta_6h\"%'").fetchone()[0]
+        "SELECT COUNT(*) FROM candidates WHERE features_json LIKE '%\"oi_delta_6h\"%'"
+    ).fetchone()[0]
     labeled_micro = c.execute(
         "SELECT COUNT(*) FROM candidates cd JOIN labels l "
         "  ON l.candidate_id = cd.id "
-        "WHERE cd.features_json LIKE '%\"oi_delta_6h\"%'").fetchone()[0]
+        "WHERE cd.features_json LIKE '%\"oi_delta_6h\"%'"
+    ).fetchone()[0]
     c.close()
     print(f"candidates with microstructure captured (oi_delta_6h): {total_micro}")
     print(f"LABELED candidates with oi_delta_6h: {labeled_micro} / target {TARGET}")
     if labeled_micro >= TARGET:
-        print("READY — append _MICROSTRUCTURE_FEATURES_PENDING to FEATURE_KEYS "
-              "and retrain (same change). The honest gate decides edge.")
+        print(
+            "READY — append _MICROSTRUCTURE_FEATURES_PENDING to FEATURE_KEYS "
+            "and retrain (same change). The honest gate decides edge."
+        )
     else:
-        print(f"NOT READY — need {TARGET - labeled_micro} more. "
-              f"Keep the bot running and labels flowing (build_labels.py).")
+        print(
+            f"NOT READY — need {TARGET - labeled_micro} more. "
+            f"Keep the bot running and labels flowing (build_labels.py)."
+        )
     return 0
 
 

@@ -43,7 +43,10 @@ jobs:
           python-version: "3.9"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # Project is scripts-only (packages = [] in pyproject) -> NOT pip-installable as a
+        # package (editable/wheel build produces 0 .egg-info on modern setuptools). Tests
+        # run via sys.path + importlib, so install the dependencies directly.
+        run: pip install pytest pytest-cov coverage jsonschema pyyaml scipy pandas numpy requests
 
       # Run each skill's tests in isolation to avoid module name collisions
       # (each skill has its own scorer.py, calculators/, helpers.py).
@@ -198,6 +201,45 @@ jobs:
           path: htmlcov/
           retention-days: 7
 
+  research-labs:
+    name: Research labs (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The labs + data_io + MCP warehouse reader are stdlib-only by design;
+      # only pytest (+ ruff for lint) is needed. Scope ruff to the new modules
+      # because some pre-existing research/ files are not yet ruff-clean.
+      - name: Install tools
+        run: pip install pytest "ruff==0.9.6"
+
+      - name: Ruff check (research labs + mcp_server)
+        run: >
+          ruff check
+          research/dca_rebalance_lab.py research/funding_carry_lab.py
+          research/data_io.py research/run_spot_study.py mcp_server/
+
+      - name: Ruff format check (research labs + mcp_server)
+        run: >
+          ruff format --check
+          research/dca_rebalance_lab.py research/funding_carry_lab.py
+          research/data_io.py research/run_spot_study.py mcp_server/
+
+      - name: Test research labs + data_io + MCP reader
+        run: >
+          python -m pytest
+          tests/test_dca_rebalance_lab.py
+          tests/test_funding_carry_lab.py
+          tests/test_data_io.py
+          tests/test_trading_bot_mcp.py
+          tests/test_research_labs_realdata.py
+          -v
+
   security:
     name: Security
     runs-on: ubuntu-latest
@@ -213,8 +255,11 @@ jobs:
       # Compare a fresh scan against committed baseline (results only, ignore metadata)
       - name: Detect secrets check
         run: |
+          # fetch_earnings_fmp.py excluded: line 10 is a docstring placeholder
+          # (export FMP_API_KEY="your-key"), flagged only by CI's detect-secrets as a
+          # templated-placeholder false positive — verified not a real secret.
           detect-secrets scan \
-            --exclude-files '\.env$|\.json$|\.csv$|\.md$|\.zip$|\.baseline$' \
+            --exclude-files '\.env$|\.json$|\.csv$|\.md$|\.zip$|\.baseline$|fetch_earnings_fmp\.py$' \
             > /tmp/new_scan.json
           python3 -c "
           import json, sys

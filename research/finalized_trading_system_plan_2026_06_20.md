@@ -1,0 +1,230 @@
+# Finalized Trading-System Plan & Honest Verdict (2026-06-20)
+
+**Written for a non-trader.** You asked me to fix the bugs, find why the bot loses,
+build a "solid profitable trading mechanism," and evaluate a list of specific
+chart strategies (harmonic patterns, stochastic crossovers, ICT, Asian range
+breakout, Dow swing structure, Bollinger squeeze, AI valuation models). I ran a
+deep, multi-source research pass (5 angles, ~50 cited sources, each claim
+adversarially checked) plus an engineering audit of the code. Here is the honest,
+evidence-based result.
+
+---
+
+## 0. Status & refined roadmap (updated 2026-06-20)
+
+**Done this engagement** (branch `harden/review-2026-06-20`, ~14 commits, bot stays
+PAPER, 1988 tests green):
+- Audited the bot: mechanically sound, no new bugs; fixed dead `auto_backtest.py`,
+  a naked-SL gap, and reconciled two stale docs (Spec §12 halt, MODEL_GATE).
+- Confirmed (3 internal audits + ~50 external sources + live data) the bot has
+  **no entry edge**, and that every named chart strategy lacks after-cost edge (§3).
+- Built a read-only **MCP server** (`mcp_server/`) to interrogate the bot.
+- Built tested, offline labs for the only evidence-backed sleeves, now with
+  out-of-sample + 1000-path Monte-Carlo and real 3y BTC/ETH/SOL data:
+  `research/dca_rebalance_lab.py`, `research/funding_carry_lab.py`,
+  `research/data_io.py`, `research/run_spot_study.py` (+ fixtures in
+  `research/sample_data/`). Added a CI `research-labs` job so they can't break.
+
+**Refined forward roadmap** (priority; remaining items are data/secret-gated):
+| # | Action | Status / blocker |
+|---|--------|------------------|
+| P1 | ML leak-check (`scripts/leak_check_embargo.py`, embargo≥horizon) | ready; needs the bot's warehouse/labeled data |
+| P2 | Maker-only as the live cost lever (`MAKER_ONLY_ENABLED`) | already in code; measure real fill-rate live |
+| P3 | Delta-neutral funding carry | lab+MC done; needs **real funding-rate history** (FMP=price only; CoinDesk quota-blocked) |
+| P4 | Spot DCA + rebalancing | lab+MC+OOS done on 3y real data; characterized (DCA=risk-reduction) |
+| P5 | Agents/MCP stay log-only; promote only via honest gate | done |
+| P6 | Stay PAPER until P1/P3 show after-cost OOS edge | in force; expect null |
+
+**To unblock real numbers, you (the user) can supply:** a funding-rate CSV (for
+P3), a longer/labeled dataset or the bot's `data/warehouse.sqlite` (for P1), or
+exchange API keys. Without those, everything offline-buildable is now built.
+
+---
+
+## 1. The one thing to understand first
+
+**No one can give you a crypto bot that reliably makes money — not me, not a
+vendor, not a YouTube "system."** This isn't pessimism; it's what the evidence
+says, and I verified it four independent ways:
+- Your bot's own historical audits: 45.8% win rate vs 65.5% needed to break even;
+  ~89% of losses are *missing edge*, not fees.
+- ~50 external sources this session: ~73% of automated traders lose within 6
+  months; ~5–7% are profitable at 5 years; in one real-fee test of 22 popular
+  strategies, **16 lost money**.
+- Live market data (today): majors are down ~18–20% in 30 days — a regime where a
+  long-biased bot bleeds.
+- Every specific strategy you named was researched separately and **none has
+  proven, after-cost edge** (table below).
+
+So the goal of this plan is NOT "get rich." It is: **stop the bleeding, preserve
+capital, and only ever risk money on something that has *proven* it works on data
+the bot has never seen.** That is the only honest path, and it's what professionals
+actually do.
+
+## 2. Why the program is (still) losing — the definitive answer
+
+It is **not** a bug. The code is sound: 1933 automated tests pass, the close/risk
+wiring is correct, and the strategies run. The bot loses because **its entry
+signals have no real edge** — the patterns it (and you) want to trade do not
+predict price well enough to overcome trading costs (fees + spread + slippage,
+~0.1–1% per round trip). A coin-flip signal that pays costs on every flip loses
+money by arithmetic, no matter how clean the code is. This is the single root
+cause, confirmed by every audit.
+
+## 3. Verdict on each strategy you named (evidence-based)
+
+| Strategy | Verdict | Why (with evidence) |
+|---|---|---|
+| **Harmonic patterns** (Gartley/Bat/Butterfly/Crab) | ❌ No proven edge | Zero peer-reviewed validation; Fibonacci bounce levels are *statistically indistinguishable from random* price levels [ScienceDirect S0957417421012495]; results are subjective/hindsight-fitted. |
+| **AI valuation models** (Stock-to-Flow, MVRV, NVT) | ❌ Discredited / weak | S2F predicted $100k+ in 2021–22, off by 50–65% [CryptoSlate; Zipmex]; MVRV is "a lens, not a crystal ball," cycle-dependent [Presto Research]. |
+| **Stochastic crossovers** | ❌ No edge solo | 36–41% win rate; whipsaws badly in trends; needs other filters to be even marginal [QuantifiedStrategies]. |
+| **Bollinger squeeze breakout** | ⚠️ Weak, needs confirmation | 20–30% false breakouts; solo profit factor ~1.15 (≈ coin-flip); regime-dependent [QuantifiedStrategies; SSRN 5775962]. |
+| **ICT / Smart Money Concepts** (order blocks, FVG, BOS/CHoCH) | ❌ No proven edge | No peer-reviewed support; order blocks = rebranded support/resistance; rules are discretionary/unfalsifiable; ICT's own public accounts blew up [Phidias; ScienceDirect gap study]. |
+| **Asian range breakout** | ❌ Doesn't fit crypto | Session logic assumes market open/close; crypto is 24/7 with no bell; only ~0.51% of opening-range configs survive walk-forward; 50–80% false breakouts [BreakOrb; ForTraders]. |
+| **Dow Theory swing structure** | ❌ Insufficient alone | Higher-high/higher-low alone "not powerful enough to trade"; filter rules fail after costs (weak-form efficiency, Fama) [QuantifiedStrategies; Nobel/Fama]. |
+
+**Pattern across all of them:** they look convincing on a chart *after the fact*,
+but disappear under out-of-sample testing and realistic costs. Your repo already
+implements three of these (`strategies/asian_range_breakout.py`,
+`dow_swing_structure.py`, `bb_squeeze_breakout.py`) and its own research already
+marked them NO_EDGE — which matches the external evidence exactly.
+
+## 4. What actually has *some* evidence (the only honest directions)
+
+Not prediction — these are **structural / cost-based**, and still must be proven
+on your data before any real money:
+- **Delta-neutral funding carry** (futures): hold long spot + short perp (or vice
+  versa) to collect the funding rate; profit doesn't depend on price direction.
+  ~8–20% gross historically but capacity-compressed and needs discipline.
+- **Spot DCA + threshold rebalancing**: buy fixed amounts on a schedule; rebalance
+  a basket when it drifts. Improves *risk-adjusted* return; shines in drawdowns
+  (like right now). This is the lowest-risk, best-evidence path for a beginner.
+- **Cost reduction (maker-only orders)**: the one lever that helps a marginal
+  signal; ceiling ≈ breakeven, stated honestly.
+
+## 5. How I would design/build/test the bot (answers to your "how" questions)
+
+These are the evidence-based engineering answers — and your repo already does most
+of them well:
+- **Language:** **Python** — it owns this space (pandas/numpy, `ccxt` for 100+
+  exchanges, `nautilus_trader`/`freqtrade`/`vectorbt` for backtesting). Your bot is
+  Python; keep it.
+- **System design:** event loop → data feed → signal → **risk gate** → execution →
+  logging/warehouse, with a hard separation between *deciding* and *placing
+  orders*. Your repo has this (`core/bot_engine.py`, `order_manager.py`,
+  `risk_manager.py`, `warehouse.py`).
+- **Tools/connectors/skills:** `ccxt` (exchanges); SQLite warehouse for an audit
+  trail (you have it); the new **read-only MCP server** I built (`mcp_server/`) to
+  interrogate results; live-data MCPs (CoinDesk/Crypto.com/LunarCrush) for
+  research. Don't add more *prediction* layers (LLM agents add cost+variance, no
+  edge — LiveTradeBench, "The Alpha Illusion").
+- **Monitoring the market:** scheduled scans + a separate 10-second SL/TP watcher
+  (you have this); funding/OI/volatility dashboards; alerts on drawdown.
+- **Technical analysis:** use indicators as *filters/context* (trend, volatility,
+  liquidity), never as a lone crystal ball — research is unanimous that single
+  indicators don't beat buy-and-hold after costs; 3 well-chosen filters max.
+- **Finding strategies:** start from an *economic reason* (carry, liquidity
+  provision, rebalancing premium), not a chart shape. Shapes without a "why" are
+  curve-fits.
+- **Testing strategies (the most important part):** walk-forward + ≥20–30%
+  out-of-sample; model real fees+slippage; **embargo ≥ label horizon** to avoid
+  leakage; Deflated Sharpe + Monte Carlo (1,000+ reshuffles); keep <15 parameters;
+  demand out-of-sample Sharpe ≥70% of in-sample. **Paper-trade first.** Your repo
+  has the gate (`core/promotion_gate.py`) and walk-forward (`core/walk_forward.py`)
+  for exactly this.
+- **Reading charts / patterns:** honestly — *don't* trade visual patterns. The
+  evidence says they're subjective and don't survive testing. Let code measure
+  objective things (volatility, funding, spread, trend strength), not "draw" shapes.
+
+## 6. Finalized roadmap (priority order, capital-preservation first)
+
+1. **Keep the bot in PAPER.** No real money until step 4 passes. (Done — it is.)
+2. **Run the honest leak-check** on the ML model with real data
+   (`scripts/leak_check_embargo.py`, embargo ≥96); expect the inflated accuracy to
+   collapse. Promote nothing that fails the honest gate.
+3. **Backtest the evidence-based sleeves** properly (walk-forward, real costs,
+   Monte Carlo): (a) delta-neutral **funding carry**, (b) **spot DCA + rebalancing**.
+   A runnable, offline, fully-tested harness for (b) now exists:
+   `research/dca_rebalance_lab.py` (lump-sum vs DCA vs threshold-rebalance with
+   real fees+slippage; 16 unit tests in `tests/test_dca_rebalance_lab.py`). Run
+   `python research/dca_rebalance_lab.py` for the demo; feed real exchange closes
+   for a study. Also reuse `quant_suite/funding_carry.py`, and the live
+   `DCAStrategy`/`RebalancingStrategy` for execution once a config is validated.
+   For (a), an offline analytics lab now exists too:
+   `research/funding_carry_lab.py` (delta-neutral long-spot/short-perp cash-and-
+   carry — net yield, break-even funding, % positive settlements, after-cost; 12
+   tests in `tests/test_funding_carry_lab.py`). Pull real funding history with
+   `quant_suite/funding_carry.py` and pass it in. NB: this is the market-neutral
+   carry, NOT the directional funding signal (which already screened NO_EDGE).
+4. **Promote only what clears the honest gate out-of-sample.** If nothing does
+   (the likely outcome), the correct action is: stay in PAPER / DCA-only spot, and
+   treat "no edge" as a valid finding — not a reason to risk more.
+5. **Keep agents/MCP log-only**; cost-reduce with maker-only; never re-enable
+   leverage/shorts into a chop regime (like today's).
+
+## 6b. Worked example on REAL data (the labs in action)
+
+Real-data ingestion now exists (`research/data_io.py`, 11 tests). Demonstrated on
+**~3 years of real BTC daily closes** pulled live (FMP), 2023-06-01 → 2026-06-20,
+a net **+138%** window committed as a reproducible fixture
+(`research/sample_data/btc_daily_fmp_2023_2026.csv`; ETH alongside it).
+
+**BTC — lump-sum vs DCA (weekly), by regime:**
+
+| Window | Lump-sum return (maxDD) | DCA return (maxDD) |
+|---|---|---|
+| Full 3y (+138%) | **+137.6%** (51%) | **+7.5%** (48%) |
+| Bull leg, first 730d (+288%) | +287% (28%) | +105% (27%) |
+| Recent selloff, last 200d (−32%) | −31.8% (37%) | **−16.3% (23%)** |
+
+**BTC/ETH 50-50 basket — buy&hold vs threshold-rebalance (5%):**
+
+| Approach | Return | maxDD |
+|---|---|---|
+| Buy & hold | **+65.2%** | 56.6% |
+| Threshold rebalance | +59.3% | 59.3% |
+
+Two myths corrected by real data, both important for a non-trader:
+1. **DCA is NOT generally better than lump-sum.** In a rising market it badly
+   *underperforms* (it keeps buying higher); its win is only in drawdowns, where
+   it loses less and is calmer. DCA buys *risk reduction & discipline*, not return.
+2. **Rebalancing does not always pay.** Here it slightly *underperformed* hold,
+   because it kept selling the winner (BTC +138%) to buy the laggard (ETH −7%).
+   The "rebalancing premium" needs assets that mean-revert against each other.
+
+(These are still single-path historical results — run out-of-sample + Monte-Carlo
+across more assets/periods before trusting any config; see §5 testing rules.)
+
+## 6c. Extended study: 3 assets + out-of-sample + Monte-Carlo
+
+`python research/run_spot_study.py` runs BTC/ETH/SOL (committed 3y fixtures) with
+a 70/30 in-sample/out-of-sample split and a 1000-path moving-block-bootstrap
+Monte-Carlo (added to the lab as `monte_carlo()`, 5 tests). Headlines:
+
+- **DCA lowers drawdown and return on every asset** (robust, not a fluke):
+  e.g. SOL full period lump +252% (maxDD 76%) vs DCA −3% (maxDD 72%).
+- **Out-of-sample (recent 30%) lost money on all three** (BTC DCA −27%, ETH −38%,
+  SOL −39%) even though in-sample was strongly positive. Results are *entirely
+  regime-dependent* — the strongest argument for staying PAPER.
+- **Monte-Carlo bands are huge** (SOL lump return p5 −62% … p95 +5299%), i.e. the
+  single historical number is almost meaningless given path risk. DCA's band is
+  tighter both ways — concrete evidence that DCA = risk reduction, not edge.
+- **3-asset rebalancing slightly helped** (BTC/ETH/SOL: +132.7% vs hold +127.4%,
+  lower drawdown), unlike the 2-asset BTC/ETH case where it hurt — the
+  rebalancing premium appears only with enough uncorrelated volatility (SOL).
+
+These now run in CI (`research-labs` job) so they can't silently break.
+
+## 7. If you take nothing else away
+
+- Be deeply skeptical of anyone selling a "profitable system" or a pattern with a
+  fancy name. The research here shows those are how beginners lose money.
+- The bot is well-built; its honesty about *not* having edge is its best feature.
+- The safest real-money path for a non-trader is **spot DCA into majors during
+  drawdowns**, not a directional bot. Everything else stays PAPER until proven.
+
+---
+*Sources for every claim are in this folder's companion docs and the per-claim
+citations gathered this session (harmonic/Fibonacci: ScienceDirect; S2F: CryptoSlate;
+ICT: Phidias/ScienceDirect; ORB: BreakOrb; efficiency: Fama/Nobel; build practices:
+NautilusTrader/Freqtrade/CCXT; ML leakage: López de Prado).*

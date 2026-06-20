@@ -50,8 +50,7 @@ DB_PATH = ROOT / "data" / "warehouse.sqlite"
 PHANTOM_TRADE_ID = 411  # XRP/USDT:USDT buy 2026-04-21, confirmed phantom
 
 
-def _compute_r_multiple(side: str, entry_px: float, exit_px: float,
-                        stop_px: float) -> float | None:
+def _compute_r_multiple(side: str, entry_px: float, exit_px: float, stop_px: float) -> float | None:
     """Side-aware R-multiple.  Returns None if the denominator is degenerate."""
     if side == "buy":
         denom = entry_px - stop_px
@@ -67,6 +66,7 @@ def _compute_r_multiple(side: str, entry_px: float, exit_px: float,
 # ---------------------------------------------------------------------------
 # Step 1 — phantom close
 # ---------------------------------------------------------------------------
+
 
 def preview_phantom(conn: sqlite3.Connection) -> bool:
     """Return True if the phantom trade is still OPEN."""
@@ -102,18 +102,17 @@ def apply_phantom(conn: sqlite3.Connection) -> None:
            WHERE id=? AND status='OPEN'""",
         (time.time(), time.time(), PHANTOM_TRADE_ID),
     )
-    affected = conn.execute(
-        "SELECT changes()"
-    ).fetchone()[0]
+    affected = conn.execute("SELECT changes()").fetchone()[0]
     if affected:
         print(f"[phantom] APPLIED: trade id={PHANTOM_TRADE_ID} marked CLOSED.")
     else:
-        print(f"[phantom] No change (already closed or id missing).")
+        print("[phantom] No change (already closed or id missing).")
 
 
 # ---------------------------------------------------------------------------
 # Step 2 — r_multiple backfill via candidate stop_px
 # ---------------------------------------------------------------------------
+
 
 def collect_backfill_rows(conn: sqlite3.Connection) -> list[dict]:
     """Return trades that can receive an exact r_multiple from candidate.stop_px."""
@@ -134,14 +133,16 @@ def collect_backfill_rows(conn: sqlite3.Connection) -> list[dict]:
     for row in rows:
         tid, side, ep, xp, sl = row
         r_mult = _compute_r_multiple(side, ep, xp, sl)
-        result.append({
-            "trade_id": tid,
-            "side": side,
-            "entry_px": ep,
-            "exit_px": xp,
-            "stop_px": sl,
-            "r_multiple": r_mult,
-        })
+        result.append(
+            {
+                "trade_id": tid,
+                "side": side,
+                "entry_px": ep,
+                "exit_px": xp,
+                "stop_px": sl,
+                "r_multiple": r_mult,
+            }
+        )
     return result
 
 
@@ -181,6 +182,7 @@ def apply_backfill(conn: sqlite3.Connection, rows: list[dict]) -> int:
 # Summary after apply
 # ---------------------------------------------------------------------------
 
+
 def print_summary(conn: sqlite3.Connection) -> None:
     total = conn.execute("SELECT COUNT(*) FROM trades WHERE status='CLOSED'").fetchone()[0]
     null_r = conn.execute(
@@ -190,22 +192,24 @@ def print_summary(conn: sqlite3.Connection) -> None:
     print()
     print("=== Post-fix warehouse summary ===")
     print(f"  CLOSED trades:      {total}")
-    print(f"  NULL r_multiple:    {null_r}  ({null_r/total*100:.1f}%)")
-    print(f"  Has r_multiple:     {total - null_r}  ({(total-null_r)/total*100:.1f}%)")
+    print(f"  NULL r_multiple:    {null_r}  ({null_r / total * 100:.1f}%)")
+    print(f"  Has r_multiple:     {total - null_r}  ({(total - null_r) / total * 100:.1f}%)")
     print(f"  OPEN trades:        {open_ct}")
     # Attribution coverage
     attr = conn.execute("SELECT COUNT(*) FROM attribution").fetchone()[0]
-    print(f"  Attribution rows:   {attr} / {total} closed ({attr/total*100:.1f}%)")
+    print(f"  Attribution rows:   {attr} / {total} closed ({attr / total * 100:.1f}%)")
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Write changes to the database (default is dry-run).",
     )
     args = parser.parse_args()

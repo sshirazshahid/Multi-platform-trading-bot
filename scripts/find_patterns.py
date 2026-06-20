@@ -25,6 +25,7 @@ MONTHLY / longer is NOT tested: ~1-3y history gives only ~12-36 monthly observat
 
 Records reports/patterns_<date>.md. Read-only, gentle, re-runnable.
 """
+
 from __future__ import annotations
 
 import math
@@ -40,15 +41,16 @@ if str(ROOT) not in sys.path:
 from core.feature_store import load_ohlcv_window  # noqa: E402
 
 ASSETS = ["BTC", "ETH", "SOL", "BNB", "XRP"]
-COST_RT = 6.0 / 1e4          # ~6 bps round-trip
-MIN_OBS = 20                 # min occurrences per bucket per half
-T_MIN = 2.0                  # OOS significance bar (|t| >= 2)
+COST_RT = 6.0 / 1e4  # ~6 bps round-trip
+MIN_OBS = 20  # min occurrences per bucket per half
+T_MIN = 2.0  # OOS significance bar (|t| >= 2)
 ROBUST_ASSETS = 2
 
 
 def _returns(df):
     import numpy as np
     import pandas as pd
+
     df = df.sort_values("ts").copy()
     df["ret"] = np.log(df["close"]).diff()
     df["dt"] = pd.to_datetime(df["ts"], unit="s", utc=True)
@@ -78,6 +80,7 @@ def main() -> int:
     except Exception:
         pass
     import ccxt
+
     print("Connecting to Binance (public OHLCV)...")
     ex = ccxt.binance({"enableRateLimit": True, "timeout": 30000})
     ex.load_markets()
@@ -86,8 +89,10 @@ def main() -> int:
         return ex.fetch_ohlcv(symbol, tf, since=int(since_ms), limit=int(limit)) or []
 
     now = int(time.time())
-    dims = [("Hour of day (UTC)", "1h", 365 * 24 * 3600, "hour"),
-            ("Day of week (0=Mon)", "1d", 3 * 365 * 24 * 3600, "dayofweek")]
+    dims = [
+        ("Hour of day (UTC)", "1h", 365 * 24 * 3600, "hour"),
+        ("Day of week (0=Mon)", "1d", 3 * 365 * 24 * 3600, "dayofweek"),
+    ]
 
     coverage = []
     cand = []  # every evaluated (dim, asset, bucket): (dim, a, v, isn, ismean, on, omean, oos_t)
@@ -109,75 +114,103 @@ def main() -> int:
     k = len(cand)
     try:
         from scipy.stats import norm
+
         t_bar = float(norm.ppf(1 - (0.05 / max(k, 1)) / 2))
     except Exception:
         t_bar = 3.6 if k > 100 else (3.2 if k > 30 else 2.6)
 
     held_by_dim = {}
-    detail = []        # (dim, asset, bucket, is_n, is_mean, oos_n, oos_mean, oos_t, holds)
+    detail = []  # (dim, asset, bucket, is_n, is_mean, oos_n, oos_mean, oos_t, holds)
     for dim_name, a, v, isn, ismean, on, omean, oos_t in cand:
         is_sweet = ismean > COST_RT
-        holds = (is_sweet and on >= MIN_OBS and omean > COST_RT and oos_t >= t_bar)
+        holds = is_sweet and on >= MIN_OBS and omean > COST_RT and oos_t >= t_bar
         if is_sweet:
             detail.append((dim_name, a, v, isn, ismean, on, omean, oos_t, holds))
         if holds:
             held_by_dim.setdefault(dim_name, {}).setdefault(v, []).append(a)
 
-    robust = [(d, v, assets) for d, buckets in held_by_dim.items()
-              for v, assets in buckets.items() if len(assets) >= ROBUST_ASSETS]
+    robust = [
+        (d, v, assets)
+        for d, buckets in held_by_dim.items()
+        for v, assets in buckets.items()
+        if len(assets) >= ROBUST_ASSETS
+    ]
 
     now_s = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    L = [f"# Repetitive calendar / seasonality patterns ({now_s})", "",
-         "_Anti-data-mining bar: a window counts ONLY if it beats ~6bps cost IN-SAMPLE, beats "
-         "cost OUT-OF-SAMPLE, the OOS mean is statistically significant (|t|>=2), AND it holds "
-         "on >=2 assets. Even then it is a weak hypothesis: the 5 majors are ~0.8 correlated "
-         "(multi-asset != independent), and ~155 windows were tested (multiple comparisons)._", "",
-         f"**Assets:** {', '.join(ASSETS)} | hour-of-day (1y hourly), day-of-week (3y daily). "
-         "Monthly/longer NOT tested — too few observations to be honest.", "",
-         f"**Tests:** {k} windows | Bonferroni OOS t-threshold ≈ {t_bar:.2f} (replaces the prior "
-         "fixed |t|>=2, which had no multiple-comparisons control — audit #3).", "",
-         f"## Verdict: {len(robust)} pattern(s) cleared the full bar "
-         "(after-cost + OOS-significant + multi-asset)", ""]
+    L = [
+        f"# Repetitive calendar / seasonality patterns ({now_s})",
+        "",
+        "_Anti-data-mining bar: a window counts ONLY if it beats ~6bps cost IN-SAMPLE, beats "
+        "cost OUT-OF-SAMPLE, the OOS mean is statistically significant (|t|>=2), AND it holds "
+        "on >=2 assets. Even then it is a weak hypothesis: the 5 majors are ~0.8 correlated "
+        "(multi-asset != independent), and ~155 windows were tested (multiple comparisons)._",
+        "",
+        f"**Assets:** {', '.join(ASSETS)} | hour-of-day (1y hourly), day-of-week (3y daily). "
+        "Monthly/longer NOT tested — too few observations to be honest.",
+        "",
+        f"**Tests:** {k} windows | Bonferroni OOS t-threshold ≈ {t_bar:.2f} (replaces the prior "
+        "fixed |t|>=2, which had no multiple-comparisons control — audit #3).",
+        "",
+        f"## Verdict: {len(robust)} pattern(s) cleared the full bar "
+        "(after-cost + OOS-significant + multi-asset)",
+        "",
+    ]
 
     if robust:
         L.append("### Cleared the bar (still weak hypotheses — see caveats, do not bet the farm)")
         for d, v, assets in robust:
             L.append(f"- **{d} = {v}** — OOS-significant after cost on: {', '.join(assets)}")
-        L += ["", "_Caveat: correlated assets + multiple comparisons mean even these need a "
-              "Bonferroni-level bar and forward paper-tracking before being trusted._", ""]
+        L += [
+            "",
+            "_Caveat: correlated assets + multiple comparisons mean even these need a "
+            "Bonferroni-level bar and forward paper-tracking before being trusted._",
+            "",
+        ]
     else:
         L.append("### None. No calendar window was after-cost + OOS-statistically-significant.")
-        L.append("_The honest, expected result: crypto hour-of-day and day-of-week 'patterns' "
-                 "do not survive an out-of-sample significance test. There is no recurring "
-                 "hour/weekday you can reliably trade for profit here. (Monthly+ can't even be "
-                 "tested with this much history.)_")
+        L.append(
+            "_The honest, expected result: crypto hour-of-day and day-of-week 'patterns' "
+            "do not survive an out-of-sample significance test. There is no recurring "
+            "hour/weekday you can reliably trade for profit here. (Monthly+ can't even be "
+            "tested with this much history.)_"
+        )
         L.append("")
 
     sig_fail = [d for d in detail if not d[8]]
     if sig_fail:
         L.append("### ⚠ Looked profitable in-sample, FAILED the OOS / significance bar (overfit)")
-        L += ["| dimension | asset | bucket | IS n | IS mean% | OOS n | OOS mean% | OOS t |",
-              "|---|---|---|---|---|---|---|---|"]
-        for d, a, v, isn, ismean, on, omean, oos_t, _ in sorted(detail, key=lambda x: x[4], reverse=True)[:20]:
-            L.append(f"| {d} | {a} | {v} | {isn} | {ismean * 100:+.3f}% | {on} | "
-                     f"{omean * 100:+.3f}% | {oos_t:+.2f} |")
+        L += [
+            "| dimension | asset | bucket | IS n | IS mean% | OOS n | OOS mean% | OOS t |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for d, a, v, isn, ismean, on, omean, oos_t, _ in sorted(
+            detail, key=lambda x: x[4], reverse=True
+        )[:20]:
+            L.append(
+                f"| {d} | {a} | {v} | {isn} | {ismean * 100:+.3f}% | {on} | "
+                f"{omean * 100:+.3f}% | {oos_t:+.2f} |"
+            )
         L.append("")
 
     if coverage:
         L += ["### Data coverage notes"] + [f"- {c}" for c in coverage] + [""]
 
     L.append("---")
-    L.append("_scripts/find_patterns.py — descriptive backward-looking seasonality test (after-cost, "
-             "IS/OOS, |t|>=2, multi-asset), NOT a forward signal. Monthly+ intentionally untested. "
-             "Re-run as history grows._")
+    L.append(
+        "_scripts/find_patterns.py — descriptive backward-looking seasonality test (after-cost, "
+        "IS/OOS, |t|>=2, multi-asset), NOT a forward signal. Monthly+ intentionally untested. "
+        "Re-run as history grows._"
+    )
 
     out = ROOT / "reports" / f"patterns_{date.today().isoformat()}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(L), encoding="utf-8")
 
     print(f"=== Seasonality scan ({now_s}) ===")
-    print(f"VERDICT: {len(robust)} pattern(s) cleared after-cost + OOS-significant + multi-asset; "
-          f"{len(sig_fail)} in-sample windows washed out.")
+    print(
+        f"VERDICT: {len(robust)} pattern(s) cleared after-cost + OOS-significant + multi-asset; "
+        f"{len(sig_fail)} in-sample windows washed out."
+    )
     for d, v, assets in robust:
         print(f"  CLEARED: {d}={v} on {', '.join(assets)}")
     print(f"\nFull record: {out}")

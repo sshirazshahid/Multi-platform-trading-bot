@@ -22,6 +22,7 @@ Usage:
     python scripts/market_intel_report.py
     python scripts/market_intel_report.py --min-vol 10000000 --top 10
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,14 +73,18 @@ def _global_market():
     """BTC/ETH dominance + total-mcap 24h change (regime). Free, no key."""
     d = _get_json("https://api.coingecko.com/api/v3/global", timeout=20).get("data", {})
     mcp = d.get("market_cap_percentage", {}) or {}
-    return {"btc_dom": mcp.get("btc"), "eth_dom": mcp.get("eth"),
-            "mcap_24h": d.get("market_cap_change_percentage_24h_usd")}
+    return {
+        "btc_dom": mcp.get("btc"),
+        "eth_dom": mcp.get("eth"),
+        "mcap_24h": d.get("market_cap_change_percentage_24h_usd"),
+    }
 
 
 def _defillama_chains():
     data = _get_json("https://api.llama.fi/v2/chains")
-    chains = sorted(((d.get("name"), float(d.get("tvl") or 0)) for d in data),
-                    key=lambda x: x[1], reverse=True)
+    chains = sorted(
+        ((d.get("name"), float(d.get("tvl") or 0)) for d in data), key=lambda x: x[1], reverse=True
+    )
     return sum(t for _, t in chains), chains[:8]
 
 
@@ -105,8 +110,11 @@ def _defillama_stablecoins():
 
 def _coingecko_categories():
     data = _get_json("https://api.coingecko.com/api/v3/coins/categories", timeout=25)
-    cats = [(c.get("name"), c.get("market_cap_change_24h"))
-            for c in data if c.get("market_cap_change_24h") is not None]
+    cats = [
+        (c.get("name"), c.get("market_cap_change_24h"))
+        for c in data
+        if c.get("market_cap_change_24h") is not None
+    ]
     cats.sort(key=lambda x: x[1], reverse=True)
     return cats
 
@@ -114,8 +122,11 @@ def _coingecko_categories():
 def _news_headlines(limit=8):
     """Recent crypto headlines from free RSS (namespace-tolerant: RSS item + Atom entry)."""
     import xml.etree.ElementTree as ET
-    feeds = [("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-             ("Cointelegraph", "https://cointelegraph.com/rss")]
+
+    feeds = [
+        ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+        ("Cointelegraph", "https://cointelegraph.com/rss"),
+    ]
     out, per = [], max(1, limit // len(feeds) + 1)
     for src, url in feeds:
         try:
@@ -172,14 +183,18 @@ def _build_delta(prev, fng, glob, total_tvl, stable, byvol):
     items = []
     pv, cv = prev.get("fng_value"), (fng or {}).get("value")
     if pv and cv and str(pv) != str(cv):
-        items.append(f"Fear & Greed {pv} → {cv} "
-                     f"({prev.get('fng_class')} → {(fng or {}).get('value_classification')})")
+        items.append(
+            f"Fear & Greed {pv} → {cv} "
+            f"({prev.get('fng_class')} → {(fng or {}).get('value_classification')})"
+        )
     pb, cb = prev.get("btc_dom"), (glob or {}).get("btc_dom")
     if pb and cb and abs(cb - pb) >= 0.05:
         items.append(f"BTC dominance {pb:.1f}% → {cb:.1f}% ({cb - pb:+.1f}pp)")
     pt = prev.get("total_tvl")
     if pt and total_tvl:
-        items.append(f"DeFi TVL ${pt:,.0f} → ${total_tvl:,.0f} ({100 * (total_tvl / pt - 1):+.1f}%)")
+        items.append(
+            f"DeFi TVL ${pt:,.0f} → ${total_tvl:,.0f} ({100 * (total_tvl / pt - 1):+.1f}%)"
+        )
     ps, cs = prev.get("stable_total"), (stable or {}).get("total")
     if ps and cs and abs(cs / ps - 1) >= 0.0005:
         items.append(f"Stablecoin supply {100 * (cs / ps - 1):+.2f}%")
@@ -192,8 +207,11 @@ def _build_delta(prev, fng, glob, total_tvl, stable, byvol):
         items.append("Dropped from top-volume: " + ", ".join(sorted(dropped)))
     if not items:
         return []
-    return ([f"## What changed since last brief", f"_(prior brief: {prev.get('ts_utc', '?')})_", ""]
-            + [f"- {it}" for it in items] + [""])
+    return (
+        ["## What changed since last brief", f"_(prior brief: {prev.get('ts_utc', '?')})_", ""]
+        + [f"- {it}" for it in items]
+        + [""]
+    )
 
 
 def main() -> int:
@@ -202,13 +220,16 @@ def main() -> int:
     except Exception:
         pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("--min-vol", type=float, default=5_000_000.0, help="min 24h quote volume (USDT)")
+    ap.add_argument(
+        "--min-vol", type=float, default=5_000_000.0, help="min 24h quote volume (USDT)"
+    )
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
 
     prev = _prev_snapshot()
 
     import ccxt
+
     print("Connecting to Binance (public data)...")
     ex = ccxt.binance({"enableRateLimit": True, "timeout": 30000})
     binance_ok = True
@@ -271,21 +292,29 @@ def main() -> int:
     news = _safe(_news_headlines, [], "news")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    L = [f"# Crypto Market Intelligence Brief — {now}", "",
-         "_Descriptive snapshot of what is ALREADY moving. Public data is priced in — "
-         "this is for awareness/research, NOT a prediction or trade signal._", ""]
+    L = [
+        f"# Crypto Market Intelligence Brief — {now}",
+        "",
+        "_Descriptive snapshot of what is ALREADY moving. Public data is priced in — "
+        "this is for awareness/research, NOT a prediction or trade signal._",
+        "",
+    ]
 
     reg = []
     if fng:
         reg.append(f"**Fear & Greed:** {fng.get('value')}/100 — {fng.get('value_classification')}")
     if glob and glob.get("btc_dom") is not None:
-        line = f"**BTC dom:** {glob['btc_dom']:.1f}% | **ETH dom:** {(glob.get('eth_dom') or 0):.1f}%"
+        line = (
+            f"**BTC dom:** {glob['btc_dom']:.1f}% | **ETH dom:** {(glob.get('eth_dom') or 0):.1f}%"
+        )
         if glob.get("mcap_24h") is not None:
             line += f" | **total mcap 24h:** {glob['mcap_24h']:+.1f}%"
         reg.append(line)
     if breadth:
-        reg.append(f"**Breadth:** {breadth[0]}/{breadth[1]} liquid pairs green "
-                   f"({100 * breadth[0] / breadth[1]:.0f}%)")
+        reg.append(
+            f"**Breadth:** {breadth[0]}/{breadth[1]} liquid pairs green "
+            f"({100 * breadth[0] / breadth[1]:.0f}%)"
+        )
     if ethbtc:
         reg.append(f"**ETH/BTC:** {ethbtc:.5f}")
     if reg:
@@ -310,13 +339,18 @@ def main() -> int:
             L.append(f"| {b} | {p:+.1f}% | ${v:,.0f} |")
         L.append("")
     else:
-        L += ["## Market movers",
-              "_Binance movers/volume unavailable this run (source error or rate limit)._", ""]
+        L += [
+            "## Market movers",
+            "_Binance movers/volume unavailable this run (source error or rate limit)._",
+            "",
+        ]
 
     if mtf:
         L.append("## Closed-bar momentum — TODAY'S TOP GAINERS across 1h / 4h / 24h")
-        L.append("_Selection is gainers-only (not a neutral scan). Completed-bar % — may "
-                 "differ from the rolling-24h ticker above._")
+        L.append(
+            "_Selection is gainers-only (not a neutral scan). Completed-bar % — may "
+            "differ from the rolling-24h ticker above._"
+        )
         L += ["", "| coin | 1h | 4h | 24h (candle) |", "|---|---|---|---|"]
         for b, _, _, _ in gainers[:6]:
             if b in mtf:
@@ -326,8 +360,10 @@ def main() -> int:
 
     if frows:
         L.append("## Positioning — funding-rate extremes (perps, crypto-only & liquid)")
-        L.append("_Positive funding = longs pay shorts (crowded longs, squeeze-down risk); "
-                 "negative = crowded shorts (squeeze-up risk). Positioning, not a signal._")
+        L.append(
+            "_Positive funding = longs pay shorts (crowded longs, squeeze-down risk); "
+            "negative = crowded shorts (squeeze-up risk). Positioning, not a signal._"
+        )
         L += ["", "| crowded LONGS (funding) | crowded SHORTS (funding) |", "|---|---|"]
         rng = max(len(pos_fund), len(neg_fund), 1)
         for i in range(rng):
@@ -373,15 +409,19 @@ def main() -> int:
         L.append("")
 
     if _FAILED:
-        L.append(f"> ⚠ Sources unavailable this run (fetch failed): {', '.join(sorted(set(_FAILED)))}")
+        L.append(
+            f"> ⚠ Sources unavailable this run (fetch failed): {', '.join(sorted(set(_FAILED)))}"
+        )
         L.append("")
 
     L.append("---")
-    L.append("_Sources (public/free): Binance (movers/volume/funding/candles), alternative.me "
-             "(Fear & Greed), CoinGecko (global + sector rotation), DefiLlama (TVL + stablecoin "
-             "supply), CoinDesk/Cointelegraph RSS (news). Descriptive awareness, NOT a trade "
-             "signal. Runs ~every 4h via TradingBot-MarketIntel; durable history in "
-             "data/market_intel_history.jsonl. Exchange net-flows omitted — no free honest source._")
+    L.append(
+        "_Sources (public/free): Binance (movers/volume/funding/candles), alternative.me "
+        "(Fear & Greed), CoinGecko (global + sector rotation), DefiLlama (TVL + stablecoin "
+        "supply), CoinDesk/Cointelegraph RSS (news). Descriptive awareness, NOT a trade "
+        "signal. Runs ~every 4h via TradingBot-MarketIntel; durable history in "
+        "data/market_intel_history.jsonl. Exchange net-flows omitted — no free honest source._"
+    )
 
     report = "\n".join(L)
     out = ROOT / "reports" / f"market_intel_{date.today().isoformat()}.md"
@@ -390,13 +430,19 @@ def main() -> int:
 
     snap = {
         "ts_utc": now,
-        "fng_value": (fng or {}).get("value"), "fng_class": (fng or {}).get("value_classification"),
-        "btc_dom": (glob or {}).get("btc_dom"), "eth_dom": (glob or {}).get("eth_dom"),
-        "total_tvl": total_tvl or None, "stable_total": (stable or {}).get("total"),
-        "breadth_green": breadth[0] if breadth else None, "breadth_total": breadth[1] if breadth else None,
-        "top_movers": [b for b, _, _, _ in byvol], "gainers": [b for b, _, _, _ in gainers],
+        "fng_value": (fng or {}).get("value"),
+        "fng_class": (fng or {}).get("value_classification"),
+        "btc_dom": (glob or {}).get("btc_dom"),
+        "eth_dom": (glob or {}).get("eth_dom"),
+        "total_tvl": total_tvl or None,
+        "stable_total": (stable or {}).get("total"),
+        "breadth_green": breadth[0] if breadth else None,
+        "breadth_total": breadth[1] if breadth else None,
+        "top_movers": [b for b, _, _, _ in byvol],
+        "gainers": [b for b, _, _, _ in gainers],
         "losers": [b for b, _, _, _ in losers],
-        "pos_fund": [b for b, _ in pos_fund], "neg_fund": [b for b, _ in neg_fund],
+        "pos_fund": [b for b, _ in pos_fund],
+        "neg_fund": [b for b, _ in neg_fund],
         "failed": sorted(set(_FAILED)),
     }
     try:

@@ -31,6 +31,7 @@ Safety
   * Only cancels orders where the matching position is FLAT (size=0).
   * Cross-checks per-symbol open positions before cancelling.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,12 +77,14 @@ def _bybit_open_stop_orders(ex):
     to get all linear stop orders in one call.
     """
     try:
-        resp = ex.exchange.privateGetV5OrderRealtime({
-            "category": "linear",
-            "orderFilter": "StopOrder",
-            "settleCoin": "USDT",
-            "limit": 50,
-        })
+        resp = ex.exchange.privateGetV5OrderRealtime(
+            {
+                "category": "linear",
+                "orderFilter": "StopOrder",
+                "settleCoin": "USDT",
+                "limit": 50,
+            }
+        )
         return resp.get("result", {}).get("list", [])
     except Exception as e:
         logger.error(f"[bybit] fetch stop orders failed: {e}")
@@ -107,7 +110,8 @@ def _bybit_open_positions_by_symbol(ex, symbols: list[str]):
         except Exception as e:
             logger.warning(
                 f"[bybit] fetch position for {native} failed: {str(e)[:80]} — "
-                f"treating as 'unknown' (will NOT cancel its stop orders)")
+                f"treating as 'unknown' (will NOT cancel its stop orders)"
+            )
             # Defensive: mark as "unknown" so we don't cancel its orders
             out[native] = -1.0  # sentinel for "couldn't verify"
     return out
@@ -175,11 +179,13 @@ def _cleanup_bybit(ex, commit: bool):
     failed = 0
     for sym, side, qty, trigger, oid in orphans:
         try:
-            ex.exchange.privatePostV5OrderCancel({
-                "category": "linear",
-                "symbol": sym,
-                "orderId": oid,
-            })
+            ex.exchange.privatePostV5OrderCancel(
+                {
+                    "category": "linear",
+                    "symbol": sym,
+                    "orderId": oid,
+                }
+            )
             cancelled += 1
             logger.info(f"  ✓ cancelled {sym} {side} {oid[:12]}...")
         except Exception as e:
@@ -190,10 +196,15 @@ def _cleanup_bybit(ex, commit: bool):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Actually cancel orders. Default is dry-run.")
-    ap.add_argument("--exchange", default=None, choices=("binance", "bybit", "bitget"),
-                    help="Limit to one exchange. Default: all connected.")
+    ap.add_argument(
+        "--commit", action="store_true", help="Actually cancel orders. Default is dry-run."
+    )
+    ap.add_argument(
+        "--exchange",
+        default=None,
+        choices=("binance", "bybit", "bitget"),
+        help="Limit to one exchange. Default: all connected.",
+    )
     args = ap.parse_args()
 
     exchanges = _build_exchanges(args.exchange)

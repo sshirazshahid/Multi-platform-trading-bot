@@ -2,10 +2,12 @@
 
 `SCALP_TIER_ENABLED` (env, default true) when flipped to false should:
   - Drop the SCALP entry from `config.LEVERAGE_TIERS`.
-  - Restore the Phase-39 `BLACKLIST_HARD` set.
-  - Restore the Phase-44 `BLOCKED_HOURS_UTC = {0, 9, 19, 21, 23}`.
   - Make `core/mcp_brain.py`'s Claude TP/SL clamp inert (raw values
     pass through unclamped on a non-SCALP futures entry).
+
+2026-06-20 (owner "remove any blacklist and blocks"): flipping the SCALP
+tier off no longer re-introduces a symbol blacklist or blocked hours —
+`BLACKLIST_HARD` stays empty and all 24h stay open regardless of this flag.
 
 Tests reload `config` inside each test so the import-time gate runs
 under the env var being asserted, then restore the default by reload
@@ -46,16 +48,18 @@ def test_default_keeps_scalp_tier(monkeypatch):
     assert "SCALP" in cfg.LEVERAGE_TIERS
 
 
-def test_kill_switch_drops_scalp_and_restores_gates(monkeypatch):
+def test_kill_switch_drops_scalp_but_keeps_unblock(monkeypatch):
+    # 2026-06-20 (owner "remove any blacklist and blocks"): SCALP off still
+    # drops the tier, but no longer re-introduces a blacklist or blocked hours.
     monkeypatch.setenv("SCALP_TIER_ENABLED", "false")
     cfg = _reload_config()
     assert cfg.SCALP_TIER_ENABLED is False
     assert "SCALP" not in cfg.LEVERAGE_TIERS
-    assert cfg.BLACKLIST_HARD, (
-        "BLACKLIST_HARD should be non-empty when SCALP_TIER_ENABLED=false"
+    assert cfg.BLACKLIST_HARD == set(), (
+        "BLACKLIST_HARD must stay empty even with SCALP off (unblock directive)"
     )
-    assert cfg.BLOCKED_HOURS_UTC == {0, 9, 19, 21, 23}
-    assert cfg.ALLOWED_HOURS_UTC == set(range(24)) - {0, 9, 19, 21, 23}
+    assert cfg.BLOCKED_HOURS_UTC == set()
+    assert cfg.ALLOWED_HOURS_UTC == set(range(24))
 
 
 def test_kill_switch_disables_claude_tp_clamp(monkeypatch):

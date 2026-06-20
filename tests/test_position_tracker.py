@@ -252,3 +252,55 @@ def test_reconcile_imports_when_no_matching_live_position():
     imported = tracker.reconcile_closed_pnl(
         {"bybit": ex}, since_ts=now - 120)
     assert imported == 1
+
+
+# ── on_close hook wiring (safety-rail close path) ─────────────────────
+#
+# bot_engine wires tracker.on_close = order_mgr._finalize_close so EVERY
+# close (normal, SL/TP, ghost-sync) routes through warehouse recording,
+# risk updates, and notifications. Assert the hook fires on close — a
+# regression here silently drops a closed trade's accounting.
+
+
+def _make_open_position(symbol="BTC/USDT:USDT"):
+    return Position(
+        id=f"wire-{symbol}",
+        exchange="bybit",
+        symbol=symbol,
+        side="buy",
+        market_type="futures",
+        strategy="test",
+        entry_price=100.0,
+        size=1.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+        leverage=3,
+    )
+
+
+def test_close_fires_on_close_hook():
+    tracker = PositionTracker()
+    fired = {}
+    tracker.on_close = lambda pos, exit_price, reason: fired.update(
+        symbol=pos.symbol, exit_price=exit_price, reason=reason)
+    pos = _make_open_position()
+    tracker.add(pos)
+    tracker.close(pos.id, exit_price=108.0, reason="take_profit")
+    assert fired.get("symbol") == "BTC/USDT:USDT"
+    assert fired.get("exit_price") == 108.0
+    assert fired.get("reason") == "take_profit"
+
+
+def test_close_hook_failure_does_not_lose_close():
+    """A buggy hook must not prevent the position from being closed/recorded."""
+    tracker = PositionTracker()
+
+    def boom(pos, exit_price, reason):
+        raise RuntimeError("hook bug")
+
+    tracker.on_close = boom
+    pos = _make_open_position("ETH/USDT:USDT")
+    tracker.add(pos)
+    closed = tracker.close(pos.id, exit_price=90.0, reason="stop_loss")
+    assert closed is not None
+    assert pos.id not in tracker._open

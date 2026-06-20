@@ -31,6 +31,33 @@ TOP_PAIRS = [
 RESULTS_DIR = Path("data/backtest_results")
 
 
+def _make_strategy(strategy_name, order_manager, risk_manager, market_type):
+    """Map a strategy name to its (backtest-only) legacy strategy class.
+
+    Replaces the removed core.strategy_selector._make_strategy helper. Returns
+    None for an unknown name so the caller can record a clean error.
+    """
+    from strategies.legacy.supertrend import SupertrendStrategy
+    from strategies.legacy.multi_tf import MultiTFStrategy
+    from strategies.legacy.trend_following import TrendFollowingStrategy
+    from strategies.legacy.mean_reversion import MeanReversionStrategy
+    from strategies.legacy.scalping import ScalpingStrategy
+    from strategies.legacy.grid_trading import GridTradingStrategy
+
+    classes = {
+        "supertrend": SupertrendStrategy,
+        "multitf": MultiTFStrategy,
+        "trend": TrendFollowingStrategy,
+        "meanreversion": MeanReversionStrategy,
+        "scalping": ScalpingStrategy,
+        "grid": GridTradingStrategy,
+    }
+    cls = classes.get(strategy_name)
+    if cls is None:
+        return None
+    return cls(order_manager, risk_manager, market_type)
+
+
 def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0):
     """Run a single backtest and return results dict."""
     import pandas as pd
@@ -55,12 +82,14 @@ def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df.set_index("timestamp", inplace=True)
 
-        # Build strategy object
+        # Build strategy object. The old core.strategy_selector._make_strategy
+        # helper was removed in the StrategySelector refactor, so map names to the
+        # backtest-only legacy strategy classes locally (2026-06-20).
         from core.order_manager import OrderManager
         from core.risk_manager import RiskManager
-        from core.strategy_selector import _make_strategy
+        from utils.notifier import EmailNotifier
         risk = RiskManager()
-        om = OrderManager(tracker=None, risk=risk, exchanges={}, dry_run=True)
+        om = OrderManager(None, risk, EmailNotifier())
         strategy = _make_strategy(strategy_name, om, risk, market_type)
         if not strategy:
             return {"symbol": symbol, "strategy": strategy_name,
@@ -82,7 +111,7 @@ def run_single_backtest(exchange, symbol, strategy_name, days=30, balance=1000.0
             "total_trades": result.total_trades,
             "win_rate": result.win_rate,
             "total_pnl": result.total_pnl,
-            "sharpe": result.sharpe,
+            "sharpe": result.sharpe_ratio,
         }
     except Exception as e:
         return {

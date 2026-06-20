@@ -27,6 +27,7 @@ Usage:
     python scripts/sprint_kpi.py --since 2026-05-19 [--until 2026-05-26]
     python scripts/sprint_kpi.py --since 2026-04-19 --markdown
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,12 +92,15 @@ def _parse_date(s: str) -> float:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--since", required=True, help="YYYY-MM-DD (UTC)")
-    ap.add_argument("--until", default=None,
-                    help="YYYY-MM-DD (UTC, default: now)")
-    ap.add_argument("--warehouse", default="data/warehouse.sqlite",
-                    help="Path to warehouse.sqlite (default: data/warehouse.sqlite)")
-    ap.add_argument("--markdown", action="store_true",
-                    help="Emit markdown table suitable for reports/")
+    ap.add_argument("--until", default=None, help="YYYY-MM-DD (UTC, default: now)")
+    ap.add_argument(
+        "--warehouse",
+        default="data/warehouse.sqlite",
+        help="Path to warehouse.sqlite (default: data/warehouse.sqlite)",
+    )
+    ap.add_argument(
+        "--markdown", action="store_true", help="Emit markdown table suitable for reports/"
+    )
     args = ap.parse_args()
 
     since = _parse_date(args.since)
@@ -136,8 +140,7 @@ def main() -> int:
             print(f"| {k} | {buckets[k]:+.2f} | {counts[k]} |")
         print(f"| **TOTAL** | **{total:+.2f}** | **{n_total}** |")
     else:
-        print(f"=== Sprint KPI {args.since} -> {until_label} "
-              f"({days:.1f}d, n={n_total}) ===")
+        print(f"=== Sprint KPI {args.since} -> {until_label} ({days:.1f}d, n={n_total}) ===")
         for k in BUCKET_ORDER:
             print(f"  {k:11} ${buckets[k]:+8.2f}  n={counts[k]}")
         print(f"  {'TOTAL':11} ${total:+8.2f}  n={n_total}")

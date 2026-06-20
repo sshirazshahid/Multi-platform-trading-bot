@@ -4,46 +4,63 @@ scripts/live_monitor.py — continuous bot monitor.
 Prints a snapshot every 60s: live uPnL, daily PnL, open positions,
 new trades detected in log, cycle timing, errors.
 """
+
 from __future__ import annotations
-import json, os, sys, time
-from pathlib import Path
+
+import json
+import os
+import sys
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import dotenv; dotenv.load_dotenv()
+import dotenv
+
+dotenv.load_dotenv()
 
 from loguru import logger
+
 logger.remove()
 logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | {message}", level="INFO")
 
-POSITIONS_FILE  = Path("data/positions.json")
-RISK_FILE       = Path("data/risk_state.json")
-LOG_FILE        = Path(f"logs/bot_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.log")
-POLL_SEC        = 60
+POSITIONS_FILE = Path("data/positions.json")
+RISK_FILE = Path("data/risk_state.json")
+LOG_FILE = Path(f"logs/bot_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.log")
+POLL_SEC = 60
 
 # ── Exchange factory ──────────────────────────────────────────────────────────
 _clients: dict = {}
+
+
 def _client(name: str):
     k = name.lower()
     if k in _clients:
         return _clients[k]
     if "binance" in k:
         from exchanges.binance_client import BinanceClient
+
         c = BinanceClient(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_SECRET"))
     elif "bybit" in k:
         from exchanges.bybit_client import BybitClient
+
         c = BybitClient(os.getenv("BYBIT_API_KEY"), os.getenv("BYBIT_SECRET"))
     elif "bitget" in k:
         from exchanges.bitget_client import BitgetClient
-        c = BitgetClient(os.getenv("BITGET_API_KEY"), os.getenv("BITGET_SECRET"), os.getenv("BITGET_PASSPHRASE"))
+
+        c = BitgetClient(
+            os.getenv("BITGET_API_KEY"), os.getenv("BITGET_SECRET"), os.getenv("BITGET_PASSPHRASE")
+        )
     else:
         return None
     _clients[k] = c
     return c
 
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def load_open():
     return json.loads(POSITIONS_FILE.read_text()).get("open", [])
+
 
 def load_risk():
     try:
@@ -51,9 +68,11 @@ def load_risk():
     except Exception:
         return {}
 
+
 def upnl(pos, price):
     e, sz = pos["entry_price"], pos["size"]
     return (e - price) * sz if pos["side"] == "sell" else (price - e) * sz
+
 
 def fetch_price(pos):
     cl = _client(pos["exchange"])
@@ -64,9 +83,11 @@ def fetch_price(pos):
     except Exception:
         return None
 
+
 # ── Log tail tracker ──────────────────────────────────────────────────────────
 _log_seen_lines = 0
 _cycle_timestamps: list[float] = []
+
 
 def scan_log_new_lines() -> dict:
     global _log_seen_lines, _cycle_timestamps
@@ -99,8 +120,10 @@ def scan_log_new_lines() -> dict:
     # Compute avg cycle interval from last 5 cycles
     avg_interval = None
     if len(_cycle_timestamps) >= 2:
-        diffs = [_cycle_timestamps[i+1] - _cycle_timestamps[i]
-                 for i in range(max(0, len(_cycle_timestamps)-6), len(_cycle_timestamps)-1)]
+        diffs = [
+            _cycle_timestamps[i + 1] - _cycle_timestamps[i]
+            for i in range(max(0, len(_cycle_timestamps) - 6), len(_cycle_timestamps) - 1)
+        ]
         avg_interval = sum(diffs) / len(diffs) if diffs else None
 
     return {
@@ -109,6 +132,7 @@ def scan_log_new_lines() -> dict:
         "cycles_fired": len(cycles),
         "avg_cycle_s": avg_interval,
     }
+
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def main():
@@ -135,32 +159,32 @@ def main():
 
         # ── Fetch live prices in parallel ───────────────────────────────────
         from concurrent.futures import ThreadPoolExecutor
+
         prices = {}
         if positions:
             with ThreadPoolExecutor(max_workers=min(5, len(positions))) as pool:
-                results = pool.map(
-                    lambda p: (p["id"], fetch_price(p)),
-                    positions
-                )
+                results = pool.map(lambda p: (p["id"], fetch_price(p)), positions)
                 for pid, price in results:
                     if price is not None:
                         prices[pid] = price
 
         # ── Build report ────────────────────────────────────────────────────
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
         logger.info(f"[{ts}] Snapshot #{iteration}")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
 
         # Daily PnL / halt
         daily_pnl = risk.get("daily_pnl", 0)
-        is_halted  = risk.get("is_halted", False)
-        balance    = risk.get("balance", 0)
-        halt_icon  = "HALTED" if is_halted else "running"
+        is_halted = risk.get("is_halted", False)
+        balance = risk.get("balance", 0)
+        halt_icon = "HALTED" if is_halted else "running"
         logger.info(f"  Bot: {halt_icon} | daily_pnl={daily_pnl:+.4f}U | balance=${balance:.1f}")
 
         # Cycle cadence
         if log_info["avg_cycle_s"]:
-            logger.info(f"  Cycle cadence: avg {log_info['avg_cycle_s']:.0f}s (target 60s) | {log_info['cycles_fired']} new cycles this window")
+            logger.info(
+                f"  Cycle cadence: avg {log_info['avg_cycle_s']:.0f}s (target 60s) | {log_info['cycles_fired']} new cycles this window"
+            )
 
         # Positions
         total_upnl_val = 0.0
@@ -175,20 +199,21 @@ def main():
                 logger.info(
                     f"    [{icon}] {p['exchange']:6} {p['symbol']:22} "
                     f"uPnL={u:+.4f}U age={age_min:.0f}m "
-                    f"entry={p['entry_price']:.4f} now={price:.4f}")
+                    f"entry={p['entry_price']:.4f} now={price:.4f}"
+                )
             else:
                 logger.info(f"    [?] {p['exchange']:6} {p['symbol']:22} price unavailable")
         logger.info(f"  TOTAL uPnL: {total_upnl_val:+.4f} USDT")
 
         # New trades
         if log_info["new_trades"]:
-            logger.info(f"  NEW TRADES this window:")
+            logger.info("  NEW TRADES this window:")
             for kind, line in log_info["new_trades"]:
                 logger.info(f"    [{kind}] {line[-120:]}")
 
         # Errors
         if log_info["errors"]:
-            logger.info(f"  ERRORS/ALERTS:")
+            logger.info("  ERRORS/ALERTS:")
             for e in log_info["errors"][:5]:
                 logger.info(f"    {e[-120:]}")
 

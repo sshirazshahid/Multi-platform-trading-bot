@@ -19,6 +19,7 @@ Usage:
     python scripts/diagnostic_report.py             # stdout
     python scripts/diagnostic_report.py --save      # also writes reports/...
 """
+
 from __future__ import annotations
 
 import argparse
@@ -176,8 +177,7 @@ def format_report(
         L.append(f"- mean fees: ${overall['mean_fees']:.4f}")
         L.append(f"- mean realized PnL: ${overall['mean_realized_pnl']:+.4f}")
         L.append(
-            f"- alpha 95% CI: [${overall['alpha_ci_lb']:+.4f}, "
-            f"${overall['alpha_ci_ub']:+.4f}]"
+            f"- alpha 95% CI: [${overall['alpha_ci_lb']:+.4f}, ${overall['alpha_ci_ub']:+.4f}]"
         )
         L.append(f"- **VERDICT: `{overall['verdict']}`**\n")
 
@@ -247,36 +247,49 @@ def format_report(
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--save", action="store_true",
+        "--save",
+        action="store_true",
         help="Also write to reports/attribution_diagnostic_<YYYYMMDD>.md",
     )
     parser.add_argument(
-        "--exclude-strategy", action="append", default=[],
+        "--exclude-strategy",
+        action="append",
+        default=[],
         help="Strategy family to exclude (repeatable, e.g. --exclude-strategy Supertrend)",
     )
     parser.add_argument(
-        "--mode", default=None,
+        "--mode",
+        default=None,
         help="Restrict to one trade mode (e.g. CONTROLLED_LIVE, PAPER)",
     )
     parser.add_argument(
-        "--exclude-symbol", action="append", default=[],
+        "--exclude-symbol",
+        action="append",
+        default=[],
         help="Symbol to exclude (repeatable, e.g. --exclude-symbol SOL/USDT:USDT)",
     )
     parser.add_argument(
-        "--tag", default=None,
+        "--tag",
+        default=None,
         help="Tag to embed in the saved filename (e.g. live_only)",
     )
     parser.add_argument(
-        "--since", default=None,
-        help=("Filter trades by ts_entry. Accepts ISO date (2026-04-27), "
-              "ISO datetime, or relative duration like 7d/24h. Use this to "
-              "re-gate against post-Phase-2 trades only."),
+        "--since",
+        default=None,
+        help=(
+            "Filter trades by ts_entry. Accepts ISO date (2026-04-27), "
+            "ISO datetime, or relative duration like 7d/24h. Use this to "
+            "re-gate against post-Phase-2 trades only."
+        ),
     )
     parser.add_argument(
-        "--exclude-zero-cost", action="store_true",
-        help=("Skip rows where spread=slippage=funding=0 (the pre-Task-A "
-              "backfill blind spot). Recommended for any --since that "
-              "post-dates the forward-attribution wire-up."),
+        "--exclude-zero-cost",
+        action="store_true",
+        help=(
+            "Skip rows where spread=slippage=funding=0 (the pre-Task-A "
+            "backfill blind spot). Recommended for any --since that "
+            "post-dates the forward-attribution wire-up."
+        ),
     )
     args = parser.parse_args()
 
@@ -306,8 +319,7 @@ def main():
     rows = wh.query(sql, params)
     if not rows:
         print(
-            "No attribution rows. "
-            "Run scripts/backfill_attribution.py --commit first.",
+            "No attribution rows. Run scripts/backfill_attribution.py --commit first.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -337,8 +349,12 @@ def main():
     by_symbol = per_group_report(rows, "symbol")
 
     report = format_report(
-        overall, by_strategy, by_symbol,
-        n_zero_cost=n_zero_cost, n_total=n_pre_filter, since=args.since,
+        overall,
+        by_strategy,
+        by_symbol,
+        n_zero_cost=n_zero_cost,
+        n_total=n_pre_filter,
+        since=args.since,
     )
     print(report)
 

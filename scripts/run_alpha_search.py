@@ -3,6 +3,7 @@
 
 FROZEN PRE-REGISTRATION — do not change between data collection and run:
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,22 +21,23 @@ from core.alpha_zoo import screen
 from core.alpha_zoo.panel import Panel, build_panel, split_panel
 
 # ── FROZEN constants (pre-registration) ──────────────────────────────────
-HORIZON = 24          # forward-return bars (24h on 1h panel)
-SPLIT_FRAC = 0.60     # in-sample fraction
-EMBARGO = 24          # bars dropped at the IS/OOS boundary (= HORIZON)
-MIN_WIDTH = 10        # min symbols per bar for IC / portfolio
-QUANTILE = 0.20       # long-short top/bottom fraction
-IR_MIN = 0.50         # Stage-1 survivor bar
-DSR_MIN = 0.10        # Stage-2 deflated-Sharpe bar (Pr[SR>0])
-PBO_MAX = 0.50        # Stage-2 overfit ceiling
-FDR_Q = 0.05          # Benjamini-Hochberg level
+HORIZON = 24  # forward-return bars (24h on 1h panel)
+SPLIT_FRAC = 0.60  # in-sample fraction
+EMBARGO = 24  # bars dropped at the IS/OOS boundary (= HORIZON)
+MIN_WIDTH = 10  # min symbols per bar for IC / portfolio
+QUANTILE = 0.20  # long-short top/bottom fraction
+IR_MIN = 0.50  # Stage-1 survivor bar
+DSR_MIN = 0.10  # Stage-2 deflated-Sharpe bar (Pr[SR>0])
+PBO_MAX = 0.50  # Stage-2 overfit ceiling
+FDR_Q = 0.05  # Benjamini-Hochberg level
 PBO_PARTITIONS = 16
 
 DEFAULT_REPORT_DIR = ROOT / "reports"
 
 
-def run_search(panel: Panel, registry: list | None = None, *,
-               report_dir: Path | None = None) -> dict:
+def run_search(
+    panel: Panel, registry: list | None = None, *, report_dir: Path | None = None
+) -> dict:
     """Run the two-stage screen and return the result dict (and write a report
     when `report_dir` is given)."""
     registry = registry if registry is not None else alpha_mod.computable_alphas()
@@ -62,9 +64,9 @@ def run_search(panel: Panel, registry: list | None = None, *,
     oos_stats: dict[str, dict] = {}
     for a in registry:
         sig = a.fn(oos_p)
-        r = screen.long_short_returns(sig, oos_p.fwd_ret,
-                                      sign=stage1[a.id]["sign"],
-                                      q=QUANTILE, min_width=MIN_WIDTH)
+        r = screen.long_short_returns(
+            sig, oos_p.fwd_ret, sign=stage1[a.id]["sign"], q=QUANTILE, min_width=MIN_WIDTH
+        )
         returns_by_alpha[a.id] = r
         r_clean = r.dropna().to_numpy()
         oos_stats[a.id] = {
@@ -92,24 +94,37 @@ def run_search(panel: Panel, registry: list | None = None, *,
         )
         if is_survivor:
             survivors.append(a.id)
-        table.append({
-            "id": a.id, "source": a.source,
-            "ir_is": round(s1["ir_is"], 4), "category": s1["category"],
-            "oos_sharpe": round(s2["oos_sharpe"], 4), "dsr": round(s2["dsr"], 4),
-            "fdr_p": round(s2["p_raw"], 6), "fdr_pass": fdr_pass.get(a.id, False),
-            "survivor": is_survivor,
-        })
+        table.append(
+            {
+                "id": a.id,
+                "source": a.source,
+                "ir_is": round(s1["ir_is"], 4),
+                "category": s1["category"],
+                "oos_sharpe": round(s2["oos_sharpe"], 4),
+                "dsr": round(s2["dsr"], 4),
+                "fdr_p": round(s2["p_raw"], 6),
+                "fdr_pass": fdr_pass.get(a.id, False),
+                "survivor": is_survivor,
+            }
+        )
 
     table.sort(key=lambda r: r["ir_is"], reverse=True)
     result = {
         "verdict": "EDGE_FOUND" if survivors else "NO_EDGE",
         "survivors": survivors,
-        "n_computable": n_computable, "n_eff": n_eff,
+        "n_computable": n_computable,
+        "n_eff": n_eff,
         "pbo": round(pbo_value, 4),
         "pre_registration": {
-            "horizon": HORIZON, "split_frac": SPLIT_FRAC, "embargo": EMBARGO,
-            "min_width": MIN_WIDTH, "quantile": QUANTILE, "ir_min": IR_MIN,
-            "dsr_min": DSR_MIN, "pbo_max": PBO_MAX, "fdr_q": FDR_Q,
+            "horizon": HORIZON,
+            "split_frac": SPLIT_FRAC,
+            "embargo": EMBARGO,
+            "min_width": MIN_WIDTH,
+            "quantile": QUANTILE,
+            "ir_min": IR_MIN,
+            "dsr_min": DSR_MIN,
+            "pbo_max": PBO_MAX,
+            "fdr_q": FDR_Q,
         },
         "panel": {"bars": len(panel.ts), "symbols": len(panel.symbols)},
         "table": table,
@@ -123,30 +138,39 @@ def _write_report(result: dict, report_dir: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     stamp = date.today().isoformat()
     (report_dir / f"alpha_search_{stamp}.json").write_text(
-        json.dumps(result, indent=2, default=float), encoding="utf-8")
+        json.dumps(result, indent=2, default=float), encoding="utf-8"
+    )
     lines = [
-        f"# Alpha Search — {stamp}", "",
+        f"# Alpha Search — {stamp}",
+        "",
         f"**Verdict:** {result['verdict']}",
         f"**Survivors:** {result['survivors'] or 'none'}",
         f"**N_computable / N_eff:** {result['n_computable']} / {result['n_eff']}",
         f"**PBO:** {result['pbo']}",
         f"**Panel:** {result['panel']['bars']} bars × {result['panel']['symbols']} symbols",
-        "", "## Pre-registration (frozen)",
-        "```json", json.dumps(result["pre_registration"], indent=2), "```",
-        "", "## Full ranking", "",
+        "",
+        "## Pre-registration (frozen)",
+        "```json",
+        json.dumps(result["pre_registration"], indent=2),
+        "```",
+        "",
+        "## Full ranking",
+        "",
         "| id | source | IR_is | category | OOS Sharpe | DSR | FDR p | survivor |",
         "|----|--------|-------|----------|-----------|-----|-------|----------|",
     ]
     for r in result["table"]:
         lines.append(
             f"| {r['id']} | {r['source']} | {r['ir_is']} | {r['category']} | "
-            f"{r['oos_sharpe']} | {r['dsr']} | {r['fdr_p']} | {r['survivor']} |")
+            f"{r['oos_sharpe']} | {r['dsr']} | {r['fdr_p']} | {r['survivor']} |"
+        )
     (report_dir / f"alpha_search_{stamp}.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def _load_live_panel(timeframe: str = "1h") -> Panel:
     """Load every cached *_<tf>.parquet into a Panel."""
     import pandas as pd
+
     cache = ROOT / "data" / "ohlcv_cache"
     raw = {}
     for p in sorted(cache.glob(f"*_{timeframe}.parquet")):
@@ -162,8 +186,10 @@ def main() -> int:
     args = ap.parse_args()
     panel = _load_live_panel(args.timeframe)
     result = run_search(panel, report_dir=DEFAULT_REPORT_DIR)
-    print(f"VERDICT: {result['verdict']}  survivors={result['survivors']}  "
-          f"PBO={result['pbo']}  N_eff={result['n_eff']}")
+    print(
+        f"VERDICT: {result['verdict']}  survivors={result['survivors']}  "
+        f"PBO={result['pbo']}  N_eff={result['n_eff']}"
+    )
     return 0
 
 

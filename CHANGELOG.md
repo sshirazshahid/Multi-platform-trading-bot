@@ -8,6 +8,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-06-20 — review/harden pass: read-only MCP server + offline evidence-backed research labs)
+Audit/harden pass after a full review (3 internal audits + ~50 external sources + live data) that
+re-confirmed the bot has no measured entry edge and that the requested chart strategies (harmonic,
+stochastic, ICT, Asian-range, Dow-swing, Bollinger-squeeze, AI-valuation) lack after-cost edge. Bot
+stays PAPER; agents/MCP stay log-only.
+- **MCP server** (`mcp_server/`): read-only server (6 tools) over the warehouse/decisions — opens
+  SQLite `mode=ro`, imports no bot/config/ccxt code, freeform query guarded to a single SELECT.
+  Register via `.mcp.json.example`. Pure data layer in `warehouse_reader.py` (no `mcp` dependency).
+- **Research labs** (`research/`): offline, deterministic, with out-of-sample splits + 1000-path
+  moving-block Monte-Carlo — `dca_rebalance_lab.py` (DCA / lump-sum / threshold-rebalance),
+  `funding_carry_lab.py` (delta-neutral cash-and-carry), `data_io.py` (CSV/candle loaders),
+  `run_spot_study.py` (multi-asset study). Real ~3y BTC/ETH/SOL fixtures in `research/sample_data/`.
+  Findings + refined roadmap in `research/finalized_trading_system_plan_2026_06_20.md` (DCA is
+  risk-reduction not edge; carry needs real funding history; promote nothing without after-cost OOS edge).
+- **CI**: new `research-labs` job (Python 3.11) lints + tests the new modules (the existing CI never
+  ran `tests/`).
+- +31 tests (suite 1988 green).
+
+### Fixed (2026-06-20 — review/harden pass)
+- `auto_backtest.py`: repaired the dead parameter-sweep runner — removed the deleted
+  `core.strategy_selector._make_strategy` import (added a local legacy-strategy factory), fixed the
+  stale `OrderManager(exchanges=,dry_run=)` signature, and `result.sharpe`→`sharpe_ratio`. This was
+  the cause of the 2026-03-30 sweep recording 144 jobs / 0 successes. +7 regression tests run all 6
+  strategies on a mock exchange.
+- `core/order_manager.py`: added `_reconcile_missing_sl`, wired into `check_sl_tp`. A position whose
+  exchange-side SL placement failed set `_sl_failed=True`, but that flag was never read — the
+  position then relied only on the slower polled-SL checks and never regained exchange-side
+  protection. The reconciler re-attempts placement once per minute per position (no-op in paper/spot
+  and when already protected). +4 tests.
+- Reconciled two stale docs to code (with regression tests): the Spec §12 loss-driven halts were
+  permanently removed 2026-05-27 (`CLAUDE.md` previously described a non-existent 4h auto-resume);
+  the `MODEL_GATE` honest thresholds (MIN_DSR=0.10 / MAX_PBO=0.5) are already enforced in
+  `core/promotion_gate.py` (`config.py` comment was stale).
+
 ### Fixed (2026-06-15 — TSMOM mode was invisible: relabel + disable MCP monitor under tsmom)
 After setting `SIGNAL_SOURCE=tsmom` and restarting, the bot looked like it was "still Claude/MCP".
 Investigation found the entry path WAS correctly routing to tsmom (the post-flip run dropped the

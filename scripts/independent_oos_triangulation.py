@@ -19,6 +19,7 @@ SURVIVOR = OOS Sharpe > 0.5 AND OOS return > B&H AND positive OOS return on >= 3
 Costs: commission 0.1% + slippage 0.05% per side (the skill's defaults). Read-only research;
 writes only to reports/. Does NOT touch the bot, .env, or data/.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -39,7 +40,7 @@ OUT_JSON = REPO / "reports" / "independent_oos_triangulation_2026-06-13.json"
 
 COINS = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
 FULL_START = datetime(2021, 1, 1)
-SPLIT = datetime(2024, 12, 31)        # IS: 2021-01..2024-12  | OOS: 2025-01..now
+SPLIT = datetime(2024, 12, 31)  # IS: 2021-01..2024-12  | OOS: 2025-01..now
 OOS_END = datetime(2026, 6, 13)
 COMMISSION, SLIPPAGE, CAPITAL = 0.001, 0.0005, 10_000.0
 
@@ -112,7 +113,9 @@ def main():
                 print(f"  {strat:16s} OOS failed: {e}")
                 continue
             row = {
-                "coin": coin, "strategy": strat, "best_params": best,
+                "coin": coin,
+                "strategy": strat,
+                "best_params": best,
                 "is_sharpe": round(best_sharpe, 3),
                 "oos_sharpe": round(_m(oos, "sharpe_ratio"), 3),
                 "oos_return_pct": round(_m(oos, "total_return"), 2),
@@ -123,15 +126,19 @@ def main():
                 "beats_bh": _m(oos, "total_return") > bh,
             }
             results.append(row)
-            print(f"  {strat:16s} IS_Sharpe={row['is_sharpe']:+.2f} -> "
-                  f"OOS_Sharpe={row['oos_sharpe']:+.2f} OOS_ret={row['oos_return_pct']:+.1f}% "
-                  f"(B&H {bh:+.1f}%) trades={row['oos_trades']} beats_bh={row['beats_bh']}")
+            print(
+                f"  {strat:16s} IS_Sharpe={row['is_sharpe']:+.2f} -> "
+                f"OOS_Sharpe={row['oos_sharpe']:+.2f} OOS_ret={row['oos_return_pct']:+.1f}% "
+                f"(B&H {bh:+.1f}%) trades={row['oos_trades']} beats_bh={row['beats_bh']}"
+            )
 
     # Survivor analysis: per strategy, count coins with positive OOS return that beat B&H.
     survivors = {}
     for strat in GRIDS:
         rows = [r for r in results if r["strategy"] == strat]
-        pos_beat = [r for r in rows if r["oos_return_pct"] > 0 and r["beats_bh"] and r["oos_sharpe"] > 0.5]
+        pos_beat = [
+            r for r in rows if r["oos_return_pct"] > 0 and r["beats_bh"] and r["oos_sharpe"] > 0.5
+        ]
         survivors[strat] = {
             "coins_pos_beat_bh_sharpe_gt_0p5": len(pos_beat),
             "n_coins": len(rows),
@@ -144,7 +151,7 @@ def main():
     payload = {
         "generated": "2026-06-13",
         "method": "IS grid-search (best Sharpe) -> single OOS eval; survivor = OOS Sharpe>0.5 "
-                  "AND beats buy-and-hold AND positive on >=3 of 5 coins",
+        "AND beats buy-and-hold AND positive on >=3 of 5 coins",
         "split": {"is": "2021-01-01..2024-12-31", "oos": "2025-01-01..2026-06-13"},
         "costs": {"commission": COMMISSION, "slippage": SLIPPAGE},
         "coins": COINS,
@@ -163,7 +170,7 @@ def main():
         "# Independent OOS Triangulation — Textbook Strategies on Crypto Majors",
         "",
         f"**Verdict: {payload['verdict']}**  | IS 2021-01..2024-12, OOS 2025-01..2026-06 | "
-        f"costs {COMMISSION*100:.1f}%+{SLIPPAGE*100:.2f}%/side | independent toolchain (yfinance + skill strategies.py)",
+        f"costs {COMMISSION * 100:.1f}%+{SLIPPAGE * 100:.2f}%/side | independent toolchain (yfinance + skill strategies.py)",
         "",
         "## Per-strategy OOS summary (params chosen in-sample, evaluated once out-of-sample)",
         "",
@@ -171,20 +178,30 @@ def main():
         "|---|---|---|---|---|",
     ]
     for s, v in survivors.items():
-        lines.append(f"| {s} | {v['mean_oos_sharpe']:+.2f} | {v['mean_oos_return']:+.1f} | "
-                     f"{v['coins_pos_beat_bh_sharpe_gt_0p5']}/{v['n_coins']} | "
-                     f"{'YES' if v['survivor'] else 'no'} |")
-    lines += ["", "## Every (coin, strategy) — IS Sharpe vs OOS reality", "",
-              "| Coin | Strategy | IS Sharpe | OOS Sharpe | OOS ret% | B&H% | beats B&H | trades |",
-              "|---|---|---|---|---|---|---|---|"]
+        lines.append(
+            f"| {s} | {v['mean_oos_sharpe']:+.2f} | {v['mean_oos_return']:+.1f} | "
+            f"{v['coins_pos_beat_bh_sharpe_gt_0p5']}/{v['n_coins']} | "
+            f"{'YES' if v['survivor'] else 'no'} |"
+        )
+    lines += [
+        "",
+        "## Every (coin, strategy) — IS Sharpe vs OOS reality",
+        "",
+        "| Coin | Strategy | IS Sharpe | OOS Sharpe | OOS ret% | B&H% | beats B&H | trades |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
     for r in results:
-        lines.append(f"| {r['coin']} | {r['strategy']} | {r['is_sharpe']:+.2f} | {r['oos_sharpe']:+.2f} | "
-                     f"{r['oos_return_pct']:+.1f} | {r['bh_oos_return_pct']:+.1f} | "
-                     f"{'Y' if r['beats_bh'] else 'n'} | {r['oos_trades']} |")
+        lines.append(
+            f"| {r['coin']} | {r['strategy']} | {r['is_sharpe']:+.2f} | {r['oos_sharpe']:+.2f} | "
+            f"{r['oos_return_pct']:+.1f} | {r['bh_oos_return_pct']:+.1f} | "
+            f"{'Y' if r['beats_bh'] else 'n'} | {r['oos_trades']} |"
+        )
     OUT_MD.parent.mkdir(parents=True, exist_ok=True)
     OUT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"\nVERDICT: {payload['verdict']}  (survivors: "
-          f"{[s for s, v in survivors.items() if v['survivor']] or 'none'})")
+    print(
+        f"\nVERDICT: {payload['verdict']}  (survivors: "
+        f"{[s for s, v in survivors.items() if v['survivor']] or 'none'})"
+    )
     print(f"Wrote {OUT_MD} + {OUT_JSON.name}")
 
 

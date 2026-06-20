@@ -7,6 +7,7 @@ indices; close-only (no intrabar fills) so they're fully vectorisable/replayable
 
 STRATEGIES maps name -> (generator, param_grid) for the walk-forward sweep.
 """
+
 from __future__ import annotations
 
 import sys
@@ -38,7 +39,7 @@ def ema_cross(close, fast, slow):
     f = _ema(pd.Series(close), fast).to_numpy()
     s = _ema(pd.Series(close), slow).to_numpy()
     pos = np.where(f > s, 1.0, 0.0)
-    pos[:slow] = 0.0                                  # warmup flat
+    pos[:slow] = 0.0  # warmup flat
     return pos
 
 
@@ -90,7 +91,7 @@ def bollinger_meanrev(close, period, k):
 def breakout(close, lookback):
     """Donchian: long when close breaks above the PRIOR `lookback` high; exit below prior low."""
     c = pd.Series(close)
-    hi = c.rolling(lookback).max().shift(1).to_numpy()   # prior window only -> no look-ahead
+    hi = c.rolling(lookback).max().shift(1).to_numpy()  # prior window only -> no look-ahead
     lo = c.rolling(lookback).min().shift(1).to_numpy()
     pos = np.zeros(len(close))
     state = 0.0
@@ -107,10 +108,14 @@ def breakout(close, lookback):
 
 # name -> (generator, [param tuples])
 STRATEGIES = {
-    "SMA_cross": (sma_cross, [(10, 50), (10, 100), (20, 50), (20, 100), (20, 200),
-                              (50, 100), (50, 200)]),
-    "EMA_cross": (ema_cross, [(10, 50), (10, 100), (20, 50), (20, 100), (20, 200),
-                              (50, 100), (50, 200)]),
+    "SMA_cross": (
+        sma_cross,
+        [(10, 50), (10, 100), (20, 50), (20, 100), (20, 200), (50, 100), (50, 200)],
+    ),
+    "EMA_cross": (
+        ema_cross,
+        [(10, 50), (10, 100), (20, 50), (20, 100), (20, 200), (50, 100), (50, 200)],
+    ),
     "RSI_reversal": (rsi_reversal, [(14, 30, 70), (14, 30, 60), (14, 35, 65), (14, 25, 55)]),
     "MACD": (macd_cross, [(12, 26, 9), (5, 35, 5), (8, 21, 5), (10, 30, 9)]),
     "Bollinger_MR": (bollinger_meanrev, [(20, 1.5), (20, 2.0), (20, 2.5), (50, 2.0)]),
