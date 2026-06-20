@@ -12,6 +12,7 @@ Run locally over stdio:
 
 Registered for Claude Code via .mcp.json at the repo root.
 """
+
 from __future__ import annotations
 
 import json
@@ -56,22 +57,24 @@ class LimitInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     limit: int = Field(default=20, ge=1, le=500, description="Max rows to return")
     symbol: Optional[str] = Field(
-        default=None, description="Filter by symbol, e.g. 'BTC/USDT:USDT'")
+        default=None, description="Filter by symbol, e.g. 'BTC/USDT:USDT'"
+    )
 
 
 class SummaryInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     symbol: Optional[str] = Field(default=None, description="Filter by symbol")
     strategy: Optional[str] = Field(
-        default=None, description="Filter by strategy_family, e.g. 'systematic_v3_1'")
+        default=None, description="Filter by strategy_family, e.g. 'systematic_v3_1'"
+    )
 
 
 class CandidatesInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     limit: int = Field(default=20, ge=1, le=500, description="Max rows to return")
     decision: Optional[str] = Field(
-        default=None,
-        description="Filter by decision: ALLOW | SKIP | REVIEW | TAKEN")
+        default=None, description="Filter by decision: ALLOW | SKIP | REVIEW | TAKEN"
+    )
 
 
 class QueryInput(BaseModel):
@@ -101,8 +104,9 @@ async def trading_bot_recent_trades(params: LimitInput) -> str:
     return _guard(lambda: wr.recent_trades(limit=params.limit, symbol=params.symbol))
 
 
-@mcp.tool(name="trading_bot_performance_summary",
-          annotations={"title": "Performance summary", **_RO})
+@mcp.tool(
+    name="trading_bot_performance_summary", annotations={"title": "Performance summary", **_RO}
+)
 async def trading_bot_performance_summary(params: SummaryInput) -> str:
     """Aggregate after-cost performance over CLOSED trades (optionally filtered).
 
@@ -113,8 +117,9 @@ async def trading_bot_performance_summary(params: SummaryInput) -> str:
     return _guard(lambda: wr.performance_summary(symbol=params.symbol, strategy=params.strategy))
 
 
-@mcp.tool(name="trading_bot_recent_candidates",
-          annotations={"title": "Recent candidate setups", **_RO})
+@mcp.tool(
+    name="trading_bot_recent_candidates", annotations={"title": "Recent candidate setups", **_RO}
+)
 async def trading_bot_recent_candidates(params: CandidatesInput) -> str:
     """Return recent candidate setups the engine evaluated (newest first).
 
@@ -126,8 +131,9 @@ async def trading_bot_recent_candidates(params: CandidatesInput) -> str:
     return _guard(lambda: wr.recent_candidates(limit=params.limit, decision=params.decision))
 
 
-@mcp.tool(name="trading_bot_shadow_vs_live",
-          annotations={"title": "Shadow vs live comparison", **_RO})
+@mcp.tool(
+    name="trading_bot_shadow_vs_live", annotations={"title": "Shadow vs live comparison", **_RO}
+)
 async def trading_bot_shadow_vs_live() -> str:
     """Compare the shadow agent ensemble's simulated PnL against live trades.
 

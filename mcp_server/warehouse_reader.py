@@ -8,6 +8,7 @@ opened in SQLite read-only mode — this layer can never mutate trading state.
 The MCP tool wrappers in ``trading_bot_mcp.py`` are thin shells over these
 functions.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -20,8 +21,19 @@ DEFAULT_DB_PATH = REPO_ROOT / "data" / "warehouse.sqlite"
 
 # Only a single read-only SELECT/WITH statement is allowed through run_select.
 _FORBIDDEN_SQL = (
-    "insert", "update", "delete", "drop", "alter", "create", "replace",
-    "attach", "detach", "pragma", "vacuum", "reindex", "truncate",
+    "insert",
+    "update",
+    "delete",
+    "drop",
+    "alter",
+    "create",
+    "replace",
+    "attach",
+    "detach",
+    "pragma",
+    "vacuum",
+    "reindex",
+    "truncate",
 )
 
 
@@ -67,8 +79,9 @@ def list_tables(db_path: str | Path | None = None) -> list[dict[str, Any]]:
         conn.close()
 
 
-def recent_trades(limit: int = 20, symbol: str | None = None,
-                  db_path: str | Path | None = None) -> list[dict[str, Any]]:
+def recent_trades(
+    limit: int = 20, symbol: str | None = None, db_path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Most recent CLOSED trades, newest first, optionally filtered by symbol."""
     conn = _connect(db_path)
     try:
@@ -88,8 +101,9 @@ def recent_trades(limit: int = 20, symbol: str | None = None,
         conn.close()
 
 
-def performance_summary(symbol: str | None = None, strategy: str | None = None,
-                        db_path: str | Path | None = None) -> dict[str, Any]:
+def performance_summary(
+    symbol: str | None = None, strategy: str | None = None, db_path: str | Path | None = None
+) -> dict[str, Any]:
     """Aggregate after-the-fact performance over CLOSED trades.
 
     Returns win rate, profit factor, total/avg realized PnL, and counts — the
@@ -123,7 +137,8 @@ def performance_summary(symbol: str | None = None, strategy: str | None = None,
             "total_realized_pnl": round(total, 4),
             "avg_pnl_per_trade": round(total / n, 4) if n else None,
             "profit_factor": (
-                round(gross_win / gross_loss, 4) if gross_loss > 0
+                round(gross_win / gross_loss, 4)
+                if gross_loss > 0
                 else (None if gross_win == 0 else float("inf"))
             ),
             "gross_win": round(gross_win, 4),
@@ -133,8 +148,9 @@ def performance_summary(symbol: str | None = None, strategy: str | None = None,
         conn.close()
 
 
-def recent_candidates(limit: int = 20, decision: str | None = None,
-                      db_path: str | Path | None = None) -> list[dict[str, Any]]:
+def recent_candidates(
+    limit: int = 20, decision: str | None = None, db_path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Most recent candidate setups the engine evaluated, newest first.
 
     ``decision`` filters by ALLOW | SKIP | REVIEW | TAKEN; SKIP rows carry the
@@ -215,8 +231,9 @@ def is_select_only(sql: str) -> bool:
     return not any(f" {kw} " in f" {lowered} " for kw in _FORBIDDEN_SQL)
 
 
-def run_select(sql: str, limit: int = 100,
-               db_path: str | Path | None = None) -> list[dict[str, Any]]:
+def run_select(
+    sql: str, limit: int = 100, db_path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Run a guarded, read-only SELECT and return rows (capped by limit).
 
     Raises WarehouseError with an actionable message if the statement is not a

@@ -24,6 +24,7 @@ HONESTY / RISK (read before trusting any number):
   schedule changes. Size margin conservatively and treat this as low single-digit
   to mid-teens % annual at best, not free money.
 """
+
 from __future__ import annotations
 
 import math
@@ -32,7 +33,7 @@ from dataclasses import dataclass, field
 # Binance/Bybit/Bitget settle perpetual funding every 8h -> 3/day -> 1095/yr.
 SETTLEMENTS_PER_YEAR = 1095
 # Per-side taker cost defaults; the carry crosses 2 legs (spot + perp), entry+exit.
-DEFAULT_FEE_PCT_PER_SIDE = 0.0006   # ~0.06% blended taker (spot+perp)
+DEFAULT_FEE_PCT_PER_SIDE = 0.0006  # ~0.06% blended taker (spot+perp)
 DEFAULT_SLIPPAGE_PCT_PER_SIDE = 0.0005  # 5 bps per leg
 
 
@@ -41,10 +42,10 @@ class CarryResult:
     label: str
     notional: float
     n_settlements: int
-    gross_funding_pnl: float       # sum of funding collected/paid
-    total_costs: float             # entry + exit, both legs
+    gross_funding_pnl: float  # sum of funding collected/paid
+    total_costs: float  # entry + exit, both legs
     net_pnl: float
-    net_yield_pct: float           # net_pnl / notional, over the whole period
+    net_yield_pct: float  # net_pnl / notional, over the whole period
     annualized_net_yield_pct: float
     avg_funding_per_settlement: float
     annualized_gross_funding_pct: float
@@ -55,15 +56,17 @@ class CarryResult:
     extra: dict = field(default_factory=dict)
 
 
-def annualize_funding(avg_rate_per_settlement: float,
-                      settlements_per_year: int = SETTLEMENTS_PER_YEAR) -> float:
+def annualize_funding(
+    avg_rate_per_settlement: float, settlements_per_year: int = SETTLEMENTS_PER_YEAR
+) -> float:
     """Convert an average per-settlement funding rate (decimal) to annual %."""
     return avg_rate_per_settlement * settlements_per_year * 100.0
 
 
-def round_trip_cost_pct(fee_pct_per_side: float = DEFAULT_FEE_PCT_PER_SIDE,
-                        slippage_pct_per_side: float = DEFAULT_SLIPPAGE_PCT_PER_SIDE
-                        ) -> float:
+def round_trip_cost_pct(
+    fee_pct_per_side: float = DEFAULT_FEE_PCT_PER_SIDE,
+    slippage_pct_per_side: float = DEFAULT_SLIPPAGE_PCT_PER_SIDE,
+) -> float:
     """Total cost as a fraction of notional to OPEN and CLOSE both legs.
 
     Two legs (spot + perp) x two events (entry + exit) = 4 crossings.
@@ -71,20 +74,24 @@ def round_trip_cost_pct(fee_pct_per_side: float = DEFAULT_FEE_PCT_PER_SIDE,
     return 4.0 * (fee_pct_per_side + slippage_pct_per_side)
 
 
-def break_even_funding_per_settlement(n_settlements: int,
-                                      fee_pct_per_side=DEFAULT_FEE_PCT_PER_SIDE,
-                                      slippage_pct_per_side=DEFAULT_SLIPPAGE_PCT_PER_SIDE
-                                      ) -> float:
+def break_even_funding_per_settlement(
+    n_settlements: int,
+    fee_pct_per_side=DEFAULT_FEE_PCT_PER_SIDE,
+    slippage_pct_per_side=DEFAULT_SLIPPAGE_PCT_PER_SIDE,
+) -> float:
     """Average per-settlement funding rate needed to break even over n holds."""
     if n_settlements <= 0:
         raise ValueError("n_settlements must be > 0")
     return round_trip_cost_pct(fee_pct_per_side, slippage_pct_per_side) / n_settlements
 
 
-def simulate_cash_and_carry(funding_rates, notional=10_000.0,
-                            fee_pct_per_side=DEFAULT_FEE_PCT_PER_SIDE,
-                            slippage_pct_per_side=DEFAULT_SLIPPAGE_PCT_PER_SIDE,
-                            settlements_per_year=SETTLEMENTS_PER_YEAR) -> CarryResult:
+def simulate_cash_and_carry(
+    funding_rates,
+    notional=10_000.0,
+    fee_pct_per_side=DEFAULT_FEE_PCT_PER_SIDE,
+    slippage_pct_per_side=DEFAULT_SLIPPAGE_PCT_PER_SIDE,
+    settlements_per_year=SETTLEMENTS_PER_YEAR,
+) -> CarryResult:
     """Simulate holding a delta-neutral long-spot/short-perp carry across the
     given per-settlement funding rates (decimal; +0.0001 = +0.01%/8h, longs pay
     shorts so the short-perp leg COLLECTS when the rate is positive).
@@ -109,7 +116,7 @@ def simulate_cash_and_carry(funding_rates, notional=10_000.0,
     positives = 0
     worst = math.inf
     for rate in funding_rates:
-        pay = rate * notional   # +ve rate -> short perp receives
+        pay = rate * notional  # +ve rate -> short perp receives
         gross += pay
         equity += pay
         curve.append(equity)
@@ -125,8 +132,7 @@ def simulate_cash_and_carry(funding_rates, notional=10_000.0,
     net_yield_pct = net_pnl / notional * 100.0
     years = n / settlements_per_year
     annualized_net = (net_yield_pct / years) if years > 0 else 0.0
-    be = break_even_funding_per_settlement(
-        n, fee_pct_per_side, slippage_pct_per_side)
+    be = break_even_funding_per_settlement(n, fee_pct_per_side, slippage_pct_per_side)
     return CarryResult(
         label="cash_and_carry",
         notional=notional,
@@ -144,15 +150,14 @@ def simulate_cash_and_carry(funding_rates, notional=10_000.0,
         equity_curve=curve,
         extra={
             "break_even_funding_per_settlement": be,
-            "round_trip_cost_pct": round_trip_cost_pct(
-                fee_pct_per_side, slippage_pct_per_side) * 100.0,
+            "round_trip_cost_pct": round_trip_cost_pct(fee_pct_per_side, slippage_pct_per_side)
+            * 100.0,
             "avg_funding_clears_breakeven": avg_rate > be,
         },
     )
 
 
-def summarize_funding(funding_rates,
-                      settlements_per_year=SETTLEMENTS_PER_YEAR) -> dict:
+def summarize_funding(funding_rates, settlements_per_year=SETTLEMENTS_PER_YEAR) -> dict:
     """Quick descriptive stats of a funding series (no trade simulated)."""
     if not funding_rates:
         raise ValueError("funding_rates must be non-empty")
@@ -170,15 +175,18 @@ def summarize_funding(funding_rates,
 
 
 def _fmt(r: CarryResult) -> str:
-    return (f"  net={r.net_pnl:+10.2f} ({r.net_yield_pct:+.3f}% / "
-            f"{r.annualized_net_yield_pct:+.2f}% ann)  "
-            f"gross={r.gross_funding_pnl:+.2f} costs={r.total_costs:.2f}  "
-            f"+settle={r.pct_settlements_positive:.0f}%  "
-            f"ann.funding={r.annualized_gross_funding_pct:+.2f}%")
+    return (
+        f"  net={r.net_pnl:+10.2f} ({r.net_yield_pct:+.3f}% / "
+        f"{r.annualized_net_yield_pct:+.2f}% ann)  "
+        f"gross={r.gross_funding_pnl:+.2f} costs={r.total_costs:.2f}  "
+        f"+settle={r.pct_settlements_positive:.0f}%  "
+        f"ann.funding={r.annualized_gross_funding_pct:+.2f}%"
+    )
 
 
 if __name__ == "__main__":
     import random
+
     random.seed(2)
     spy = SETTLEMENTS_PER_YEAR
 
@@ -194,6 +202,8 @@ if __name__ == "__main__":
     print("B: thin/noisy funding")
     print(_fmt(simulate_cash_and_carry(fb)))
     print(f"   summary: {summarize_funding(fb)}")
-    print(f"\nRound-trip cost = {round_trip_cost_pct()*100:.3f}% of notional; "
-          f"break-even avg funding over 1yr = "
-          f"{break_even_funding_per_settlement(spy)*100:.5f}%/settlement")
+    print(
+        f"\nRound-trip cost = {round_trip_cost_pct() * 100:.3f}% of notional; "
+        f"break-even avg funding over 1yr = "
+        f"{break_even_funding_per_settlement(spy) * 100:.5f}%/settlement"
+    )

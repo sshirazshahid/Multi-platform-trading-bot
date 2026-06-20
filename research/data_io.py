@@ -12,6 +12,7 @@ Why this matters: the labs are honest only when fed real, multi-regime,
 out-of-sample data. This is the bridge — hand it a CSV (or MCP-pulled candles)
 and pipe the result straight into a lab.
 """
+
 from __future__ import annotations
 
 import csv
@@ -28,8 +29,7 @@ def load_closes_csv(path: str | Path, close_col: str = "close") -> list[float]:
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None or close_col not in reader.fieldnames:
-            raise ValueError(
-                f"column '{close_col}' not found; have {reader.fieldnames}")
+            raise ValueError(f"column '{close_col}' not found; have {reader.fieldnames}")
         for row in reader:
             val = row.get(close_col)
             if val is None or val == "":
@@ -45,8 +45,7 @@ def load_funding_csv(path: str | Path, rate_col: str = "rate") -> list[float]:
     return load_closes_csv(path, close_col=rate_col)
 
 
-def closes_from_candles(candles, key: str = "close",
-                        chronological: bool = True) -> list[float]:
+def closes_from_candles(candles, key: str = "close", chronological: bool = True) -> list[float]:
     """Convert a candle payload to a list of close prices.
 
     Accepts:
@@ -94,8 +93,9 @@ def _ts_str(s: str, fallback: int) -> float:
     return float(digits) if digits else float(fallback)
 
 
-def write_closes_csv(path: str | Path, closes, timestamps=None,
-                     close_col: str = "close", ts_col: str = "timestamp") -> Path:
+def write_closes_csv(
+    path: str | Path, closes, timestamps=None, close_col: str = "close", ts_col: str = "timestamp"
+) -> Path:
     """Write a simple closes CSV (optionally with timestamps). Returns the path."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

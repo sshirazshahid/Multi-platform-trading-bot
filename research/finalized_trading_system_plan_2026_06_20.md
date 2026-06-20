@@ -133,21 +133,36 @@ of them well:
 
 ## 6b. Worked example on REAL data (the labs in action)
 
-Real-data ingestion now exists (`research/data_io.py`, 11 tests) — hand it a CSV
-or exchange/MCP candles and it feeds the labs. Demonstrated on 32 days of real
-BTC daily closes (`research/sample_data/btc_daily_2026-06-20.csv`, May 20→Jun 20,
-a −17.6% month):
+Real-data ingestion now exists (`research/data_io.py`, 11 tests). Demonstrated on
+**~3 years of real BTC daily closes** pulled live (FMP), 2023-06-01 → 2026-06-20,
+a net **+138%** window committed as a reproducible fixture
+(`research/sample_data/btc_daily_fmp_2023_2026.csv`; ETH alongside it).
 
-| Approach | Return | Max drawdown |
+**BTC — lump-sum vs DCA (weekly), by regime:**
+
+| Window | Lump-sum return (maxDD) | DCA return (maxDD) |
 |---|---|---|
-| Lump-sum / HODL | **−17.7%** | 21.5% |
-| DCA (daily) | **−6.1%** | 8.4% |
+| Full 3y (+138%) | **+137.6%** (51%) | **+7.5%** (48%) |
+| Bull leg, first 730d (+288%) | +287% (28%) | +105% (27%) |
+| Recent selloff, last 200d (−32%) | −31.8% (37%) | **−16.3% (23%)** |
 
-The honest lesson, in one table: in a falling market DCA loses **much less** and
-is far less volatile — but it still loses. DCA reduces *risk*; it does not turn a
-declining asset into a profit. (32 bars is far too short to conclude anything —
-this only shows the mechanism. Run years across bull/bear/chop before trusting a
-config.)
+**BTC/ETH 50-50 basket — buy&hold vs threshold-rebalance (5%):**
+
+| Approach | Return | maxDD |
+|---|---|---|
+| Buy & hold | **+65.2%** | 56.6% |
+| Threshold rebalance | +59.3% | 59.3% |
+
+Two myths corrected by real data, both important for a non-trader:
+1. **DCA is NOT generally better than lump-sum.** In a rising market it badly
+   *underperforms* (it keeps buying higher); its win is only in drawdowns, where
+   it loses less and is calmer. DCA buys *risk reduction & discipline*, not return.
+2. **Rebalancing does not always pay.** Here it slightly *underperformed* hold,
+   because it kept selling the winner (BTC +138%) to buy the laggard (ETH −7%).
+   The "rebalancing premium" needs assets that mean-revert against each other.
+
+(These are still single-path historical results — run out-of-sample + Monte-Carlo
+across more assets/periods before trusting any config; see §5 testing rules.)
 
 ## 7. If you take nothing else away
 
