@@ -131,6 +131,24 @@ of them well:
 5. **Keep agents/MCP log-only**; cost-reduce with maker-only; never re-enable
    leverage/shorts into a chop regime (like today's).
 
+## 6b. Worked example on REAL data (the labs in action)
+
+Real-data ingestion now exists (`research/data_io.py`, 11 tests) — hand it a CSV
+or exchange/MCP candles and it feeds the labs. Demonstrated on 32 days of real
+BTC daily closes (`research/sample_data/btc_daily_2026-06-20.csv`, May 20→Jun 20,
+a −17.6% month):
+
+| Approach | Return | Max drawdown |
+|---|---|---|
+| Lump-sum / HODL | **−17.7%** | 21.5% |
+| DCA (daily) | **−6.1%** | 8.4% |
+
+The honest lesson, in one table: in a falling market DCA loses **much less** and
+is far less volatile — but it still loses. DCA reduces *risk*; it does not turn a
+declining asset into a profit. (32 bars is far too short to conclude anything —
+this only shows the mechanism. Run years across bull/bear/chop before trusting a
+config.)
+
 ## 7. If you take nothing else away
 
 - Be deeply skeptical of anyone selling a "profitable system" or a pattern with a
