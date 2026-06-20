@@ -121,7 +121,11 @@ def _build_node(coins, timeframe, equity, lookback):
 
     config = TradingNodeConfig(
         trader_id="TSMOM-PAPER-001",
-        logging=LoggingConfig(log_level="INFO"),
+        logging=LoggingConfig(
+            log_level="INFO", log_level_file="INFO",
+            log_directory=str(pathlib.Path(__file__).resolve().parents[1] / "reports" / "paper_logs"),
+            log_file_name="paper_trade",
+        ),
         data_clients={VENUE: data_config},
         exec_clients={VENUE: exec_config},
     )
