@@ -164,6 +164,26 @@ Two myths corrected by real data, both important for a non-trader:
 (These are still single-path historical results — run out-of-sample + Monte-Carlo
 across more assets/periods before trusting any config; see §5 testing rules.)
 
+## 6c. Extended study: 3 assets + out-of-sample + Monte-Carlo
+
+`python research/run_spot_study.py` runs BTC/ETH/SOL (committed 3y fixtures) with
+a 70/30 in-sample/out-of-sample split and a 1000-path moving-block-bootstrap
+Monte-Carlo (added to the lab as `monte_carlo()`, 5 tests). Headlines:
+
+- **DCA lowers drawdown and return on every asset** (robust, not a fluke):
+  e.g. SOL full period lump +252% (maxDD 76%) vs DCA −3% (maxDD 72%).
+- **Out-of-sample (recent 30%) lost money on all three** (BTC DCA −27%, ETH −38%,
+  SOL −39%) even though in-sample was strongly positive. Results are *entirely
+  regime-dependent* — the strongest argument for staying PAPER.
+- **Monte-Carlo bands are huge** (SOL lump return p5 −62% … p95 +5299%), i.e. the
+  single historical number is almost meaningless given path risk. DCA's band is
+  tighter both ways — concrete evidence that DCA = risk reduction, not edge.
+- **3-asset rebalancing slightly helped** (BTC/ETH/SOL: +132.7% vs hold +127.4%,
+  lower drawdown), unlike the 2-asset BTC/ETH case where it hurt — the
+  rebalancing premium appears only with enough uncorrelated volatility (SOL).
+
+These now run in CI (`research-labs` job) so they can't silently break.
+
 ## 7. If you take nothing else away
 
 - Be deeply skeptical of anyone selling a "profitable system" or a pattern with a

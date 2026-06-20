@@ -219,13 +219,13 @@ jobs:
         run: >
           ruff check
           research/dca_rebalance_lab.py research/funding_carry_lab.py
-          research/data_io.py mcp_server/
+          research/data_io.py research/run_spot_study.py mcp_server/
 
       - name: Ruff format check (research labs + mcp_server)
         run: >
           ruff format --check
           research/dca_rebalance_lab.py research/funding_carry_lab.py
-          research/data_io.py mcp_server/
+          research/data_io.py research/run_spot_study.py mcp_server/
 
       - name: Test research labs + data_io + MCP reader
         run: >

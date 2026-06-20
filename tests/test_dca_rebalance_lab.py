@@ -122,3 +122,52 @@ def test_rebalance_triggers_on_drift():
 def test_price_validation(bad):
     with pytest.raises(ValueError):
         lab.simulate_lump_sum(bad)
+
+
+# ── Monte-Carlo robustness ────────────────────────────────────────────
+
+def test_monte_carlo_deterministic_with_seed():
+    prices = [100 * (1 + 0.001 * i) for i in range(200)]
+    a = lab.monte_carlo(prices, strategy="dca", n_paths=100, seed=7,
+                        capital=1000.0, interval_bars=7)
+    b = lab.monte_carlo(prices, strategy="dca", n_paths=100, seed=7,
+                        capital=1000.0, interval_bars=7)
+    assert a == b
+
+
+def test_monte_carlo_percentiles_ordered_and_keyed():
+    prices = [100 * (1 + 0.002 * i) for i in range(150)]
+    mc = lab.monte_carlo(prices, strategy="lump_sum", n_paths=200, seed=1)
+    for metric in ("return_pct", "max_drawdown_pct", "sharpe"):
+        b = mc[metric]
+        assert b["p5"] <= b["p50"] <= b["p95"]
+        assert b["min"] <= b["mean"] <= b["max"]
+    assert mc["n_paths"] == 200
+
+
+def test_monte_carlo_constant_returns_zero_spread():
+    # A perfectly geometric series has identical log-returns; every bootstrap
+    # path is the same, so the percentile band collapses to a point.
+    prices = [100 * (1.01**i) for i in range(120)]
+    mc = lab.monte_carlo(prices, strategy="lump_sum", n_paths=50, seed=0)
+    b = mc["return_pct"]
+    assert b["p95"] - b["p5"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_monte_carlo_validation():
+    prices = [100, 101, 102]
+    with pytest.raises(ValueError):
+        lab.monte_carlo(prices, strategy="nope")
+    with pytest.raises(ValueError):
+        lab.monte_carlo(prices, n_paths=0)
+    with pytest.raises(ValueError):
+        lab.monte_carlo(prices, block=0)
+
+
+def test_bootstrap_path_shape():
+    rets = lab._log_returns([100, 110, 99, 105])
+    import random as _r
+    path = lab._bootstrap_path(100.0, rets, n=20, block=2, rng=_r.Random(0))
+    assert len(path) == 20
+    assert path[0] == 100.0
+    assert all(p > 0 for p in path)

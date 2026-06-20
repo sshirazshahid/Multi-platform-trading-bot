@@ -24,6 +24,7 @@ guarantee — it still loses money if the asset trends down over the horizon.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 
 DEFAULT_FEE_PCT = 0.001  # 0.1% spot taker, matches strategies/dca_strategy.py
@@ -182,6 +183,97 @@ def simulate_dca(
     )
 
 
+# ── Monte-Carlo robustness (moving-block bootstrap of returns) ────────
+
+
+def _log_returns(prices) -> list[float]:
+    return [math.log(prices[i] / prices[i - 1]) for i in range(1, len(prices))]
+
+
+def _bootstrap_path(p0: float, rets: list[float], n: int, block: int, rng) -> list[float]:
+    """Build one synthetic price path of length n by concatenating random
+    contiguous blocks of historical log-returns (moving-block bootstrap), then
+    compounding from p0. Preserves short-horizon autocorrelation via `block`."""
+    if not rets or n < 2:
+        return [p0] * max(1, n)
+    out: list[float] = []
+    while len(out) < n - 1:
+        start = rng.randrange(0, len(rets))
+        out.extend(rets[start : start + block])
+    out = out[: n - 1]
+    path = [p0]
+    for r in out:
+        path.append(path[-1] * math.exp(r))
+    return path
+
+
+def _percentiles(values) -> dict:
+    s = sorted(values)
+    n = len(s)
+
+    def q(p):
+        if n == 1:
+            return s[0]
+        idx = p * (n - 1)
+        lo = int(idx)
+        hi = min(lo + 1, n - 1)
+        return s[lo] * (1 - (idx - lo)) + s[hi] * (idx - lo)
+
+    return {
+        "p5": q(0.05),
+        "p25": q(0.25),
+        "p50": q(0.50),
+        "p75": q(0.75),
+        "p95": q(0.95),
+        "mean": sum(s) / n,
+        "min": s[0],
+        "max": s[-1],
+    }
+
+
+_SIMS = {"dca": simulate_dca, "lump_sum": simulate_lump_sum}
+
+
+def monte_carlo(
+    prices, strategy="dca", n_paths=1000, block=20, seed=0, periods_per_year=365, **sim_kw
+) -> dict:
+    """Moving-block-bootstrap Monte-Carlo robustness for a single-asset sleeve.
+
+    Resamples blocks of historical log-returns into `n_paths` synthetic price
+    paths, runs `strategy` ('dca' or 'lump_sum') on each, and returns percentile
+    bands of total return %, max drawdown %, and Sharpe. Answers "how much does
+    the headline number depend on the one path history happened to take?".
+    Deterministic given `seed`. Pass strategy kwargs (capital, interval_bars,
+    dip_*) via **sim_kw — but only those the chosen strategy accepts.
+    """
+    _validate(prices)
+    if strategy not in _SIMS:
+        raise ValueError(f"unknown strategy '{strategy}'; use {list(_SIMS)}")
+    if n_paths < 1:
+        raise ValueError("n_paths must be >= 1")
+    if block < 1:
+        raise ValueError("block must be >= 1")
+    sim = _SIMS[strategy]
+    rets = _log_returns(prices)
+    rng = random.Random(seed)
+    n = len(prices)
+    ret_pcts, dds, sharpes = [], [], []
+    for _ in range(n_paths):
+        path = _bootstrap_path(prices[0], rets, n, block, rng)
+        r = sim(path, periods_per_year=periods_per_year, **sim_kw)
+        ret_pcts.append(r.total_return_pct)
+        dds.append(r.max_drawdown_pct)
+        sharpes.append(r.sharpe)
+    return {
+        "strategy": strategy,
+        "n_paths": n_paths,
+        "block": block,
+        "return_pct": _percentiles(ret_pcts),
+        "max_drawdown_pct": _percentiles(dds),
+        "sharpe": _percentiles(sharpes),
+    }
+
+
 # ── multi-asset basket ────────────────────────────────────────────────
 
 
@@ -314,8 +406,6 @@ if __name__ == "__main__":
     # the textbook case where DCA's lower drawdown shows. Replace `prices` with
     # real closes (e.g. exported from an exchange / the CoinDesk MCP) for a real
     # study — and run multiple regimes + out-of-sample before trusting it.
-    import random
-
     random.seed(1)
     fall = [100 * (1 - 0.01 * i) for i in range(40)]  # -40% drawdown
     recover = [fall[-1] * (1 + 0.012 * i) for i in range(60)]  # recovery

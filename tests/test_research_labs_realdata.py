@@ -70,3 +70,12 @@ def test_funding_carry_lab_cli_demo_runs():
     r = _run_demo("research/funding_carry_lab.py")
     assert r.returncode == 0, r.stderr
     assert "cash-and-carry" in r.stdout.lower() or "carry" in r.stdout.lower()
+
+
+def test_spot_study_runs(monkeypatch):
+    """The multi-asset study runner executes against the committed fixtures."""
+    if not BTC_CSV.exists():
+        pytest.skip("fixtures missing")
+    import research.run_spot_study as study
+    monkeypatch.setattr(study, "MC_PATHS", 25)  # keep MC fast in CI
+    study.main()  # must not raise
