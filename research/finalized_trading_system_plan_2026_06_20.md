@@ -119,6 +119,12 @@ of them well:
    `python research/dca_rebalance_lab.py` for the demo; feed real exchange closes
    for a study. Also reuse `quant_suite/funding_carry.py`, and the live
    `DCAStrategy`/`RebalancingStrategy` for execution once a config is validated.
+   For (a), an offline analytics lab now exists too:
+   `research/funding_carry_lab.py` (delta-neutral long-spot/short-perp cash-and-
+   carry — net yield, break-even funding, % positive settlements, after-cost; 12
+   tests in `tests/test_funding_carry_lab.py`). Pull real funding history with
+   `quant_suite/funding_carry.py` and pass it in. NB: this is the market-neutral
+   carry, NOT the directional funding signal (which already screened NO_EDGE).
 4. **Promote only what clears the honest gate out-of-sample.** If nothing does
    (the likely outcome), the correct action is: stay in PAPER / DCA-only spot, and
    treat "no edge" as a valid finding — not a reason to risk more.
