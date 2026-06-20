@@ -70,6 +70,18 @@ def test_five_global_losses_track_streak(rm):
         f"Expected 5 losses in global streak; got {rm._global_streak}")
 
 
+def test_five_global_losses_do_not_halt(rm):
+    """Spec §12 global halt was removed 2026-05-27: 5 consecutive losses must
+    NOT write data/review_required.json and must NOT switch OPERATING_MODE.
+    Only the streak is tracked (for audit); per-trade SLs remain the loss rail.
+    """
+    from pathlib import Path
+    for i in range(5):
+        _loss(rm, f"S{i}/USDT", f"fam{i}", 1)
+    assert not Path("data/review_required.json").exists(), (
+        "Loss streak wrote a review flag — the Spec §12 halt should be removed")
+
+
 def test_win_resets_streak(rm):
     _loss(rm, "BTC/USDT", "x", 1)
     rm.record_trade_result(symbol="BTC/USDT", family="x",

@@ -1,3 +1,40 @@
+# Task: Full review + harden + extend (2026-06-20) — in progress
+
+Branch: `harden/review-2026-06-20`. Bot stays PAPER. Plan: Foundation → Edge validation
+→ Agent/MCP (shadow-first) → Research. Honesty guardrail: no edge is measured; new
+agents/MCP ship log-only and cannot be promoted to live without an honest leak-free gate.
+
+## Phase 0 — baseline (done)
+- Deps were uninstalled in sandbox; installed requirements.txt + pytest/ruff/pyarrow +
+  skill deps (jsonschema/pyyaml/scipy). `pip` works (PyPI reachable).
+- BASELINE test results (pre-change):
+  * `tests/` (bot): 1902 passed, 0 failed (after pyarrow install).
+  * full root (skills+bot): 2504 passed, 17 skipped, 1 failed.
+  * The 1 root failure = `skills/ftd-detector/.../test_fmp_client.py` — ENVIRONMENTAL
+    (network egress blocks financialmodelingprep.com, 403 host-not-in-allowlist). Not a
+    code bug; out of scope (equity skill, live API). Leave as-is.
+- Conclusion: suite is healthy; it simply had never been run here (missing deps). The
+  "make sure everything is tested and working" ask is largely satisfied by Phase 0.
+
+## Phase 1 — foundation (done)
+- [x] Backtest engine: original `timeframe` kwarg bug already resolved in current
+  code; the real remaining break was `auto_backtest.py` (dead `_make_strategy`
+  import + stale `OrderManager(exchanges=,dry_run=)` signature + `result.sharpe`).
+  Fixed all three with a local strategy factory; added 7 regression tests
+  (test_strategies_smoke.py) running all 6 strategies on a mock exchange.
+- [x] Spec §12 doc/code drift: all nine loss-driven halts were removed 2026-05-27
+  (replaced by soft daily-loss breaker). Rewrote the stale CLAUDE.md gotcha to
+  match; added test_five_global_losses_do_not_halt (test_risk_pauses.py).
+- [x] SL placement naked-exposure: `_sl_failed` was set but never read. Added
+  `OrderManager._reconcile_missing_sl` (re-attempts exchange SL each monitor
+  cycle, throttled 60s, clears flag on success) + wired into check_sl_tp; 4 tests.
+- [x] Wiring verification: confirmed close path → on_close → _finalize_close
+  (bot_engine.py:113). Added test_close_fires_on_close_hook +
+  test_close_hook_failure_does_not_lose_close (test_position_tracker.py).
+- Result: tests/ 1902 → 1914 passing (12 new), 0 regressions. Ruff clean on edits.
+
+---
+
 # Task: UNBLOCK ALL trades — edge-opinion gates to soft sizing (2026-06-11) — shipped
 
 ## Review (follow-up to symbols unblock; user saw "[EV] BLOCKED ... Phase 27" + said

@@ -200,3 +200,46 @@ def test_pattern_agent_importable():
 def test_liquidity_agent_importable():
     from core.agents.liquidity_agent import LiquidityAgent
     assert LiquidityAgent().name == "LiquidityAgent"
+
+
+# ─── 5. auto_backtest parameter sweep (signature-drift guard) ─────────
+#
+# auto_backtest.run_single_backtest silently broke after refactors: the
+# core.strategy_selector._make_strategy helper was removed, OrderManager's
+# signature changed (no exchanges=/dry_run= kwargs), and BacktestResult
+# renamed sharpe -> sharpe_ratio. The 2026-03-30 sweep recorded 144 jobs /
+# 0 successes as a result. This drives the full path on a mock exchange so
+# any future signature drift fails here instead of in a live sweep.
+
+
+class _MockExchange:
+    name = "MockEx"
+
+    def fetch_ohlcv(self, symbol, timeframe, limit=1000, market_type="futures"):
+        rs = np.random.RandomState(3)
+        n = min(limit, 400)
+        base = 1_700_000_000_000
+        price = 100 + np.cumsum(rs.randn(n) * 0.5)
+        return [
+            [base + i * 3_600_000, p, p + 0.6, p - 0.6,
+             p + rs.randn() * 0.2, abs(rs.randn() * 1000)]
+            for i, p in enumerate(price)
+        ]
+
+
+@pytest.mark.parametrize(
+    "strat", ["supertrend", "multitf", "trend", "meanreversion", "scalping", "grid"]
+)
+def test_auto_backtest_run_single(strat):
+    import auto_backtest as ab
+    r = ab.run_single_backtest(_MockExchange(), "BTC/USDT", strat, days=20)
+    # Must complete without an error key and expose the expected result fields.
+    assert "error" not in r, f"{strat} failed: {r.get('error')}"
+    for key in ("total_trades", "win_rate", "total_pnl", "sharpe"):
+        assert key in r, f"{strat} missing {key}"
+
+
+def test_auto_backtest_unknown_strategy():
+    import auto_backtest as ab
+    r = ab.run_single_backtest(_MockExchange(), "BTC/USDT", "nope", days=20)
+    assert r.get("error") == "unknown strategy"
