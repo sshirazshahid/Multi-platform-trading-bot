@@ -286,6 +286,25 @@ All settings centralized. Loaded from `.env` via `python-dotenv`. Key sections:
 Rich TUI dashboard. Launch: `python dashboard.py` or `TradingBot.bat` option [2].
 Flags: `--refresh SEC` (3-3600), `--width COLS` (60-200).
 
+### MCP Server (`mcp_server/`, read-only introspection)
+
+`mcp_server/trading_bot_mcp.py` is a local stdio MCP server (registered via
+`.mcp.json`) that exposes the warehouse + decision data as read-only tools
+(`trading_bot_list_tables`, `_recent_trades`, `_performance_summary`,
+`_recent_candidates`, `_shadow_vs_live`, `_query`). It opens
+`data/warehouse.sqlite` in `mode=ro` and imports no bot/config/ccxt code, so it
+**cannot place orders or change state** — it is for interrogating the bot's
+reasoning, not driving it. Pure data-access lives in `warehouse_reader.py` (no
+`mcp` dependency, unit-tested in `tests/test_trading_bot_mcp.py`). Install with
+`pip install -r mcp_server/requirements.txt`.
+
+**Shadow → live promotion criterion (agents + MCP):** the multi-agent shadow
+ensemble (`core/shadow_runner.py`) and any new prediction layer remain
+**log-only**. They may be promoted to the live decision path ONLY after their
+decisions beat the live path on the honest gate (`core/promotion_gate.py`:
+MIN_DSR≥0.10, MAX_PBO≤0.5, OOS-WR≥0.55, AUC≥0.60). Never promote on a no-edge
+signal — use `trading_bot_shadow_vs_live` to watch the comparison.
+
 ## Common Development Commands
 
 ### Running the Bot

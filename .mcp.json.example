@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "trading_bot": {
+      "command": "python",
+      "args": ["mcp_server/trading_bot_mcp.py"],
+      "env": {}
+    }
+  }
+}

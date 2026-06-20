@@ -46,7 +46,23 @@ agents/MCP ship log-only and cannot be promoted to live without an honest leak-f
   min_dsr=0.0/max_pbo=1.0). Now documents the resolved honest thresholds.
 - NET: nothing to promote (no edge, no model); honest gate guards future retrains.
 
-## Phase 3 — agent/MCP infra (shadow-first) — next
+## Phase 3 — agent/MCP infra (shadow-first) — done
+- Multi-agent shadow ensemble ALREADY wired: core/shadow_runner.py builds
+  Trend/Scalp/MeanReversion/Pattern/Liquidity + RiskAgent + ExecutionAgent via
+  AgentCoordinator, writes warehouse.shadow_decisions, places NO orders, gated
+  by SHADOW_MODE_ENABLED. No rebuild needed.
+- NEW: read-only MCP server (mcp_server/) — trading_bot_mcp.py (FastMCP, stdio,
+  6 tools: list_tables, recent_trades, performance_summary, recent_candidates,
+  shadow_vs_live, query). Pure data layer warehouse_reader.py (no mcp dep);
+  opens warehouse mode=ro; freeform query guarded to single SELECT. Registered
+  via .mcp.json. 17 tests (test_trading_bot_mcp.py). Verified: 6 tools list,
+  read-only, graceful "warehouse not found" on fresh clone.
+- Documented shadow->live promotion criterion in CLAUDE.md + MCP README: agents
+  & MCP stay log-only; promote only after beating live on the honest gate.
+- Honesty: built as the user asked, but log-only — cannot degrade paper PnL and
+  cannot be promoted on a no-edge signal.
+- Full suite: 1933 passing, 0 failures.
+
 ## Phase 4 — research (futures+spot) — pending (needs live data / API keys)
 
 ## Environment limits hit
