@@ -63,7 +63,29 @@ agents/MCP ship log-only and cannot be promoted to live without an honest leak-f
   cannot be promoted on a no-edge signal.
 - Full suite: 1933 passing, 0 failures.
 
-## Phase 4 — research (futures+spot) — pending (needs live data / API keys)
+## Phase 4 — research (futures+spot) — done (offline scope)
+- Verified spot_manager + capital_allocator instantiate cleanly and ARE wired
+  into bot_engine (212-222) — no signature-drift bug like auto_backtest had.
+- Verified research harnesses import OK: strategy_lab, run_research,
+  portfolio_scanner, run_confluence_paper. Backtest engine proven on synthetic.
+- Could NOT run live pair discovery / strategy backtests: no API keys + network
+  egress restricted in sandbox. Per CLAUDE.md §5, did NOT fabricate edge.
+- Wrote research/pair_and_strategy_roadmap_2026_06_20.md: consolidated NO_EDGE
+  evidence + a runnable roadmap (new pairs to screen via discover_all, futures
+  + spot strategies to test, exact commands, honest after-cost exit criteria).
+
+# REVIEW (2026-06-20 session)
+- Branch harden/review-2026-06-20, 4 commits, bot stays PAPER throughout.
+- Tests: baseline 1902 -> 1933 passing (+31 new), 0 regressions, 0 failures.
+- Real bugs fixed: auto_backtest.py dead (3 bugs) -> works; _sl_failed never
+  read -> reconciliation hook re-protects naked positions; 2 stale docs (Spec
+  §12 halt, MODEL_GATE caveat) reconciled to code.
+- New: read-only MCP server (6 tools) for interrogating the bot's reasoning.
+- Honesty held: no live flip, no leverage re-enable, no overfit-model promotion;
+  agents/MCP are log-only and gated. The headline finding stands — NO measured
+  edge; profitability cannot be promised, only foundation + honest validation.
+- BLOCKER: no git remote in sandbox -> could not push. Commits are local on the
+  branch; attach origin to push. No API keys -> live data work deferred (roadmap).
 
 ## Environment limits hit
 - No git remote ('origin') configured in sandbox → cannot push; commits are
