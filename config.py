@@ -846,7 +846,10 @@ HIGH_ATR_PCT_THRESHOLD = 0.025  # ATR% > 2.5% → max leverage = STANDARD (2x)
 # longs at 46.8% / -$3.48. The bleed is concentrated entirely on the
 # short side. Reverts the UNBLOCK_ALL directive on shorts only — longs
 # stay open. Restore by setting False.
-SHORTS_DISABLED = True
+# 2026-06-20 (owner "remove any blacklist and blocks", PAPER): shorts re-enabled.
+# This flag was already inert — auto_mutator.shorts_blocked() hard-returns False —
+# so flipping it to False just keeps the unblock durable if that is ever restored.
+SHORTS_DISABLED = False
 
 # ==============================================================
 # TRADING GATES — evidence-based whitelist / blacklist / hours
@@ -1356,20 +1359,12 @@ MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "12.0
 
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
-    # Phase-39 (2026-05-09) BLACKLIST_HARD — re-fitted on 421-trade
-    # all-time analysis. Net-negative across all strategies combined.
-    BLACKLIST_HARD = {
-        "APT/USDT:USDT",
-        "SOL/USDT:USDT",
-        "XRP/USDT:USDT",
-        "ETH/USDT:USDT",
-        "DOGE/USDT:USDT",
-        "BTC/USDT:USDT",
-    }
-    # Phase-44 (2026-05-10) BLOCKED_HOURS_UTC — REAL-trade filter
-    # catastrophic losers retained from Phase 39.
-    BLOCKED_HOURS_UTC = {0, 9, 19, 21, 23}
-    ALLOWED_HOURS_UTC = set(range(24)) - BLOCKED_HOURS_UTC
+    # 2026-06-20 (owner "remove any blacklist and blocks", PAPER): disabling the
+    # SCALP tier no longer re-introduces a symbol blacklist or blocked hours.
+    # Previously this branch silently re-populated BLACKLIST_HARD
+    # ({APT,SOL,XRP,ETH,DOGE,BTC}) and BLOCKED_HOURS_UTC ({0,9,19,21,23}) — a
+    # latent trap that contradicted the unblock directive. BLACKLIST_HARD now
+    # stays empty and all 24h stay open regardless of the SCALP-tier toggle.
 
 # Side filter — shorts require BTC macro-bear confirmation
 # 2026-04-12: Relaxed. BTC-bear gate blocked 90%+ of short signals

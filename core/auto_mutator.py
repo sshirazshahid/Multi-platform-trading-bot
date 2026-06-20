@@ -215,25 +215,21 @@ class AutoMutator:
     # ── Public API used by bot_engine ────────────────────────────────
 
     def get_effective_blacklist(self) -> set:
-        """Return the set of dynamically-blacklisted symbols (still active).
+        """Dynamically-blacklisted symbols — DISABLED 2026-06-20.
 
-        Excludes side-prefixed entries (e.g. 'SHORT:ETH/USDT:USDT') — those
-        are side-specific bans surfaced via `get_short_blacklist()`.
+        Owner directive "remove any blacklist and blocks" (PAPER): the runtime
+        symbol blacklist is short-circuited to empty so a losing streak (or a
+        stale persisted entry) can no longer re-block a symbol at entry —
+        mirrors shorts_blocked() below. Blacklist WRITES were already off since
+        2026-05-27; this makes the disable explicit and durable on the read
+        side too. The learner still records evidence and may set a leverage cap
+        (a safety rail, kept). Restore the prior filtering via git history.
         """
-        self._expire()
-        return {
-            k for k in self._state["blacklist"].keys()
-            if not k.startswith("SHORT:")
-        }
+        return set()  # UNBLOCK — see docstring
 
     def get_short_blacklist(self) -> set:
-        """Return the set of symbols banned for SHORTS only (still active)."""
-        self._expire()
-        return {
-            k.split(":", 1)[1]
-            for k in self._state["blacklist"].keys()
-            if k.startswith("SHORT:")
-        }
+        """Symbols banned for SHORTS only — DISABLED 2026-06-20 (see above)."""
+        return set()  # UNBLOCK
 
     def get_leverage_cap(self) -> Optional[int]:
         """Return an active leverage cap (int) or None."""
