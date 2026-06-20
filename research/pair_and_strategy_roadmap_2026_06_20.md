@@ -93,3 +93,48 @@ geometric breakeven, profit factor, and an OOS/forward fold. **Promote nothing
 that doesn't clear breakeven after costs on out-of-sample data.** If everything
 is NULL again (the prior record), that is a valid, publishable result — keep the
 bot in PAPER and keep cost reduction as the only live lever.
+
+## 6. External evidence (5-angle deep research, 2026-06-20)
+
+A web research pass (~50 sources, adversarially checked) independently
+**corroborates the internal NO_EDGE record** and the chosen direction:
+
+- **Retail algo edge is rare**: ~73% of automated traders lose within 6 months;
+  5–7% profitable at 5yr; >90% of bots fail; overfitting erodes live returns
+  26–58%; in a real-fee paper-trade of 22 strategies, **16 lost money**
+  (avg −0.078%/trade). Matches this bot's 45.8% WR / ~−$0.25/trade.
+  [stratproof.com paper-trading-22-strategies; quantifiedstrategies.com
+  day-trading-statistics; BIS WP1049]
+- **Directional ML on OHLCV loses after costs**: honest OOS AUC for crypto
+  direction is ~0.55–0.65, not 0.76; AUC 0.60 nets ~$0 after costs.
+  [ScienceDirect S0927538X25003701; PMC12571449]
+- **ML leak-check is textbook-correct**: PBO=1.0 ⇒ near-certain overfit; embargo
+  MUST be ≥ label horizon (24<96 = leakage); use purged/combinatorial CV +
+  Deflated Sharpe; expect AUC to deflate after the fix.
+  [López de Prado, AFML; Deflated Sharpe SSRN 2460551; QuantInsti]
+- **LLM/agent layers add cost + variance, not durable edge**: LiveTradeBench
+  (live, 2025) negligible/negative correlation; look-ahead bias >15pp alpha
+  decay; "The Alpha Illusion" (2026) — LLM-agent reported alpha is not
+  deployment evidence. Validates keeping agents/MCP log-only.
+  [arXiv 2511.03628, 2601.13770, 2605.16895]
+- **Only market-neutral / cost-aware edges have support**:
+  - Futures: funding-rate carry / basis (delta-neutral; ~8–20% net, capacity-
+    compressed, needs discipline); vol-scaled TSMOM (Sharpe ~1.8 backtest,
+    degrades OOS); maker rebates need scale. [ScienceDirect S2096720925000818;
+    arXiv 2602.11708]
+  - Spot: DCA (Sharpe ~1.45–1.85, lower drawdown) + threshold rebalancing (±15%
+    drift beat HODL ~77% of the time); 200-day MA standalone = whipsaw.
+    [Quantpedia rebalancing-premium; yellow.com DCA]
+
+### Finalized forward roadmap (priority order)
+1. Run the honest leak-check (`scripts/leak_check_embargo.py`, embargo ≥96) on
+   real warehouse data; keep the honest gate; promote nothing that fails.
+2. Make maker-only the default live lever; measure fill-rate vs adverse selection.
+3. Build + backtest a delta-neutral funding-carry sleeve (highest-confidence
+   futures edge); require after-cost OOS-positive + capacity check before capital.
+4. Spot DCA + threshold-rebalancing sleeves; backtest vs lump-sum/HODL; wire via
+   spot_manager/capital_allocator only if they beat HODL after costs.
+5. Keep agents/MCP log-only; promote only on the honest gate; add no new
+   directional LLM prediction.
+6. Stay PAPER until 1–4 produce after-cost OOS edge. Expect null — that is a
+   valid result.

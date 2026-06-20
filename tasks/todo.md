@@ -87,6 +87,15 @@ agents/MCP ship log-only and cannot be promoted to live without an honest leak-f
 - BLOCKER: no git remote in sandbox -> could not push. Commits are local on the
   branch; attach origin to push. No API keys -> live data work deferred (roadmap).
 
+## Deep research (5-angle, ~50 sources) — appended to roadmap doc
+- External evidence independently CORROBORATES the internal NO_EDGE record:
+  retail algo edge rare (16/22 real-fee strategies lost; 5-7% profitable at 5yr);
+  directional ML OOS AUC ~0.55-0.65 not 0.76; leak-check is textbook-correct
+  (embargo >= label horizon, DSR, CPCV); LLM/agent layers add cost+variance, no
+  durable edge (validates log-only); only market-neutral/cost-aware edges have
+  support (funding carry, DCA + threshold rebalancing). See research/
+  pair_and_strategy_roadmap_2026_06_20.md §6 for citations + finalized roadmap.
+
 ## Environment limits hit
 - No git remote ('origin') configured in sandbox → cannot push; commits are
   local on branch harden/review-2026-06-20. User must attach a remote to push.
