@@ -88,3 +88,43 @@ def test_summarize_funding():
 def test_validation(bad_call):
     with pytest.raises(ValueError):
         bad_call()
+
+
+# ── Monte-Carlo robustness ────────────────────────────────────────────
+
+def test_mc_carry_deterministic_with_seed():
+    rates = [0.0001 + (i % 7 - 3) * 1e-5 for i in range(400)]
+    a = fc.monte_carlo_carry(rates, n_paths=100, block=24, seed=3)
+    b = fc.monte_carlo_carry(rates, n_paths=100, block=24, seed=3)
+    assert a == b
+
+
+def test_mc_carry_percentiles_ordered_and_keyed():
+    rates = [0.0001 + (i % 5 - 2) * 2e-5 for i in range(500)]
+    mc = fc.monte_carlo_carry(rates, n_paths=300, block=24, seed=1)
+    for metric in ("annualized_net_yield_pct", "net_yield_pct", "pct_settlements_positive"):
+        b = mc[metric]
+        assert b["p5"] <= b["p50"] <= b["p95"]
+    assert mc["n_paths"] == 300
+
+
+def test_mc_carry_constant_series_zero_spread():
+    # Constant funding -> every block identical -> band collapses to a point.
+    mc = fc.monte_carlo_carry([0.0001] * 300, n_paths=50, block=24, seed=0)
+    b = mc["annualized_net_yield_pct"]
+    assert b["p95"] - b["p5"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_mc_carry_validation():
+    with pytest.raises(ValueError):
+        fc.monte_carlo_carry([], n_paths=10)
+    with pytest.raises(ValueError):
+        fc.monte_carlo_carry([0.0001] * 10, n_paths=0)
+    with pytest.raises(ValueError):
+        fc.monte_carlo_carry([0.0001] * 10, block=0)
+
+
+def test_bootstrap_series_length():
+    import random as _r
+    out = fc._bootstrap_series([0.1, 0.2, 0.3], n=50, block=2, rng=_r.Random(0))
+    assert len(out) == 50

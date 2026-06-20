@@ -28,6 +28,7 @@ HONESTY / RISK (read before trusting any number):
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 
 # Binance/Bybit/Bitget settle perpetual funding every 8h -> 3/day -> 1095/yr.
@@ -174,6 +175,76 @@ def summarize_funding(funding_rates, settlements_per_year=SETTLEMENTS_PER_YEAR) 
     }
 
 
+# ── Monte-Carlo robustness (block bootstrap of the funding series) ────
+
+
+def _percentiles(values) -> dict:
+    s = sorted(values)
+    n = len(s)
+
+    def q(p):
+        if n == 1:
+            return s[0]
+        idx = p * (n - 1)
+        lo = int(idx)
+        hi = min(lo + 1, n - 1)
+        return s[lo] * (1 - (idx - lo)) + s[hi] * (idx - lo)
+
+    return {
+        "p5": q(0.05),
+        "p25": q(0.25),
+        "p50": q(0.50),
+        "p75": q(0.75),
+        "p95": q(0.95),
+        "mean": sum(s) / n,
+        "min": s[0],
+        "max": s[-1],
+    }
+
+
+def _bootstrap_series(series, n, block, rng) -> list:
+    """Resample a value series to length n by concatenating random contiguous
+    blocks (moving-block bootstrap), preserving short-horizon persistence."""
+    out: list = []
+    while len(out) < n:
+        start = rng.randrange(0, len(series))
+        out.extend(series[start : start + block])
+    return out[:n]
+
+
+def monte_carlo_carry(funding_rates, n_paths=1000, block=24, seed=0, **sim_kw) -> dict:
+    """Block-bootstrap Monte-Carlo of the cash-and-carry over a funding series.
+
+    Funding is persistent (regimes of positive/negative), so we resample blocks
+    (default 24 settlements ~ 8 days) to keep that structure, run the carry on
+    each synthetic path, and return percentile bands of annualized net yield (%)
+    and the share of settlements that were positive. Shows how much the carry
+    depends on the funding regime persisting. Deterministic given `seed`.
+    """
+    if not funding_rates:
+        raise ValueError("funding_rates must be non-empty")
+    if n_paths < 1:
+        raise ValueError("n_paths must be >= 1")
+    if block < 1:
+        raise ValueError("block must be >= 1")
+    rng = random.Random(seed)
+    n = len(funding_rates)
+    ann, netpct, pos = [], [], []
+    for _ in range(n_paths):
+        path = _bootstrap_series(funding_rates, n, block, rng)
+        r = simulate_cash_and_carry(path, **sim_kw)
+        ann.append(r.annualized_net_yield_pct)
+        netpct.append(r.net_yield_pct)
+        pos.append(r.pct_settlements_positive)
+    return {
+        "n_paths": n_paths,
+        "block": block,
+        "annualized_net_yield_pct": _percentiles(ann),
+        "net_yield_pct": _percentiles(netpct),
+        "pct_settlements_positive": _percentiles(pos),
+    }
+
+
 def _fmt(r: CarryResult) -> str:
     return (
         f"  net={r.net_pnl:+10.2f} ({r.net_yield_pct:+.3f}% / "
@@ -185,8 +256,6 @@ def _fmt(r: CarryResult) -> str:
 
 
 if __name__ == "__main__":
-    import random
-
     random.seed(2)
     spy = SETTLEMENTS_PER_YEAR
 
@@ -206,4 +275,11 @@ if __name__ == "__main__":
         f"\nRound-trip cost = {round_trip_cost_pct() * 100:.3f}% of notional; "
         f"break-even avg funding over 1yr = "
         f"{break_even_funding_per_settlement(spy) * 100:.5f}%/settlement"
+    )
+
+    mc = monte_carlo_carry(fa, n_paths=500, block=24, seed=1)
+    a = mc["annualized_net_yield_pct"]
+    print(
+        f"\nMonte-Carlo (A, 500 paths): annualized net yield "
+        f"p5/p50/p95 = {a['p5']:+.2f}/{a['p50']:+.2f}/{a['p95']:+.2f}%"
     )

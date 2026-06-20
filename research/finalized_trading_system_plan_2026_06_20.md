@@ -10,6 +10,37 @@ evidence-based result.
 
 ---
 
+## 0. Status & refined roadmap (updated 2026-06-20)
+
+**Done this engagement** (branch `harden/review-2026-06-20`, ~14 commits, bot stays
+PAPER, 1988 tests green):
+- Audited the bot: mechanically sound, no new bugs; fixed dead `auto_backtest.py`,
+  a naked-SL gap, and reconciled two stale docs (Spec §12 halt, MODEL_GATE).
+- Confirmed (3 internal audits + ~50 external sources + live data) the bot has
+  **no entry edge**, and that every named chart strategy lacks after-cost edge (§3).
+- Built a read-only **MCP server** (`mcp_server/`) to interrogate the bot.
+- Built tested, offline labs for the only evidence-backed sleeves, now with
+  out-of-sample + 1000-path Monte-Carlo and real 3y BTC/ETH/SOL data:
+  `research/dca_rebalance_lab.py`, `research/funding_carry_lab.py`,
+  `research/data_io.py`, `research/run_spot_study.py` (+ fixtures in
+  `research/sample_data/`). Added a CI `research-labs` job so they can't break.
+
+**Refined forward roadmap** (priority; remaining items are data/secret-gated):
+| # | Action | Status / blocker |
+|---|--------|------------------|
+| P1 | ML leak-check (`scripts/leak_check_embargo.py`, embargo≥horizon) | ready; needs the bot's warehouse/labeled data |
+| P2 | Maker-only as the live cost lever (`MAKER_ONLY_ENABLED`) | already in code; measure real fill-rate live |
+| P3 | Delta-neutral funding carry | lab+MC done; needs **real funding-rate history** (FMP=price only; CoinDesk quota-blocked) |
+| P4 | Spot DCA + rebalancing | lab+MC+OOS done on 3y real data; characterized (DCA=risk-reduction) |
+| P5 | Agents/MCP stay log-only; promote only via honest gate | done |
+| P6 | Stay PAPER until P1/P3 show after-cost OOS edge | in force; expect null |
+
+**To unblock real numbers, you (the user) can supply:** a funding-rate CSV (for
+P3), a longer/labeled dataset or the bot's `data/warehouse.sqlite` (for P1), or
+exchange API keys. Without those, everything offline-buildable is now built.
+
+---
+
 ## 1. The one thing to understand first
 
 **No one can give you a crypto bot that reliably makes money — not me, not a
