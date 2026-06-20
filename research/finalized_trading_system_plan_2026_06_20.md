@@ -113,7 +113,12 @@ of them well:
    collapse. Promote nothing that fails the honest gate.
 3. **Backtest the evidence-based sleeves** properly (walk-forward, real costs,
    Monte Carlo): (a) delta-neutral **funding carry**, (b) **spot DCA + rebalancing**.
-   Reuse `quant_suite/funding_carry.py`, `DCAStrategy`, `RebalancingStrategy`.
+   A runnable, offline, fully-tested harness for (b) now exists:
+   `research/dca_rebalance_lab.py` (lump-sum vs DCA vs threshold-rebalance with
+   real fees+slippage; 16 unit tests in `tests/test_dca_rebalance_lab.py`). Run
+   `python research/dca_rebalance_lab.py` for the demo; feed real exchange closes
+   for a study. Also reuse `quant_suite/funding_carry.py`, and the live
+   `DCAStrategy`/`RebalancingStrategy` for execution once a config is validated.
 4. **Promote only what clears the honest gate out-of-sample.** If nothing does
    (the likely outcome), the correct action is: stay in PAPER / DCA-only spot, and
    treat "no edge" as a valid finding — not a reason to risk more.
