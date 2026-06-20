@@ -3,7 +3,14 @@
 Mirrors core/tsmom_signal.py bar-for-bar: long-only, open when N-day momentum > 0
 and flat, close on momentum flip. Decisions are driven by an INTERNAL signal-state
 flag (``_intended_long``), NOT by async fill state, so the OPEN/CLOSE decision-bar
-sequence matches the pure-python reference exactly regardless of fill timing.
+sequence matches the pure-python reference exactly regardless of fill timing —
+this bar-for-bar reference parity is asserted with ``enable_stop=False``.
+
+With ``enable_stop=True`` (the default, and what both backtest + paper paths use)
+the 8% disaster stop can close a position OUT of momentum sync; ``_intended_long``
+is reset in ``on_position_closed`` so the port RE-ENTERS on the next positive bar,
+matching the LIVE signal's position-keyed re-entry (``pos is None``) rather than
+staying latched-flat for the rest of the uptrend (cloud-review bug_024, 2026-06-20).
 
 Risk: every order is gated by the authoritative pretrade_guard (CLAUDE.md §2). A
 mandatory 8% disaster stop is placed atomically on position open (fail-closed: if
@@ -175,3 +182,10 @@ class TSMOMStrategy(Strategy):
                 exit_px=float(getattr(event, "last_px", 0) or 0), realized_pnl=pnl,
                 exit_reason="tsmom_flip_or_stop")
             self._open_trade_id = None
+        # Re-entry keys on ACTUAL position state, mirroring the LIVE signal
+        # (core/tsmom_signal.py: `mom_positive and pos is None`). A momentum-flip
+        # close already set _intended_long=False in on_bar, so this is a no-op
+        # there; but when the 8% disaster stop fires mid-uptrend it is the ONLY
+        # reset, so without it the entry gate stays latched and the port sits
+        # flat for the rest of the trend (cloud-review bug_024, 2026-06-20).
+        self._intended_long = False
