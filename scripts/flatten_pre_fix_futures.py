@@ -12,6 +12,7 @@ Usage:
     python scripts/flatten_pre_fix_futures.py            # dry-run, prints plan
     python scripts/flatten_pre_fix_futures.py --execute  # actually close
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,15 +45,15 @@ def _build_clients() -> dict[str, BaseExchange]:
     if BYBIT_API_KEY and BYBIT_SECRET_KEY:
         out["bybit"] = BybitClient(BYBIT_API_KEY, BYBIT_SECRET_KEY)
     if BITGET_API_KEY and BITGET_SECRET_KEY and BITGET_PASSPHRASE:
-        out["bitget"] = BitgetClient(
-            BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE)
+        out["bitget"] = BitgetClient(BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE)
     return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--execute", action="store_true",
-                    help="Actually submit closing orders. Default is dry-run.")
+    ap.add_argument(
+        "--execute", action="store_true", help="Actually submit closing orders. Default is dry-run."
+    )
     args = ap.parse_args()
 
     clients = _build_clients()
@@ -60,7 +61,7 @@ def main() -> int:
         print("No exchange credentials available — nothing to do.")
         return 0
 
-    plan: list[tuple[str, str, str, float]] = []   # (exch, sym, close_side, size)
+    plan: list[tuple[str, str, str, float]] = []  # (exch, sym, close_side, size)
     for name, ex in clients.items():
         try:
             positions = ex.fetch_positions() or []
@@ -94,7 +95,11 @@ def main() -> int:
         client = clients[exch]
         try:
             client.create_order(
-                sym, "market", close_side, size, None,
+                sym,
+                "market",
+                close_side,
+                size,
+                None,
                 params={"reduceOnly": True},
                 market_type="futures",
             )

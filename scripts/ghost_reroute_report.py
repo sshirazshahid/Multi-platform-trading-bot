@@ -7,6 +7,7 @@ Usage:
     python scripts/ghost_reroute_report.py --since 2026-05-19T12:00:00
     python scripts/ghost_reroute_report.py --since 2026-05-19 --markdown
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,23 +70,27 @@ def main():
                 if not ts_m or not line_m:
                     continue
                 try:
-                    ts = datetime.strptime(ts_m.group("ts"), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    ts = datetime.strptime(ts_m.group("ts"), "%Y-%m-%d %H:%M:%S").replace(
+                        tzinfo=timezone.utc
+                    )
                 except ValueError:
                     continue
                 if ts < since:
                     continue
                 # float("nan") is fine; just won't pass uPnL>0 in the
                 # would_reroute gate (already enforced producer-side).
-                events.append({
-                    "ts": ts,
-                    "symbol": line_m.group("symbol"),
-                    "side": line_m.group("side"),
-                    "exchange": line_m.group("exchange"),
-                    "upnl": float(line_m.group("upnl")),
-                    "notional": float(line_m.group("notional")),
-                    "would_reroute": line_m.group("reroute") == "True",
-                    "reason": line_m.group("reason"),
-                })
+                events.append(
+                    {
+                        "ts": ts,
+                        "symbol": line_m.group("symbol"),
+                        "side": line_m.group("side"),
+                        "exchange": line_m.group("exchange"),
+                        "upnl": float(line_m.group("upnl")),
+                        "notional": float(line_m.group("notional")),
+                        "would_reroute": line_m.group("reroute") == "True",
+                        "reason": line_m.group("reason"),
+                    }
+                )
 
     if not events:
         print("No GHOST_REROUTE_INSTRUMENT events found in window.")
@@ -116,10 +121,12 @@ def main():
         print(f"| Mean expected-saved-pnl | ${mean_saved:.3f} |")
         print(f"| Sum expected-saved-pnl | ${sum(saved_pnls):.2f} |")
         print("\n### Decision gate (Day 4–5)\n")
-        gate_pass = (per_24h >= 5.0 and mean_saved > 0)
+        gate_pass = per_24h >= 5.0 and mean_saved > 0
         print(f"- Rate ≥ 5/24h: {'YES' if per_24h >= 5.0 else 'NO'}")
         print(f"- Mean expected-saved-pnl > $0: {'YES' if mean_saved > 0 else 'NO'}")
-        print(f"- **Gate: {'PASS — ship Patch #1' if gate_pass else 'FAIL — deprioritize Patch #1'}**")
+        print(
+            f"- **Gate: {'PASS — ship Patch #1' if gate_pass else 'FAIL — deprioritize Patch #1'}**"
+        )
         print("\n### Reason breakdown")
         for r, c in by_reason.most_common():
             print(f"- {r}: {c}")

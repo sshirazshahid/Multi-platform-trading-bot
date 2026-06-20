@@ -5,6 +5,7 @@ window. Emits markdown to reports/shadow_compare_<date>.md.
 
 Wired into bot_engine._daily_self_check via subprocess.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,15 +44,18 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
     con = _connect(db_path)
     cutoff = int(time.time() - window_hours * 3600)
 
-    shadow_rows = list(con.execute(
-        "SELECT * FROM shadow_decisions "
-        "WHERE ts >= ? AND decision='ALLOW'",
-        (cutoff,),
-    ).fetchall())
-    live_rows = list(con.execute(
-        "SELECT * FROM trades WHERE ts_exit >= ? AND status='CLOSED'",
-        (cutoff,),
-    ).fetchall())
+    shadow_rows = list(
+        con.execute(
+            "SELECT * FROM shadow_decisions WHERE ts >= ? AND decision='ALLOW'",
+            (cutoff,),
+        ).fetchall()
+    )
+    live_rows = list(
+        con.execute(
+            "SELECT * FROM trades WHERE ts_exit >= ? AND status='CLOSED'",
+            (cutoff,),
+        ).fetchall()
+    )
 
     s_stats = _stats(shadow_rows, "sim_pnl")
     s_stats_alt = _stats(shadow_rows, "projected_pnl")
@@ -66,11 +70,17 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
     lines.append(f"# Shadow vs Live — last {window_hours}h\n")
     lines.append(f"_generated {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}_\n")
     lines.append("\n## Live (current notional)\n")
-    lines.append(f"- n={l_stats['n']} sum=${l_stats['sum']:.2f} mean=${l_stats['mean']:.3f} WR={l_stats['wr']:.1%}")
+    lines.append(
+        f"- n={l_stats['n']} sum=${l_stats['sum']:.2f} mean=${l_stats['mean']:.3f} WR={l_stats['wr']:.1%}"
+    )
     lines.append("\n## Shadow (current notional, sim_pnl)\n")
-    lines.append(f"- n={s_stats['n']} sum=${s_stats['sum']:.2f} mean=${s_stats['mean']:.3f} WR={s_stats['wr']:.1%}")
+    lines.append(
+        f"- n={s_stats['n']} sum=${s_stats['sum']:.2f} mean=${s_stats['mean']:.3f} WR={s_stats['wr']:.1%}"
+    )
     lines.append("\n## Shadow (alt notional $200, projected_pnl)\n")
-    lines.append(f"- n={s_stats_alt['n']} sum=${s_stats_alt['sum']:.2f} mean=${s_stats_alt['mean']:.3f}")
+    lines.append(
+        f"- n={s_stats_alt['n']} sum=${s_stats_alt['sum']:.2f} mean=${s_stats_alt['mean']:.3f}"
+    )
     lines.append("\n## Per-agent shadow breakdown\n")
     if by_agent:
         for agent, rows in sorted(by_agent.items()):

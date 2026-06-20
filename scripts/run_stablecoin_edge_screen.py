@@ -7,6 +7,7 @@ halves (OOS stability). Honest prior (repo study): NO_EDGE / a slow overlay, not
 
 Run: python scripts/run_stablecoin_edge_screen.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,8 +29,8 @@ from core.data_feeds.stablecoin_supply_feed import (  # noqa: E402
     supply_growth_signal,
 )
 
-WINDOWS = [14, 30, 60]   # supply-growth lookback (days)
-HORIZONS = [7, 14, 30]   # BTC forward-return horizon (days)
+WINDOWS = [14, 30, 60]  # supply-growth lookback (days)
+HORIZONS = [7, 14, 30]  # BTC forward-return horizon (days)
 
 
 def load_btc_daily_close() -> pd.Series:
@@ -71,8 +72,10 @@ def main() -> None:
     print(f"BTC:    {len(btc)} daily obs  {btc.index[0].date()} -> {btc.index[-1].date()}")
 
     n_trials = len(WINDOWS) * len(HORIZONS)
-    print(f"n_trials (windows x horizons) = {n_trials}; "
-          f"frozen gate: |t|>=3.5 AND shuffle-z>=3.5 AND both-half sign-consistent\n")
+    print(
+        f"n_trials (windows x horizons) = {n_trials}; "
+        f"frozen gate: |t|>=3.5 AND shuffle-z>=3.5 AND both-half sign-consistent\n"
+    )
 
     any_pass = False
     for w in WINDOWS:
@@ -82,20 +85,26 @@ def main() -> None:
             # step=h -> non-overlapping forward returns (overlap inflates t/null otherwise)
             r = timeseries_regime_gate(sig, fwd, n_shuffles=500, seed=0, step=h)
             verdict = "PASS" if r["passes"] else "no"
-            print(f"win={w:2d}d h={h:2d}d | n={r['n']:4d} rho={r['rho']:+.3f} "
-                  f"t={r['t']:5.2f} z_null={r['z_vs_null']:5.2f} "
-                  f"h1={r['rho_first_half']:+.2f} h2={r['rho_second_half']:+.2f} "
-                  f"both={str(r['both_halves']):5s} -> {verdict}")
+            print(
+                f"win={w:2d}d h={h:2d}d | n={r['n']:4d} rho={r['rho']:+.3f} "
+                f"t={r['t']:5.2f} z_null={r['z_vs_null']:5.2f} "
+                f"h1={r['rho_first_half']:+.2f} h2={r['rho_second_half']:+.2f} "
+                f"both={str(r['both_halves']):5s} -> {verdict}"
+            )
             any_pass = any_pass or r["passes"]
 
     print()
     if any_pass:
-        print("CANDIDATE(S) cleared the frozen gate. Treat as exploratory — extend walk-forward "
-              "and re-screen OOS before ANY use; never deploy on a single in-sample pass.")
+        print(
+            "CANDIDATE(S) cleared the frozen gate. Treat as exploratory — extend walk-forward "
+            "and re-screen OOS before ANY use; never deploy on a single in-sample pass."
+        )
     else:
-        print("VERDICT: NO_EDGE — stablecoin-supply growth does not predict BTC forward returns "
-              "past the frozen gate. Matches the repo-study prior (slow liquidity overlay, not a "
-              "tradeable edge). Cost was ~2 modules + this script; the null stops cheaply.")
+        print(
+            "VERDICT: NO_EDGE — stablecoin-supply growth does not predict BTC forward returns "
+            "past the frozen gate. Matches the repo-study prior (slow liquidity overlay, not a "
+            "tradeable edge). Cost was ~2 modules + this script; the null stops cheaply."
+        )
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ target. No look-ahead. Read-only.
 
 Records reports/candlestick_screen_<date>.md (+ .json). Reads local parquet cache only.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,14 +49,14 @@ CACHE = ROOT / "data" / "ohlcv_cache"
 REPORTS = ROOT / "reports"
 
 COINS = ["BTC", "ETH", "BNB", "SOL", "LINK", "TRX", "SUI", "ATOM", "DOGE", "ALGO", "ZEC"]
-NATIVE_TFS = {"15m", "1h", "4h"}            # present in cache
-RESAMPLE_TFS = {"30m": ("15m", 2), "45m": ("15m", 3)}   # built from 15m
+NATIVE_TFS = {"15m", "1h", "4h"}  # present in cache
+RESAMPLE_TFS = {"30m": ("15m", 2), "45m": ("15m", 3)}  # built from 15m
 ALL_TFS = ["15m", "30m", "45m", "1h", "4h"]
-HORIZONS = [1, 2, 4]                          # forward bars to hold
-COST_RT = 10.0 / 1e4                          # ~10 bps round-trip (5 bps/side taker, majors)
+HORIZONS = [1, 2, 4]  # forward bars to hold
+COST_RT = 10.0 / 1e4  # ~10 bps round-trip (5 bps/side taker, majors)
 IS_FRAC = 0.60
-MIN_OOS = 30                                  # min OOS occurrences for a usable t-stat
-FWA = 0.05                                    # family-wise alpha
+MIN_OOS = 30  # min OOS occurrences for a usable t-stat
+FWA = 0.05  # family-wise alpha
 
 
 def _load_native(coin: str, tf: str) -> pd.DataFrame | None:
@@ -77,10 +78,17 @@ def _resample(df15: pd.DataFrame, minutes: int) -> pd.DataFrame | None:
     g = df15.copy()
     sec = minutes * 60
     g["bucket"] = (g["ts"] // sec) * sec
-    agg = g.groupby("bucket").agg(
-        open=("open", "first"), high=("high", "max"),
-        low=("low", "min"), close=("close", "last"), n=("ts", "size"),
-    ).reset_index()
+    agg = (
+        g.groupby("bucket")
+        .agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+            n=("ts", "size"),
+        )
+        .reset_index()
+    )
     # keep only fully-formed buckets (drop partial trailing/leading groups)
     full = agg[agg["n"] == (minutes // 15)].copy()
     full = full.rename(columns={"bucket": "ts"})[["ts", "open", "high", "low", "close"]]
@@ -110,12 +118,14 @@ def _patterns(o, h, l, c):
     lower = np.minimum(o, c) - l
     green = c > o
     red = c < o
+
     # shifted (previous-bar) views; index 0 has no prev → False
     def prev(a):
         out = np.empty_like(a)
         out[0] = a[0]
         out[1:] = a[:-1]
         return out
+
     po, ph, pl, pc = prev(o), prev(h), prev(l), prev(c)
     pbody = np.abs(pc - po)
     pgreen, pred = pc > po, pc < po
@@ -141,7 +151,7 @@ def _patterns(o, h, l, c):
     # 6 bearish pin bar: upper wick >= 60% of range
     sigs.append(("bear_pin", -1, (upper / rng >= 0.60)))
     # 7 doji-long / 8 doji-short: tiny body relative to range
-    doji = (body / rng <= 0.10)
+    doji = body / rng <= 0.10
     sigs.append(("doji_long", +1, doji.copy()))
     sigs.append(("doji_short", -1, doji.copy()))
     # 9 bullish marubozu: dominant green body (momentum)
@@ -156,16 +166,24 @@ def _patterns(o, h, l, c):
     s = np.zeros(n, dtype=bool)
     if n >= 3:
         for i in range(2, n):
-            if (c[i] > o[i] and c[i-1] > o[i-1] and c[i-2] > o[i-2]
-                    and c[i] > c[i-1] > c[i-2]):
+            if (
+                c[i] > o[i]
+                and c[i - 1] > o[i - 1]
+                and c[i - 2] > o[i - 2]
+                and c[i] > c[i - 1] > c[i - 2]
+            ):
                 s[i] = True
     sigs.append(("three_soldiers", +1, s))
     # 13 three black crows
     s = np.zeros(n, dtype=bool)
     if n >= 3:
         for i in range(2, n):
-            if (c[i] < o[i] and c[i-1] < o[i-1] and c[i-2] < o[i-2]
-                    and c[i] < c[i-1] < c[i-2]):
+            if (
+                c[i] < o[i]
+                and c[i - 1] < o[i - 1]
+                and c[i - 2] < o[i - 2]
+                and c[i] < c[i - 1] < c[i - 2]
+            ):
                 s[i] = True
     sigs.append(("three_crows", -1, s))
     return sigs
@@ -187,7 +205,7 @@ def main() -> int:
         pass
 
     cache: dict = {}
-    results = []          # (coin, tf, pat, H, dir, oos_n, oos_mean, oos_t, is_mean)
+    results = []  # (coin, tf, pat, H, dir, oos_n, oos_mean, oos_t, is_mean)
     coverage = []
     n_tests = 0
 
@@ -202,8 +220,9 @@ def main() -> int:
                 coverage.append(f"{coin} {tf}: {0 if df is None else len(df)} bars (skip)")
                 continue
             # align coin <-> BTC on shared timestamps for beta-neutralisation
-            m = df.merge(btc[["ts", "close"]].rename(columns={"close": "btc_close"}),
-                         on="ts", how="inner")
+            m = df.merge(
+                btc[["ts", "close"]].rename(columns={"close": "btc_close"}), on="ts", how="inner"
+            )
             if len(m) < 200:
                 coverage.append(f"{coin} {tf}: {len(m)} aligned bars (skip)")
                 continue
@@ -238,29 +257,41 @@ def main() -> int:
                     if sd == 0:
                         continue
                     t = float(oos.mean() / (sd / math.sqrt(len(oos))))
-                    results.append((coin, tf, pat, H, direction, len(oos),
-                                    float(oos.mean()), t, float(iss.mean())))
+                    results.append(
+                        (
+                            coin,
+                            tf,
+                            pat,
+                            H,
+                            direction,
+                            len(oos),
+                            float(oos.mean()),
+                            t,
+                            float(iss.mean()),
+                        )
+                    )
 
     # Bonferroni bar over the full family of tests actually run
     k = max(n_tests, 1)
     alpha_bonf = FWA / k
     # two-sided z critical for the corrected alpha (t ~ z at these sample sizes)
     from statistics import NormalDist
+
     z_crit = NormalDist().inv_cdf(1.0 - alpha_bonf / 2.0)
 
-    survivors = [r for r in results
-                 if r[6] > 0 and r[7] >= z_crit and (r[6] > 0) == (r[8] > 0)]
-    nearmiss = sorted([r for r in results if r[6] > 0 and abs(r[7]) >= 2.0],
-                      key=lambda r: abs(r[7]), reverse=True)[:25]
+    survivors = [r for r in results if r[6] > 0 and r[7] >= z_crit and (r[6] > 0) == (r[8] > 0)]
+    nearmiss = sorted(
+        [r for r in results if r[6] > 0 and abs(r[7]) >= 2.0], key=lambda r: abs(r[7]), reverse=True
+    )[:25]
 
     today = date.today().isoformat()
     REPORTS.mkdir(exist_ok=True)
 
     L = [f"# Candlestick morphology edge screen — {today}", ""]
     L += [
-        "**Hypothesis under test:** \"BTC/ETH/BNB/SOL/LINK/TRX/SUI/ATOM/DOGE/ALGO/ZEC are "
+        '**Hypothesis under test:** "BTC/ETH/BNB/SOL/LINK/TRX/SUI/ATOM/DOGE/ALGO/ZEC are '
         "going up — find a candlestick pattern, on a 15m/30m/45m/1h/4h sweet-spot, that is "
-        "profitably predictive (futures).\"",
+        'profitably predictive (futures)."',
         "",
         "**Method:** classic candlestick morphology (engulfing, hammer, shooting-star, pin, "
         "doji, marubozu, inside-bar, three-soldiers/crows), each with its textbook direction. "
@@ -276,54 +307,98 @@ def main() -> int:
         f"## SURVIVORS: {len(survivors)}",
     ]
     if survivors:
-        L += ["", "| coin | tf | pattern | dir | H | OOS n | OOS net% | OOS t | IS net% |",
-              "|---|---|---|---|---|---|---|---|---|"]
-        for (coin, tf, pat, H, d, nn, mn, t, ism) in sorted(
-                survivors, key=lambda r: abs(r[7]), reverse=True):
-            L.append(f"| {coin} | {tf} | {pat} | {'L' if d > 0 else 'S'} | {H} | {nn} | "
-                     f"{mn*100:+.3f}% | {t:+.2f} | {ism*100:+.3f}% |")
-        L += ["", "⚠ Any survivor must be ADVERSARIALLY re-checked (overlap for H>1, "
-              "regime-dependence, transaction-cost realism) before it is anything but a "
-              "hypothesis. Do NOT trade on this alone."]
+        L += [
+            "",
+            "| coin | tf | pattern | dir | H | OOS n | OOS net% | OOS t | IS net% |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for coin, tf, pat, H, d, nn, mn, t, ism in sorted(
+            survivors, key=lambda r: abs(r[7]), reverse=True
+        ):
+            L.append(
+                f"| {coin} | {tf} | {pat} | {'L' if d > 0 else 'S'} | {H} | {nn} | "
+                f"{mn * 100:+.3f}% | {t:+.2f} | {ism * 100:+.3f}% |"
+            )
+        L += [
+            "",
+            "⚠ Any survivor must be ADVERSARIALLY re-checked (overlap for H>1, "
+            "regime-dependence, transaction-cost realism) before it is anything but a "
+            "hypothesis. Do NOT trade on this alone.",
+        ]
     else:
-        L += ["", "**None.** No candlestick pattern, on any tested timeframe, clears the "
-              "beta-adjusted after-cost significance bar. On a no-edge market this washout is "
-              "the expected and honest result — consistent with every prior screen "
-              "(momentum/MR/breakout, funding, OI, ETF-flow, Kronos, seasonality)."]
+        L += [
+            "",
+            "**None.** No candlestick pattern, on any tested timeframe, clears the "
+            "beta-adjusted after-cost significance bar. On a no-edge market this washout is "
+            "the expected and honest result — consistent with every prior screen "
+            "(momentum/MR/breakout, funding, OI, ETF-flow, Kronos, seasonality).",
+        ]
 
-    L += ["", f"## Near-misses (uncorrected |t|≥2, positive OOS) — {len(nearmiss)} shown",
-          "_With ~%d tests, ≈%.0f false positives at |t|≥2 are EXPECTED by chance. These are "
-          "NOT edges; shown only for transparency._" % (k, k * 0.05)]
+    L += [
+        "",
+        f"## Near-misses (uncorrected |t|≥2, positive OOS) — {len(nearmiss)} shown",
+        "_With ~%d tests, ≈%.0f false positives at |t|≥2 are EXPECTED by chance. These are "
+        "NOT edges; shown only for transparency._" % (k, k * 0.05),
+    ]
     if nearmiss:
-        L += ["", "| coin | tf | pattern | dir | H | OOS n | OOS net% | OOS t |",
-              "|---|---|---|---|---|---|---|---|"]
-        for (coin, tf, pat, H, d, nn, mn, t, ism) in nearmiss:
-            L.append(f"| {coin} | {tf} | {pat} | {'L' if d > 0 else 'S'} | {H} | {nn} | "
-                     f"{mn*100:+.3f}% | {t:+.2f} |")
+        L += [
+            "",
+            "| coin | tf | pattern | dir | H | OOS n | OOS net% | OOS t |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for coin, tf, pat, H, d, nn, mn, t, ism in nearmiss:
+            L.append(
+                f"| {coin} | {tf} | {pat} | {'L' if d > 0 else 'S'} | {H} | {nn} | "
+                f"{mn * 100:+.3f}% | {t:+.2f} |"
+            )
 
     L += ["", "## Coverage"]
     L += ["- " + c for c in coverage]
-    L += ["", "_Caveats: H>1 forward windows overlap (inflates t — downweight H>1); BTC "
-          "beta=1 by construction (≈0 alpha vs itself); local parquet cache, no network._"]
+    L += [
+        "",
+        "_Caveats: H>1 forward windows overlap (inflates t — downweight H>1); BTC "
+        "beta=1 by construction (≈0 alpha vs itself); local parquet cache, no network._",
+    ]
 
     out_md = REPORTS / f"candlestick_screen_{today}.md"
     out_md.write_text("\n".join(L), encoding="utf-8")
     out_json = REPORTS / f"candlestick_screen_{today}.json"
-    out_json.write_text(json.dumps({
-        "date": today, "tests_run": k, "bonferroni_t_bar": z_crit,
-        "survivors": [
-            {"coin": r[0], "tf": r[1], "pattern": r[2], "horizon": r[3],
-             "dir": r[4], "oos_n": r[5], "oos_net_mean": r[6], "oos_t": r[7],
-             "is_net_mean": r[8]} for r in survivors],
-        "n_nearmiss": len(nearmiss),
-    }, indent=2), encoding="utf-8")
+    out_json.write_text(
+        json.dumps(
+            {
+                "date": today,
+                "tests_run": k,
+                "bonferroni_t_bar": z_crit,
+                "survivors": [
+                    {
+                        "coin": r[0],
+                        "tf": r[1],
+                        "pattern": r[2],
+                        "horizon": r[3],
+                        "dir": r[4],
+                        "oos_n": r[5],
+                        "oos_net_mean": r[6],
+                        "oos_t": r[7],
+                        "is_net_mean": r[8],
+                    }
+                    for r in survivors
+                ],
+                "n_nearmiss": len(nearmiss),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     print(f"Tests run: {k} | Bonferroni |t| bar: {z_crit:.2f}")
     print(f"SURVIVORS: {len(survivors)}")
-    for (coin, tf, pat, H, d, nn, mn, t, ism) in sorted(
-            survivors, key=lambda r: abs(r[7]), reverse=True):
-        print(f"  SURVIVOR: {coin} {tf} {pat} {'L' if d>0 else 'S'} H{H} "
-              f"OOS t={t:+.2f} net={mn*100:+.3f}% n={nn}")
+    for coin, tf, pat, H, d, nn, mn, t, ism in sorted(
+        survivors, key=lambda r: abs(r[7]), reverse=True
+    ):
+        print(
+            f"  SURVIVOR: {coin} {tf} {pat} {'L' if d > 0 else 'S'} H{H} "
+            f"OOS t={t:+.2f} net={mn * 100:+.3f}% n={nn}"
+        )
     print(f"Near-misses (|t|>=2): {len(nearmiss)}")
     print(f"Report: {out_md}")
     return 0

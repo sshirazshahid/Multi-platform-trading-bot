@@ -13,6 +13,7 @@ Run:
     python scripts/backfill_btc_alpha.py --dry-run  # compute + print, no DB writes
     python scripts/backfill_btc_alpha.py --fetch     # fetch missing BTC 15m via ccxt
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,8 +55,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=1_000_000)
     ap.add_argument("--beta", type=float, default=1.0)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--fetch", action="store_true",
-                    help="fetch missing BTC 15m bars via ccxt (public, no auth)")
+    ap.add_argument(
+        "--fetch", action="store_true", help="fetch missing BTC 15m bars via ccxt (public, no auth)"
+    )
     args = ap.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -87,8 +89,10 @@ def main() -> None:
     n_bars = 0 if btc is None else len(btc)
     print(f"BTC 15m bars available in window: {n_bars}")
     if n_bars == 0:
-        print("[abort] BTC 15m cache is empty for this window. Re-run with --fetch, "
-              "or run scripts/backfill_universe_ohlcv.py first.")
+        print(
+            "[abort] BTC 15m cache is empty for this window. Re-run with --fetch, "
+            "or run scripts/backfill_universe_ohlcv.py first."
+        )
         return
     cov0, cov1 = float(btc["ts"].iloc[0]), float(btc["ts"].iloc[-1])
     print(f"BTC coverage: {_d(cov0)} -> {_d(cov1)} UTC")
@@ -107,10 +111,13 @@ def main() -> None:
         # Honest beta context: raw realized PnL over the SAME labelable trades.
         raw = [
             (float(r["realized_pnl"] or 0.0) + float(r["partial_realized_pnl"] or 0.0))
-            for r in rows if r["id"] in {lid for (lid, *_x) in labeled}
+            for r in rows
+            if r["id"] in {lid for (lid, *_x) in labeled}
         ]
-        print(f"raw PnL (same trades): sum=${sum(raw):.2f}  => beta share ≈ "
-              f"${sum(raw) - sum(alphas):+.2f}")
+        print(
+            f"raw PnL (same trades): sum=${sum(raw):.2f}  => beta share ≈ "
+            f"${sum(raw) - sum(alphas):+.2f}"
+        )
     else:
         print("no trades labelable (BTC window did not cover any trade).")
 

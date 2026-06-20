@@ -11,6 +11,7 @@ existing cache filenames so the panel stays consistent (BASE-USDT_1h.parquet
 Usage:
     python scripts/backfill_ohlcv_history.py --years 3
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,22 +33,27 @@ def make_fetcher(client, *, market_type: str = "spot"):
     params = client._futures_params() if market_type == "futures" else {}
 
     def _fetch(symbol, timeframe, since_ms, limit):
-        return client.exchange.fetch_ohlcv(
-            symbol, timeframe, since=int(since_ms), limit=int(limit),
-            params=params) or []
+        return (
+            client.exchange.fetch_ohlcv(
+                symbol, timeframe, since=int(since_ms), limit=int(limit), params=params
+            )
+            or []
+        )
+
     return _fetch
 
 
 def symbols_from_cache(timeframe: str = "1h") -> list[str]:
     out = []
     for p in sorted(CACHE.glob(f"*_{timeframe}.parquet")):
-        base = p.name[: -len(f"_{timeframe}.parquet")]      # 'BTC-USDT'
-        out.append(base.replace("-", "/", 1))               # 'BTC/USDT'
+        base = p.name[: -len(f"_{timeframe}.parquet")]  # 'BTC-USDT'
+        out.append(base.replace("-", "/", 1))  # 'BTC/USDT'
     return out
 
 
-def backfill(client, *, years: float = 3.0, timeframe: str = "1h",
-             market_type: str = "spot") -> dict[str, int]:
+def backfill(
+    client, *, years: float = 3.0, timeframe: str = "1h", market_type: str = "spot"
+) -> dict[str, int]:
     now = int(time.time())
     start = now - int(years * 365 * 24 * 3600)
     fetcher = make_fetcher(client, market_type=market_type)
@@ -62,6 +68,7 @@ def backfill(client, *, years: float = 3.0, timeframe: str = "1h",
 def _build_binance():
     import config
     from exchanges.binance_client import BinanceClient
+
     return BinanceClient(config.BINANCE_API_KEY, config.BINANCE_SECRET_KEY)
 
 

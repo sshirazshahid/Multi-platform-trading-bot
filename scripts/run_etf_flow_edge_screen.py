@@ -17,6 +17,7 @@ at ~$1,300. This is a cheap falsification, not a deployment. GO only on the full
 
 Run: python scripts/run_etf_flow_edge_screen.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -34,8 +35,8 @@ from core.data_feeds.etf_flow_feed import (  # noqa: E402
     parse_etf_flow_series,
 )
 
-WINDOWS = [5, 10, 20]   # ETF-flow lookback (trading days); fits the ~618-obs sample
-HORIZONS = [3, 5, 10]   # BTC forward-return horizon (days)
+WINDOWS = [5, 10, 20]  # ETF-flow lookback (trading days); fits the ~618-obs sample
+HORIZONS = [3, 5, 10]  # BTC forward-return horizon (days)
 
 
 def load_btc_daily_close() -> pd.Series:
@@ -80,8 +81,10 @@ def main() -> None:
     if flows.empty:
         print("[abort] no ETF-flow data parsed from Farside")
         return
-    print(f"ETF flow: {len(flows)} daily obs  {flows.index[0].date()} -> {flows.index[-1].date()}  "
-          f"(cum ${flows.sum():,.0f}M)")
+    print(
+        f"ETF flow: {len(flows)} daily obs  {flows.index[0].date()} -> {flows.index[-1].date()}  "
+        f"(cum ${flows.sum():,.0f}M)"
+    )
     btc = load_btc_daily_close()
     if btc.empty:
         print("[abort] no BTC daily close")
@@ -96,8 +99,10 @@ def main() -> None:
     flow_known = flow_daily.shift(1)  # causal: known at next BTC close
 
     n_trials = len(WINDOWS) * len(HORIZONS)
-    print(f"n_trials (windows x horizons) = {n_trials}; "
-          f"frozen gate: |t|>=3.5 AND shuffle-z>=3.5 AND both-half sign-consistent")
+    print(
+        f"n_trials (windows x horizons) = {n_trials}; "
+        f"frozen gate: |t|>=3.5 AND shuffle-z>=3.5 AND both-half sign-consistent"
+    )
     print(f"overlap with BTC era: {len(btc_era)} days from {btc_era.index[0].date()}\n")
 
     any_pass = False
@@ -107,21 +112,27 @@ def main() -> None:
             fwd = btc_era.shift(-h) / btc_era - 1.0
             r = timeseries_regime_gate(sig, fwd, n_shuffles=500, seed=0, step=h)
             verdict = "PASS" if r["passes"] else "no"
-            print(f"win={w:2d}d h={h:2d}d | n={r['n']:4d} rho={r['rho']:+.3f} "
-                  f"t={r['t']:5.2f} z_null={r['z_vs_null']:5.2f} "
-                  f"h1={r['rho_first_half']:+.2f} h2={r['rho_second_half']:+.2f} "
-                  f"both={str(r['both_halves']):5s} -> {verdict}")
+            print(
+                f"win={w:2d}d h={h:2d}d | n={r['n']:4d} rho={r['rho']:+.3f} "
+                f"t={r['t']:5.2f} z_null={r['z_vs_null']:5.2f} "
+                f"h1={r['rho_first_half']:+.2f} h2={r['rho_second_half']:+.2f} "
+                f"both={str(r['both_halves']):5s} -> {verdict}"
+            )
             any_pass = any_pass or r["passes"]
 
     print()
     if any_pass:
-        print("CANDIDATE(S) cleared the frozen gate. Treat as EXPLORATORY only — small sample "
-              "(~2.4y), single ETF era; extend walk-forward + re-screen OOS and confirm after-cost "
-              "before ANY use. Never deploy on a single in-sample pass.")
+        print(
+            "CANDIDATE(S) cleared the frozen gate. Treat as EXPLORATORY only — small sample "
+            "(~2.4y), single ETF era; extend walk-forward + re-screen OOS and confirm after-cost "
+            "before ANY use. Never deploy on a single in-sample pass."
+        )
     else:
-        print("VERDICT: NO_EDGE — spot-BTC-ETF net flow does not predict BTC forward returns past "
-              "the frozen gate. The one genuinely-new non-price source tested cheaply; null stops "
-              "here. (Flows are largely coincident with price, not leading, net of cost.)")
+        print(
+            "VERDICT: NO_EDGE — spot-BTC-ETF net flow does not predict BTC forward returns past "
+            "the frozen gate. The one genuinely-new non-price source tested cheaply; null stops "
+            "here. (Flows are largely coincident with price, not leading, net of cost.)"
+        )
 
 
 if __name__ == "__main__":

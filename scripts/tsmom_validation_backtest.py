@@ -13,6 +13,7 @@ OOS 2025-01..2026-06. Benchmark: buy-and-hold each coin over OOS.
 GO criterion: OOS Sharpe(TSMOM) > OOS Sharpe(B&H) on >=3 of 5 coins AND TSMOM OOS Sharpe > 0.
 Read-only research; writes only to reports/. Reuses the yfinance cache from the 2026-06-13 triangulation.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,7 +63,7 @@ def _maxdd(eq: pd.Series) -> float:
 def tsmom_positions(df: pd.DataFrame) -> pd.Series:
     """Long-only TSMOM target weight in [0, MAX_LEV], rebalanced every HOLD days."""
     close = df["close"]
-    mom = close > close.shift(LOOKBACK)               # 28d momentum positive -> eligible long
+    mom = close > close.shift(LOOKBACK)  # 28d momentum positive -> eligible long
     realized = close.pct_change().rolling(20).std() * np.sqrt(ANN)
     volscale = (TARGET_ANN_VOL / realized).clip(upper=MAX_LEV).fillna(0.0)
     raw = (mom.astype(float) * volscale).fillna(0.0)
@@ -100,28 +101,40 @@ def run_coin(df: pd.DataFrame) -> dict:
 def main():
     rows = []
     for coin in COINS:
-        load_data(coin, FULL_START, OOS_END, DATA_DIR)              # prime cache
+        load_data(coin, FULL_START, OOS_END, DATA_DIR)  # prime cache
         is_df = load_data(coin, FULL_START, SPLIT, DATA_DIR)
         oos_df = load_data(coin, SPLIT, OOS_END, DATA_DIR)
         is_r = run_coin(is_df)
         oos_r = run_coin(oos_df)
         beats = oos_r["tsmom_sharpe"] > oos_r["bh_sharpe"]
-        rows.append({"coin": coin, "is": is_r, "oos": oos_r,
-                     "oos_beats_bh_sharpe": bool(beats),
-                     "oos_tsmom_sharpe_pos": bool(oos_r["tsmom_sharpe"] > 0)})
-        print(f"[{coin}] IS Sharpe TSMOM {is_r['tsmom_sharpe']:+.2f} / B&H {is_r['bh_sharpe']:+.2f} | "
-              f"OOS Sharpe TSMOM {oos_r['tsmom_sharpe']:+.2f} / B&H {oos_r['bh_sharpe']:+.2f} "
-              f"(ret {oos_r['tsmom_cagr']:+.0f}% vs {oos_r['bh_cagr']:+.0f}%, DD {oos_r['tsmom_maxdd']:.0f}% "
-              f"vs {oos_r['bh_maxdd']:.0f}%, exp {oos_r['exposure_pct']:.0f}%) beats_bh={beats}")
+        rows.append(
+            {
+                "coin": coin,
+                "is": is_r,
+                "oos": oos_r,
+                "oos_beats_bh_sharpe": bool(beats),
+                "oos_tsmom_sharpe_pos": bool(oos_r["tsmom_sharpe"] > 0),
+            }
+        )
+        print(
+            f"[{coin}] IS Sharpe TSMOM {is_r['tsmom_sharpe']:+.2f} / B&H {is_r['bh_sharpe']:+.2f} | "
+            f"OOS Sharpe TSMOM {oos_r['tsmom_sharpe']:+.2f} / B&H {oos_r['bh_sharpe']:+.2f} "
+            f"(ret {oos_r['tsmom_cagr']:+.0f}% vs {oos_r['bh_cagr']:+.0f}%, DD {oos_r['tsmom_maxdd']:.0f}% "
+            f"vs {oos_r['bh_maxdd']:.0f}%, exp {oos_r['exposure_pct']:.0f}%) beats_bh={beats}"
+        )
 
     n_beat = sum(r["oos_beats_bh_sharpe"] and r["oos_tsmom_sharpe_pos"] for r in rows)
     go = n_beat >= 3
     verdict = "GO" if go else "NO_GO"
     payload = {
-        "generated": "2026-06-15", "strategy": "long-only TSMOM 28d/5d vol-targeted",
+        "generated": "2026-06-15",
+        "strategy": "long-only TSMOM 28d/5d vol-targeted",
         "go_criterion": "OOS Sharpe > B&H Sharpe AND OOS Sharpe > 0 on >=3 of 5 coins",
-        "coins_passing": n_beat, "verdict": verdict, "rows": rows,
-        "costs": {"per_change": COST}, "split": {"is": "2021..2024", "oos": "2025..2026-06"},
+        "coins_passing": n_beat,
+        "verdict": verdict,
+        "rows": rows,
+        "costs": {"per_change": COST},
+        "split": {"is": "2021..2024", "oos": "2025..2026-06"},
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -130,17 +143,22 @@ def main():
         "# TSMOM Validation Gate — long-only 28d/5d, vol-targeted, after-cost",
         "",
         f"**Verdict: {verdict}** ({n_beat}/5 coins: OOS Sharpe > buy-and-hold AND positive). "
-        f"GO needs >=3. IS 2021-2024, OOS 2025-2026-06. Costs {COST*100:.2f}%/change. yfinance daily majors.",
+        f"GO needs >=3. IS 2021-2024, OOS 2025-2026-06. Costs {COST * 100:.2f}%/change. yfinance daily majors.",
         "",
         "| Coin | OOS Sharpe TSMOM | OOS Sharpe B&H | OOS ret% TSMOM | OOS ret% B&H | OOS DD TSMOM | OOS DD B&H | exposure% | beats? |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         o = r["oos"]
-        lines.append(f"| {r['coin']} | {o['tsmom_sharpe']:+.2f} | {o['bh_sharpe']:+.2f} | "
-                     f"{o['tsmom_cagr']:+.0f} | {o['bh_cagr']:+.0f} | {o['tsmom_maxdd']:.0f} | {o['bh_maxdd']:.0f} | "
-                     f"{o['exposure_pct']:.0f} | {'YES' if (r['oos_beats_bh_sharpe'] and r['oos_tsmom_sharpe_pos']) else 'no'} |")
-    lines += ["", f"**{'GO - proceed to Phase 2 (wire behind a flag, PAPER).' if go else 'NO_GO - long-only TSMOM does not clear the gate on these majors after costs. Do NOT rewire the engine; keep the current PAPER bot. The design does not survive validation here either.'}**"]
+        lines.append(
+            f"| {r['coin']} | {o['tsmom_sharpe']:+.2f} | {o['bh_sharpe']:+.2f} | "
+            f"{o['tsmom_cagr']:+.0f} | {o['bh_cagr']:+.0f} | {o['tsmom_maxdd']:.0f} | {o['bh_maxdd']:.0f} | "
+            f"{o['exposure_pct']:.0f} | {'YES' if (r['oos_beats_bh_sharpe'] and r['oos_tsmom_sharpe_pos']) else 'no'} |"
+        )
+    lines += [
+        "",
+        f"**{'GO - proceed to Phase 2 (wire behind a flag, PAPER).' if go else 'NO_GO - long-only TSMOM does not clear the gate on these majors after costs. Do NOT rewire the engine; keep the current PAPER bot. The design does not survive validation here either.'}**",
+    ]
     OUT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nVERDICT: {verdict} ({n_beat}/5). Wrote {OUT_MD.name}")
 

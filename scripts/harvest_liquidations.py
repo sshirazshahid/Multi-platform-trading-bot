@@ -17,6 +17,7 @@ at ~$1,300. This only builds the dataset; nothing is wired to the live bot.
 
 Run (continuous): python scripts/harvest_liquidations.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HIST = ROOT / "data" / "liquidations_history.jsonl"
 STATUS = ROOT / "data" / "liquidations_status.json"
 WS_URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
-FLUSH_EVERY_SEC = 120          # check for completed hours this often
+FLUSH_EVERY_SEC = 120  # check for completed hours this often
 RECONNECT_MAX_BACKOFF = 60.0
 
 
@@ -50,9 +51,9 @@ class _Buckets:
     def add(self, hour: int, symbol: str, side: str, usd: float) -> None:
         for key in (symbol, "ALL"):
             cell = self.data[hour][key]
-            if side == "SELL":      # long position liquidated
+            if side == "SELL":  # long position liquidated
                 cell["long_usd"] += usd
-            else:                    # BUY -> short position liquidated
+            else:  # BUY -> short position liquidated
                 cell["short_usd"] += usd
             cell["count"] += 1
         self.total_events += 1
@@ -65,13 +66,18 @@ class _Buckets:
             with HIST.open("a", encoding="utf-8") as f:
                 for h in done:
                     for sym, cell in self.data[h].items():
-                        f.write(json.dumps({
-                            "hour": h,
-                            "symbol": sym,
-                            "long_usd": round(cell["long_usd"], 2),
-                            "short_usd": round(cell["short_usd"], 2),
-                            "count": int(cell["count"]),
-                        }) + "\n")
+                        f.write(
+                            json.dumps(
+                                {
+                                    "hour": h,
+                                    "symbol": sym,
+                                    "long_usd": round(cell["long_usd"], 2),
+                                    "short_usd": round(cell["short_usd"], 2),
+                                    "count": int(cell["count"]),
+                                }
+                            )
+                            + "\n"
+                        )
                         rows += 1
                     del self.data[h]
         return rows
@@ -79,13 +85,18 @@ class _Buckets:
 
 def _write_status(connected: bool, buckets: _Buckets, last_evt_ts: float) -> None:
     try:
-        STATUS.write_text(json.dumps({
-            "updated": time.time(),
-            "connected": connected,
-            "open_hours": len(buckets.data),
-            "total_events": buckets.total_events,
-            "last_event_ts": last_evt_ts,
-        }), encoding="utf-8")
+        STATUS.write_text(
+            json.dumps(
+                {
+                    "updated": time.time(),
+                    "connected": connected,
+                    "open_hours": len(buckets.data),
+                    "total_events": buckets.total_events,
+                    "last_event_ts": last_evt_ts,
+                }
+            ),
+            encoding="utf-8",
+        )
     except Exception:
         pass
 
@@ -118,8 +129,11 @@ async def _run_once(buckets: _Buckets) -> None:
             if now - last_flush >= FLUSH_EVERY_SEC:
                 n = buckets.flush_completed(_hour_key(now * 1000))
                 if n:
-                    print(f"[liq] flushed {n} hourly rows -> {HIST.name} "
-                          f"(events so far={buckets.total_events})", flush=True)
+                    print(
+                        f"[liq] flushed {n} hourly rows -> {HIST.name} "
+                        f"(events so far={buckets.total_events})",
+                        flush=True,
+                    )
                 _write_status(True, buckets, last_evt)
                 last_flush = now
 
@@ -135,8 +149,10 @@ async def main() -> None:
             backoff = 2.0
         except Exception as e:  # noqa: BLE001 — fail-safe: log + reconnect, never die
             _write_status(False, buckets, 0.0)
-            print(f"[liq] disconnected ({type(e).__name__}: {e}); reconnecting in {backoff:.0f}s",
-                  flush=True)
+            print(
+                f"[liq] disconnected ({type(e).__name__}: {e}); reconnecting in {backoff:.0f}s",
+                flush=True,
+            )
             try:
                 buckets.flush_completed(_hour_key(time.time() * 1000))
             except Exception:

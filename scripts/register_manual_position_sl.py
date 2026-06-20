@@ -29,6 +29,7 @@ Safety
   * Skips if SL price is on the wrong side of current mark by > 5%
     (defense against stale SL values).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,10 +54,13 @@ def _load_manual_positions() -> list[dict]:
         raise SystemExit(f"positions.json not found at {POSITIONS_PATH}")
     data = json.loads(POSITIONS_PATH.read_text(encoding="utf-8"))
     return [
-        p for p in data.get("open", [])
-        if (p.get("strategy") == "manual"
+        p
+        for p in data.get("open", [])
+        if (
+            p.get("strategy") == "manual"
             and (p.get("id") or "").startswith("MANUAL-")
-            and not p.get("_exchange_sl", False))
+            and not p.get("_exchange_sl", False)
+        )
     ]
 
 
@@ -133,8 +137,9 @@ def _sanity_check_sl(symbol: str, side: str, sl: float, mark: float) -> tuple[bo
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Actually place SL orders. Default is dry-run.")
+    ap.add_argument(
+        "--commit", action="store_true", help="Actually place SL orders. Default is dry-run."
+    )
     args = ap.parse_args()
 
     positions = _load_manual_positions()
@@ -143,12 +148,16 @@ def main():
         return
 
     print(f"\nfound {len(positions)} manual position(s) without exchange-side SL:\n")
-    print(f"{'#':<3} {'exchange':<10} {'symbol':<22} {'side':<5} "
-          f"{'size':>12} {'entry':>10} {'sl':>10}")
+    print(
+        f"{'#':<3} {'exchange':<10} {'symbol':<22} {'side':<5} "
+        f"{'size':>12} {'entry':>10} {'sl':>10}"
+    )
     print("-" * 80)
     for i, p in enumerate(positions, 1):
-        print(f"{i:<3} {p['exchange']:<10} {p['symbol']:<22} {p['side']:<5} "
-              f"{p['size']:>12.6g} {p['entry_price']:>10.6g} {p['stop_loss']:>10.6g}")
+        print(
+            f"{i:<3} {p['exchange']:<10} {p['symbol']:<22} {p['side']:<5} "
+            f"{p['size']:>12.6g} {p['entry_price']:>10.6g} {p['stop_loss']:>10.6g}"
+        )
 
     if not args.commit:
         print("\nDRY RUN — no orders placed. Re-run with --commit to register SL.")
@@ -165,6 +174,7 @@ def main():
     from core.position_tracker import PositionTracker
     from core.risk_manager import RiskManager
     from utils.notifier import TelegramNotifier
+
     tracker = PositionTracker()
     risk = RiskManager()
     notifier = TelegramNotifier()
@@ -182,10 +192,16 @@ def main():
 
         # Recreate Position from dict for the placement helper.
         pos = Position(
-            id=p["id"], exchange=p["exchange"], symbol=p["symbol"], side=p["side"],
-            market_type=p.get("market_type", "futures"), strategy=p.get("strategy", "manual"),
-            entry_price=p["entry_price"], size=p["size"],
-            stop_loss=p["stop_loss"], take_profit=p.get("take_profit", 0),
+            id=p["id"],
+            exchange=p["exchange"],
+            symbol=p["symbol"],
+            side=p["side"],
+            market_type=p.get("market_type", "futures"),
+            strategy=p.get("strategy", "manual"),
+            entry_price=p["entry_price"],
+            size=p["size"],
+            stop_loss=p["stop_loss"],
+            take_profit=p.get("take_profit", 0),
             leverage=p.get("leverage", 1),
             paper_trade=False,
         )
@@ -212,11 +228,19 @@ def main():
 
         logger.info(
             f"placing SL: {p['exchange']} {p['symbol']} {p['side']} "
-            f"size={p['size']} sl={p['stop_loss']} mark={mark} (sanity={why})")
+            f"size={p['size']} sl={p['stop_loss']} mark={mark} (sanity={why})"
+        )
         try:
             om._place_exchange_sl_tp(  # noqa: SLF001
-                ex, pos, p["stop_loss"], p["take_profit"], p["side"],
-                p["symbol"], p["size"], p.get("market_type", "futures"))
+                ex,
+                pos,
+                p["stop_loss"],
+                p["take_profit"],
+                p["side"],
+                p["symbol"],
+                p["size"],
+                p.get("market_type", "futures"),
+            )
             if getattr(pos, "_exchange_sl", False):
                 successes += 1
                 logger.info(f"  ✓ SL registered for {pos.id}")

@@ -26,6 +26,7 @@ Honest prior: NO_EDGE (consistent with every prior screen). The recorded result 
 deliverable either way. Records reports/kronos_xsec_<date>.md (+ .json). Run with the
 torch+CUDA interpreter (system Python312). Read-only on the bot.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,20 +47,47 @@ CUTOFF = pd.Timestamp("2025-09-01")
 
 # 30 liquid coins (incl. all 11 the user named). Skipped automatically if data is thin.
 UNIVERSE = [
-    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT",
-    "LTC", "BCH", "ATOM", "ETC", "TRX", "SUI", "APT", "ARB", "FIL", "INJ",
-    "AAVE", "HBAR", "FET", "JUP", "IOTA", "AXS", "ALGO", "NEAR", "OP", "ZEC",
+    "BTC",
+    "ETH",
+    "BNB",
+    "SOL",
+    "XRP",
+    "DOGE",
+    "ADA",
+    "AVAX",
+    "LINK",
+    "DOT",
+    "LTC",
+    "BCH",
+    "ATOM",
+    "ETC",
+    "TRX",
+    "SUI",
+    "APT",
+    "ARB",
+    "FIL",
+    "INJ",
+    "AAVE",
+    "HBAR",
+    "FET",
+    "JUP",
+    "IOTA",
+    "AXS",
+    "ALGO",
+    "NEAR",
+    "OP",
+    "ZEC",
 ]
 LOOKBACK = 400
-HORIZONS = (4, 12, 24)          # 4h / 12h / 24h on 1h bars
+HORIZONS = (4, 12, 24)  # 4h / 12h / 24h on 1h bars
 MAX_H = max(HORIZONS)
-SAMPLES = 3                     # stochastic paths averaged per forecast
-K = 6                           # long top-K, short bottom-K (~20% of 30)
-MAX_DEC = 220                   # cap decision bars (≈ 6600 forecasts ≈ ~38 min)
-COST_ONEWAY = 5.0 / 1e4         # 5 bps/side taker
+SAMPLES = 3  # stochastic paths averaged per forecast
+K = 6  # long top-K, short bottom-K (~20% of 30)
+MAX_DEC = 220  # cap decision bars (≈ 6600 forecasts ≈ ~38 min)
+COST_ONEWAY = 5.0 / 1e4  # 5 bps/side taker
 # full-rebalance cost per period: long+short legs, open+close = 4x one-way on gross
-COST_FULL = 4 * COST_ONEWAY     # ~20 bps/period  (taker, full turnover)
-COST_LOW = 1.6 * COST_ONEWAY    # ~8 bps/period   (charitable: low turnover / maker-ish)
+COST_FULL = 4 * COST_ONEWAY  # ~20 bps/period  (taker, full turnover)
+COST_LOW = 1.6 * COST_ONEWAY  # ~8 bps/period   (charitable: low turnover / maker-ish)
 
 
 def _post_cutoff(sym: str) -> pd.DataFrame | None:
@@ -119,13 +147,13 @@ def main() -> int:
     fc = get_kronos_forecaster(lookback=LOOKBACK)
     t0 = time.time()
     fc.load()
-    print(f"Kronos loaded in {time.time()-t0:.1f}s")
+    print(f"Kronos loaded in {time.time() - t0:.1f}s")
 
     # per-horizon accumulators of per-rebalance series
-    ic_k = {h: [] for h in HORIZONS}      # kronos RankIC
-    ic_m = {h: [] for h in HORIZONS}      # momentum RankIC
-    ls_k = {h: [] for h in HORIZONS}      # kronos long-short gross spread
-    ls_m = {h: [] for h in HORIZONS}      # momentum long-short gross spread
+    ic_k = {h: [] for h in HORIZONS}  # kronos RankIC
+    ic_m = {h: [] for h in HORIZONS}  # momentum RankIC
+    ls_k = {h: [] for h in HORIZONS}  # kronos long-short gross spread
+    ls_m = {h: [] for h in HORIZONS}  # momentum long-short gross spread
     n_inf = 0
     t_start = time.time()
 
@@ -136,12 +164,15 @@ def main() -> int:
         fwd = {h: {} for h in HORIZONS}
         for s in coins:
             df = data[s]
-            ctx = df.loc[:T]                      # rows with ts <= T (post-cutoff only)
+            ctx = df.loc[:T]  # rows with ts <= T (post-cutoff only)
             if len(ctx) < LOOKBACK:
                 continue
             try:
-                f = fc.forecast(ctx.reset_index()[["ts", "open", "high", "low", "close"]],
-                                horizon=MAX_H, samples=SAMPLES)
+                f = fc.forecast(
+                    ctx.reset_index()[["ts", "open", "high", "low", "close"]],
+                    horizon=MAX_H,
+                    samples=SAMPLES,
+                )
             except Exception:
                 continue
             n_inf += 1
@@ -167,46 +198,64 @@ def main() -> int:
                 ic_k[h].append(ick)
             if not np.isnan(icm):
                 ic_m[h].append(icm)
-            ek = np.argsort(ev)            # ascending
+            ek = np.argsort(ev)  # ascending
             em = np.argsort(mv)
             ls_k[h].append(float(rv[ek[-K:]].mean() - rv[ek[:K]].mean()))
             ls_m[h].append(float(rv[em[-K:]].mean() - rv[em[:K]].mean()))
         if (bi + 1) % 20 == 0:
             el = time.time() - t_start
-            print(f"  {bi+1}/{len(dec_ts)} bars | {n_inf} inf | {el:.0f}s "
-                  f"| ~{el/max(n_inf,1)*1000:.0f}ms/inf")
+            print(
+                f"  {bi + 1}/{len(dec_ts)} bars | {n_inf} inf | {el:.0f}s "
+                f"| ~{el / max(n_inf, 1) * 1000:.0f}ms/inf"
+            )
 
     # ---- aggregate + gates --------------------------------------------------
     rows = []
     for h in HORIZONS:
-        ick = np.array(ic_k[h]); icm = np.array(ic_m[h])
-        lk = np.array(ls_k[h]); lm = np.array(ls_m[h])
+        ick = np.array(ic_k[h])
+        icm = np.array(ic_m[h])
+        lk = np.array(ls_k[h])
+        lm = np.array(ls_m[h])
         pyear = 8760.0 / h
-        def sharpe(x):
+
+        def sharpe(x, pyear=pyear):  # bind loop var pyear at def time (B023)
             x = np.asarray(x, float)
-            return float(x.mean() / x.std(ddof=1) * np.sqrt(pyear)) if len(x) > 1 and x.std(ddof=1) > 0 else 0.0
+            return (
+                float(x.mean() / x.std(ddof=1) * np.sqrt(pyear))
+                if len(x) > 1 and x.std(ddof=1) > 0
+                else 0.0
+            )
+
         net_full = lk - COST_FULL
         net_low = lk - COST_LOW
-        rows.append({
-            "h": h, "n": int(len(lk)),
-            "kronos_meanIC": float(ick.mean()) if len(ick) else 0.0,
-            "kronos_IC_t": _tstat(ick) if len(ick) else 0.0,
-            "mom_meanIC": float(icm.mean()) if len(icm) else 0.0,
-            "mom_IC_t": _tstat(icm) if len(icm) else 0.0,
-            "kronos_LS_gross_pct": float(lk.mean() * 100) if len(lk) else 0.0,
-            "kronos_LS_t": _tstat(lk) if len(lk) else 0.0,
-            "kronos_LS_net_full_pct": float(net_full.mean() * 100) if len(lk) else 0.0,
-            "kronos_LS_net_low_pct": float(net_low.mean() * 100) if len(lk) else 0.0,
-            "kronos_LS_sharpe_grossann": sharpe(lk),
-            "kronos_LS_sharpe_net_full": sharpe(net_full),
-            "mom_LS_gross_pct": float(lm.mean() * 100) if len(lm) else 0.0,
-        })
+        rows.append(
+            {
+                "h": h,
+                "n": int(len(lk)),
+                "kronos_meanIC": float(ick.mean()) if len(ick) else 0.0,
+                "kronos_IC_t": _tstat(ick) if len(ick) else 0.0,
+                "mom_meanIC": float(icm.mean()) if len(icm) else 0.0,
+                "mom_IC_t": _tstat(icm) if len(icm) else 0.0,
+                "kronos_LS_gross_pct": float(lk.mean() * 100) if len(lk) else 0.0,
+                "kronos_LS_t": _tstat(lk) if len(lk) else 0.0,
+                "kronos_LS_net_full_pct": float(net_full.mean() * 100) if len(lk) else 0.0,
+                "kronos_LS_net_low_pct": float(net_low.mean() * 100) if len(lk) else 0.0,
+                "kronos_LS_sharpe_grossann": sharpe(lk),
+                "kronos_LS_sharpe_net_full": sharpe(net_full),
+                "mom_LS_gross_pct": float(lm.mean() * 100) if len(lm) else 0.0,
+            }
+        )
 
     def is_go(r):
-        return (r["kronos_meanIC"] > 0 and r["kronos_IC_t"] >= 3.0
-                and r["kronos_LS_net_full_pct"] > 0 and r["kronos_LS_sharpe_net_full"] > 0
-                and r["kronos_meanIC"] > r["mom_meanIC"]
-                and r["kronos_LS_gross_pct"] > r["mom_LS_gross_pct"])
+        return (
+            r["kronos_meanIC"] > 0
+            and r["kronos_IC_t"] >= 3.0
+            and r["kronos_LS_net_full_pct"] > 0
+            and r["kronos_LS_sharpe_net_full"] > 0
+            and r["kronos_meanIC"] > r["mom_meanIC"]
+            and r["kronos_LS_gross_pct"] > r["mom_LS_gross_pct"]
+        )
+
     gos = [r for r in rows if is_go(r)]
 
     today = date.today().isoformat()
@@ -220,10 +269,10 @@ def main() -> int:
         "",
         f"**Setup:** {len(coins)} coins, 1h bars, leakage-safe (≥2025-09-01, context & target). "
         f"{len(dec_ts)} non-overlapping rebalances (step={step}h). Kronos-mini, samples={SAMPLES}, "
-        f"{n_inf} forecasts. Horizons 4h/12h/24h. Cost: full-rebalance ~{COST_FULL*1e4:.0f}bps/period "
-        f"(taker) and charitable ~{COST_LOW*1e4:.0f}bps/period.",
+        f"{n_inf} forecasts. Horizons 4h/12h/24h. Cost: full-rebalance ~{COST_FULL * 1e4:.0f}bps/period "
+        f"(taker) and charitable ~{COST_LOW * 1e4:.0f}bps/period.",
         "",
-        f"## VERDICT: {'GO @ ' + ', '.join(str(r['h'])+'h' for r in gos) if gos else 'NO_EDGE (0 horizons clear the gate)'}",
+        f"## VERDICT: {'GO @ ' + ', '.join(str(r['h']) + 'h' for r in gos) if gos else 'NO_EDGE (0 horizons clear the gate)'}",
         "",
         "**Gate:** mean RankIC>0 & |t|≥3; long-short net>0 & Sharpe>0; Kronos beats momentum on RankIC AND gross spread.",
         "",
@@ -231,29 +280,45 @@ def main() -> int:
         "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        L.append("| {h} | {n} | {kronos_meanIC:+.4f} | {kronos_IC_t:+.2f} | {mom_meanIC:+.4f} | "
-                 "{mom_IC_t:+.2f} | {kronos_LS_gross_pct:+.3f} | {kronos_LS_t:+.2f} | "
-                 "{kronos_LS_net_full_pct:+.3f} | {kronos_LS_net_low_pct:+.3f} | "
-                 "{kronos_LS_sharpe_net_full:+.2f} | {mom_LS_gross_pct:+.3f} |".format(**r))
-    L += ["",
-          "_RankIC = cross-sectional Spearman(forecast, realized) per rebalance, averaged. "
-          "LS gross = mean(top-6 realized) − mean(bottom-6 realized) per period (before cost). "
-          "Sharpe annualized at 8760/h periods/yr. Honest caveats: Kronos sampling is stochastic "
-          "(sub-0.1% effects are noise); ~30-coin cross-section is a fraction of the paper's "
-          "hundreds; even a positive result is NOT capturable at ~$1,300 (min-notional × many legs)._"]
+        L.append(
+            "| {h} | {n} | {kronos_meanIC:+.4f} | {kronos_IC_t:+.2f} | {mom_meanIC:+.4f} | "
+            "{mom_IC_t:+.2f} | {kronos_LS_gross_pct:+.3f} | {kronos_LS_t:+.2f} | "
+            "{kronos_LS_net_full_pct:+.3f} | {kronos_LS_net_low_pct:+.3f} | "
+            "{kronos_LS_sharpe_net_full:+.2f} | {mom_LS_gross_pct:+.3f} |".format(**r)
+        )
+    L += [
+        "",
+        "_RankIC = cross-sectional Spearman(forecast, realized) per rebalance, averaged. "
+        "LS gross = mean(top-6 realized) − mean(bottom-6 realized) per period (before cost). "
+        "Sharpe annualized at 8760/h periods/yr. Honest caveats: Kronos sampling is stochastic "
+        "(sub-0.1% effects are noise); ~30-coin cross-section is a fraction of the paper's "
+        "hundreds; even a positive result is NOT capturable at ~$1,300 (min-notional × many legs)._",
+    ]
     out_md = REPORTS / f"kronos_xsec_{today}.md"
     out_md.write_text("\n".join(L), encoding="utf-8")
     (REPORTS / f"kronos_xsec_{today}.json").write_text(
-        json.dumps({"date": today, "coins": coins, "n_rebalances": len(dec_ts),
-                    "n_forecasts": n_inf, "rows": rows, "go_horizons": [r["h"] for r in gos]},
-                   indent=2), encoding="utf-8")
+        json.dumps(
+            {
+                "date": today,
+                "coins": coins,
+                "n_rebalances": len(dec_ts),
+                "n_forecasts": n_inf,
+                "rows": rows,
+                "go_horizons": [r["h"] for r in gos],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     print("\n=== RESULT ===")
     for r in rows:
-        print(f"h={r['h']:>2} n={r['n']:>3} | Kronos IC={r['kronos_meanIC']:+.4f}(t={r['kronos_IC_t']:+.2f}) "
-              f"Mom IC={r['mom_meanIC']:+.4f} | LS gross={r['kronos_LS_gross_pct']:+.3f}% "
-              f"net_full={r['kronos_LS_net_full_pct']:+.3f}% Sharpe={r['kronos_LS_sharpe_net_full']:+.2f} "
-              f"| Mom LS={r['mom_LS_gross_pct']:+.3f}%")
+        print(
+            f"h={r['h']:>2} n={r['n']:>3} | Kronos IC={r['kronos_meanIC']:+.4f}(t={r['kronos_IC_t']:+.2f}) "
+            f"Mom IC={r['mom_meanIC']:+.4f} | LS gross={r['kronos_LS_gross_pct']:+.3f}% "
+            f"net_full={r['kronos_LS_net_full_pct']:+.3f}% Sharpe={r['kronos_LS_sharpe_net_full']:+.2f} "
+            f"| Mom LS={r['mom_LS_gross_pct']:+.3f}%"
+        )
     print(f"\nVERDICT: {'GO ' + str([r['h'] for r in gos]) if gos else 'NO_EDGE'}")
     print(f"Report: {out_md}")
     return 0

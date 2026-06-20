@@ -18,6 +18,7 @@ cheaply. Nothing here trades real capital; this is an offline screen on cached O
 
 Run: python scripts/run_kalman_pairs_screen.py [--timeframe 4h] [--fee 0.0005] [--max-bases 30]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,14 +33,19 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from core.alpha_zoo.kalman_pairs import cointegration_pvalue, pair_strategy_returns  # noqa: E402
-from core.alpha_zoo.screen import dsr_for_returns, fdr_bh, pbo_over_alphas, sharpe_pvalue  # noqa: E402
+from core.alpha_zoo.screen import (  # noqa: E402
+    dsr_for_returns,
+    fdr_bh,
+    pbo_over_alphas,
+    sharpe_pvalue,
+)
 from core.stat_tests import sharpe  # noqa: E402
 
 CACHE = ROOT / "data" / "ohlcv_cache"
-MIN_BARS = 15000         # require a multi-year history per base (1h: ~26k bars = ~3y)
-MIN_OVERLAP = 8000       # require a decent aligned overlap per pair
-COINT_P = 0.05           # in-sample cointegration threshold
-DSR_BAR = 0.10           # frozen DSR promote/report bar
+MIN_BARS = 15000  # require a multi-year history per base (1h: ~26k bars = ~3y)
+MIN_OVERLAP = 8000  # require a decent aligned overlap per pair
+COINT_P = 0.05  # in-sample cointegration threshold
+DSR_BAR = 0.10  # frozen DSR promote/report bar
 
 
 def load_panel(timeframe: str, max_bases: int) -> pd.DataFrame:
@@ -77,15 +83,21 @@ def main() -> None:
     panel = load_panel(args.timeframe, args.max_bases)
     bases = list(panel.columns)
     if len(bases) < 2:
-        print(f"[abort] only {len(bases)} base(s) @ {args.timeframe} cleared MIN_BARS={MIN_BARS}; "
-              f"nothing to pair.")
+        print(
+            f"[abort] only {len(bases)} base(s) @ {args.timeframe} cleared MIN_BARS={MIN_BARS}; "
+            f"nothing to pair."
+        )
         return
-    print(f"universe: {len(bases)} bases @ {args.timeframe}  "
-          f"{panel.index.min().date()} -> {panel.index.max().date()}")
+    print(
+        f"universe: {len(bases)} bases @ {args.timeframe}  "
+        f"{panel.index.min().date()} -> {panel.index.max().date()}"
+    )
     pairs = list(combinations(bases, 2))
     n_trials = len(pairs)
-    print(f"n_trials (pairs tested) = {n_trials}; fee={args.fee:.4%}/leg; "
-          f"frozen gate: in-sample coint p<{COINT_P} AND OOS DSR>={DSR_BAR} AND FDR(q=0.05); PBO reported\n")
+    print(
+        f"n_trials (pairs tested) = {n_trials}; fee={args.fee:.4%}/leg; "
+        f"frozen gate: in-sample coint p<{COINT_P} AND OOS DSR>={DSR_BAR} AND FDR(q=0.05); PBO reported\n"
+    )
 
     candidates = []  # (label, oos_returns, coint_p, oos_sharpe, p_value)
     for a, b in pairs:
@@ -111,7 +123,9 @@ def main() -> None:
 
     print(f"in-sample-cointegrated candidates that traded OOS: {len(candidates)}\n")
     if not candidates:
-        print("VERDICT: NO_EDGE — no pair was even in-sample cointegrated + active OOS. Stops cheaply.")
+        print(
+            "VERDICT: NO_EDGE — no pair was even in-sample cointegrated + active OOS. Stops cheaply."
+        )
         return
 
     pvals = [c[4] for c in candidates]
@@ -127,20 +141,28 @@ def main() -> None:
         fdr_ok = fdr_flags[pvals.index(pv)]
         ok = bool(dsr >= DSR_BAR and fdr_ok)
         passes.append(ok)
-        print(f"{label:<14} {p_in:>8.3f} {sr:>8.4f} {pv:>7.3f} {dsr:>6.2f} "
-              f"{str(fdr_ok):>4}  {'PASS' if ok else 'no'}")
+        print(
+            f"{label:<14} {p_in:>8.3f} {sr:>8.4f} {pv:>7.3f} {dsr:>6.2f} "
+            f"{str(fdr_ok):>4}  {'PASS' if ok else 'no'}"
+        )
 
-    print(f"\nPBO over {len(candidates)} candidate OOS return series = {pbo_val:.2f} "
-          f"(>=0.5 => in-sample winner carries no OOS information)")
+    print(
+        f"\nPBO over {len(candidates)} candidate OOS return series = {pbo_val:.2f} "
+        f"(>=0.5 => in-sample winner carries no OOS information)"
+    )
     if any(passes):
-        print("\nCANDIDATE(S) cleared the frozen gate. Treat as EXPLORATORY only — extend walk-forward, "
-              "re-screen on fresh OOS, and account for borrow/funding before ANY use. Never deploy on a "
-              "single pass.")
+        print(
+            "\nCANDIDATE(S) cleared the frozen gate. Treat as EXPLORATORY only — extend walk-forward, "
+            "re-screen on fresh OOS, and account for borrow/funding before ANY use. Never deploy on a "
+            "single pass."
+        )
     else:
-        print("\nVERDICT: NO_EDGE — no cointegrated pair's Kalman mean-reversion survives the frozen "
-              "stack (DSR + FDR) after fees. Matches the instrument-agnostic no-edge prior; the spread "
-              "is too thin vs two-legged cost and cointegration is unstable out-of-sample. Cost was "
-              "~1 module + this screen; the null stops cheaply.")
+        print(
+            "\nVERDICT: NO_EDGE — no cointegrated pair's Kalman mean-reversion survives the frozen "
+            "stack (DSR + FDR) after fees. Matches the instrument-agnostic no-edge prior; the spread "
+            "is too thin vs two-legged cost and cointegration is unstable out-of-sample. Cost was "
+            "~1 module + this screen; the null stops cheaply."
+        )
 
 
 if __name__ == "__main__":

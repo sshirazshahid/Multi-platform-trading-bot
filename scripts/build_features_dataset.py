@@ -18,6 +18,7 @@ Usage:
     python scripts/build_features_dataset.py --since 2026-01-01 --max-rows 5000
     python scripts/build_features_dataset.py --symbols BTC/USDT,ETH/USDT
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,10 +61,12 @@ def _binance_public() -> ccxt.binance:
 
 def _fetcher(ex):
     """Return a fetcher closure compatible with `load_ohlcv_window`."""
+
     def f(symbol, timeframe, since_ms, limit):
         # ccxt expects 'BTC/USDT' (no :USDT). Strip the perp suffix if present.
         base = symbol.split(":")[0]
         return ex.fetch_ohlcv(base, timeframe, since=int(since_ms), limit=int(limit))
+
     return f
 
 
@@ -156,7 +159,8 @@ def _build_btc_window(start_ts: int, end_ts: int, fetcher) -> dict[str, pd.DataF
     for tf in ("4h", "1h"):
         tf_sec = _TF_TO_SECONDS[tf]
         df = load_ohlcv_window(
-            "BTC/USDT", tf,
+            "BTC/USDT",
+            tf,
             start_ts - tf_sec * 50,
             end_ts + tf_sec * 5,
             fetcher=fetcher,
@@ -168,12 +172,18 @@ def _build_btc_window(start_ts: int, end_ts: int, fetcher) -> dict[str, pd.DataF
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--since", default=None,
-                        help="ISO date (YYYY-MM-DD); only process candidates after this ts")
-    parser.add_argument("--max-rows", type=int, default=None,
-                        help="cap number of candidates processed (smoke testing)")
-    parser.add_argument("--symbols", default=None,
-                        help="comma-separated whitelist e.g. BTC/USDT,ETH/USDT")
+    parser.add_argument(
+        "--since", default=None, help="ISO date (YYYY-MM-DD); only process candidates after this ts"
+    )
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        help="cap number of candidates processed (smoke testing)",
+    )
+    parser.add_argument(
+        "--symbols", default=None, help="comma-separated whitelist e.g. BTC/USDT,ETH/USDT"
+    )
     parser.add_argument("--print-every", type=int, default=200)
     args = parser.parse_args()
 
@@ -204,8 +214,10 @@ def main() -> int:
     if not rows:
         print("no candidates match — nothing to do")
         return 0
-    print(f"loaded {len(rows)} candidate rows; ts range: "
-          f"{int(rows[0]['ts'])} -> {int(rows[-1]['ts'])}")
+    print(
+        f"loaded {len(rows)} candidate rows; ts range: "
+        f"{int(rows[0]['ts'])} -> {int(rows[-1]['ts'])}"
+    )
 
     btc = _build_btc_window(int(rows[0]["ts"]), int(rows[-1]["ts"]), fetcher)
     if not btc:
@@ -216,18 +228,19 @@ def main() -> int:
     t0 = time.time()
     for i, r in enumerate(rows):
         ok = _process_candidate(
-            cand=r, btc_window=btc, fs=fs, fetcher=fetcher,
+            cand=r,
+            btc_window=btc,
+            fs=fs,
+            fetcher=fetcher,
             cache_pad_seconds=0,
         )
         written += ok
-        skipped += (1 - ok)
+        skipped += 1 - ok
         if (i + 1) % args.print_every == 0:
             elapsed = time.time() - t0
             rate = (i + 1) / max(1e-3, elapsed)
-            print(f"  [{i+1}/{len(rows)}] written={written} skipped={skipped} "
-                  f"rate={rate:.1f}/s")
-    print(f"done -- written={written} skipped={skipped} "
-          f"elapsed={time.time()-t0:.0f}s")
+            print(f"  [{i + 1}/{len(rows)}] written={written} skipped={skipped} rate={rate:.1f}/s")
+    print(f"done -- written={written} skipped={skipped} elapsed={time.time() - t0:.0f}s")
 
     counts = wh.query("SELECT COUNT(*) c FROM features")[0]["c"]
     print(f"features table now has {counts} rows")

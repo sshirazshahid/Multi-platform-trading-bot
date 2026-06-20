@@ -26,6 +26,7 @@ Caveats
   inside trailing_stop_manager — this script only fits the BASE pair, which
   is the dominant lever. Graduated tiers stay as-is.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,10 +41,10 @@ if str(ROOT) not in sys.path:
 
 from core.warehouse import get_warehouse  # noqa: E402
 
-GRID_ACTIVATION = [0.005, 0.008, 0.012, 0.015, 0.020]   # 5 cells
-GRID_LOCK = [0.50, 0.60, 0.70, 0.80, 0.85]              # 5 cells
+GRID_ACTIVATION = [0.005, 0.008, 0.012, 0.015, 0.020]  # 5 cells
+GRID_LOCK = [0.50, 0.60, 0.70, 0.80, 0.85]  # 5 cells
 DEFAULT_ACTIVATION = 0.008  # current production
-DEFAULT_LOCK = 0.70         # current production
+DEFAULT_LOCK = 0.70  # current production
 OUT_PATH = ROOT / "data" / "trailing_params.json"
 
 
@@ -52,6 +53,7 @@ def _fetch_ohlc(symbol: str, since_ms: int, until_ms: int) -> list[list[float]]:
     [ts, open, high, low, close, volume]. Empty list on any failure."""
     try:
         import ccxt
+
         ex = ccxt.binance({"enableRateLimit": True})
         # Strip futures suffix for spot endpoint
         spot_sym = symbol.replace(":USDT", "").replace("/USDT", "/USDT")
@@ -72,8 +74,13 @@ def _fetch_ohlc(symbol: str, since_ms: int, until_ms: int) -> list[list[float]]:
 
 
 def _replay_winner(
-    side: str, entry: float, exit_: float, ohlc: list[list[float]],
-    *, activation_pct: float, lock_fraction: float,
+    side: str,
+    entry: float,
+    exit_: float,
+    ohlc: list[list[float]],
+    *,
+    activation_pct: float,
+    lock_fraction: float,
 ) -> float:
     """Simulate trailing-stop on a single winner. Returns simulated exit
     price (>= 0); caller multiplies by size for PnL.
@@ -95,7 +102,9 @@ def _replay_winner(
 
     for row in ohlc:
         _ts, o, h, lo, c, _v = row
-        h = float(h); lo = float(lo); c = float(c)
+        h = float(h)
+        lo = float(lo)
+        c = float(c)
 
         if is_long:
             if h > peak:
@@ -120,7 +129,7 @@ def _replay_winner(
             if activated and h >= sl > 0:
                 return sl
 
-    return exit_   # never trailed; close at original exit
+    return exit_  # never trailed; close at original exit
 
 
 def _winners_from_warehouse(limit: int | None = None) -> list[dict]:
@@ -170,9 +179,12 @@ def fit(limit: int | None = None, report: bool = False) -> dict:
                 if not ohlc:
                     continue
                 sim_exit = _replay_winner(
-                    side=w["side"], entry=float(w["entry_px"]),
-                    exit_=float(w["exit_px"]), ohlc=ohlc,
-                    activation_pct=a, lock_fraction=L,
+                    side=w["side"],
+                    entry=float(w["entry_px"]),
+                    exit_=float(w["exit_px"]),
+                    ohlc=ohlc,
+                    activation_pct=a,
+                    lock_fraction=L,
                 )
                 size = float(w.get("size") or 0.0)
                 if w["side"].lower() in ("buy", "long"):
@@ -181,22 +193,27 @@ def fit(limit: int | None = None, report: bool = False) -> dict:
                     pnl = (float(w["entry_px"]) - sim_exit) * size
                 total_pnl += pnl
                 n_replayed += 1
-            grid_results.append({
-                "activation_pct": a, "lock_fraction": L,
-                "total_pnl": total_pnl, "n_replayed": n_replayed,
-            })
+            grid_results.append(
+                {
+                    "activation_pct": a,
+                    "lock_fraction": L,
+                    "total_pnl": total_pnl,
+                    "n_replayed": n_replayed,
+                }
+            )
             if report:
-                print(f"  a={a:.3f} L={L:.2f}: pnl=${total_pnl:.2f} "
-                      f"(n={n_replayed})")
+                print(f"  a={a:.3f} L={L:.2f}: pnl=${total_pnl:.2f} (n={n_replayed})")
 
     if not grid_results:
         return {"error": "no_replays", "n_winners": len(winners)}
 
     best = max(grid_results, key=lambda r: r["total_pnl"])
     baseline = next(
-        (r for r in grid_results
-         if r["activation_pct"] == DEFAULT_ACTIVATION
-         and r["lock_fraction"] == DEFAULT_LOCK),
+        (
+            r
+            for r in grid_results
+            if r["activation_pct"] == DEFAULT_ACTIVATION and r["lock_fraction"] == DEFAULT_LOCK
+        ),
         None,
     )
     payload = {
@@ -213,13 +230,16 @@ def fit(limit: int | None = None, report: bool = False) -> dict:
 
     if report:
         print()
-        print(f"BEST: a={payload['activation_pct']:.3f} "
-              f"L={payload['lock_fraction']:.2f} -> "
-              f"pnl=${payload['best_pnl']:.2f}")
+        print(
+            f"BEST: a={payload['activation_pct']:.3f} "
+            f"L={payload['lock_fraction']:.2f} -> "
+            f"pnl=${payload['best_pnl']:.2f}"
+        )
         if payload["baseline_pnl"] is not None:
             delta = payload["best_pnl"] - payload["baseline_pnl"]
-            print(f"vs baseline (a=0.008 L=0.70): "
-                  f"${payload['baseline_pnl']:.2f}  delta=${delta:+.2f}")
+            print(
+                f"vs baseline (a=0.008 L=0.70): ${payload['baseline_pnl']:.2f}  delta=${delta:+.2f}"
+            )
         print(f"persisted -> {OUT_PATH}")
     return payload
 

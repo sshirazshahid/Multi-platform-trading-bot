@@ -19,6 +19,7 @@ Daily cadence (~99 bars); horizons 1d & 3d. n_trials(DSR)=2 (E×2 horizons).
 NOTE: ~99 daily obs is THIN — per the prereg, OI is exploratory/low-power.
 Verdict is reported with that caveat.
 """
+
 from __future__ import annotations
 
 import sys
@@ -48,17 +49,58 @@ from core.data_feeds.open_interest_feed import _coin_to_instrument  # noqa: E402
 from core.stat_tests import pbo as _pbo  # noqa: E402
 from core.stat_tests import sharpe  # noqa: E402
 
-IR_MIN, DSR_REPORT, DSR_PROMOTE, PBO_MAX, Q, SPLIT, FEE, SLIP = 0.50, 0.10, 0.90, 0.50, 0.20, 0.60, 0.0007, 0.0005
+IR_MIN, DSR_REPORT, DSR_PROMOTE, PBO_MAX, Q, SPLIT, FEE, SLIP = (
+    0.50,
+    0.10,
+    0.90,
+    0.50,
+    0.20,
+    0.60,
+    0.0007,
+    0.0005,
+)
 MARKET = "binance"
-BASES = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK",
-         "ATOM", "ARB", "OP", "NEAR", "APT", "DOT", "LTC", "TRX", "UNI",
-         "AAVE", "FIL", "INJ", "SUI", "TIA", "SEI", "RUNE", "FET", "WLD", "LDO"]
+BASES = [
+    "BTC",
+    "ETH",
+    "SOL",
+    "BNB",
+    "XRP",
+    "DOGE",
+    "ADA",
+    "AVAX",
+    "LINK",
+    "ATOM",
+    "ARB",
+    "OP",
+    "NEAR",
+    "APT",
+    "DOT",
+    "LTC",
+    "TRX",
+    "UNI",
+    "AAVE",
+    "FIL",
+    "INJ",
+    "SUI",
+    "TIA",
+    "SEI",
+    "RUNE",
+    "FET",
+    "WLD",
+    "LDO",
+]
 
 
 def fetch_oi_daily(base: str, limit: int = 100) -> pd.Series:
     """Daily OI (CLOSE_SETTLEMENT = OI in base/contract units, price-independent)."""
-    r = call_coindesk_oi_ohlcv(market=MARKET, instrument=_coin_to_instrument(base),
-                               frequency="days", aggregate=1, limit=limit)
+    r = call_coindesk_oi_ohlcv(
+        market=MARKET,
+        instrument=_coin_to_instrument(base),
+        frequency="days",
+        aggregate=1,
+        limit=limit,
+    )
     data = (r or {}).get("Data", []) or []
     out = {}
     for b in data:
@@ -102,8 +144,10 @@ def main():
     P = pd.DataFrame(price).sort_index()
     idx = OI.index.intersection(P.index)
     OI, P = OI.loc[idx], P.loc[idx]
-    print(f"panel: {OI.shape[0]} daily bars x {OI.shape[1]} symbols "
-          f"({idx[0].date()} -> {idx[-1].date()})")
+    print(
+        f"panel: {OI.shape[0]} daily bars x {OI.shape[1]} symbols "
+        f"({idx[0].date()} -> {idx[-1].date()})"
+    )
     if OI.shape[1] < 10 or OI.shape[0] < 40:
         print("INSUFFICIENT DATA (need >=10 symbols, >=40 aligned bars) — verdict: UNRESOLVED")
         return
@@ -123,29 +167,37 @@ def main():
         ic_is = cross_sectional_ic(E.iloc[is_sl], fwd(P, h).iloc[is_sl])
         ir_is = ir(ic_is)
         fr = fwd(P, h).iloc[oos_sl]
-        ls = (long_short_returns(E.iloc[oos_sl], fr, sign=1.0, q=Q, min_width=8)
-              - cost_per_bar(h)).dropna()
+        ls = (
+            long_short_returns(E.iloc[oos_sl], fr, sign=1.0, q=Q, min_width=8) - cost_per_bar(h)
+        ).dropna()
         if ls.size < 4:
             rows.append((h, ir_is, None, None, None, None))
             continue
         half = ls.size // 2
         halves = bool(ls.iloc[:half].mean() > 0 and ls.iloc[half:].mean() > 0)
-        rows.append((h, ir_is, float(sharpe(ls.to_numpy())), float(ls.mean()),
-                     sharpe_pvalue(ls), halves))
+        rows.append(
+            (h, ir_is, float(sharpe(ls.to_numpy())), float(ls.mean()), sharpe_pvalue(ls), halves)
+        )
         series[f"E_h{h}"] = ls
 
     dsr = {k: dsr_for_returns(v, n_trials=n_trials) for k, v in series.items()}
     mat = pd.DataFrame(series).sort_index().fillna(0.0)
-    pbo_val = float(_pbo(mat.to_numpy(), n_partitions=8)) if mat.shape[0] >= 8 and mat.shape[1] >= 2 else float("nan")
+    pbo_val = (
+        float(_pbo(mat.to_numpy(), n_partitions=8))
+        if mat.shape[0] >= 8 and mat.shape[1] >= 2
+        else float("nan")
+    )
 
     print("\n" + "=" * 88)
     print("H5 / E_oi_x_price = sign(dPrice) * dOI%   (daily, CoinDesk OI ~99d)")
-    print(f"{'h(d)':>5}{'IR_is':>9}{'Sharpe_oos':>12}{'mean_oos':>11}{'DSR':>8}{'pval':>7}{'2half':>7}")
+    print(
+        f"{'h(d)':>5}{'IR_is':>9}{'Sharpe_oos':>12}{'mean_oos':>11}{'DSR':>8}{'pval':>7}{'2half':>7}"
+    )
     print("-" * 88)
     passed_s1 = []
-    for (h, ir_is, shp, mean, pval, halves) in rows:
+    for h, ir_is, shp, mean, pval, halves in rows:
         dk = f"E_h{h}"
-        dsr_v = dsr.get(dk, float('nan'))
+        dsr_v = dsr.get(dk, float("nan"))
         shp_s = f"{shp:.3f}" if shp is not None else "n/a"
         mean_s = f"{mean:+.5f}" if mean is not None else "n/a"
         pval_s = f"{pval:.3f}" if pval is not None else "n/a"
@@ -159,12 +211,17 @@ def main():
 
     # Verdict per frozen gates
     promoted = []
-    for (h, ir_is, shp, mean, pval, halves) in rows:
+    for h, ir_is, shp, mean, pval, halves in rows:
         if shp is None:
             continue
         dsr_v = dsr.get(f"E_h{h}", 0.0)
-        if (abs(ir_is) >= IR_MIN and dsr_v >= DSR_PROMOTE
-                and (np.isnan(pbo_val) or pbo_val <= PBO_MAX) and mean > 0 and halves):
+        if (
+            abs(ir_is) >= IR_MIN
+            and dsr_v >= DSR_PROMOTE
+            and (np.isnan(pbo_val) or pbo_val <= PBO_MAX)
+            and mean > 0
+            and halves
+        ):
             promoted.append(f"E@h{h}d (IR={ir_is:+.2f}, DSR={dsr_v:.2f})")
 
     if promoted:

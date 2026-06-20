@@ -33,6 +33,7 @@ Usage
     python scripts/gate_effectiveness_report.py --window 7   # last 7d only
     python scripts/gate_effectiveness_report.py --json       # also dump JSON
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,7 +92,8 @@ def report_score_calibration(c, since_ts: int) -> str:
         "Pre-fix data showed 85+ was anti-EV; let's see if cell-filter "
         "kept it that way or improved.",
     )
-    rows = c.execute("""
+    rows = c.execute(
+        """
         SELECT
           CASE
             WHEN mcp_score < 65          THEN '00-64'
@@ -111,7 +113,9 @@ def report_score_calibration(c, since_ts: int) -> str:
           AND ts_entry >= ?
         GROUP BY bucket
         ORDER BY bucket
-    """, (since_ts,)).fetchall()
+    """,
+        (since_ts,),
+    ).fetchall()
     if not rows:
         return out + "_no data in window_\n"
     out += "| bucket | n | sum | avg | WR |\n|---|---:|---:|---:|---:|\n"
@@ -132,7 +136,8 @@ def report_cell_performance(c, since_ts: int) -> str:
         "separately as PRE-FILTER and do not represent filter leaks.",
     )
     star_list = "(" + ",".join(f"'{s}'" for s in STAR_SYMBOLS) + ")"
-    rows = c.execute(f"""
+    rows = c.execute(
+        f"""
         SELECT
           CASE WHEN ts_entry >= ? THEN 'POST' ELSE 'PRE' END AS era,
           CASE
@@ -148,7 +153,9 @@ def report_cell_performance(c, since_ts: int) -> str:
         WHERE status='CLOSED' AND ts_entry >= ?
         GROUP BY era, cell
         ORDER BY era DESC, sum_pnl DESC
-    """, (CELL_FILTER_ACTIVE_TS, since_ts)).fetchall()
+    """,
+        (CELL_FILTER_ACTIVE_TS, since_ts),
+    ).fetchall()
     if not rows:
         return out + "_no data in window_\n"
     out += "| era | cell | n | sum | avg | WR |\n|---|---|---:|---:|---:|---:|\n"
@@ -157,12 +164,15 @@ def report_cell_performance(c, since_ts: int) -> str:
         out += f"| {era_label} | {r['cell']} | {r['n']} | {_fmt_pnl(r['sum_pnl'])} | {_fmt_pnl(r['avg_pnl'])} | {r['wr']}% |\n"
 
     # Skip-reason distribution (gate firing rates)
-    skips = c.execute("""
+    skips = c.execute(
+        """
         SELECT skip_reason, COUNT(*) AS n
         FROM candidates
         WHERE decision='SKIP' AND ts >= ?
         GROUP BY skip_reason ORDER BY n DESC LIMIT 20
-    """, (since_ts,)).fetchall()
+    """,
+        (since_ts,),
+    ).fetchall()
     if skips:
         out += "\n### Skip reasons (top 20)\n\n"
         out += "| reason | n |\n|---|---:|\n"
@@ -182,7 +192,8 @@ def report_pwin_calibration(c, since_ts: int) -> str:
         "direction means the model's probabilities are stale.",
     )
     # Join predictions to trades on candidate_id (Phase 13.5b wiring)
-    rows = c.execute("""
+    rows = c.execute(
+        """
         SELECT
           CASE
             WHEN p.p_win < 0.50 THEN '0.30-0.49'
@@ -201,7 +212,9 @@ def report_pwin_calibration(c, since_ts: int) -> str:
         WHERE t.status='CLOSED' AND t.ts_entry >= ?
         GROUP BY p_bucket
         ORDER BY p_bucket
-    """, (since_ts,)).fetchall()
+    """,
+        (since_ts,),
+    ).fetchall()
     if not rows:
         return out + "_no joined predictions+trades data in window_\n"
     out += "| p_win bucket | n | avg_pwin | realized WR | sum |\n|---|---:|---:|---:|---:|\n"
@@ -230,7 +243,8 @@ def report_exit_reason_breakdown(c, since_ts: int) -> str:
         "ghost-reclassified ones; ghost_reconciled / ghost_sync "
         "should shrink toward zero post-fix.",
     )
-    rows = c.execute("""
+    rows = c.execute(
+        """
         SELECT exit_reason, COUNT(*) AS n,
                ROUND(SUM(realized_pnl), 2) AS sum_pnl,
                ROUND(AVG(realized_pnl), 3) AS avg_pnl,
@@ -239,7 +253,9 @@ def report_exit_reason_breakdown(c, since_ts: int) -> str:
         WHERE status='CLOSED' AND ts_entry >= ?
         GROUP BY exit_reason
         ORDER BY sum_pnl DESC
-    """, (since_ts,)).fetchall()
+    """,
+        (since_ts,),
+    ).fetchall()
     if not rows:
         return out + "_no data in window_\n"
     out += "| exit_reason | n | sum | avg | WR |\n|---|---:|---:|---:|---:|\n"
@@ -260,7 +276,8 @@ def report_per_symbol(c, since_ts: int) -> str:
         "be auto-blocked once n >= min_sample_size (5) in the live "
         "lookback window.",
     )
-    rows = c.execute("""
+    rows = c.execute(
+        """
         SELECT symbol, COUNT(*) AS n,
                ROUND(SUM(realized_pnl), 2) AS sum_pnl,
                ROUND(AVG(realized_pnl), 3) AS avg_pnl,
@@ -270,23 +287,25 @@ def report_per_symbol(c, since_ts: int) -> str:
         GROUP BY symbol
         HAVING n >= 3
         ORDER BY sum_pnl DESC
-    """, (since_ts,)).fetchall()
+    """,
+        (since_ts,),
+    ).fetchall()
     if not rows:
         return out + "_no data in window_\n"
     # Read live floor values from config so report stays in sync.
     try:
         from config import EXPECTANCY_FILTER as _EF
         from config import STAR_SYMBOLS as _STAR
+
         nonstar_floor = float(_EF.get("min_expected_dollar", 0.05))
-        star_floor    = float(_EF.get("min_expected_star", 0.00))
-        min_n         = int(_EF.get("min_sample_size", 5))
+        star_floor = float(_EF.get("min_expected_star", 0.00))
+        min_n = int(_EF.get("min_sample_size", 5))
     except Exception:
         nonstar_floor, star_floor, min_n = 0.05, 0.00, 5
         _STAR = STAR_SYMBOLS
 
     out += (
-        f"_floors: STAR ≥ ${star_floor:.2f} | non-STAR ≥ ${nonstar_floor:.2f} "
-        f"| min_n={min_n}_\n\n"
+        f"_floors: STAR ≥ ${star_floor:.2f} | non-STAR ≥ ${nonstar_floor:.2f} | min_n={min_n}_\n\n"
     )
     out += "| symbol | n | sum | avg | WR | filter status |\n|---|---:|---:|---:|---:|---|\n"
     for r in rows:
@@ -310,7 +329,8 @@ def report_per_symbol(c, since_ts: int) -> str:
 
 def report_summary(c, since_ts: int) -> dict:
     """Top-line numbers for JSONL append + report header."""
-    r = c.execute("""
+    r = c.execute(
+        """
         SELECT COUNT(*) AS n,
                ROUND(SUM(realized_pnl), 2) AS sum_pnl,
                ROUND(AVG(realized_pnl), 3) AS avg_pnl,
@@ -318,26 +338,38 @@ def report_summary(c, since_ts: int) -> dict:
                ROUND(SUM(fee), 2) AS sum_fees
         FROM trades
         WHERE status='CLOSED' AND ts_entry >= ?
-    """, (since_ts,)).fetchone()
+    """,
+        (since_ts,),
+    ).fetchone()
     if not r or r["n"] == 0:
-        return {"n": 0, "sum_pnl": 0.0, "avg_pnl": 0.0, "wr": 0.0,
-                "sum_fees": 0.0, "since_ts": since_ts}
+        return {
+            "n": 0,
+            "sum_pnl": 0.0,
+            "avg_pnl": 0.0,
+            "wr": 0.0,
+            "sum_fees": 0.0,
+            "since_ts": since_ts,
+        }
     return {
-        "n": r["n"], "sum_pnl": r["sum_pnl"] or 0.0,
-        "avg_pnl": r["avg_pnl"] or 0.0, "wr": r["wr"] or 0.0,
-        "sum_fees": r["sum_fees"] or 0.0, "since_ts": since_ts,
+        "n": r["n"],
+        "sum_pnl": r["sum_pnl"] or 0.0,
+        "avg_pnl": r["avg_pnl"] or 0.0,
+        "wr": r["wr"] or 0.0,
+        "sum_fees": r["sum_fees"] or 0.0,
+        "since_ts": since_ts,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--window", type=int, default=30,
-                    help="Lookback in days (default 30)")
-    ap.add_argument("--json", action="store_true",
-                    help="Also write a JSON snapshot alongside the markdown")
+    ap.add_argument("--window", type=int, default=30, help="Lookback in days (default 30)")
+    ap.add_argument(
+        "--json", action="store_true", help="Also write a JSON snapshot alongside the markdown"
+    )
     args = ap.parse_args()
 
     import time
+
     since_ts = int(time.time() - args.window * 86400)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -386,11 +418,16 @@ def main() -> int:
     # JSONL append for trend tracking
     JSONL_LOG.parent.mkdir(parents=True, exist_ok=True)
     with JSONL_LOG.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "report_date": today,
-            "window_days": args.window,
-            **summary,
-        }) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "report_date": today,
+                    "window_days": args.window,
+                    **summary,
+                }
+            )
+            + "\n"
+        )
     print(f"appended to: {JSONL_LOG}")
 
     if args.json:

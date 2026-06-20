@@ -43,6 +43,7 @@ Usage
     python scripts/backfill_positions_json.py            # dry-run preview
     python scripts/backfill_positions_json.py --commit   # apply
 """
+
 from __future__ import annotations
 
 import argparse
@@ -149,8 +150,9 @@ def heartbeat_age_sec() -> float | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Actually write positions.json. Default is dry-run.")
+    ap.add_argument(
+        "--commit", action="store_true", help="Actually write positions.json. Default is dry-run."
+    )
     args = ap.parse_args()
 
     if not WH_PATH.exists():
@@ -214,8 +216,7 @@ def main() -> int:
             continue
         # Don't overwrite REAL closed records — they're the canonical
         # post-fee net-PnL source. Only patch synthetic reconciled records.
-        existing_reason = (existing.get("close_reason") or
-                           existing.get("exit_reason") or "")
+        existing_reason = existing.get("close_reason") or existing.get("exit_reason") or ""
         existing_id = str(existing.get("id") or "")
         is_synthetic = (
             existing_reason in SYNTHETIC_REASONS
@@ -232,15 +233,20 @@ def main() -> int:
         return 0
 
     print(f"actions ({len(actions)}):")
-    print("  {:<8}  {:<8}  {:<24}  {:<7}  {:>10}  {:>10}".format(
-        "action", "id", "symbol", "side", "old_pnl", "new_pnl"))
+    print(
+        "  {:<8}  {:<8}  {:<24}  {:<7}  {:>10}  {:>10}".format(
+            "action", "id", "symbol", "side", "old_pnl", "new_pnl"
+        )
+    )
     for kind, wh_row, existing in actions[:30]:
         old = float(existing.get("pnl") or 0) if existing else 0.0
         new = float(wh_row["realized_pnl"])
         old_s = f"{old:+.4f}" if existing else "(new)"
-        print("  {:<8}  {:<8}  {:<24}  {:<7}  {:>10}  {:>+10.4f}".format(
-            kind, str(wh_row["id"]), wh_row["symbol"][:24],
-            wh_row["side"], old_s, new))
+        print(
+            "  {:<8}  {:<8}  {:<24}  {:<7}  {:>10}  {:>+10.4f}".format(
+                kind, str(wh_row["id"]), wh_row["symbol"][:24], wh_row["side"], old_s, new
+            )
+        )
     if len(actions) > 30:
         print(f"  ... and {len(actions) - 30} more")
 
@@ -264,9 +270,11 @@ def main() -> int:
             closed_list[idx]["pnl"] = float(wh_row["realized_pnl"])
             closed_list[idx]["gross_pnl"] = float(wh_row["realized_pnl"])
             closed_list[idx]["close_reason"] = str(
-                wh_row.get("exit_reason") or closed_list[idx].get("close_reason") or "")
+                wh_row.get("exit_reason") or closed_list[idx].get("close_reason") or ""
+            )
             closed_list[idx]["total_fees"] = float(
-                wh_row.get("fee") or closed_list[idx].get("total_fees") or 0)
+                wh_row.get("fee") or closed_list[idx].get("total_fees") or 0
+            )
             # Patch entry context if warehouse has it and positions.json doesn't.
             if not closed_list[idx].get("entry_price") and wh_row.get("entry_px"):
                 closed_list[idx]["entry_price"] = float(wh_row["entry_px"])

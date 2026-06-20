@@ -10,30 +10,33 @@ a harmless "already closed" error is caught if the bot closes first.
 Usage:
     python scripts/monitor_close_on_profit.py
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 import time
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Project root on path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import dotenv
+
 dotenv.load_dotenv()
 
 from loguru import logger
 
 POSITIONS_FILE = Path("data/positions.json")
 POLL_SEC = 20
-MIN_PROFIT_USDT = 0.01   # close as soon as > 1 cent profit (covers fees)
+MIN_PROFIT_USDT = 0.01  # close as soon as > 1 cent profit (covers fees)
 
 # ── Exchange factory ─────────────────────────────────────────────────────────
 
 _exchange_cache: dict = {}
+
 
 def _get_exchange(name: str):
     key = name.lower()
@@ -41,18 +44,21 @@ def _get_exchange(name: str):
         return _exchange_cache[key]
     if "binance" in key:
         from exchanges.binance_client import BinanceClient
+
         client = BinanceClient(
             api_key=os.getenv("BINANCE_API_KEY"),
             secret=os.getenv("BINANCE_SECRET"),
         )
     elif "bybit" in key:
         from exchanges.bybit_client import BybitClient
+
         client = BybitClient(
             api_key=os.getenv("BYBIT_API_KEY"),
             secret=os.getenv("BYBIT_SECRET"),
         )
     elif "bitget" in key:
         from exchanges.bitget_client import BitgetClient
+
         client = BitgetClient(
             api_key=os.getenv("BITGET_API_KEY"),
             secret=os.getenv("BITGET_SECRET"),
@@ -67,6 +73,7 @@ def _get_exchange(name: str):
 
 # ── Positions loader ─────────────────────────────────────────────────────────
 
+
 def load_open_positions() -> list[dict]:
     try:
         data = json.loads(POSITIONS_FILE.read_text())
@@ -77,6 +84,7 @@ def load_open_positions() -> list[dict]:
 
 
 # ── Price fetch ──────────────────────────────────────────────────────────────
+
 
 def fetch_price(client, symbol: str) -> float | None:
     try:
@@ -90,22 +98,24 @@ def fetch_price(client, symbol: str) -> float | None:
 
 # ── PnL calc ─────────────────────────────────────────────────────────────────
 
+
 def calc_upnl(pos: dict, current_price: float) -> float:
     entry = float(pos["entry_price"])
-    size  = float(pos["size"])
-    side  = pos["side"]          # "buy" or "sell"
-    if side == "sell":           # short: profit when price falls
+    size = float(pos["size"])
+    side = pos["side"]  # "buy" or "sell"
+    if side == "sell":  # short: profit when price falls
         return (entry - current_price) * size
-    else:                        # long: profit when price rises
+    else:  # long: profit when price rises
         return (current_price - entry) * size
 
 
 # ── Close position ───────────────────────────────────────────────────────────
 
+
 def close_position(client, pos: dict, upnl: float) -> bool:
     symbol = pos["symbol"]
-    size   = float(pos["size"])
-    side   = pos["side"]
+    size = float(pos["size"])
+    side = pos["side"]
     close_side = "buy" if side == "sell" else "sell"
     ex_name = pos["exchange"].lower()
     ex = client.exchange
@@ -138,6 +148,7 @@ def close_position(client, pos: dict, upnl: float) -> bool:
 
 # ── Main loop ────────────────────────────────────────────────────────────────
 
+
 def main():
     logger.info("=" * 60)
     logger.info("PROFIT MONITOR — close when any position turns green")
@@ -157,9 +168,9 @@ def main():
 
         for pos in positions:
             symbol = pos["symbol"]
-            entry  = float(pos["entry_price"])
-            side   = pos["side"]
-            tp     = float(pos.get("take_profit") or 0)
+            entry = float(pos["entry_price"])
+            side = pos["side"]
+            tp = float(pos.get("take_profit") or 0)
 
             client = _get_exchange(pos["exchange"])
             if client is None:
@@ -169,7 +180,7 @@ def main():
             if price is None:
                 continue
 
-            upnl    = calc_upnl(pos, price)
+            upnl = calc_upnl(pos, price)
             upnl_pct = upnl / (entry * float(pos["size"])) * 100
 
             # Distance to TP

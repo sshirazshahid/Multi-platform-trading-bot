@@ -15,6 +15,7 @@ the NO-EDGE findings are real, not a look-ahead artifact, and tells the live loo
 startup candles each indicator needs. Records reports/indicator_bias_audit_<date>.md.
 Read-only.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,8 +36,8 @@ from core.alpha_zoo.bias_checks import lookahead_violations, recursive_instabili
 
 COINS = ["BTC", "ETH", "SOL", "DOGE", "ZEC"]
 TF = "1h"
-N_BARS = 1200          # recent window per coin
-CHECK_LAST = 40        # look-ahead: recompute on prefixes for the last N bars (bounds O(n^2))
+N_BARS = 1200  # recent window per coin
+CHECK_LAST = 40  # look-ahead: recompute on prefixes for the last N bars (bounds O(n^2))
 
 
 def _load(coin: str) -> pd.DataFrame | None:
@@ -78,12 +79,15 @@ def main() -> int:
             series = ohlc if needs_df else close
             la = lookahead_violations(fn, series, check_indices=check_idx)
             rec = recursive_instability(fn, series)
-            rows.append({
-                "coin": coin, "indicator": name,
-                "lookahead_violations": len(la),
-                "rec_max_rel_drift": rec["max_rel_drift"],
-                "rec_min_stable_len": rec["min_stable_len"],
-            })
+            rows.append(
+                {
+                    "coin": coin,
+                    "indicator": name,
+                    "lookahead_violations": len(la),
+                    "rec_max_rel_drift": rec["max_rel_drift"],
+                    "rec_min_stable_len": rec["min_stable_len"],
+                }
+            )
 
     audited = [r for r in rows if not r.get("skip")]
     any_la = sum(r["lookahead_violations"] for r in audited)
@@ -99,50 +103,76 @@ def main() -> int:
 
     today = date.today().isoformat()
     REPORTS.mkdir(exist_ok=True)
-    L = [f"# Indicator bias audit — {today}", "",
-         f"Bot's real indicators (`core/agents/indicators.py`) on {len([r for r in rows if r.get('skip')]) and ''}"
-         f"{', '.join(c for c in COINS)} {TF}, last {N_BARS} bars. "
-         "Detectors: `bias_checks.lookahead_violations` (causal recompute) + `recursive_instability` "
-         "(warmup/repaint drift).", "",
-         f"## Verdict: {'LOOK-AHEAD DETECTED — investigate' if any_la else 'CLEAN — no look-ahead; indicators are causal'}",
-         "",
-         f"- Total look-ahead violations across all indicators/coins (last {CHECK_LAST} bars each): **{any_la}**",
-         "- Recursive drift below quantifies the backtest-vs-live gap at the final bar and the warmup each indicator needs.",
-         "",
-         "## Per-indicator rollup",
-         "| indicator | look-ahead viol. | max recursive rel-drift | recommended warmup (bars) |",
-         "|---|---|---|---|"]
+    L = [
+        f"# Indicator bias audit — {today}",
+        "",
+        f"Bot's real indicators (`core/agents/indicators.py`) on {len([r for r in rows if r.get('skip')]) and ''}"
+        f"{', '.join(c for c in COINS)} {TF}, last {N_BARS} bars. "
+        "Detectors: `bias_checks.lookahead_violations` (causal recompute) + `recursive_instability` "
+        "(warmup/repaint drift).",
+        "",
+        f"## Verdict: {'LOOK-AHEAD DETECTED — investigate' if any_la else 'CLEAN — no look-ahead; indicators are causal'}",
+        "",
+        f"- Total look-ahead violations across all indicators/coins (last {CHECK_LAST} bars each): **{any_la}**",
+        "- Recursive drift below quantifies the backtest-vs-live gap at the final bar and the warmup each indicator needs.",
+        "",
+        "## Per-indicator rollup",
+        "| indicator | look-ahead viol. | max recursive rel-drift | recommended warmup (bars) |",
+        "|---|---|---|---|",
+    ]
     for name in _indicators():
         d = per_ind.get(name, {"la": 0, "max_drift": float("nan"), "warmup": 0})
         warm = d["warmup"] or "—"
         L.append(f"| {name} | {d['la']} | {d['max_drift']:.2e} | {warm} |")
 
-    L += ["", "## Per coin × indicator", "| coin | indicator | LA viol. | rec rel-drift | min stable len |",
-          "|---|---|---|---|---|"]
+    L += [
+        "",
+        "## Per coin × indicator",
+        "| coin | indicator | LA viol. | rec rel-drift | min stable len |",
+        "|---|---|---|---|---|",
+    ]
     for r in audited:
-        L.append(f"| {r['coin']} | {r['indicator']} | {r['lookahead_violations']} | "
-                 f"{r['rec_max_rel_drift']:.2e} | {r['rec_min_stable_len'] or '—'} |")
-    skipped = [r['coin'] for r in rows if r.get('skip')]
+        L.append(
+            f"| {r['coin']} | {r['indicator']} | {r['lookahead_violations']} | "
+            f"{r['rec_max_rel_drift']:.2e} | {r['rec_min_stable_len'] or '—'} |"
+        )
+    skipped = [r["coin"] for r in rows if r.get("skip")]
     if skipped:
         L += ["", f"_Skipped (insufficient data): {', '.join(skipped)}_"]
-    L += ["", "_EMA/RSI/ATR/ADX use `ewm(adjust=False)` (recursive): final-bar value converges as "
-          "warmup accrues, so a small non-zero drift is expected and the 'recommended warmup' is the "
-          "honest number of startup candles to load before trusting them. Zero look-ahead confirms the "
-          "decision features are causal — the NO-EDGE findings are not a peeking artifact._"]
+    L += [
+        "",
+        "_EMA/RSI/ATR/ADX use `ewm(adjust=False)` (recursive): final-bar value converges as "
+        "warmup accrues, so a small non-zero drift is expected and the 'recommended warmup' is the "
+        "honest number of startup candles to load before trusting them. Zero look-ahead confirms the "
+        "decision features are causal — the NO-EDGE findings are not a peeking artifact._",
+    ]
 
     out_md = REPORTS / f"indicator_bias_audit_{today}.md"
     out_md.write_text("\n".join(L), encoding="utf-8")
     (REPORTS / f"indicator_bias_audit_{today}.json").write_text(
-        json.dumps({"date": today, "total_lookahead_violations": int(any_la),
-                    "per_indicator": per_ind, "rows": audited}, indent=2, default=str),
-        encoding="utf-8")
+        json.dumps(
+            {
+                "date": today,
+                "total_lookahead_violations": int(any_la),
+                "per_indicator": per_ind,
+                "rows": audited,
+            },
+            indent=2,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
 
-    print(f"Look-ahead violations (total): {any_la}  -> "
-          f"{'INVESTIGATE' if any_la else 'CLEAN (causal)'}")
+    print(
+        f"Look-ahead violations (total): {any_la}  -> "
+        f"{'INVESTIGATE' if any_la else 'CLEAN (causal)'}"
+    )
     for name in _indicators():
         d = per_ind.get(name, {})
-        print(f"  {name:7} LA={d.get('la',0)}  max_rel_drift={d.get('max_drift',float('nan')):.2e}  "
-              f"warmup~{d.get('warmup',0) or '—'}")
+        print(
+            f"  {name:7} LA={d.get('la', 0)}  max_rel_drift={d.get('max_drift', float('nan')):.2e}  "
+            f"warmup~{d.get('warmup', 0) or '—'}"
+        )
     print(f"Report: {out_md}")
     return 0
 

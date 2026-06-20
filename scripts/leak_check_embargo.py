@@ -8,6 +8,7 @@ embargo>=96, leakage is confirmed.
 Read-only. Reuses the trainer's real API (load_dataset / _walk_forward_oos /
 _summarise / LRModel). Writes a verdict to reports/.
 """
+
 from __future__ import annotations
 
 import sys
@@ -29,12 +30,17 @@ from scripts.train_models import (  # noqa: E402
 def _run(market: str, embargo: int) -> dict:
     X, y, ts, syms, source = load_dataset(market)
     if X.shape[0] == 0:
-        return {"embargo": embargo, "n_oos": 0, "base_rate": 0.0,
-                "wr_at_0.55": float("nan"), "auc": float("nan"),
-                "dsr": float("nan")}
+        return {
+            "embargo": embargo,
+            "n_oos": 0,
+            "base_rate": 0.0,
+            "wr_at_0.55": float("nan"),
+            "auc": float("nan"),
+            "dsr": float("nan"),
+        }
     oos, _folds, _mat = _walk_forward_oos(
-        X, y, n_splits=5, embargo_bars=embargo,
-        build_model=lambda: LRModel(C=0.5))
+        X, y, n_splits=5, embargo_bars=embargo, build_model=lambda: LRModel(C=0.5)
+    )
     s = _summarise(y, oos, n_trials=1)
     return {
         "embargo": embargo,
@@ -54,13 +60,16 @@ def main() -> int:
     def _f(v):
         return "nan" if v != v else f"{v:.3f}"  # NaN-safe
 
-    delta = (lo["wr_at_0.55"] - hi["wr_at_0.55"]
-             if (lo["wr_at_0.55"] == lo["wr_at_0.55"]
-                 and hi["wr_at_0.55"] == hi["wr_at_0.55"]) else float("nan"))
+    delta = (
+        lo["wr_at_0.55"] - hi["wr_at_0.55"]
+        if (lo["wr_at_0.55"] == lo["wr_at_0.55"] and hi["wr_at_0.55"] == hi["wr_at_0.55"])
+        else float("nan")
+    )
     verdict = (
         "LEAKAGE CONFIRMED — WR collapses when embargo >= label horizon"
         if (delta == delta and delta > 0.10)
-        else "no large embargo effect — investigate PBO/label join elsewhere")
+        else "no large embargo effect — investigate PBO/label join elsewhere"
+    )
 
     body = (
         f"# Leak check — {market} (2026-05-25)\n\n"

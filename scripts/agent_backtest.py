@@ -10,6 +10,7 @@ per-agent stats.
 
 Output: reports/agent_backtest_<date>.md
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,12 +55,18 @@ def _load_ohlcv_cache(exchange: str, symbol: str, tf: str) -> Optional[pd.DataFr
         return None
 
 
-def _build_ctx_at(t: int, symbol: str,
-                  d_5m: pd.DataFrame, d_15m: pd.DataFrame,
-                  d_1h: pd.DataFrame, d_4h: pd.DataFrame) -> Optional[dict]:
+def _build_ctx_at(
+    t: int,
+    symbol: str,
+    d_5m: pd.DataFrame,
+    d_15m: pd.DataFrame,
+    d_1h: pd.DataFrame,
+    d_4h: pd.DataFrame,
+) -> Optional[dict]:
     """Slice each TF up to time t (UNIX ms), return ctx dict.
     All TFs must have at least the lookback bars before t.
     """
+
     def _slice(df, n_min):
         if df is None:
             return None
@@ -67,22 +74,21 @@ def _build_ctx_at(t: int, symbol: str,
         if len(sub) < n_min:
             return None
         return sub
+
     s5 = _slice(d_5m, 80)
     s15 = _slice(d_15m, 40)
     s1h = _slice(d_1h, 80)
     s4h = _slice(d_4h, 40)
     if any(x is None for x in (s5, s15, s1h, s4h)):
         return None
-    return {"symbol": symbol, "ohlcv_5m": s5, "ohlcv_15m": s15,
-            "ohlcv_1h": s1h, "ohlcv_4h": s4h}
+    return {"symbol": symbol, "ohlcv_5m": s5, "ohlcv_15m": s15, "ohlcv_1h": s1h, "ohlcv_4h": s4h}
 
 
-def _simulate_exit(proposal, future_close: pd.Series,
-                   max_bars: int = 24) -> tuple[float, str]:
+def _simulate_exit(proposal, future_close: pd.Series, max_bars: int = 24) -> tuple[float, str]:
     """Walk forward until TP, SL, or max_bars hit. Return (pnl_pct, reason)."""
     side = proposal.side
     entry, sl, tp = proposal.entry, proposal.sl, proposal.tp
-    bars = future_close.iloc[1:max_bars + 1] if len(future_close) > 1 else future_close
+    bars = future_close.iloc[1 : max_bars + 1] if len(future_close) > 1 else future_close
     for c in bars:
         if side == "buy":
             if c >= tp:
@@ -124,8 +130,7 @@ def backtest_symbol(
     if d_1h is None or len(d_1h) < 200:
         return {}
 
-    agents = [TrendAgent(), ScalpAgent(), MeanReversionAgent(),
-              PatternAgent(), LiquidityAgent()]
+    agents = [TrendAgent(), ScalpAgent(), MeanReversionAgent(), PatternAgent(), LiquidityAgent()]
     stats: dict[str, BacktestStats] = {a.name: BacktestStats(agent=a.name) for a in agents}
 
     # Walk the 1h grid (cheapest to iterate); for each evaluation point
@@ -189,8 +194,10 @@ def render_report(all_stats: dict[str, dict[str, BacktestStats]]) -> str:
         a = aggregated[agent]
         wr = a.wins / a.n if a.n else 0.0
         mean = a.sum_pnl / a.n if a.n else 0.0
-        lines.append(f"| {agent} | {a.n} | {a.wins} | {wr:.1%} | "
-                     f"${a.sum_pnl:+.2f} | ${mean:+.3f} | ${a.best:+.2f} | ${a.worst:+.2f} |")
+        lines.append(
+            f"| {agent} | {a.n} | {a.wins} | {wr:.1%} | "
+            f"${a.sum_pnl:+.2f} | ${mean:+.3f} | ${a.best:+.2f} | ${a.worst:+.2f} |"
+        )
     lines.append("")
     lines.append("## Per-symbol breakdown")
     lines.append("")
@@ -208,8 +215,7 @@ def render_report(all_stats: dict[str, dict[str, BacktestStats]]) -> str:
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--symbols", nargs="*",
-                    default=["BTC/USDT:USDT", "ETH/USDT:USDT"])
+    ap.add_argument("--symbols", nargs="*", default=["BTC/USDT:USDT", "ETH/USDT:USDT"])
     ap.add_argument("--exchange", default="binance")
     ap.add_argument("--notional", type=float, default=200.0)
     ap.add_argument("--out-dir", default="reports")
@@ -223,13 +229,13 @@ def main(argv: Optional[list] = None) -> int:
         s = backtest_symbol(sym, exchange=ns.exchange, notional_usdt=ns.notional)
         if s:
             all_stats[sym] = s
-            print(f"  {sym}: " + ", ".join(
-                f"{name}={st.n}" for name, st in s.items() if st.n > 0
-            ))
+            print(f"  {sym}: " + ", ".join(f"{name}={st.n}" for name, st in s.items() if st.n > 0))
 
     if not all_stats:
-        print("WARNING: no symbols had usable cache. Run the bot first to populate "
-              "data/ohlcv_cache/, or implement live fetch fallback.")
+        print(
+            "WARNING: no symbols had usable cache. Run the bot first to populate "
+            "data/ohlcv_cache/, or implement live fetch fallback."
+        )
         return 1
 
     report = render_report(all_stats)

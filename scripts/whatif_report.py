@@ -49,16 +49,15 @@ def _summarize(pnls: list[float]) -> dict:
     """Compute summary stats for a PnL series."""
     n = len(pnls)
     if n == 0:
-        return {"n": 0, "net": 0.0, "wr": 0.0, "expectancy": 0.0,
-                "pf": 0.0, "max_dd": 0.0}
-    wins   = [p for p in pnls if p > 0]
+        return {"n": 0, "net": 0.0, "wr": 0.0, "expectancy": 0.0, "pf": 0.0, "max_dd": 0.0}
+    wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
-    net    = sum(pnls)
-    avg_win  = sum(wins)   / len(wins)   if wins   else 0.0
+    net = sum(pnls)
+    avg_win = sum(wins) / len(wins) if wins else 0.0
     avg_loss = sum(losses) / len(losses) if losses else 0.0
     wr = (len(wins) / n * 100) if n else 0.0
     # Profit factor = gross wins / |gross losses|
-    gross_win  = sum(wins)
+    gross_win = sum(wins)
     gross_loss = -sum(losses)
     pf = (gross_win / gross_loss) if gross_loss > 0 else (999.0 if gross_win > 0 else 0.0)
     expectancy = net / n
@@ -110,8 +109,9 @@ def build_series(wh: Warehouse) -> dict:
         """SELECT ref_id, decision FROM claude_reviews
            WHERE ref_type='candidate' AND task='pre_trade_review'"""
     )
-    claude_decisions = {int(r["ref_id"]): r["decision"]
-                        for r in claude_rows if r.get("ref_id") is not None}
+    claude_decisions = {
+        int(r["ref_id"]): r["decision"] for r in claude_rows if r.get("ref_id") is not None
+    }
 
     for r in rows:
         pnl = float(r.get("pnl") or 0.0)
@@ -152,8 +152,7 @@ def render_markdown(stats: dict, series: dict) -> str:
         "| Series | N | Net PnL | WR | PF | Expect | AvgW | AvgL | MaxDD |",
         "|--------|---|---------|----|----|--------|------|------|-------|",
     ]
-    for label, key in [("Raw", "raw"), ("Meta-filtered", "meta"),
-                       ("Claude-vetoed", "claude")]:
+    for label, key in [("Raw", "raw"), ("Meta-filtered", "meta"), ("Claude-vetoed", "claude")]:
         s = stats[key]
         md.append(
             f"| {label} | {s['n']} | {s['net']:+.2f} | {s['wr']:.1f}% | "
@@ -194,18 +193,25 @@ def main() -> int:
     json_path = out_dir / f"whatif_{date}.json"
 
     md_path.write_text(render_markdown(stats, series), encoding="utf-8")
-    json_path.write_text(json.dumps({
-        "generated_at": time.time(),
-        "stats": stats,
-        "sample_sizes": {k: len(v) for k, v in series.items()},
-    }, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(
+            {
+                "generated_at": time.time(),
+                "stats": stats,
+                "sample_sizes": {k: len(v) for k, v in series.items()},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     print(f"[whatif] wrote {md_path}")
     print(f"[whatif] wrote {json_path}")
     for k in ("raw", "meta", "claude"):
         s = stats[k]
-        print(f"[whatif] {k:8s} n={s['n']:4d} net={s['net']:+.2f} "
-              f"wr={s['wr']:.1f}% pf={s['pf']:.2f}")
+        print(
+            f"[whatif] {k:8s} n={s['n']:4d} net={s['net']:+.2f} wr={s['wr']:.1f}% pf={s['pf']:.2f}"
+        )
     return 0
 
 

@@ -34,6 +34,7 @@ Usage
     python scripts/consolidate_spot_dust.py --commit   # apply
     python scripts/consolidate_spot_dust.py --commit --force   # bypass HB
 """
+
 from __future__ import annotations
 
 import argparse
@@ -116,30 +117,32 @@ def dust_candidates(portfolio: dict, marker: dict, cutoff: float) -> list[dict]:
                 continue
             if (ex_name, coin) in marker:
                 continue
-            candidates.append({
-                "exchange": ex_name,
-                "coin": coin,
-                "balance": balance,
-                "price": price,
-                "value_usdt": value,
-                "symbol": f"{coin}/USDT",
-            })
+            candidates.append(
+                {
+                    "exchange": ex_name,
+                    "coin": coin,
+                    "balance": balance,
+                    "price": price,
+                    "value_usdt": value,
+                    "symbol": f"{coin}/USDT",
+                }
+            )
     return candidates
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--commit", action="store_true",
-                    help="Actually place sell orders. Default is dry-run.")
-    ap.add_argument("--force", action="store_true",
-                    help="Bypass heartbeat freshness guard.")
-    ap.add_argument("--cutoff", type=float, default=None,
-                    help="Override SPOT_STRATEGY.dust_cutoff_usd (USD).")
+    ap.add_argument(
+        "--commit", action="store_true", help="Actually place sell orders. Default is dry-run."
+    )
+    ap.add_argument("--force", action="store_true", help="Bypass heartbeat freshness guard.")
+    ap.add_argument(
+        "--cutoff", type=float, default=None, help="Override SPOT_STRATEGY.dust_cutoff_usd (USD)."
+    )
     args = ap.parse_args()
 
     if not PORTFOLIO_PATH.exists():
-        print(f"spot_portfolio.json not found: {PORTFOLIO_PATH}",
-              file=sys.stderr)
+        print(f"spot_portfolio.json not found: {PORTFOLIO_PATH}", file=sys.stderr)
         return 1
 
     # Heartbeat guard
@@ -158,6 +161,7 @@ def main() -> int:
         try:
             sys.path.insert(0, str(ROOT))
             from config import SPOT_STRATEGY as _SS
+
             cutoff = float(_SS.get("dust_cutoff_usd", 25.0))
         except Exception:
             cutoff = 25.0
@@ -168,20 +172,26 @@ def main() -> int:
 
     if not cands:
         already = len(marker)
-        print(f"No dust to consolidate. (cutoff=${cutoff:.2f}, "
-              f"{already} positions already in marker)")
+        print(
+            f"No dust to consolidate. (cutoff=${cutoff:.2f}, {already} positions already in marker)"
+        )
         return 0
 
     print(f"Dust cutoff: ${cutoff:.2f}")
     print(f"Already-consolidated marker rows: {len(marker)}")
     print(f"New dust candidates ({len(cands)}):")
-    print("  {:<10}  {:<8}  {:>14}  {:>10}  {:>10}".format(
-        "exchange", "coin", "balance", "price", "value_usd"))
+    print(
+        "  {:<10}  {:<8}  {:>14}  {:>10}  {:>10}".format(
+            "exchange", "coin", "balance", "price", "value_usd"
+        )
+    )
     total_value = 0.0
     for c in cands:
-        print("  {:<10}  {:<8}  {:>14.6f}  {:>10.4f}  {:>10.2f}".format(
-            c["exchange"], c["coin"], c["balance"],
-            c["price"], c["value_usdt"]))
+        print(
+            "  {:<10}  {:<8}  {:>14.6f}  {:>10.4f}  {:>10.2f}".format(
+                c["exchange"], c["coin"], c["balance"], c["price"], c["value_usdt"]
+            )
+        )
         total_value += c["value_usdt"]
     print(f"Total value to consolidate: ${total_value:.2f}")
 
@@ -204,8 +214,10 @@ def main() -> int:
         return 1
 
     if OPERATING_MODE != "CONTROLLED_LIVE":
-        print(f"REFUSED: OPERATING_MODE={OPERATING_MODE} — refuses to "
-              f"sell unless mode is CONTROLLED_LIVE.")
+        print(
+            f"REFUSED: OPERATING_MODE={OPERATING_MODE} — refuses to "
+            f"sell unless mode is CONTROLLED_LIVE."
+        )
         return 3
 
     clients: dict = {}
@@ -226,31 +238,32 @@ def main() -> int:
             continue
         try:
             order = ex.create_order(
-                symbol=c["symbol"], order_type="market",
-                side="sell", amount=c["balance"],
+                symbol=c["symbol"],
+                order_type="market",
+                side="sell",
+                amount=c["balance"],
                 market_type="spot",
             )
             now_ts = time.time()
             row = {
                 "ts": now_ts,
-                "ts_iso": datetime.fromtimestamp(
-                    now_ts, tz=timezone.utc).isoformat(),
+                "ts_iso": datetime.fromtimestamp(now_ts, tz=timezone.utc).isoformat(),
                 "exchange": c["exchange"],
                 "coin": c["coin"],
                 "symbol": c["symbol"],
                 "balance_sold": c["balance"],
                 "price_at_decision": c["price"],
                 "expected_proceeds_usd": c["value_usdt"],
-                "order_id": (order.get("id") if isinstance(order, dict)
-                             else None),
+                "order_id": (order.get("id") if isinstance(order, dict) else None),
             }
             completed.append(row)
-            print(f"  SOLD: {c['exchange']:<8} {c['coin']:<8} "
-                  f"qty={c['balance']:.6g} ~${c['value_usdt']:.2f}")
+            print(
+                f"  SOLD: {c['exchange']:<8} {c['coin']:<8} "
+                f"qty={c['balance']:.6g} ~${c['value_usdt']:.2f}"
+            )
         except Exception as e:
             failed.append({**c, "error": str(e)[:200]})
-            print(f"  FAIL: {c['exchange']} {c['coin']}: {e}",
-                  file=sys.stderr)
+            print(f"  FAIL: {c['exchange']} {c['coin']}: {e}", file=sys.stderr)
 
     if completed:
         save_marker(completed)

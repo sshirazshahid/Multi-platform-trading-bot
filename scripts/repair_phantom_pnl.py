@@ -31,6 +31,7 @@ Usage:
     # Cap (testing)
     python scripts/repair_phantom_pnl.py --commit --limit 50
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,7 +48,7 @@ from core.warehouse import Warehouse, get_warehouse  # noqa: E402
 # Module-level constants the test suite can monkeypatch.
 DATA_DIR = ROOT / "data"
 REPAIRED_TAG = "reconciled_no_context_repaired"
-PHANTOM_PNL_THRESHOLD = -2.0   # rows with realized_pnl < this are repair candidates
+PHANTOM_PNL_THRESHOLD = -2.0  # rows with realized_pnl < this are repair candidates
 
 
 def _identify_phantom_rows(wh: Warehouse, limit: int | None) -> list[dict]:
@@ -74,10 +75,7 @@ def _annotate(wh: Warehouse, trade_ids: list[int]) -> None:
     # Build placeholder list — sqlite has a 999-param ceiling but our worst-case
     # is dozens of rows.
     placeholders = ",".join("?" * len(trade_ids))
-    sql = (
-        f"UPDATE trades SET exit_reason = ? "
-        f"WHERE id IN ({placeholders})"
-    )
+    sql = f"UPDATE trades SET exit_reason = ? WHERE id IN ({placeholders})"
     wh._conn().execute(sql, [REPAIRED_TAG, *trade_ids])
 
 
@@ -169,22 +167,27 @@ def repair(
             _rerun_learning()
             print("Repair: LearningEngine.learn(force=True) completed.")
         except Exception as e:
-            print(f"Repair: LearningEngine rerun FAILED: {e}. "
-                  "Warehouse + kelly_stats are repaired; rerun learning manually.")
+            print(
+                f"Repair: LearningEngine rerun FAILED: {e}. "
+                "Warehouse + kelly_stats are repaired; rerun learning manually."
+            )
 
     return n
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--commit", action="store_true",
-                        help="Persist annotations + reset kelly + rerun learning "
-                             "(default: dry run, count only)")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Repair at most N rows (testing)")
-    parser.add_argument("--skip-learning-rerun", action="store_true",
-                        help="Skip LearningEngine().learn() at the end "
-                             "(annotate only, faster)")
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="Persist annotations + reset kelly + rerun learning (default: dry run, count only)",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Repair at most N rows (testing)")
+    parser.add_argument(
+        "--skip-learning-rerun",
+        action="store_true",
+        help="Skip LearningEngine().learn() at the end (annotate only, faster)",
+    )
     args = parser.parse_args()
     n = repair(
         commit=args.commit,

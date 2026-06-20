@@ -44,9 +44,9 @@ except ImportError:  # degraded standalone run: skip CI fields
     mean_ci = wilson_interval = None
 
 MIN_TRADES_PER_HOUR = 8
-WR_BLOCK_THRESHOLD  = 35.0    # percent
-PNL_BLOCK_THRESHOLD = -3.0    # USDT total
-WR_GREEN_THRESHOLD  = 55.0
+WR_BLOCK_THRESHOLD = 35.0  # percent
+PNL_BLOCK_THRESHOLD = -3.0  # USDT total
+WR_GREEN_THRESHOLD = 55.0
 PNL_GREEN_THRESHOLD = 3.0
 
 
@@ -54,13 +54,13 @@ def _default_mode() -> str:
     """Current operating mode for warehouse scoping (PAPER fallback)."""
     try:
         from config import DRY_RUN
+
         return "PAPER" if DRY_RUN else "CONTROLLED_LIVE"
     except Exception:
         return "PAPER"
 
 
-def _load_hour_stats(db_path: Path, lookback_days: int,
-                     mode: str = None) -> dict[int, dict]:
+def _load_hour_stats(db_path: Path, lookback_days: int, mode: str = None) -> dict[int, dict]:
     """Group warehouse closed trades by UTC entry hour.
 
     Whole-trade PnL (realized + partial-TP legs), scoped to `mode`."""
@@ -92,9 +92,9 @@ def _load_hour_stats(db_path: Path, lookback_days: int,
             n = len(pnls)
             wins = sum(1 for p in pnls if p > 0)
             row = {
-                "n":   n,
+                "n": n,
                 "wins": wins,
-                "wr":  round(100.0 * wins / max(1, n), 2),
+                "wr": round(100.0 * wins / max(1, n), 2),
                 "pnl": round(sum(pnls), 4),
             }
             if wilson_interval is not None:
@@ -135,41 +135,41 @@ def _classify(stats: dict[int, dict]) -> tuple[list[int], list[int], list[int], 
     return blocked, green, neutral, profitable
 
 
-def build_evidence(db_path: Path, lookback_days: int = 60,
-                   mode: str = None) -> dict:
+def build_evidence(db_path: Path, lookback_days: int = 60, mode: str = None) -> dict:
     mode = mode or _default_mode()
     stats = _load_hour_stats(db_path, lookback_days, mode)
     blocked, green, neutral, profitable = _classify(stats)
     return {
-        "computed_at":     datetime.now(timezone.utc).isoformat(),
-        "lookback_days":   lookback_days,
-        "mode":            mode,
-        "min_trades":      MIN_TRADES_PER_HOUR,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "lookback_days": lookback_days,
+        "mode": mode,
+        "min_trades": MIN_TRADES_PER_HOUR,
         "thresholds": {
-            "wr_block_below":  WR_BLOCK_THRESHOLD,
+            "wr_block_below": WR_BLOCK_THRESHOLD,
             "pnl_block_below": PNL_BLOCK_THRESHOLD,
-            "wr_green_above":  WR_GREEN_THRESHOLD,
+            "wr_green_above": WR_GREEN_THRESHOLD,
             "pnl_green_above": PNL_GREEN_THRESHOLD,
         },
         "blocked": blocked,
-        "green":   green,
+        "green": green,
         "neutral": neutral,
         # Allow-list for the HOUR_GATE_PROFIT_ONLY gate (2026-06-11)
         "profitable": profitable,
         # CI fields in stats are INFORMATIONAL ONLY — the gate rule is
         # unchanged (n>=8 AND whole-trade pnl > 0, owner directive).
         "ci_note": "informational only; gate rule unchanged (n>=8 AND pnl>0)",
-        "stats":   stats,
+        "stats": stats,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db",  default="data/warehouse.sqlite", type=Path)
+    ap.add_argument("--db", default="data/warehouse.sqlite", type=Path)
     ap.add_argument("--out", default="data/hour_gate_evidence.json", type=Path)
     ap.add_argument("--lookback-days", default=60, type=int)
-    ap.add_argument("--mode", default=None,
-                    help="warehouse mode scope (default: current operating mode)")
+    ap.add_argument(
+        "--mode", default=None, help="warehouse mode scope (default: current operating mode)"
+    )
     args = ap.parse_args()
 
     evidence = build_evidence(args.db, args.lookback_days, args.mode)

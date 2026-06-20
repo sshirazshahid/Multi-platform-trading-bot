@@ -13,6 +13,7 @@ Usage:
     python scripts/build_labels.py --market spot --time-bars 96
     python scripts/build_labels.py --market futures --time-bars 36 --tf 15m
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,7 +38,7 @@ from core.warehouse import get_warehouse  # noqa: E402
 # horizon should be long enough that barriers RESOLVE rather than time-out;
 # real positions are typically held much shorter than this.
 DEFAULT_TIME_BARS = {"futures": 96, "spot": 96}
-DEFAULT_TF        = {"futures": "15m", "spot": "1h"}
+DEFAULT_TF = {"futures": "15m", "spot": "1h"}
 
 
 def _binance_public() -> ccxt.binance:
@@ -48,6 +49,7 @@ def _fetcher(ex):
     def f(symbol, timeframe, since_ms, limit):
         base = symbol.split(":")[0]
         return ex.fetch_ohlcv(base, timeframe, since=int(since_ms), limit=int(limit))
+
     return f
 
 
@@ -121,7 +123,8 @@ def _label_one(
     tf_sec = _TF_TO_SECONDS[tf]
     # Need at least time_bars forward bars + 5-bar headroom for the entry bar.
     df = load_ohlcv_window(
-        pair, tf,
+        pair,
+        tf,
         ts - tf_sec * 5,
         ts + tf_sec * (time_bars + 5),
         fetcher=fetcher,
@@ -153,12 +156,15 @@ def _label_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--market", choices=["futures", "spot"], default="futures")
-    parser.add_argument("--time-bars", type=int, default=None,
-                        help=f"override default {DEFAULT_TIME_BARS}")
-    parser.add_argument("--tf", default=None,
-                        help=f"override OHLCV timeframe; defaults {DEFAULT_TF}")
-    parser.add_argument("--since", default=None,
-                        help="ISO date YYYY-MM-DD; only label candidates after this ts")
+    parser.add_argument(
+        "--time-bars", type=int, default=None, help=f"override default {DEFAULT_TIME_BARS}"
+    )
+    parser.add_argument(
+        "--tf", default=None, help=f"override OHLCV timeframe; defaults {DEFAULT_TF}"
+    )
+    parser.add_argument(
+        "--since", default=None, help="ISO date YYYY-MM-DD; only label candidates after this ts"
+    )
     parser.add_argument("--max-rows", type=int, default=None)
     parser.add_argument("--symbols", default=None)
     parser.add_argument("--print-every", type=int, default=200)
@@ -208,8 +214,11 @@ def main() -> int:
     t0 = time.time()
     for i, r in enumerate(rows):
         out = _label_one(
-            cand=r, market_type=args.market,
-            time_bars=time_bars, tf=tf, fetcher=fetcher,
+            cand=r,
+            market_type=args.market,
+            time_bars=time_bars,
+            tf=tf,
+            fetcher=fetcher,
         )
         if out is None:
             skipped += 1
@@ -232,14 +241,17 @@ def main() -> int:
         n_neg += int(y == 0)
         if (i + 1) % args.print_every == 0:
             elapsed = time.time() - t0
-            print(f"  [{i+1}/{len(rows)}] written={written} skipped={skipped} "
-                  f"WR={n_pos/max(1,n_pos+n_neg):.3f} rate={(i+1)/max(1e-3,elapsed):.1f}/s")
+            print(
+                f"  [{i + 1}/{len(rows)}] written={written} skipped={skipped} "
+                f"WR={n_pos / max(1, n_pos + n_neg):.3f} rate={(i + 1) / max(1e-3, elapsed):.1f}/s"
+            )
 
-    print(f"done -- written={written} skipped={skipped} "
-          f"WR={n_pos/max(1,n_pos+n_neg):.3f} elapsed={time.time()-t0:.0f}s")
+    print(
+        f"done -- written={written} skipped={skipped} "
+        f"WR={n_pos / max(1, n_pos + n_neg):.3f} elapsed={time.time() - t0:.0f}s"
+    )
     counts = wh.query(
-        "SELECT y, COUNT(*) c FROM labels WHERE market_type=? GROUP BY y",
-        (args.market,)
+        "SELECT y, COUNT(*) c FROM labels WHERE market_type=? GROUP BY y", (args.market,)
     )
     print(f"labels[{args.market}] now: {counts}")
     return 0

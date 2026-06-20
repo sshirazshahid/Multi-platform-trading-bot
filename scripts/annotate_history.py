@@ -59,38 +59,43 @@ def annotate(limit: int = 20, *, dry_run: bool = False) -> dict:
     for row in rows:
         tid = row.get("id")
         trade_payload = {
-            "symbol":       row.get("symbol"),
-            "exchange":     row.get("exchange"),
-            "side":         row.get("side"),
-            "entry_px":     row.get("entry_px"),
-            "exit_px":      row.get("exit_px"),
+            "symbol": row.get("symbol"),
+            "exchange": row.get("exchange"),
+            "side": row.get("side"),
+            "entry_px": row.get("entry_px"),
+            "exit_px": row.get("exit_px"),
             "realized_pnl": row.get("realized_pnl"),
-            "r_multiple":   row.get("r_multiple"),
-            "hold_sec":     row.get("hold_sec"),
-            "exit_reason":  row.get("exit_reason"),
-            "leverage":     row.get("leverage"),
+            "r_multiple": row.get("r_multiple"),
+            "hold_sec": row.get("hold_sec"),
+            "exit_reason": row.get("exit_reason"),
+            "leverage": row.get("leverage"),
             "strategy_family": row.get("strategy_family"),
         }
 
         if dry_run:
-            print(f"[annotate] [dry] trade {tid} {row.get('symbol')} "
-                  f"{row.get('side')} pnl={row.get('realized_pnl')}")
+            print(
+                f"[annotate] [dry] trade {tid} {row.get('symbol')} "
+                f"{row.get('side')} pnl={row.get('realized_pnl')}"
+            )
             continue
 
-        print(f"[annotate] trade {tid} {row.get('symbol')} "
-              f"{row.get('side')} -> calling Claude advisory...")
+        print(
+            f"[annotate] trade {tid} {row.get('symbol')} "
+            f"{row.get('side')} -> calling Claude advisory..."
+        )
         out = call_advisory(
             "historical_annotation",
             {"TRADE_JSON": trade_payload},
-            warehouse=wh, ref_type="trade", ref_id=int(tid),
+            warehouse=wh,
+            ref_type="trade",
+            ref_id=int(tid),
         )
         if out is None:
             failed += 1
             print(f"[annotate] trade {tid} FAILED (see claude_schema_failures.jsonl)")
         else:
             ok += 1
-            print(f"[annotate] trade {tid} -> {out.get('decision')} "
-                  f"conf={out.get('confidence')}")
+            print(f"[annotate] trade {tid} -> {out.get('decision')} conf={out.get('confidence')}")
 
         # Gentle pacing to avoid hammering the CLI
         time.sleep(0.5)
@@ -101,10 +106,12 @@ def annotate(limit: int = 20, *, dry_run: bool = False) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=20)
-    ap.add_argument("--all", action="store_true",
-                    help="Drain the unannotated queue (batches of --limit).")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Print what would be annotated; don't call Claude.")
+    ap.add_argument(
+        "--all", action="store_true", help="Drain the unannotated queue (batches of --limit)."
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Print what would be annotated; don't call Claude."
+    )
     args = ap.parse_args()
 
     if not args.all:

@@ -26,6 +26,7 @@ Usage:
     python scripts/star_review.py --window 30 # tighter window
     python scripts/star_review.py --json      # machine-readable
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,7 +66,8 @@ def _scan(window_days: int = 60) -> dict:
     since = int(time.time()) - window_days * 86400
 
     # All symbols (claude_portfolio only) with at least 5 trades
-    rows = con.execute("""
+    rows = con.execute(
+        """
         SELECT symbol, COUNT(*) AS n,
                SUM(realized_pnl) AS total,
                AVG(realized_pnl) AS mean,
@@ -78,7 +80,9 @@ def _scan(window_days: int = 60) -> dict:
         GROUP BY symbol
         HAVING n >= 5
         ORDER BY total DESC
-    """, (since,)).fetchall()
+    """,
+        (since,),
+    ).fetchall()
 
     promote, demote, watch = [], [], []
     star_set = set(STAR_SYMBOLS)
@@ -90,14 +94,16 @@ def _scan(window_days: int = 60) -> dict:
             # Demotion check — only if expected value is net-negative.
             # A symbol with low WR but high R:R (mean > 0) is still
             # profitable; don't demote on WR alone.
-            if (r["n"] >= DEMOTE_MIN_N and r["mean"] < DEMOTE_MEAN_FLOOR):
+            if r["n"] >= DEMOTE_MIN_N and r["mean"] < DEMOTE_MEAN_FLOOR:
                 demote.append(dict(r))
         else:
             # Promotion check
-            if (r["n"] >= PROMOTE_MIN_N
+            if (
+                r["n"] >= PROMOTE_MIN_N
                 and r["mean"] > PROMOTE_MIN_MEAN
                 and r["wr"] >= PROMOTE_MIN_WR
-                and r["worst"] >= PROMOTE_MAX_WORST):
+                and r["worst"] >= PROMOTE_MAX_WORST
+            ):
                 promote.append(dict(r))
             elif r["n"] >= 8 and r["mean"] >= 0:
                 watch.append(dict(r))
@@ -130,7 +136,7 @@ def _md_report(data: dict) -> str:
         "## Promotion candidates (would add)",
         "",
         f"_Criteria: n&gt;={PROMOTE_MIN_N}, mean>$%.2f, WR&gt;=%d%%, no trade worse than $%.2f_"
-        % (PROMOTE_MIN_MEAN, int(PROMOTE_MIN_WR*100), PROMOTE_MAX_WORST),
+        % (PROMOTE_MIN_MEAN, int(PROMOTE_MIN_WR * 100), PROMOTE_MAX_WORST),
         "",
     ]
     if data["promote"]:
@@ -141,7 +147,7 @@ def _md_report(data: dict) -> str:
                 f"| `{r['symbol']}` | {r['n']} | "
                 f"${r['total']:+.2f} | ${r['mean']:+.3f} | "
                 f"${r['worst']:+.2f} | ${r['best']:+.2f} | "
-                f"{r['wr']*100:.0f}% |"
+                f"{r['wr'] * 100:.0f}% |"
             )
     else:
         lines.append("_(none — current STARs are still the best edge)_")
@@ -161,7 +167,7 @@ def _md_report(data: dict) -> str:
             lines.append(
                 f"| `{r['symbol']}` | {r['n']} | "
                 f"${r['total']:+.2f} | ${r['mean']:+.3f} | "
-                f"{r['wr']*100:.0f}% |"
+                f"{r['wr'] * 100:.0f}% |"
             )
     else:
         lines.append("_(none — current STARs all healthy)_")
@@ -180,7 +186,7 @@ def _md_report(data: dict) -> str:
             lines.append(
                 f"| `{r['symbol']}` | {r['n']} | "
                 f"${r['total']:+.2f} | ${r['mean']:+.3f} | "
-                f"{r['wr']*100:.0f}% |"
+                f"{r['wr'] * 100:.0f}% |"
             )
     else:
         lines.append("_(none)_")
@@ -205,10 +211,8 @@ def _md_report(data: dict) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--window", type=int, default=60,
-                    help="Lookback window in days (default 60)")
-    ap.add_argument("--json", action="store_true",
-                    help="Emit JSON instead of markdown")
+    ap.add_argument("--window", type=int, default=60, help="Lookback window in days (default 60)")
+    ap.add_argument("--json", action="store_true", help="Emit JSON instead of markdown")
     args = ap.parse_args()
 
     data = _scan(args.window)

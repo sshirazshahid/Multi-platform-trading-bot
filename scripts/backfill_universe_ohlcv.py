@@ -21,6 +21,7 @@ Usage:
     python scripts/backfill_universe_ohlcv.py --list-only          # enumerate, no fetch
     python scripts/backfill_universe_ohlcv.py --days 365 --min-vol 3000000 --max-symbols 300
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,8 +38,13 @@ from core.feature_store import load_ohlcv_window
 
 def _make_spot_fetcher(client):
     def _fetch(symbol, timeframe, since_ms, limit):
-        return client.exchange.fetch_ohlcv(
-            symbol, timeframe, since=int(since_ms), limit=int(limit), params={}) or []
+        return (
+            client.exchange.fetch_ohlcv(
+                symbol, timeframe, since=int(since_ms), limit=int(limit), params={}
+            )
+            or []
+        )
+
     return _fetch
 
 
@@ -47,8 +53,13 @@ def _connected_clients() -> dict:
     from exchanges.binance_client import BinanceClient
     from exchanges.bitget_client import BitgetClient
     from exchanges.bybit_client import BybitClient
+
     out = {}
-    for name, ctor in (("binance", BinanceClient), ("bybit", BybitClient), ("bitget", BitgetClient)):
+    for name, ctor in (
+        ("binance", BinanceClient),
+        ("bybit", BybitClient),
+        ("bitget", BitgetClient),
+    ):
         try:
             c = ctor()
             if getattr(c, "_connected", False):
@@ -98,10 +109,19 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=float, default=365.0)
     ap.add_argument("--timeframe", default="1h")
-    ap.add_argument("--min-vol", type=float, default=3_000_000.0, help="min 24h quote volume (USDT)")
+    ap.add_argument(
+        "--min-vol", type=float, default=3_000_000.0, help="min 24h quote volume (USDT)"
+    )
     ap.add_argument("--max-symbols", type=int, default=300, help="safety cap on universe size")
-    ap.add_argument("--throttle", type=float, default=0.6, help="inter-symbol sleep (s) — keep the live bot's API access healthy")
-    ap.add_argument("--list-only", action="store_true", help="enumerate the universe and exit (no OHLCV fetch)")
+    ap.add_argument(
+        "--throttle",
+        type=float,
+        default=0.6,
+        help="inter-symbol sleep (s) — keep the live bot's API access healthy",
+    )
+    ap.add_argument(
+        "--list-only", action="store_true", help="enumerate the universe and exit (no OHLCV fetch)"
+    )
     args = ap.parse_args()
 
     print("Connecting to venues...")
@@ -114,10 +134,14 @@ def main() -> int:
     universe = enumerate_liquid_bases(clients, args.min_vol)
     ranked = sorted(universe.items(), key=lambda kv: kv[1]["vol"], reverse=True)
     capped = ranked[: args.max_symbols]
-    print(f"\nUNIVERSE: {len(universe)} unique liquid bases; using top {len(capped)} (cap {args.max_symbols}).")
+    print(
+        f"\nUNIVERSE: {len(universe)} unique liquid bases; using top {len(capped)} (cap {args.max_symbols})."
+    )
     print("Top 20 by 24h vol: " + ", ".join(b for b, _ in capped[:20]))
     if args.list_only:
-        print(f"\n--list-only: {len(capped)} symbols would be backfilled to {args.days:.0f}d {args.timeframe}.")
+        print(
+            f"\n--list-only: {len(capped)} symbols would be backfilled to {args.days:.0f}d {args.timeframe}."
+        )
         return 0
 
     # Fetch source priority: prefer Binance (deepest history), else the venue that lists it.
@@ -142,7 +166,9 @@ def main() -> int:
             print(f"  [{i}/{len(capped)}] {symbol:16s} FAILED: {str(e)[:80]}")
         time.sleep(args.throttle)  # gentle: protect the live bot's API access
 
-    print(f"\nDONE: {done}/{len(capped)} symbols cached, {total_bars:,} total bars. Failures: {len(failed)}")
+    print(
+        f"\nDONE: {done}/{len(capped)} symbols cached, {total_bars:,} total bars. Failures: {len(failed)}"
+    )
     if failed:
         print("Failed: " + ", ".join(s for s, _ in failed[:20]))
     print("Next: python scripts/run_alpha_search.py --timeframe 1h")

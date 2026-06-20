@@ -43,7 +43,10 @@ jobs:
           python-version: "3.9"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # Project is scripts-only (packages = [] in pyproject) -> NOT pip-installable as a
+        # package (editable/wheel build produces 0 .egg-info on modern setuptools). Tests
+        # run via sys.path + importlib, so install the dependencies directly.
+        run: pip install pytest pytest-cov coverage jsonschema pyyaml scipy
 
       # Run each skill's tests in isolation to avoid module name collisions
       # (each skill has its own scorer.py, calculators/, helpers.py).

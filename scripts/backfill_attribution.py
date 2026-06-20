@@ -18,6 +18,7 @@ Usage:
     # Limit (testing)
     python scripts/backfill_attribution.py --commit --limit 50
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,9 +71,9 @@ def backfill(
                 entry_fill=float(r["entry_px"]),  # mid ≈ fill (no separate mid stored)
                 exit_mid=float(r["exit_px"]),
                 exit_fill=float(r["exit_px"]),
-                funding_paid=0.0,                 # not stored historically
+                funding_paid=0.0,  # not stored historically
                 fees=float(r["fee"] or 0.0),
-                slippage_modeled=0.0,             # already baked into px for paper trades
+                slippage_modeled=0.0,  # already baked into px for paper trades
             )
             if commit:
                 record(wh, trade_id=int(r["id"]), trade=t)
@@ -96,9 +97,9 @@ def backfill(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--commit", action="store_true",
-                        help="Persist attribution rows (default: dry run)")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Process at most N trades")
+    parser.add_argument(
+        "--commit", action="store_true", help="Persist attribution rows (default: dry run)"
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Process at most N trades")
     args = parser.parse_args()
     backfill(commit=args.commit, limit=args.limit)
