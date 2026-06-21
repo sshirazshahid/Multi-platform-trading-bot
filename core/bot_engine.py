@@ -80,6 +80,59 @@ def _tier_blocked_by_cap(tier_name: str, tier_cap, escalation_enabled: bool) -> 
     return bool(cap_to_standard and tier_name not in ("STANDARD", "SCALP"))
 
 
+def _canonical_exit_reason(raw: str) -> str:
+    """Collapse a free-text LLM close rationale into a clean machine label so the
+    warehouse `exit_reason` stays a usable GROUP BY key (audit 2026-06-21 H8).
+
+    The discretionary Claude CLOSE path passed its natural-language `reason`
+    straight through, minting 39 one-off labels (e.g. "Lock +2%; OB imb -0.71
+    heavy sell pressure") as the learning substrate's exit-type key. A genuine
+    machine label is a short, space-free snake_case token; anything containing a
+    space (or absurdly long) is prose and maps to the canonical 'claude_close'.
+    The full rationale is preserved in the [Claude] log line and, when threaded,
+    via `exit_decision_id` -> mcp_decisions.jsonl. Idempotent on clean labels.
+    """
+    r = (raw or "").strip()
+    if not r:
+        return "claude_close"
+    if " " not in r and len(r) <= 40:
+        return r
+    return "claude_close"
+
+
+def _effective_tp_threshold(take_profit, entry_price, side, leverage,
+                            base_threshold, near_target_enabled,
+                            near_target_frac=0.8):
+    """Effective mcp_take_profit threshold, in the SAME units as net_pnl_pct
+    (LEVERAGED margin-%) — audit 2026-06-21 B5.
+
+    Flag OFF (near_target_enabled False): returns base_threshold unchanged
+    (1.5 STAR / 0.5 non-STAR) so the gate is byte-identical to today.
+
+    Flag ON: require a NEAR-PLANNED-TP exit instead of capping every winner at
+    the bare floor. net_pnl_pct is LEVERAGED price-% (pnl_pct = price% * lev,
+    see the builder at bot_engine.py ~4396), while the planned-TP distance
+    (take_profit vs entry_price) is UN-leveraged price-%. Scale the price-%
+    target by leverage so both sides share units:
+        effective = near_target_frac * tp_dist_pct * lev
+
+    Falls back to base_threshold on any invalid TP/entry/side so a missing or
+    wrong-side take_profit can never make the gate fire trivially.
+    """
+    if not near_target_enabled:
+        return base_threshold
+    if not take_profit or entry_price <= 0:
+        return base_threshold
+    lev = max(1, int(leverage or 1))
+    if str(side).lower() in ("buy", "long"):
+        tp_dist_pct = (take_profit - entry_price) / entry_price * 100.0
+    else:
+        tp_dist_pct = (entry_price - take_profit) / entry_price * 100.0
+    if tp_dist_pct <= 0:                       # missing / wrong-side TP
+        return base_threshold
+    return near_target_frac * tp_dist_pct * lev
+
+
 MAX_PER_EXCHANGE    = CLAUDE_PORTFOLIO.get("max_per_exchange", 6)
 MAX_TOTAL_POSITIONS = 8       # Max 8 total across all exchanges
 NEWS_INTERVAL       = CLAUDE_PORTFOLIO.get("news_interval_min", 30) * 60
@@ -3107,6 +3160,10 @@ class BotEngine:
 
         position_id = action.get("position_id", "")
         reason = action.get("reason", "claude_portfolio_close")
+        # Canonicalize the LLM's free-text rationale to a clean machine label so
+        # the warehouse exit_reason stays a usable GROUP BY key (audit H8). The
+        # raw prose is preserved in the log line + exit_decision_id below.
+        canon_reason = _canonical_exit_reason(reason)
 
         if not position_id:
             logger.warning("[Claude] CLOSE action missing position_id")
@@ -3136,13 +3193,14 @@ class BotEngine:
 
         logger.info(
             f"[Claude] EXECUTING CLOSE: {target.symbol} {target.side} "
-            f"on {target.exchange} | {reason[:60]}")
+            f"on {target.exchange} | reason={canon_reason} | rationale={reason[:80]}")
 
         try:
             # Provenance: thread the CLOSE decision's id so the warehouse row
-            # receives exit_decision_id via _finalize_close.
+            # receives exit_decision_id via _finalize_close. The canonical
+            # reason is what lands in exit_reason; the prose stays in the log.
             self.order_mgr.close_position(
-                exchange, target, reason,
+                exchange, target, canon_reason,
                 decision_id=action.get("decision_id"))
             return True
         except Exception as e:
@@ -4520,7 +4578,27 @@ class BotEngine:
                         net_pnl_pct = _pnl_pct - rt_fee_pct
                         # Phase 46: STAR threshold 1.5%, non-STAR 0.5%
                         is_star = p.symbol in _STAR
-                        tp_threshold = 1.5 if is_star else 0.5
+                        _base_threshold = 1.5 if is_star else 0.5
+                        # B5 (audit 2026-06-21): when near_target_exit is ON,
+                        # require a near-PLANNED-TP exit instead of the bare floor.
+                        # net_pnl_pct is LEVERAGED, so the helper scales the
+                        # price-% TP distance by leverage. Flag OFF => returns
+                        # _base_threshold (byte-identical to today).
+                        # ⚠ UNITS INVARIANT: net_pnl_pct is leveraged ONLY because
+                        # this block is fenced by `source == "tracker"` above (that
+                        # builder applies *lev). Do NOT route the exchange-sourced
+                        # UNLEVERAGED pnl_pct here, or the threshold becomes lev×
+                        # too strict and winners never exit.
+                        from config import RISK as _RISK_NT
+                        tp_threshold = _effective_tp_threshold(
+                            take_profit=p.take_profit,
+                            entry_price=p.entry_price,
+                            side=p.side,
+                            leverage=p.leverage,
+                            base_threshold=_base_threshold,
+                            near_target_enabled=_RISK_NT.get("near_target_exit_enabled", False),
+                            near_target_frac=_RISK_NT.get("near_target_frac", 0.8),
+                        )
                         if net_pnl_pct >= tp_threshold and conf >= 0.60:
                             for ex_name, exchange in self.active_exchanges.items():
                                 if ex_name == p.exchange.lower() or ex_name in p.exchange.lower():

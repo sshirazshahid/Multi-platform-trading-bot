@@ -2366,6 +2366,29 @@ class OrderManager:
                     continue
                 continue  # hold to the momentum-flip CLOSE; skip all scalp exits
 
+            # ── B6 (audit 2026-06-21): PLANNED-TP-FIRST (flag-gated) ──────────
+            # When near_target_exit is ON, the configured/planned TP is the FIRST
+            # profit authority so a winner that has reached target is not pre-empted
+            # by partial-TP / trailing / early-BE and clipped below it. Mirrors the
+            # late TP check's guards (tp>0, not exchange-held) and reuses the
+            # 'take_profit' exit_reason. Flag OFF => this block is skipped entirely,
+            # so the dispatch order is byte-identical to today (the late TP check
+            # still owns it). Only the TP half is hoisted — SL stays in its later
+            # position so trailing/early-BE can still advance it first.
+            if RISK.get("near_target_exit_enabled", False):
+                _tp_ptf = pos.take_profit
+                if _tp_ptf and float(_tp_ptf) > 0 and not _exchange_handles_sltp:
+                    _hit = (pos.side == "buy" and price >= float(_tp_ptf)) or \
+                           (pos.side == "sell" and price <= float(_tp_ptf))
+                    if _hit:
+                        _, _ntp_ptf, _ = self._net_pnl_at_price(pos, price)
+                        logger.info(
+                            f"[Orders] TAKE PROFIT (planned-first): {pos.symbol} "
+                            f"{pos.side.upper()} @ {price:.4f} "
+                            f"(TP={float(_tp_ptf):.4f}) net={_ntp_ptf:+.2f}%")
+                        self.close_position(exchange, pos, "take_profit", price)
+                        continue
+
             # ── PARTIAL TAKE PROFIT ──
             try:
                 from config import PARTIAL_TP
@@ -2410,17 +2433,19 @@ class OrderManager:
                     _stale_min = _SM_tw.get("stale_close_min", 45)
                     _stale_profit = _SM_tw.get("stale_min_profit", 0.3)
                     if _pos_age_min >= _stale_min:
-                        _net_pct = 0
-                        try:
-                            if hasattr(pos, "pnl_pct"):
-                                _net_pct = float(pos.pnl_pct or 0)
-                            elif hasattr(pos, "unrealized_pnl_pct"):
-                                _net_pct = float(pos.unrealized_pnl_pct or 0)
-                        except Exception:
-                            pass
-                        if _net_pct < _stale_profit:
+                        # Live fee-aware net. pos.pnl_pct is None on an OPEN
+                        # position (only set at close, position_tracker.py:248),
+                        # so the old read made `0.0 < stale_profit` ALWAYS true
+                        # and force-closed EVERY aged scalp — winners included
+                        # (audit 2026-06-21 H3). Use the same fee-aware net the
+                        # AGE block uses and spare genuinely-profitable positions.
+                        _stale_net_pnl, _net_pct, _ = self._net_pnl_at_price(
+                            pos, price)
+                        if _stale_net_pnl <= 0 or _net_pct < _stale_profit:
                             logger.info(
-                                f"[Orders] SCALP_STALE: {pos.symbol} age={_pos_age_min:.0f}m pnl={_net_pct:+.2f}% < {_stale_profit}% — closing")
+                                f"[Orders] SCALP_STALE: {pos.symbol} "
+                                f"age={_pos_age_min:.0f}m net={_net_pct:+.2f}% "
+                                f"pnl=${_stale_net_pnl:+.2f} < {_stale_profit}% — closing")
                             self.close_position(exchange, pos, "scalp_stale_close")
                             continue
 

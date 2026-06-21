@@ -1,3 +1,58 @@
+# Task: Close-in-profit overhaul (audit 2026-06-21) — Phase A in progress
+
+Full audit: `reports/profit_close_audit_2026-06-21.md` (agent-architecture-audit, 30 agents,
+8 authorities, adversarially verified). Verdict: BROKEN — no single owner of "close in profit";
+6-8 authorities race the same winner and the lowest-yield one (mcp_take_profit +0.5%) wins.
+Bot PAPER + running; edits apply on owner RESTART (NOT bounced).
+
+## Phase A — correctness/attribution (safe, no EV-shape change)
+- [x] **A3** `scalp_stale` live-net fix — spare profitable aged scalps (was reading always-None
+      `pos.pnl_pct` -> 0.0<0.3 always true -> force-closed EVERY aged scalp incl. winners).
+      `order_manager.py:2412-2425` now uses `_net_pnl_at_price`. + `tests/test_scalp_stale_winner_exempt.py`.
+- [x] **A1** Canonical `exit_reason` enum — `_canonical_exit_reason()` collapses Claude prose
+      (39 free-text labels) to `claude_close`; clean machine labels pass through. Wired into
+      `_execute_close`; prose preserved in log + `exit_decision_id`. + `tests/test_canonical_exit_reason.py`.
+- [ ] **A2** Entry gate (`recent_expectancy`) reads whole-trade PnL = `realized + COALESCE(partial,0)`.
+      `warehouse.py:459-519` (OWNER-gated: changes the live gate).
+- [ ] **A4** *(verify finding first — skeptic REFUTED it)* gate `_execute_close` discretionary LLM
+      CLOSE on profitable/in-SL positions + `is_tsmom_position` guard.
+- [ ] **A8** Backfill `entry_stop_px`; `r_multiple` reconstruct from ATR-SL when absent; reconcile
+      patches the OPEN row. `position_tracker.py`, `scripts/backfill_warehouse_closes.py`.
+
+## Phase B — EV-shape (CAN change WR -> default-OFF flag + PAPER A/B; flag before shipping)
+ONE shared flag: `RISK["near_target_exit_enabled"]` (default False, env `NEAR_TARGET_EXIT_ENABLED`)
++ `RISK["near_target_frac"]` (0.8). Flag-OFF verified byte-identical (547 exit/monitor tests green).
+- [x] **B5** `mcp_take_profit` near-target gate — `_effective_tp_threshold()` (bot_engine.py) scales the
+      price-% TP distance by LEVERAGE (units trap confirmed: `_pnl_pct` built price%*lev at ~bot_engine:4396;
+      verified by design workflow w/ 3x arithmetic). Wired at the TAKE_PROFIT block; flag-OFF returns the
+      old 0.5/1.5. + `tests/test_near_target_tp_threshold.py` (11, incl. leverage trap).
+- [x] **B6** planned-TP-first early block in `check_sl_tp` (after TSMOM, before partial-TP; TP-half only;
+      reuses 'take_profit'; skips exchange-held TP) + trailing age-out activation floored above round-trip
+      cost (`trailing_stop_manager._adaptive_activation`). + `tests/test_planned_tp_first_b6.py` (7, incl.
+      the flag-ON take_profit vs flag-OFF trailing_stop discriminator). ⚠ A/B NOTE: flag-ON, a tick that
+      gaps straight to full TP closes 100% (skips the partial-then-full shape) — intended, call out in A/B.
+- [ ] **B7** Unify partial/trailing/early-BE/age into one `decide_profit_exit` behind a per-position
+      lock; route 30s monitor through it as advisory; add `_reconcile_missing_tp`. (Deferred; B5+B6 are the
+      high-leverage subset of B7's intent and ship first.)
+- [x] Adversarial review (4-lens workflow): verdict SHIP_WITH_NITS, **zero blockers**. B5 units
+      confirmed correct at the wired call site (3x/1x arithmetic); flag-OFF feature-invariance confirmed.
+      Closed the flagged coverage gaps: partial-TP-bypass discriminator, default-flag pin, spot trailing
+      floor, leveraged B6, sell-side flag-OFF baseline (B6 tests 7 -> 13). Added units-footgun guard
+      comment at the B5 call site. Full suite: 2030 passed, 0 failed. ruff clean (pre-existing I001@1732 only).
+- [ ] COMMIT pending (not requested; bot still running, not restarted). A/B note for whoever flips the
+      flag: under flag-ON a tick that gaps straight to full TP closes 100% (skips partial-then-full).
+- NOTE: H3 (scalp_stale) + H8 (exit_reason enum) are the prior-turn A1/A3 correctness fixes — un-gated
+      by design (owner-approved "safe fixes now"), NOT under near_target_exit_enabled. Documented separately.
+
+## Gate / honesty
+Phase B must NOT be enabled hot. Ceiling remains BREAK-EVEN (entry NO_EDGE); stay PAPER. No
+post-fix R:R uplift is "edge" — it is removal of self-harm, measured only after A2.
+
+## Review (Phase A)
+- A3 shipped + tested. Rest pending owner go on the EV-shape phase.
+
+---
+
 # Task: Full review + harden + extend (2026-06-20) — in progress
 
 Branch: `harden/review-2026-06-20`. Bot stays PAPER. Plan: Foundation → Edge validation

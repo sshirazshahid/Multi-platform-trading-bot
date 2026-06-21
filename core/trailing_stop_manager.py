@@ -113,7 +113,14 @@ class TrailingStopManager:
         except Exception:
             return base
         if age_min >= 65:
-            # Final 10 minutes before AGE_LIMIT — activate at ANY positive PnL
+            # Final 10 minutes before AGE_LIMIT — activate at ANY positive PnL.
+            # B6 (audit 2026-06-21): when near_target_exit is ON, FLOOR activation
+            # above the round-trip cost so trailing can't lock a net-NEGATIVE
+            # "win" at ~0% just before age-out. Flag OFF => returns 0.0001
+            # (byte-identical to today).
+            if RISK.get("near_target_exit_enabled", False):
+                return max(0.0001,
+                           _fee_rate(getattr(position, "market_type", "futures")) * 1.5)
             return 0.0001
         if age_min >= 50:
             # 50-65 min — activate at +0.5% if not already

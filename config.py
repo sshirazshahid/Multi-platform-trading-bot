@@ -617,6 +617,18 @@ RISK = {
     # to capture the 30-60min profitable cell before its 75min expiry.
     "trailing_activation": 0.012,  # 1.2% — engage earlier under tighter age cap
     "trailing_distance": 0.008,  # 0.8% — tighter trail to lock faster
+    # ── NEAR-TARGET EXIT (B5+B6, audit 2026-06-21) — ONE default-OFF flag ──
+    # When True (PAPER A/B only): (B5) mcp_take_profit may fire only at a
+    # NEAR-PLANNED-TP level — net >= near_target_frac * planned_TP_dist, with the
+    # leverage units reconciled (net_pnl_pct is LEVERAGED; tp_dist is price%) —
+    # instead of the bare +0.5%/+1.5% floor that caps every winner; (B6) the
+    # configured/planned TP becomes the FIRST profit authority checked in
+    # check_sl_tp, and the trailing age-out activation is floored above the
+    # round-trip cost. Default OFF => behavior byte-identical to today. This is a
+    # WR-affecting EV-shape change: validate in PAPER before enabling. Toggle via
+    # NEAR_TARGET_EXIT_ENABLED=true. The ceiling stays break-even (entry NO_EDGE).
+    "near_target_exit_enabled": os.getenv("NEAR_TARGET_EXIT_ENABLED", "false").lower() == "true",
+    "near_target_frac": float(os.getenv("NEAR_TARGET_FRAC", "0.8")),
     # 2026-04-28 (L99): KEPT at 0.12. Drawdown halt is the from-peak
     # circuit breaker; at 99x leverage it's the only thing standing
     # between a few bad trades and a wiped account. Removal would
