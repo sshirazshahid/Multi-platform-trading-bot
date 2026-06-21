@@ -1306,6 +1306,12 @@ class OrderManager:
                 f"[Orders] TP order on {exchange.name}: {symbol} "
                 f"@ {tp_rounded} (type={tp_type})")
         except Exception as e:
+            # Clear the flag so _exchange_handles_sltp evaluates False and the
+            # polled SL/TP price-trigger + B6 planned-first path cover the dropped
+            # TP until _reconcile_missing_tp restores the exchange TP (audit
+            # 2026-06-21 B7). On the fresh-entry path the attr may be unset, so
+            # this is not always already-False.
+            pos._exchange_tp = False
             logger.warning(
                 f"[Orders] TP order FAILED on {exchange.name} {symbol}: {e} "
                 f"— local monitoring active (SL is protected)")
@@ -1428,6 +1434,85 @@ class OrderManager:
                 f"[Orders] SL reconcile OK: exchange SL restored for {pos.symbol}")
             return True
         return False
+
+    def _reconcile_missing_tp(self, exchange: BaseExchange, pos: Position) -> bool:
+        """Re-establish a missing exchange-side TP on a live futures position.
+
+        Gap (audit 2026-06-21 B7): once ``_exchange_handles_sltp`` is True the
+        polled TP check (and the B6 planned-first block) are suppressed — the
+        exchange is expected to own the TP. But the venue can drop the planned-TP
+        conditional (e.g. a venue-side cancel on a partial fill) while
+        ``_exchange_tp`` stays True, orphaning the planned TP so the winner only
+        exits via trailing/age. (The companion placement-failure case is handled
+        at entry: a failed TP create_order now clears ``_exchange_tp`` so the
+        polled/B6 path covers it.) This re-asserts the already-planned
+        ``pos.take_profit`` at most once/minute/position when ``_exchange_tp``
+        claims True but no profit-side conditional is actually resting on the venue.
+
+        Live/futures-only; a no-op in PAPER and on spot. Returns True when a TP is
+        (or regains being) present, or when reconciliation does not apply.
+        """
+        if self.dry_run or getattr(pos, "market_type", None) != "futures":
+            return True
+        if not getattr(pos, "_exchange_tp", False):
+            return True  # exchange not meant to own the TP -> polled path covers it
+        if not pos.take_profit or float(pos.take_profit) <= 0:
+            return True
+        if not pos.entry_price or float(pos.entry_price) <= 0:
+            return True  # can't classify profit/loss side without a valid entry
+        import time as _t
+        if _t.time() - getattr(pos, "_tp_retry_ts", 0.0) < 60:
+            return True  # throttle: at most once/minute/position
+        pos._tp_retry_ts = _t.time()
+
+        # fetch_open_orders NEVER raises (exchanges/base.py:378-387 returns [] on
+        # error AND when not-ready), so an EMPTY list is INCONCLUSIVE — never treat
+        # it as proof the TP is gone, or a transient API failure would churn a
+        # cancel-all + re-place every cycle. Only act on a NON-EMPTY list that has
+        # a loss-side SL conditional but NO profit-side TP conditional.
+        open_orders = exchange.fetch_open_orders(pos.symbol, pos.market_type)
+        if not open_orders:
+            return True  # inconclusive (error or genuinely empty) -> no-op
+        ep = float(pos.entry_price)
+        side = (pos.side or "").lower()
+        tp_present = sl_present = False
+        for o in open_orders:
+            info = o.get("info", {}) or {}
+            trig = (o.get("triggerPrice") or o.get("stopPrice")
+                    or info.get("triggerPrice") or info.get("stopPrice"))
+            try:
+                trig = float(trig) if trig is not None else None
+            except (TypeError, ValueError):
+                trig = None
+            if not trig or trig <= 0:
+                continue
+            profit_side = (trig > ep) if side == "buy" else (trig < ep)
+            if profit_side:
+                tp_present = True
+            else:
+                sl_present = True
+        if tp_present or not sl_present:
+            # TP already resting, OR no SL-side conditional either (inconclusive
+            # shape) — nothing to safely act on.
+            return True
+
+        # Orphaned exchange TP (SL resting, no profit-side conditional). Do NOT
+        # cancel the WORKING SL to re-place both (that primitive,
+        # _replace_exchange_sl, cancel_all_orders first => a brief naked-SL window
+        # if the SL re-place then fails). Instead DOWNGRADE to local polled
+        # enforcement: clear _exchange_tp so _exchange_handles_sltp evaluates False
+        # and the polled SL/TP price-trigger + B6 planned-first path watch the
+        # planned TP from here. Same safe fallback as a failed TP placement at
+        # entry; never touches the SL. (Trade-off: polled TP loses wick accuracy
+        # vs an exchange conditional — acceptable for a rare orphan, and strictly
+        # safer than risking the working SL. This is the audit's "re-validate
+        # _exchange_tp before suppressing the polled check" option.)
+        logger.warning(
+            f"[Orders] TP reconcile: exchange TP missing for {pos.symbol} "
+            f"{pos.id[:8]} (SL present, no profit-side conditional) — downgrading "
+            f"to polled TP enforcement (planned TP {float(pos.take_profit):.6g})")
+        pos._exchange_tp = False
+        return True
 
     # ── Close position ────────────────────────────────────────────────
 
@@ -2305,6 +2390,12 @@ class OrderManager:
             # position relying only on polled monitoring. No-op in paper / spot
             # and when the SL is already attached.
             self._reconcile_missing_sl(exchange, pos)
+
+            # ── TP reconciliation (audit 2026-06-21 B7) ──
+            # Restore an orphaned exchange-side TP (e.g. a venue-side cancel that
+            # left _exchange_tp stale). No-op in paper / spot and when a TP is
+            # already resting; throttled to once/minute/position.
+            self._reconcile_missing_tp(exchange, pos)
 
             # ── DRY_RUN realism: intrabar wick SL/TP (2026-04-11) ──
             # LIVE exchange-side SL/TP orders trigger on wick price (high/low

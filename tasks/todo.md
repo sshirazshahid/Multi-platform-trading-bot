@@ -31,16 +31,26 @@ ONE shared flag: `RISK["near_target_exit_enabled"]` (default False, env `NEAR_TA
       cost (`trailing_stop_manager._adaptive_activation`). + `tests/test_planned_tp_first_b6.py` (7, incl.
       the flag-ON take_profit vs flag-OFF trailing_stop discriminator). ⚠ A/B NOTE: flag-ON, a tick that
       gaps straight to full TP closes 100% (skips the partial-then-full shape) — intended, call out in A/B.
-- [ ] **B7** Unify partial/trailing/early-BE/age into one `decide_profit_exit` behind a per-position
-      lock; route 30s monitor through it as advisory; add `_reconcile_missing_tp`. (Deferred; B5+B6 are the
-      high-leverage subset of B7's intent and ship first.)
+- **B7** scoped by design workflow (wqo628i7s) to net-new pieces; full `decide_profit_exit` merge
+  DEFERRED (B5/B6 already captured the precedence — the merge is high-risk reorg with ~no new behavior):
+  - [x] **B7-P1** `_reconcile_missing_tp` (LIVE/futures-only, no-op in PAPER) — restores an orphaned
+        exchange TP. Design-verify caught: `fetch_open_orders` never raises (returns [] on error) so an
+        empty list = INCONCLUSIVE no-op (no order churn); only acts on the SL-present/TP-absent signature.
+        Impl review caught HIGH: don't cancel the working SL to restore the TP -> DOWNGRADE to polled
+        (clear `_exchange_tp`) instead, never touching the SL. + hardening: clear `_exchange_tp` on a failed
+        TP placement. + `tests/test_reconcile_missing_tp.py` (11).
+  - [ ] **B7-P2** per-position close/SL-mutation lock (design `implement_now`, deadlock-analyzed) — DEFERRED
+        to its own pass: load-bearing only in CONTROLLED_LIVE (tracker.close pop is already double-close
+        idempotent in PAPER). Implement before any live flip.
+  - [ ] **B7-P3** full `decide_profit_exit` unification + 30s-monitor-as-advisory — DEFER until pre-live.
 - [x] Adversarial review (4-lens workflow): verdict SHIP_WITH_NITS, **zero blockers**. B5 units
       confirmed correct at the wired call site (3x/1x arithmetic); flag-OFF feature-invariance confirmed.
       Closed the flagged coverage gaps: partial-TP-bypass discriminator, default-flag pin, spot trailing
       floor, leveraged B6, sell-side flag-OFF baseline (B6 tests 7 -> 13). Added units-footgun guard
       comment at the B5 call site. Full suite: 2030 passed, 0 failed. ruff clean (pre-existing I001@1732 only).
-- [ ] COMMIT pending (not requested; bot still running, not restarted). A/B note for whoever flips the
-      flag: under flag-ON a tick that gaps straight to full TP closes 100% (skips partial-then-full).
+- [x] Committed A1/A3 + B5/B6 as 1e21250 (9 files). B7-P1 reconciler committed separately. Bot still
+      running, not restarted (edits apply on owner restart). A/B note for whoever flips the flag: under
+      flag-ON a tick that gaps straight to full TP closes 100% (skips partial-then-full).
 - NOTE: H3 (scalp_stale) + H8 (exit_reason enum) are the prior-turn A1/A3 correctness fixes — un-gated
       by design (owner-approved "safe fixes now"), NOT under near_target_exit_enabled. Documented separately.
 
