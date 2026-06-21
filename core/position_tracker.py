@@ -556,6 +556,13 @@ class PositionTracker:
             positions = [p for p in positions if p.symbol == symbol]
         return positions
 
+    def is_position_open(self, position_id: str) -> bool:
+        """True iff `position_id` is currently in the open set. Used by the
+        B7-P2 per-position lock to no-op a close that lost the race (the winner
+        already popped the id under this same RLock). Reentrant-safe."""
+        with self._lock:
+            return position_id in self._open
+
     def count_open(self, exchange: str = None) -> int:
         with self._lock:
             if exchange:

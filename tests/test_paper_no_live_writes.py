@@ -24,6 +24,9 @@ from core.bot_engine import BotEngine
 def _make_engine():
     eng = object.__new__(BotEngine)  # bypass heavy __init__
     eng.order_mgr = MagicMock()
+    # B7-P2: per-position lock defaults OFF in production; a MagicMock would
+    # otherwise make the flag truthy and route through the (absent) per-id lock.
+    eng.order_mgr._per_pos_lock_enabled = False
     return eng
 
 

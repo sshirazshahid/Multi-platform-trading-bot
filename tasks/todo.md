@@ -39,9 +39,17 @@ ONE shared flag: `RISK["near_target_exit_enabled"]` (default False, env `NEAR_TA
         Impl review caught HIGH: don't cancel the working SL to restore the TP -> DOWNGRADE to polled
         (clear `_exchange_tp`) instead, never touching the SL. + hardening: clear `_exchange_tp` on a failed
         TP placement. + `tests/test_reconcile_missing_tp.py` (11).
-  - [ ] **B7-P2** per-position close/SL-mutation lock (design `implement_now`, deadlock-analyzed) — DEFERRED
-        to its own pass: load-bearing only in CONTROLLED_LIVE (tracker.close pop is already double-close
-        idempotent in PAPER). Implement before any live flip.
+  - [x] **B7-P2** per-position close/SL-mutation lock — SHIPPED (default-OFF PER_POSITION_LOCK_ENABLED).
+        Deadlock-proof workflow (5 agents) + impl review (8 checks SHIP). Per-id **RLock** (MANDATORY:
+        _replace_exchange_sl -> _place_exchange_sl_tp fail-closed re-enters close_position same-thread;
+        plain Lock would self-deadlock the SL monitor). close_position/_replace_exchange_sl (om + engine)
+        are thin flag-gated wrappers -> _impl, with 5s timeout-acquire (proceed-on-timeout so a bug can
+        never freeze the monitor), in-lock tracker.is_position_open idempotency, and _pos_locks eviction
+        in _finalize_close. + tracker.is_position_open. + tests/test_per_position_lock.py (9, incl.
+        re-entrancy-no-deadlock + timeout backstop + concurrency one-real-close). Fixed 5 harness
+        regressions from the rename (getattr-defensive wrappers; mock flag in test_paper_no_live_writes).
+        Full suite 2050 green. LIVE-only value (inert in PAPER). LOW/deferred: add a timeout counter metric.
+  - NOTE B7-P2 default OFF: flip PER_POSITION_LOCK_ENABLED=true for a PAPER soak before any live flip.
   - [ ] **B7-P3** full `decide_profit_exit` unification + 30s-monitor-as-advisory — DEFER until pre-live.
 - [x] Adversarial review (4-lens workflow): verdict SHIP_WITH_NITS, **zero blockers**. B5 units
       confirmed correct at the wired call site (3x/1x arithmetic); flag-OFF feature-invariance confirmed.

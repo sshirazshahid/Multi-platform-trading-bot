@@ -1858,6 +1858,18 @@ DAILY_LOSS_BREAKER = {
     "max_loss_pct": float(os.getenv("DAILY_LOSS_BREAKER_PCT", "0.02")),
 }
 
+# ── PER-POSITION CLOSE/SL LOCK (B7-P2, audit 2026-06-21) — default OFF ──
+# When True, OrderManager serializes close_position + _replace_exchange_sl on the
+# SAME position id via a per-id RLock (with a 5s timeout backstop + is_position_open
+# idempotency). Prevents the 10s SL/TP loop, the 30s MCP monitor, and the portfolio
+# cycle from double-closing / cancel-racing one position. LIVE-only value: in PAPER
+# close_position and both _replace_exchange_sl helpers issue NO exchange order, so
+# the lock is dormant by construction. Default OFF: this is unproven concurrency
+# code in the safety-critical exit core; flip ON for a PAPER soak before any live
+# flip. RLock is mandatory (fail-closed re-entry) — see the proof in
+# reports/ / tasks/todo.md B7-P2.
+PER_POSITION_LOCK_ENABLED = os.getenv("PER_POSITION_LOCK_ENABLED", "false").lower() == "true"
+
 # ==============================================================
 # 2026-05-20 GHOST + NOISE CLEANUP + SMALL-TP CAPTURE
 # Per-area kill switches for the five-area improvement set.

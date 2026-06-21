@@ -3449,6 +3449,27 @@ class BotEngine:
             logger.debug(f"[Engine] Position sync: {e}")
 
     def _replace_exchange_sl(self, exchange, pos, new_sl: float) -> bool:
+        """B7-P2 wrapper: serialize this TIGHTEN/BREAKEVEN SL re-place with the
+        OrderManager's close/SL-mutation on the same position id, via the ONE
+        shared per-id RLock (self.order_mgr._position_lock). Default-OFF; timeout
+        backstop so it can never freeze the 30s monitor. RLock-safe: this path
+        re-enters om.close_position via the fail-closed _place_exchange_sl_tp."""
+        om = self.order_mgr
+        if not getattr(om, "_per_pos_lock_enabled", False):
+            return self._replace_exchange_sl_impl(exchange, pos, new_sl)
+        lk = om._position_lock(pos.id)
+        acquired = lk.acquire(timeout=om._pos_lock_timeout)
+        if not acquired:
+            logger.error(
+                f"[Lock] engine _replace_exchange_sl _position_lock TIMEOUT for "
+                f"{pos.id} after 5s — proceeding WITHOUT serialization")
+        try:
+            return self._replace_exchange_sl_impl(exchange, pos, new_sl)
+        finally:
+            if acquired:
+                lk.release()
+
+    def _replace_exchange_sl_impl(self, exchange, pos, new_sl: float) -> bool:
         """Cancel the existing SL conditional order on the exchange and place
         a new one at `new_sl`. Used by TIGHTEN/BREAKEVEN actions.
 

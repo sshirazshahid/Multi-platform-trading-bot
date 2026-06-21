@@ -8,6 +8,7 @@ core/order_manager.py — Order lifecycle with:
 """
 
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -219,6 +220,19 @@ class OrderManager:
         # After 3 failures, force-close in tracker to break infinite loops
         self._close_fail_path = Path("data/close_fail_count.json")
         self._close_fail_count: dict = self._load_close_fail_count()
+
+        # B7-P2 (audit 2026-06-21) — per-position close/SL-mutation lock.
+        # One RLock per position id (RLock is MANDATORY: _replace_exchange_sl ->
+        # _place_exchange_sl_tp fail-closed re-enters close_position on the SAME
+        # thread; a plain Lock would self-deadlock the SL monitor). Default-OFF
+        # (PER_POSITION_LOCK_ENABLED) — LIVE-only value, fully inert in PAPER.
+        from config import PER_POSITION_LOCK_ENABLED as _ppl
+        self._per_pos_lock_enabled = bool(_ppl)
+        self._pos_locks: dict = {}
+        self._pos_locks_guard = threading.Lock()
+        # Acquire timeout (< the 10s SL/TP monitor cadence) so a stuck lock can
+        # never freeze/stack the monitor; on timeout we proceed unserialized.
+        self._pos_lock_timeout = 5.0
 
         if DRY_RUN:
             logger.warning(
@@ -1317,6 +1331,26 @@ class OrderManager:
                 f"— local monitoring active (SL is protected)")
 
     def _replace_exchange_sl(self, exchange: BaseExchange, pos: Position) -> None:
+        """B7-P2 per-position serialization wrapper (default-OFF). Serializes
+        SL-mutation with close/other SL-moves on the same id via the shared
+        per-id RLock; timeout-acquire with proceed-on-timeout so it can never
+        freeze the SL monitor. RLock re-entry covers the fail-closed re-call
+        into close_position inside _place_exchange_sl_tp."""
+        if not getattr(self, "_per_pos_lock_enabled", False):
+            return self._replace_exchange_sl_impl(exchange, pos)
+        lk = self._position_lock(pos.id)
+        acquired = lk.acquire(timeout=self._pos_lock_timeout)
+        if not acquired:
+            logger.error(
+                f"[Lock] _replace_exchange_sl _position_lock TIMEOUT for "
+                f"{pos.id} after 5s — proceeding WITHOUT serialization")
+        try:
+            return self._replace_exchange_sl_impl(exchange, pos)
+        finally:
+            if acquired:
+                lk.release()
+
+    def _replace_exchange_sl_impl(self, exchange: BaseExchange, pos: Position) -> None:
         """Cancel the existing SL/TP conditional orders on the exchange and
         re-place them at the current ``pos.stop_loss`` / ``pos.take_profit``
         for the current ``pos.size``.
@@ -1644,7 +1678,50 @@ class OrderManager:
                     f"for {position.symbol}: {str(e)[:120]}")
         return True
 
+    def _position_lock(self, pid: str) -> threading.RLock:
+        """Return the one shared RLock for this position id (created on first
+        use under the guard). RLock — not Lock — because the fail-closed path
+        _replace_exchange_sl -> _place_exchange_sl_tp -> close_position re-enters
+        on the SAME thread for the SAME id (proof 2026-06-21). The guard holds
+        ONLY for the dict get-or-create; the per-id lock is acquired by the
+        caller OUTSIDE the guard so the guard never nests with anything."""
+        with self._pos_locks_guard:
+            lk = self._pos_locks.get(pid)
+            if lk is None:
+                lk = threading.RLock()
+                self._pos_locks[pid] = lk
+            return lk
+
     def close_position(self, exchange: BaseExchange, position: Position,
+                       reason: str, price: float = None,
+                       order_type: str = "market",
+                       decision_id: str | None = None):
+        """B7-P2 per-position serialization wrapper (default-OFF via
+        PER_POSITION_LOCK_ENABLED). When ON, serializes close + SL-mutation on
+        the same position id and no-ops the race loser via tracker.is_position_open.
+        Timeout-acquire (5s < the 10s monitor cadence) with proceed-without-lock
+        fallback so a locking bug can never freeze the SL/TP monitor thread."""
+        if not getattr(self, "_per_pos_lock_enabled", False):
+            return self._close_position_impl(
+                exchange, position, reason, price, order_type, decision_id)
+        lk = self._position_lock(position.id)
+        acquired = lk.acquire(timeout=self._pos_lock_timeout)
+        if not acquired:
+            logger.error(
+                f"[Lock] close_position _position_lock TIMEOUT for "
+                f"{position.id} after 5s — proceeding WITHOUT serialization")
+        try:
+            if not self.tracker.is_position_open(position.id):
+                logger.info(
+                    f"[Orders] close race no-op: {position.id[:8]} already closed")
+                return None
+            return self._close_position_impl(
+                exchange, position, reason, price, order_type, decision_id)
+        finally:
+            if acquired:
+                lk.release()
+
+    def _close_position_impl(self, exchange: BaseExchange, position: Position,
                        reason: str, price: float = None,
                        order_type: str = "market",
                        decision_id: str | None = None):
@@ -1893,6 +1970,14 @@ class OrderManager:
         ``pos`` is the closed Position (entry fields preserved, exit fields
         populated). ``price`` is the actual exit price the tracker recorded.
         """
+        # B7-P2: evict this id's per-position lock to bound dict growth. Runs
+        # here (via tracker.on_close) AFTER tracker.close has already popped the
+        # id from _open, so any waiter that re-creates a fresh lock for this id
+        # will find is_position_open()==False and no-op. Guard the dict op only;
+        # never pop inside close_position's own locked region.
+        if getattr(self, "_per_pos_lock_enabled", False):
+            with self._pos_locks_guard:
+                self._pos_locks.pop(pos.id, None)
         # Phase 29 (2026-05-05) — record stop_loss exits for the post-SL
         # cooldown / StoplossGuard layers in RiskManager. Runs FIRST so
         # ledger is updated even if downstream notifier/warehouse code
