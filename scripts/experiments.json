@@ -40,6 +40,17 @@
       "baseline_days": 14,
       "min_n": 20,
       "aux": "profitable_hour_share"
+    },
+    {
+      "id": "near_target_exit",
+      "label": "NEAR_TARGET_EXIT_ENABLED (B5 near-target mcp_take_profit + B6 planned-TP-first + trailing age-out floor) — does letting winners reach the planned TP raise whole-trade PnL / realized R:R without dropping WR",
+      "start_ts": 0,
+      "end_ts": null,
+      "mode": "PAPER",
+      "baseline_days": 14,
+      "min_n": 20,
+      "aux": null,
+      "_activation": "Set NEAR_TARGET_EXIT_ENABLED=true in .env, restart the bot, then set start_ts to the restart epoch (NOT commit time). Until start_ts>0 this is NOT_STARTED and skipped. Single-variable A/B: do NOT flip other flags during this run. EXIT-shape change on a NO_EDGE bot -> measures realized-R:R redistribution, not alpha; ceiling is break-even."
     }
   ]
 }
