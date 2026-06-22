@@ -462,6 +462,7 @@ class Warehouse:
         days: int = 30,
         min_n: int = 5,
         max_rows: int = 50,
+        whole_trade: bool = False,
     ) -> dict | None:
         """Per-symbol realised expectancy from the last `days` of CLOSED trades.
 
@@ -486,15 +487,25 @@ class Warehouse:
                 where.append("side=?")
                 params.append(side)
             params.append(int(max_rows))
+            # A2 (audit 2026-06-21): when whole_trade, measure expectancy on
+            # whole-trade PnL (runner realized_pnl + partial_realized_pnl) instead
+            # of the runner leg alone, which under-counts partial-taken winners.
+            # ⚠ Owner-gated (EXPECTANCY_FILTER.whole_trade, default-OFF): folding
+            # partials in makes per-symbol expectancy LESS negative -> the gate
+            # ALLOWS MORE trades; on a NO_EDGE bot that means more negative-EV
+            # trades, so it must NOT be enabled without edge. Default OFF =>
+            # byte-identical (runner-only realized_pnl).
+            _pnl_col = ("realized_pnl + COALESCE(partial_realized_pnl, 0)"
+                        if whole_trade else "realized_pnl")
             sql = (
-                "SELECT realized_pnl FROM trades "
+                f"SELECT {_pnl_col} AS pnl FROM trades "
                 f"WHERE {' AND '.join(where)} "
                 "ORDER BY ts_entry DESC LIMIT ?"
             )
             rows = self._conn().execute(sql, tuple(params)).fetchall()
             pnls = [
-                float(r["realized_pnl"]) for r in rows
-                if r["realized_pnl"] is not None
+                float(r["pnl"]) for r in rows
+                if r["pnl"] is not None
             ]
             n = len(pnls)
             if n < min_n:

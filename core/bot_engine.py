@@ -1856,7 +1856,8 @@ class BotEngine:
             days = int(_EF.get("lookback_days", 30))
             min_n = int(_EF.get("min_sample_size", 5))
             exp = _gw().recent_expectancy(
-                sym_key, side=side, days=days, min_n=min_n)
+                sym_key, side=side, days=days, min_n=min_n,
+                whole_trade=_EF.get("whole_trade", False))
             if exp is None:
                 # insufficient data — allow at full size (don't block on noise)
                 return 1.0, ""
@@ -3180,6 +3181,18 @@ class BotEngine:
             logger.info(f"[Claude] Position {position_id[:8]} not found — may be closed already")
             return False
 
+        # A4 (audit 2026-06-21): tsmom positions own their own exit (momentum
+        # flip / disaster stop, Phase 2b). The SL/TP loop and the 30s monitor
+        # already enforce this (order_manager.check_sl_tp / _run_mcp_position_
+        # monitor); _execute_close was the one path missing it, so a discretionary
+        # portfolio-cycle CLOSE could market-close a tsmom hold. ALWAYS-ON invariant.
+        from core.tsmom_signal import is_tsmom_position as _is_tsmom_pos
+        if _is_tsmom_pos(target):
+            logger.info(
+                f"[Claude] portfolio CLOSE skipped — tsmom owns its exit: "
+                f"{target.symbol} {target.id[:8]}")
+            return False
+
         # Find exchange client
         exchange = None
         for ex_name, ex in self.active_exchanges.items():
@@ -3190,6 +3203,30 @@ class BotEngine:
         if not exchange:
             logger.warning(f"[Claude] Exchange for {target.exchange} not connected")
             return False
+
+        # A4 (audit 2026-06-21): flag-gated discretionary-close guard. When
+        # enabled, refuse a Claude-sourced CLOSE of a NON-disaster position so
+        # SL/TP/trailing own the exit (mirrors the 2026-04-24 monitor-CLOSE
+        # suppression). A genuine catastrophic loss (net <= -8% price, spec §2
+        # disaster stop) still passes (escape hatch). Default-OFF => unchanged.
+        # Algo-fallback CLOSE (source != "claude") is exempt — it only fires on a
+        # real loss-cut.
+        from config import PORTFOLIO_DISCRETIONARY_CLOSE_GUARD_ENABLED as _pdcg
+        if _pdcg and action.get("source") == "claude":
+            try:
+                _tk = exchange.fetch_ticker(target.symbol, target.market_type)
+                _last = float(_tk.get("last") or _tk.get("close") or 0)
+                if _last > 0:
+                    _, _net_pct, _ = self.order_mgr._net_pnl_at_price(target, _last)
+                    if _net_pct > -8.0:   # not a disaster -> let SL/TP own it
+                        logger.info(
+                            f"[Claude] portfolio CLOSE suppressed (discretionary, "
+                            f"non-disaster net={_net_pct:+.2f}%) — SL/TP/trailing own "
+                            f"exits (2026-04-24 monitor-policy parity): "
+                            f"{target.symbol} {target.id[:8]}")
+                        return False
+            except Exception as _e:
+                logger.debug(f"[Claude] discretionary-close guard skipped: {_e}")
 
         logger.info(
             f"[Claude] EXECUTING CLOSE: {target.symbol} {target.side} "

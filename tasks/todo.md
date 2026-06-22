@@ -12,12 +12,23 @@ Bot PAPER + running; edits apply on owner RESTART (NOT bounced).
 - [x] **A1** Canonical `exit_reason` enum — `_canonical_exit_reason()` collapses Claude prose
       (39 free-text labels) to `claude_close`; clean machine labels pass through. Wired into
       `_execute_close`; prose preserved in log + `exit_decision_id`. + `tests/test_canonical_exit_reason.py`.
-- [ ] **A2** Entry gate (`recent_expectancy`) reads whole-trade PnL = `realized + COALESCE(partial,0)`.
-      `warehouse.py:459-519` (OWNER-gated: changes the live gate).
-- [ ] **A4** *(verify finding first — skeptic REFUTED it)* gate `_execute_close` discretionary LLM
-      CLOSE on profitable/in-SL positions + `is_tsmom_position` guard.
-- [ ] **A8** Backfill `entry_stop_px`; `r_multiple` reconstruct from ATR-SL when absent; reconcile
-      patches the OPEN row. `position_tracker.py`, `scripts/backfill_warehouse_closes.py`.
+- [x] **A2** `recent_expectancy(whole_trade=...)` — entry gate can read whole-trade PnL
+      (`realized + COALESCE(partial_realized_pnl,0)`) behind `EXPECTANCY_FILTER.whole_trade` (default-OFF,
+      byte-identical when off). ⚠ OWNER-GATED: folding partials in loosens the gate (more trades) — do NOT
+      enable without a measured edge. + `tests/test_recent_expectancy_whole_trade.py` (4).
+- [x] **A4** discretionary-CLOSE guard in `_execute_close` (scope+verify workflow CONFIRMED the path is
+      genuinely ungated — only OBSERVATION-gated — the un-suppressed twin of the disabled 30s monitor
+      CLOSE; the audit reviewer's refutation was the "latent-not-active" nuance, not a refutation).
+      Always-ON `is_tsmom_position` guard (invariant, was missing here) + default-OFF
+      `PORTFOLIO_DISCRETIONARY_CLOSE_GUARD_ENABLED` suppression of Claude-sourced non-disaster closes,
+      with a -8% catastrophic escape hatch. + `tests/test_execute_close_discretionary_guard.py` (6).
+- [x] **A8** SKIP (verified no-action). Warehouse query settled it: `legacy_only` — the 2026-06-04
+      entry_stop fix works (live path 0% NULL r_multiple/entry_stop_px for 17 straight days, last-7d 0%).
+      The 460 NULL r_multiple rows are 100% legacy (decision_id NULL), have no entry-stop data
+      (unrecoverable — ATR clamp not retained), and r_multiple has NO live reader. `positions.json`
+      backfill INFEASIBLE (disjoint window: closed-buffer starts 2026-06-05, NULLs end 2026-06-04; ids
+      don't join). reconcile-patch is LIVE-only/dormant in PAPER — defer. Optional approx-R backfill =
+      cosmetic, no EV change — not done.
 
 ## Phase B — EV-shape (CAN change WR -> default-OFF flag + PAPER A/B; flag before shipping)
 ONE shared flag: `RISK["near_target_exit_enabled"]` (default False, env `NEAR_TARGET_EXIT_ENABLED`)

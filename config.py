@@ -1006,6 +1006,13 @@ EXPECTANCY_FILTER = {
     "min_expected_star": -0.50,
     "lookback_days": 30,
     "min_sample_size": 5,
+    # A2 (audit 2026-06-21): when True, the per-symbol expectancy gate measures
+    # WHOLE-TRADE PnL (runner realized_pnl + partial_realized_pnl) instead of the
+    # runner leg alone (which under-counts partial-taken winners). ⚠ Default-OFF
+    # and OWNER-GATED: folding partials in makes expectancy less negative -> the
+    # gate ALLOWS MORE trades, which on a NO_EDGE bot means more negative-EV
+    # trades. Do NOT enable without a measured entry edge. OFF => byte-identical.
+    "whole_trade": False,
     # Operator-whitelisted symbols bypass the floor entirely. Use sparingly —
     # a symbol on this list trades regardless of recent expectancy. Per-trade
     # SL, MODEL_GATE, and Spec §12 streak halt still apply.
@@ -1869,6 +1876,18 @@ DAILY_LOSS_BREAKER = {
 # flip. RLock is mandatory (fail-closed re-entry) — see the proof in
 # reports/ / tasks/todo.md B7-P2.
 PER_POSITION_LOCK_ENABLED = os.getenv("PER_POSITION_LOCK_ENABLED", "false").lower() == "true"
+
+# ── PORTFOLIO DISCRETIONARY-CLOSE GUARD (A4, audit 2026-06-21) — default OFF ──
+# The portfolio-cycle Claude CLOSE -> _execute_close has NO gate beyond OBSERVATION
+# mode (no pnl / proximity / source filter) — the un-suppressed twin of the 30s
+# monitor CLOSE that was disabled 2026-04-24 after a 1W/17L record. When True, a
+# Claude-sourced (source=="claude") CLOSE of a NON-disaster position is refused so
+# SL/TP/trailing own the exit; a genuine catastrophic loss still passes (escape
+# hatch). The path is LATENT (the OPEN-centric portfolio prompt rarely solicits a
+# profitable CLOSE), so default OFF => behavior unchanged. The separate
+# is_tsmom_position guard in _execute_close is ALWAYS-ON (tsmom owns its exit).
+PORTFOLIO_DISCRETIONARY_CLOSE_GUARD_ENABLED = (
+    os.getenv("PORTFOLIO_DISCRETIONARY_CLOSE_GUARD_ENABLED", "false").lower() == "true")
 
 # ==============================================================
 # 2026-05-20 GHOST + NOISE CLEANUP + SMALL-TP CAPTURE
