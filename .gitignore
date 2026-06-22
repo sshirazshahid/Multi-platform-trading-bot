@@ -154,3 +154,15 @@ ntrader/reports/
 ntrader/**/__pycache__/
 ntrader/__pycache__/
 ntrader/.pytest_cache/
+
+# 2026-06-22 (owner request): ignore the root data/ dir wholesale + stray tool /
+# junk artifacts. SUPERSEDES the "data/ as a whole stays trackable" note above —
+# new data/ files are no longer auto-tracked (the public repo holds real wallet /
+# trade / market state). Already-TRACKED data files are NOT untracked by this
+# (gitignore only affects untracked paths); run `git rm --cached <file>` to drop
+# any you want removed from history going forward. Root-anchored so nested data/
+# dirs elsewhere (e.g. ntrader/data/, handled above) are unaffected.
+/data/
+/nul
+/gstack/
+/tradingview-mcp/
