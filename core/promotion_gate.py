@@ -37,6 +37,7 @@ narrow-universe overfit check.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -297,6 +298,7 @@ MIN_WR_UPLIFT = 1.5
 # whose backtest edge is more likely real than a selection artifact.
 MIN_DSR = 0.10
 MAX_PBO = 0.5
+MAX_MODEL_AGE_DAYS = 7
 
 LATEST_TEMPLATE = "ensemble_{market}_latest.json"
 AUDIT_LOG = Path("data/models/audit.jsonl")
@@ -449,6 +451,58 @@ def promote_if_eligible(
     tmp.write_text(json.dumps(payload, indent=2, default=float))
     tmp.replace(latest)
     return True
+
+
+def validate_model_pointer(
+    ptr: dict,
+    *,
+    market_type: str,
+    max_age_days: int = MAX_MODEL_AGE_DAYS,
+) -> tuple[bool, str, dict]:
+    """Revalidate an existing ``ensemble_*_latest.json`` pointer before load.
+
+    A pointer can become unsafe after thresholds tighten, after an artifact is
+    manually edited, or simply because it is stale. Treat the pointer as a
+    cached promotion decision, not a permanent authorization.
+    """
+    if not isinstance(ptr, dict):
+        return False, "latest pointer is not a JSON object", {}
+
+    diag_in = ptr.get("diag")
+    if not isinstance(diag_in, dict):
+        return False, "latest pointer missing promotion diagnostics", {
+            "model_version": ptr.get("model_version"),
+            "market_type": market_type,
+        }
+
+    art_path = ptr.get("artifact_path") or diag_in.get("artifact_path") or ""
+    row = {
+        "model_version": ptr.get("model_version") or diag_in.get("model_version"),
+        "artifact_path": art_path,
+        "oos_wr": diag_in.get("oos_wr"),
+        "deflated_sharpe": diag_in.get("deflated_sharpe"),
+        "pbo": diag_in.get("pbo"),
+    }
+    ok, reason, diag = evaluate_model_version(row, market_type=market_type)
+
+    promoted_at = float(ptr.get("promoted_at") or 0.0)
+    now = time.time()
+    age_days = (now - promoted_at) / 86_400.0 if promoted_at > 0 else float("inf")
+    diag["promoted_at"] = promoted_at
+    diag["pointer_age_days"] = age_days
+    diag["max_model_age_days"] = int(max_age_days)
+
+    if promoted_at <= 0:
+        return False, "latest pointer missing promoted_at", diag
+    if promoted_at > now + 300:
+        return False, "latest pointer promoted_at is in the future", diag
+    if age_days > max_age_days:
+        return False, (
+            f"latest pointer stale: {age_days:.1f}d > {int(max_age_days)}d"
+        ), diag
+    if not ok:
+        return False, reason, diag
+    return True, "OK", diag
 
 
 def apply_split(percent_to_shadow: float, path: str | Path = "data/ab_split.json") -> None:

@@ -230,7 +230,7 @@ class NewsSentimentFeed:
                 import json
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read())
-                for item in data.get("Data", [])[:30]:
+                for item in self._cryptocompare_items(data):
                     title = item.get("title", "")
                     sentiment = self._classify_sentiment(title)
                     articles.append({
@@ -245,6 +245,22 @@ class NewsSentimentFeed:
                 logger.debug(f"[NewsFeed] CryptoCompare fallback failed: {e}")
 
         return articles
+
+    @staticmethod
+    def _cryptocompare_items(data: dict) -> list[dict]:
+        """Normalize CryptoCompare's occasionally wrapped news payload."""
+        raw_items = data.get("Data", []) if isinstance(data, dict) else []
+        if isinstance(raw_items, dict):
+            raw_items = (
+                raw_items.get("Data")
+                or raw_items.get("items")
+                or raw_items.get("news")
+                or raw_items.get("results")
+                or []
+            )
+        if not isinstance(raw_items, list):
+            return []
+        return [item for item in raw_items[:30] if isinstance(item, dict)]
 
     @staticmethod
     def _classify_sentiment(title: str) -> str:

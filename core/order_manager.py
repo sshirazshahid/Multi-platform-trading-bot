@@ -383,7 +383,8 @@ class OrderManager:
             return True  # can't validate, allow
 
     def _verify_order_on_exchange(self, exchange, order_id: str,
-                                  symbol: str) -> dict | None:
+                                  symbol: str,
+                                  market_type: str = "spot") -> dict | None:
         """Immediately verify an order exists on exchange after placement.
         Returns order status dict or None if verification fails."""
         if not order_id:
@@ -391,7 +392,18 @@ class OrderManager:
         import time as _t
         for attempt in range(2):
             try:
-                status = exchange.exchange.fetch_order(order_id, symbol)
+                params = {}
+                if market_type == "futures":
+                    try:
+                        fn = getattr(exchange, "_futures_params", None)
+                        maybe = fn() if callable(fn) else {}
+                        params = maybe if isinstance(maybe, dict) else {}
+                    except Exception:
+                        params = {}
+                if params:
+                    status = exchange.exchange.fetch_order(order_id, symbol, params)
+                else:
+                    status = exchange.exchange.fetch_order(order_id, symbol)
                 if status and status.get("id"):
                     logger.debug(
                         f"[Orders] Order {order_id} verified: "
@@ -570,8 +582,9 @@ class OrderManager:
           'uncertain' -> cancel+verify both failed; do NOT register (the
                          ghost-reconciler adopts any real fill on the next cycle).
 
-        Sizes to the ACTUAL fill only for an explicit 'partial_maker'; every
-        other fill keeps the intended size (unchanged behavior for normal fills).
+        Sizes to the ACTUAL fill whenever the venue/executor reports one.
+        This handles partial maker fills, downsized exchange fills, and TWAP
+        slices. If no fill/amount is reported, fall back to intended_size.
         """
         if not order:
             return ("no_fill", 0.0)
@@ -582,10 +595,85 @@ class OrderManager:
             return ("uncertain", 0.0)
         if not order.get("id"):
             return ("no_fill", 0.0)
+        filled = float(order.get("filled") or 0)
+        amount = float(order.get("amount") or 0)
+        actual = filled if filled > 0 else amount
         if status == "partial_maker":
-            filled = float(order.get("filled") or 0)
-            return ("filled", filled) if filled > 0 else ("no_fill", 0.0)
-        return ("filled", float(intended_size))
+            return ("filled", actual) if actual > 0 else ("no_fill", 0.0)
+        return ("filled", actual if actual > 0 else float(intended_size))
+
+    @staticmethod
+    def _aggregate_execution_results(results, intended_size):
+        """Aggregate TWAP slice results into one order-like dict.
+
+        Returns None for no fill, an ``uncertain`` dict when every slice is
+        uncertain/no-fill and at least one is uncertain, or a synthetic filled
+        order with total filled quantity and VWAP average.
+        """
+        if not results:
+            return None
+
+        slice_hint = float(intended_size) / max(1, len(results))
+        total = 0.0
+        notional = 0.0
+        ids = []
+        fill_types = []
+        any_uncertain = False
+        first = None
+
+        for order in results:
+            if not order:
+                continue
+            first = first or order
+            outcome, fill_sz = OrderManager._interpret_execution_result(
+                order, slice_hint)
+            if outcome == "uncertain":
+                any_uncertain = True
+                continue
+            if outcome != "filled" or fill_sz <= 0:
+                continue
+            px = float(order.get("average") or order.get("price") or 0)
+            total += fill_sz
+            if px > 0:
+                notional += fill_sz * px
+            if order.get("id"):
+                ids.append(str(order.get("id")))
+            if order.get("_fill_type"):
+                fill_types.append(order.get("_fill_type"))
+
+        if total > 0:
+            avg = (notional / total) if notional > 0 else float(
+                (first or {}).get("average") or (first or {}).get("price") or 0)
+            if "taker" in fill_types:
+                fill_type = "taker"
+            elif "maker_partial" in fill_types or total < float(intended_size):
+                fill_type = "maker_partial"
+            elif "maker" in fill_types:
+                fill_type = "maker"
+            else:
+                fill_type = None
+            out = {
+                "id": ids[0] if ids else f"TWAP-{uuid.uuid4().hex[:8]}",
+                "status": "closed",
+                "filled": total,
+                "amount": total,
+                "average": avg,
+                "price": avg,
+                "_twap_slice_ids": ids,
+            }
+            if fill_type:
+                out["_fill_type"] = fill_type
+            if any_uncertain:
+                out["_executor_warning"] = "twap_partial_with_uncertain_slice"
+            return out
+
+        if any_uncertain:
+            return {
+                "status": "uncertain",
+                "id": (first or {}).get("id"),
+                "_executor_warning": "twap_uncertain",
+            }
+        return None
 
     def open_position(self, exchange: BaseExchange, symbol: str, side: str,
                       market_type: str, strategy: str, size: float,
@@ -899,7 +987,7 @@ class OrderManager:
                     results = self.executor.execute_twap(
                         exchange, symbol, side, size,
                         market_type, params)
-                    order = results[0] if results else None
+                    order = self._aggregate_execution_results(results, size)
                 else:
                     # Limit order with market fallback
                     order = self.executor.execute_limit_with_fallback(
@@ -942,7 +1030,7 @@ class OrderManager:
 
                 # ── Post-order verification ──
                 verified = self._verify_order_on_exchange(
-                    exchange, pos.order_id, symbol)
+                    exchange, pos.order_id, symbol, market_type)
                 if verified:
                     actual_fill = verified.get("average") or verified.get("price")
                     if actual_fill:
@@ -1692,15 +1780,32 @@ class OrderManager:
                 self._pos_locks[pid] = lk
             return lk
 
+    @staticmethod
+    def _close_order_confirmed(order) -> bool:
+        """Return True only when a close order response proves venue receipt/fill."""
+        if not isinstance(order, dict):
+            return False
+        status = str(order.get("status") or "").lower()
+        if status in {"rejected", "failed", "canceled", "cancelled"}:
+            return False
+        if order.get("id"):
+            return True
+        try:
+            if float(order.get("filled") or 0) > 0:
+                return True
+        except Exception:
+            pass
+        return status in {"closed", "filled"}
+
     def close_position(self, exchange: BaseExchange, position: Position,
                        reason: str, price: float = None,
                        order_type: str = "market",
                        decision_id: str | None = None):
-        """B7-P2 per-position serialization wrapper (default-OFF via
+        """B7-P2 per-position serialization wrapper (default-ON via
         PER_POSITION_LOCK_ENABLED). When ON, serializes close + SL-mutation on
         the same position id and no-ops the race loser via tracker.is_position_open.
-        Timeout-acquire (5s < the 10s monitor cadence) with proceed-without-lock
-        fallback so a locking bug can never freeze the SL/TP monitor thread."""
+        Timeout-acquire (5s < the 10s monitor cadence) and fail closed on
+        timeout so close/SL mutation never proceeds without serialization."""
         if not getattr(self, "_per_pos_lock_enabled", False):
             return self._close_position_impl(
                 exchange, position, reason, price, order_type, decision_id)
@@ -1709,7 +1814,8 @@ class OrderManager:
         if not acquired:
             logger.error(
                 f"[Lock] close_position _position_lock TIMEOUT for "
-                f"{position.id} after 5s — proceeding WITHOUT serialization")
+                f"{position.id} after 5s — refusing unsynchronized close")
+            return None
         try:
             if not self.tracker.is_position_open(position.id):
                 logger.info(
@@ -1806,6 +1912,8 @@ class OrderManager:
                     position.size,
                     price if order_type == "limit" else None,
                     params=params, market_type=position.market_type)
+                if not self._close_order_confirmed(close_order):
+                    raise RuntimeError(f"close order not confirmed: {close_order}")
                 order_placed = True
                 # Use actual fill price if available
                 fill = close_order.get("average") or close_order.get("price")
@@ -1856,11 +1964,14 @@ class OrderManager:
                     else:
                         logger.info(f"[Orders] {exchange.name} One-Way mode — retrying close without reduceOnly")
                         try:
-                            exchange.create_order(
+                            retry_order = exchange.create_order(
                                 position.symbol, order_type, close_side,
                                 position.size,
                                 price if order_type == "limit" else None,
                                 params={}, market_type=position.market_type)
+                            if not self._close_order_confirmed(retry_order):
+                                raise RuntimeError(
+                                    f"retry close order not confirmed: {retry_order}")
                             order_placed = True
                         except Exception as e2:
                             err2 = str(e2).lower()
@@ -1877,10 +1988,13 @@ class OrderManager:
                     # One-way mode: reduceOnly=True tells the exchange this is a close
                     _ow_close = {"reduceOnly": True}
                     try:
-                        exchange.create_order(
+                        retry_order = exchange.create_order(
                             position.symbol, order_type, close_side,
                             position.size, None,
                             params=_ow_close, market_type=position.market_type)
+                        if not self._close_order_confirmed(retry_order):
+                            raise RuntimeError(
+                                f"one-way close order not confirmed: {retry_order}")
                         order_placed = True
                     except Exception as e2:
                         err2 = str(e2).lower()
@@ -1893,17 +2007,18 @@ class OrderManager:
                     logger.error(f"[Orders] Close failed for {position.id}: {e}")
 
             if not order_placed:
-                # Track close failures — force-close ghost after 3 attempts
+                # Track close failures. Do NOT local-close after repeated
+                # failures: if the venue close is unconfirmed, hiding the
+                # position locally is more dangerous than keeping it visible.
                 fc = self._close_fail_count.get(position.id, 0) + 1
                 self._close_fail_count[position.id] = fc
                 self._save_close_fail_count()
                 if fc >= 3:
-                    logger.warning(
-                        f"[Orders] GHOST: {position.symbol} close failed {fc}x "
-                        f"— force-closing in tracker (not on exchange)")
-                    self.tracker.close(position.id, price, "ghost_force_close")
-                    self._close_fail_count.pop(position.id, None)
-                    self._save_close_fail_count()
+                    logger.critical(
+                        f"[Orders] CLOSE FAILED {fc}x for {position.symbol} "
+                        f"{position.side.upper()} id={position.id}: keeping "
+                        f"tracker OPEN until exchange close is confirmed. "
+                        f"Manual reconciliation required.")
                 return None
 
         # Success — clear any failure counter

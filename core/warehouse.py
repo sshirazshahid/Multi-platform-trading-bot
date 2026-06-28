@@ -87,6 +87,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_key
     ON trades(exchange, symbol, ts_entry, side);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 
+CREATE TABLE IF NOT EXISTS trade_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id      INTEGER NOT NULL,
+    event_type    TEXT    NOT NULL,
+    event_ts      REAL    NOT NULL,
+    exchange      TEXT,
+    symbol        TEXT,
+    side          TEXT,
+    payload_json  TEXT,
+    UNIQUE(trade_id, event_type, event_ts)
+);
+CREATE INDEX IF NOT EXISTS idx_trade_events_trade ON trade_events(trade_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trade_events_close_once
+    ON trade_events(trade_id)
+    WHERE event_type='CLOSE';
+
 CREATE TABLE IF NOT EXISTS claude_reviews (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     ts                REAL    NOT NULL,
@@ -284,6 +300,13 @@ class Warehouse:
                     "ON predictions(candidate_id)")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_trade_events_close_once "
+                    "ON trade_events(trade_id) WHERE event_type='CLOSE'"
+                )
+            except sqlite3.OperationalError:
+                pass
             for col_def in (
                 "agent_id TEXT",
                 "proposal_id TEXT",
@@ -395,7 +418,21 @@ class Warehouse:
                  fill_type, decision_id),
             )
             if cur.rowcount > 0:
-                return int(cur.lastrowid)
+                trade_id = int(cur.lastrowid)
+                self._record_trade_event(
+                    trade_id=trade_id,
+                    event_type="OPEN",
+                    event_ts=ts_entry,
+                    payload={
+                        "exchange": exchange,
+                        "symbol": symbol,
+                        "side": side,
+                        "entry_px": entry_px,
+                        "size": size,
+                        "mode": mode,
+                    },
+                )
+                return trade_id
             # Already inserted — look it up
             got = self._conn().execute(
                 "SELECT id FROM trades WHERE exchange=? AND symbol=? AND ts_entry=? AND side=?",
@@ -405,6 +442,39 @@ class Warehouse:
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_open error: {e}")
             return -1
+
+    def _record_trade_event(
+        self,
+        *,
+        trade_id: int,
+        event_type: str,
+        event_ts: float,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            row = self._conn().execute(
+                "SELECT exchange, symbol, side FROM trades WHERE id=?",
+                (trade_id,),
+            ).fetchone()
+            exchange = row["exchange"] if row else None
+            symbol = row["symbol"] if row else None
+            side = row["side"] if row else None
+            self._conn().execute(
+                """INSERT OR IGNORE INTO trade_events(
+                    trade_id, event_type, event_ts, exchange, symbol, side, payload_json)
+                VALUES (?,?,?,?,?,?,?)""",
+                (
+                    trade_id,
+                    event_type,
+                    event_ts,
+                    exchange,
+                    symbol,
+                    side,
+                    json.dumps(payload or {}, separators=(",", ":")),
+                ),
+            )
+        except sqlite3.Error as e:
+            logger.debug(f"[Warehouse] record_trade_event skipped: {e}")
 
     def record_trade_close(
         self,
@@ -452,6 +522,17 @@ class Warehouse:
                 (ts_exit, exit_px, realized_pnl, r_multiple,
                  hold_sec, exit_reason, fee, slippage, entry_stop_px,
                  partial_realized_pnl, exit_decision_id, trade_id),
+            )
+            self._record_trade_event(
+                trade_id=trade_id,
+                event_type="CLOSE",
+                event_ts=ts_exit,
+                payload={
+                    "exit_px": exit_px,
+                    "realized_pnl": realized_pnl,
+                    "r_multiple": r_multiple,
+                    "exit_reason": exit_reason,
+                },
             )
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_close error: {e}")

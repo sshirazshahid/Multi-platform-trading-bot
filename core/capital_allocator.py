@@ -242,8 +242,12 @@ class CapitalAllocator:
         """
         action_type = action.get("type", "")
 
-        # Recommendation-only gate — always writes, never executes
-        if CFG.get("recommendation_only", True):
+        # Recommendation-only/PAPER gate — always writes, never executes.
+        # DRY_RUN means the bot is not in CONTROLLED_LIVE. Wallet transfers
+        # are real balance movements, not simulated orders, so PAPER must not
+        # call exchange.transfer() even when a historical config set
+        # recommendation_only=False.
+        if DRY_RUN or CFG.get("recommendation_only", True):
             self._emit_recommendation(action)
             logger.info(
                 f"[CapAlloc] [RECOMMEND-ONLY] {action_type}: "
@@ -252,12 +256,9 @@ class CapitalAllocator:
             self._record_action(action, success=False)
             return False
 
-        # ACCUMULATE executes a REAL futures→spot transfer of the owner's OWN
-        # funds even under DRY_RUN/PAPER — owner explicitly confirmed this
-        # (AskUserQuestion 2026-05-24, reconfirmed 2026-05-30: "Allow in PAPER
-        # too"). DRY_RUN simulates market ORDERS, not wallet transfers between
-        # the owner's own spot/futures wallets. recommendation_only=False is the
-        # opt-in gate; the transfer circuit-breaker prevents futile retries.
+        # ACCUMULATE executes a REAL futures→spot transfer only in explicit
+        # CONTROLLED_LIVE with recommendation_only=False. The transfer
+        # circuit-breaker prevents futile retries.
         if action_type == "ACCUMULATE":
             ex_name = action["exchange"]
             if self._transfer_circuit_open(ex_name):

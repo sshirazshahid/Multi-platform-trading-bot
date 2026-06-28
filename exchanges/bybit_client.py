@@ -474,6 +474,7 @@ class BybitClient(BaseExchange):
         settleCoin".
         """
         if not self._ok():
+            self._last_positions_fetch_ok = False
             return []
         from exchanges.base import _is_timestamp_error
         params = {"category": "linear"}
@@ -481,7 +482,9 @@ class BybitClient(BaseExchange):
             params["settleCoin"] = "USDT"
         for attempt in range(2):
             try:
-                return self.exchange.fetch_positions(symbols, params=params) or []
+                result = self.exchange.fetch_positions(symbols, params=params) or []
+                self._last_positions_fetch_ok = True
+                return result
             except Exception as e:
                 if _is_timestamp_error(e) and attempt == 0:
                     logger.warning("[Bybit] Timestamp error on positions — re-syncing")
@@ -490,7 +493,9 @@ class BybitClient(BaseExchange):
                 # 2026-04-16: Raised debug->warning so silent position fetch
                 # failures (e.g. auth revoked, IP not whitelisted) surface.
                 logger.warning(f"[Bybit] fetch_positions failed: {str(e)[:150]}")
+                self._last_positions_fetch_ok = False
                 return []
+        self._last_positions_fetch_ok = False
         return []
 
     def get_min_order_size(self, symbol: str) -> float:

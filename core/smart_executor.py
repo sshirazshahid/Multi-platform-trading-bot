@@ -144,6 +144,19 @@ class SmartExecutor:
             # (latent: PAPER bypasses this path; found 2026-06-11).
             params["postOnly"] = True
 
+        def _fetch_order_status(order_id: str) -> dict:
+            fetch_params = {}
+            if market_type == "futures":
+                try:
+                    fn = getattr(exchange, "_futures_params", None)
+                    maybe = fn() if callable(fn) else {}
+                    fetch_params = maybe if isinstance(maybe, dict) else {}
+                except Exception:
+                    fetch_params = {}
+            if fetch_params:
+                return exchange.exchange.fetch_order(order_id, symbol, fetch_params)
+            return exchange.exchange.fetch_order(order_id, symbol)
+
         entry_price = self.get_entry_price(exchange, symbol, side, market_type)
         if entry_price <= 0:
             # Fallback to market immediately
@@ -181,7 +194,7 @@ class SmartExecutor:
             while time.time() - start < wait_window:
                 time.sleep(1)
                 try:
-                    status = exchange.exchange.fetch_order(order_id, symbol)
+                    status = _fetch_order_status(order_id)
                     if status.get("status") == "closed":
                         fill_price = float(status.get("average", entry_price))
                         logger.info(
@@ -212,9 +225,13 @@ class SmartExecutor:
             #   3. If status == 'closed' / fully filled → return it,
             #      DO NOT place market (would be a double-fill)
             #   4. If status == 'canceled' or unknown → proceed to market
+            cancel_confirmed = False
             cancel_failed = False
             try:
-                exchange.cancel_order(order_id, symbol)
+                cancel_result = exchange.cancel_order(order_id, symbol, market_type)
+                cancel_confirmed = bool(cancel_result) and not bool(
+                    (cancel_result or {}).get("_cancel_uncertain"))
+                cancel_failed = not cancel_confirmed
             except Exception as cancel_err:
                 cancel_failed = True
                 logger.debug(
@@ -225,9 +242,12 @@ class SmartExecutor:
             # timeout window, return without placing a market order.
             filled_qty = 0.0
             status = {}
+            verified_safe_cancel = False
             try:
-                status = exchange.exchange.fetch_order(order_id, symbol)
+                status = _fetch_order_status(order_id)
                 state = (status.get("status") or "").lower()
+                verified_safe_cancel = state in (
+                    "canceled", "cancelled", "expired", "rejected")
                 filled_qty = float(status.get("filled") or 0)
                 if state == "closed" or (filled_qty > 0 and filled_qty >= amount * 0.95):
                     fill_price = float(status.get("average") or status.get("price") or entry_price)
@@ -250,6 +270,15 @@ class SmartExecutor:
                     return {"status": "uncertain", "id": order_id,
                             "symbol": symbol, "amount": amount,
                             "_executor_warning": "cancel+verify both failed"}
+
+            if cancel_failed and not verified_safe_cancel and filled_qty <= 0:
+                logger.warning(
+                    f"[Executor] {symbol}: cancel was not confirmed and order "
+                    f"verification did not prove cancellation — refusing market "
+                    f"fallback to avoid double-fill.")
+                return {"status": "uncertain", "id": order_id,
+                        "symbol": symbol, "amount": amount,
+                        "_executor_warning": "cancel_not_confirmed"}
 
             # Partial fill below the 95% "treat as filled" bar above: a real,
             # smaller position now exists (cancel removed only the unfilled
@@ -284,7 +313,9 @@ class SmartExecutor:
                                        market_type, params)
 
         except Exception as e:
-            logger.debug(f"[Executor] Limit order failed {symbol}: {e}")
+            logger.warning(
+                f"[Executor] Limit order failed {symbol}: {str(e)[:120]} — "
+                f"NOT falling back to market because venue receipt is unknown")
             if _maker_only:
                 logger.info(
                     f"[Executor] {symbol}: limit-place failed under MAKER_ONLY "
@@ -293,8 +324,9 @@ class SmartExecutor:
                 return {"status": "skipped_maker_only", "id": None,
                         "symbol": symbol, "amount": amount,
                         "_executor_warning": "maker_only_place_failed"}
-            return self._market_order(exchange, symbol, side, amount,
-                                       market_type, params)
+            return {"status": "uncertain", "id": None,
+                    "symbol": symbol, "amount": amount,
+                    "_executor_warning": "limit_place_failed_unknown"}
 
     def execute_twap(self, exchange, symbol: str, side: str,
                      total_amount: float, market_type: str = "spot",

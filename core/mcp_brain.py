@@ -952,6 +952,15 @@ class MCPBrain:
                 self._model_load_failed_at[market_type] = time.time()
                 return {}
             ptr = json.loads(latest.read_text())
+            from core.promotion_gate import validate_model_pointer
+            ptr_ok, ptr_reason, _ptr_diag = validate_model_pointer(
+                ptr, market_type=market_type)
+            if not ptr_ok:
+                logger.warning(
+                    f"[ModelGate] latest pointer rejected for market={market_type}: "
+                    f"{ptr_reason}")
+                self._model_load_failed_at[market_type] = time.time()
+                return {}
             art_path = Path(ptr["artifact_path"])
             if not art_path.exists():
                 logger.warning(

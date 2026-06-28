@@ -1774,8 +1774,31 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 hb_age_s = str(int((datetime.now(timezone.utc) - hb_dt).total_seconds()))
             except Exception:
                 pass
-            hb_status = col("RUNNING", GREEN + BOLD)
-            hb_reason = ""
+            # 2026-06-22: reflect the bot's real state instead of a hardcoded
+            # green "RUNNING". Precedence: risk-manager halt > heartbeat
+            # staleness. A crashed/stalled bot leaves a stale heartbeat file
+            # (the file-absent guard below never fires for it), so age is the
+            # only signal that catches a dead process. halted_exchanges /
+            # api_latency are per-cycle-volatile sentinels in this build and
+            # are intentionally not surfaced here to avoid false DEGRADED
+            # flicker; is_halted + age cover what the operator must not miss.
+            try:
+                _hb_age = int(hb_age_s)
+            except (TypeError, ValueError):
+                _hb_age = None
+            if hb.get("is_halted"):
+                hb_status = col("HALTED", RED + BOLD)
+                hb_reason = "  " + col(
+                    "[{}]".format(hb.get("halt_reason") or "risk halt"), RED)
+            elif _hb_age is not None and _hb_age > 600:
+                hb_status = col("STALE", RED + BOLD)
+                hb_reason = "  " + col("[no heartbeat update]", RED)
+            elif _hb_age is not None and _hb_age > 180:
+                hb_status = col("STALE", YELLOW + BOLD)
+                hb_reason = "  " + col("[heartbeat lagging]", YELLOW)
+            else:
+                hb_status = col("RUNNING", GREEN + BOLD)
+                hb_reason = ""
             # Mem: bot writes 0 when psutil isn't available in the venv —
             # display "n/a" instead of the misleading "0MB".
             mem_str = "n/a" if (not hb_mem or hb_mem == 0) else "{:.0f}MB".format(hb_mem)
@@ -1814,9 +1837,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 start_bal = wd.get("start", 100.0)
         except Exception:
             start_bal = 100.0
+        _n_disp = 0
         for ex_name in ["binance", "bybit", "bitget"]:
             if ex_name not in statuses:
                 continue
+            _n_disp += 1
             ec  = EX_COLOUR.get(ex_name, WHITE)
             bal = wallet_bal.get(ex_name, start_bal)
             st  = statuses.get(ex_name, "—")
@@ -1825,7 +1850,11 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             st_s = col("OK", GREEN) if st == "OK" else col(st[:15], RED)
             row("{} {}  {:>10.2f} USDT  [{}]  {:>+.2f}".format(
                 col("●", ec), vljust(col(ex_name.upper(), ec), 8), bal, st_s, diff))
-        start_total = start_bal * max(len([e for e in statuses if statuses[e] == "OK"]), 1)
+        # 2026-06-22: seed the ROI denominator with the SAME accounts summed
+        # into total_live (every displayed exchange), not just the OK ones.
+        # Previously a transient non-OK status dropped an account from the
+        # denominator while its balance stayed in the numerator, skewing ROI.
+        start_total = start_bal * max(_n_disp, 1)
         roi_pct = ((total_live - start_total) / start_total * 100) if start_total > 0 else 0
         rc = GREEN if roi_pct >= 0 else RED
         box_mid()
@@ -2111,6 +2140,25 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         shorts_s = col("ALLOWED", GREEN) if shorts_ok else col("BLOCKED (needs BTC bear)", RED)
         row("  BTC {}: {}   Shorts: {}".format(
             BTC_TREND_TIMEFRAME, col(btc_trend, btc_col), shorts_s))
+        # 2026-06-22: surface the BTC-vol circuit breaker (core/btc_vol_pause.py,
+        # active in the live engine path). It gates ALL new entries when BTC 1h
+        # ATR spikes vs its trailing median. Previously invisible — when it
+        # paused, the operator saw entries stop with no on-screen reason.
+        try:
+            _bv = _file_cache.load("data/btc_vol_state.json") or {}
+            _pu = float(_bv.get("pause_until") or 0.0)
+            _buf = _bv.get("buf") or []
+            _cur_vol = (_buf[-1][1] if _buf and isinstance(_buf[-1], (list, tuple))
+                        and len(_buf[-1]) > 1 else None)
+            _vol_s = col("  ATR {:.2f}%".format(_cur_vol), DIM) if _cur_vol is not None else ""
+            if _pu > time.time():
+                _mins = int((_pu - time.time()) / 60) + 1
+                row("  Vol gate: {}{}".format(
+                    col("PAUSED {}m (BTC vol spike)".format(_mins), RED + BOLD), _vol_s))
+            else:
+                row("  Vol gate: {}{}".format(col("armed", GREEN), _vol_s))
+        except Exception:
+            pass
         box_bot()
         print()
     except Exception as _e:
@@ -2297,17 +2345,29 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 # automatically). False means soft-SL only (relies on bot's
                 # monitor cycle — at risk if bot crashes or has API delay).
                 exch_sl = pos.get("_exchange_sl", False)
-                if sl and tp:
+                if sl or tp:
+                    # 2026-06-22: previously this required BOTH sl AND tp, which
+                    # hid the stop-loss for any futures position that has an SL
+                    # but no TP — TSMOM disaster-stop-only holds, and live
+                    # exchange positions whose only stop is the liquidation
+                    # price (take_profit=0). Render whichever protections exist
+                    # so the operator always sees the active stop.
                     sl_tag = (col("hard", GREEN) if exch_sl
                               else col("soft", YELLOW))
-                    if entry > 0:
-                        sl_pct = abs(sl - entry) / entry * 100
-                        tp_pct = abs(tp - entry) / entry * 100
-                        row("      SL:{:.6g}({:.1f}%) {} TP:{:.6g}({:.1f}%)  [{}]".format(
-                            sl, sl_pct, sl_tag, tp, tp_pct, col(strat, DIM)))
-                    else:
-                        row("      SL:{:.6g} {} TP:{:.6g}  [{}]".format(
-                            sl, sl_tag, tp, col(strat, DIM)))
+                    seg = []
+                    if sl:
+                        if entry and entry > 0:
+                            seg.append("SL:{:.6g}({:.1f}%) {}".format(
+                                sl, abs(sl - entry) / entry * 100, sl_tag))
+                        else:
+                            seg.append("SL:{:.6g} {}".format(sl, sl_tag))
+                    if tp:
+                        if entry and entry > 0:
+                            seg.append("TP:{:.6g}({:.1f}%)".format(
+                                tp, abs(tp - entry) / entry * 100))
+                        else:
+                            seg.append("TP:{:.6g}".format(tp))
+                    row("      " + "  ".join(seg) + "  [{}]".format(col(strat, DIM)))
                 elif mtype == "spot" and sz > 0 and live_px > 0:
                     value = sz * live_px
                     row("      Qty:{:.6g}  Value:{:.2f} USDT  [{}]".format(
@@ -2899,12 +2959,18 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
 
             if group_usage:
                 box_top("CORRELATION EXPOSURE")
-                total_notional = sum(
-                    float(p.get("size", 0) or 0) * float(p.get("entry_price", 0) or 0)
-                    for p in open_pos
-                )
-                if total_notional <= 0:
-                    total_notional = total_live if total_live > 0 else 1.0
+                # 2026-06-22: compare group exposure to EQUITY (account
+                # balance), matching the bot's cap semantics
+                # (correlation_manager: current_pct = group_notional / balance,
+                # capped at max_group_pct of balance). The old denominator was
+                # the sum of open notionals, so Used% was a share-of-open-book
+                # measured against a fraction-of-balance cap — apples to oranges
+                # (e.g. one lone position always read ~100% "used").
+                equity_denom = total_live
+                if equity_denom <= 0:
+                    equity_denom = sum(
+                        float(p.get("size", 0) or 0) * float(p.get("entry_price", 0) or 0)
+                        for p in open_pos) or 1.0
 
                 row("  {} {}  {}  {}  {}  {}".format(
                     vljust(col("Group",    DIM), 14),
@@ -2916,7 +2982,7 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 row("  " + col("─" * 62, DIM))
                 for gname in sorted(group_usage.keys()):
                     gu = group_usage[gname]
-                    used_pct = gu["notional"] / total_notional * 100 if total_notional > 0 else 0
+                    used_pct = gu["notional"] / equity_denom * 100 if equity_denom > 0 else 0
                     max_pct = gu["max_pct"] * 100
                     fill_ratio = min(used_pct / max_pct, 1.0) if max_pct > 0 else 0
                     bar_len = int(fill_ratio * 16)
@@ -3028,10 +3094,16 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             ds_std = np.std(downside) if len(downside) > 0 else 0
             sortino = (mean_pnl / ds_std * np.sqrt(trades_per_yr)) if ds_std > 0 else 0
 
-            # Max drawdown
-            peak_eq = 0.0
+            # Max drawdown — 2026-06-22: compute over the SAME window the panel
+            # actually draws (eq_show = last N) so MaxDD agrees with the curve
+            # and the Sharpe/Sortino printed beside it. Previously this looped
+            # the full inception-to-date `equity`, so a deep early drawdown was
+            # reported under a panel titled "(last N trades)". Seed the peak
+            # with eq_show[0] (not 0.0) since eq_show holds absolute cumulative
+            # equity that can be negative.
+            peak_eq = eq_show[0]
             max_dd = 0.0
-            for e in equity:
+            for e in eq_show:
                 peak_eq = max(peak_eq, e)
                 dd = peak_eq - e
                 max_dd = max(max_dd, dd)
@@ -3201,8 +3273,18 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
         # Status + opens today. 2026-06-11: risk_state's counter is OPENS
         # since UTC midnight (note_trade_opened), not closed trades — label
         # it so it isn't compared 1:1 against PERFORMANCE's closed count.
+        # 2026-06-22: derive Status from risk_state.is_halted/halt_reason
+        # instead of a hardcoded green "ACTIVE" — the bot can halt (daily-loss
+        # breaker / manual) and the panel must not keep claiming it's running.
+        _r_halted = bool(risk_data.get("is_halted")) if risk_data else False
+        _r_reason = (risk_data.get("halt_reason") or "") if risk_data else ""
+        if _r_halted:
+            _status_cell = col("HALTED", RED + BOLD) + (
+                col("  [{}]".format(_r_reason), RED) if _r_reason else "")
+        else:
+            _status_cell = col("ACTIVE", GREEN + BOLD)
         row("  Status: {}  MaxLev: {}x  Opens Today (UTC): {}".format(
-            col("ACTIVE", GREEN + BOLD), max_leverage,
+            _status_cell, max_leverage,
             col(str(trades_today), WHITE)))
 
         # Live safety nets
@@ -3318,24 +3400,32 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
     # ══════════════════════════════════════════════════════════════════
     if wh and wh.get("slippage", {}).get("n", 0):
         box_top("SLIPPAGE vs FEE RATIO  ({})".format(wh.get("mode", "?")))
-        s = wh["slippage"]
-        n = int(s.get("n") or 0)
-        slip = float(s.get("avg_slip") or 0.0)
-        fee  = float(s.get("avg_fee")  or 0.0)
+        slp = wh["slippage"]   # local name (not `s`) — avoids shadowing stats `s`
+        n = int(slp.get("n") or 0)
+        slip = float(slp.get("avg_slip") or 0.0)
+        fee  = float(slp.get("avg_fee")  or 0.0)
         ratio = (slip / fee) if fee > 0 else 0.0
-        # Healthy when slippage cost is < fee cost (ratio < 1).
-        ratio_c = GREEN if ratio < 1.0 else (YELLOW if ratio < 2.0 else RED)
+        # 2026-06-22: warehouse trades.slippage is recorded as 0 for every fill
+        # in this build (the sim/live execution path never populates it), so a
+        # 0.00x ratio is "no data", NOT "great execution". Don't paint a
+        # reassuring green "healthy" on an all-zero column — label it honestly.
+        slip_recorded = slip != 0.0
+        if slip_recorded:
+            ratio_c = GREEN if ratio < 1.0 else (YELLOW if ratio < 2.0 else RED)
+            ratio_s = col("{:.2f}x".format(ratio), ratio_c)
+            hint_s = col(("healthy" if ratio < 1.0 else
+                          ("watch" if ratio < 2.0 else "execution decay")), ratio_c)
+        else:
+            ratio_s = col("n/a", DIM)
+            hint_s = col("slippage not recorded", DIM)
         row("  {} {}   {} {}   {} {}".format(
             col("Avg slippage:", DIM),
             col("{:.4f} USDT".format(slip), WHITE),
             col("Avg fee:", DIM),
             col("{:.4f} USDT".format(fee), WHITE),
-            col("Ratio:", DIM),
-            col("{:.2f}x".format(ratio), ratio_c)))
-        hint = ("healthy" if ratio < 1.0 else
-                ("watch" if ratio < 2.0 else "execution decay"))
+            col("Ratio:", DIM), ratio_s))
         row("  {} {}   {} trades sampled".format(
-            col("Status:", DIM), col(hint, ratio_c), col(str(n), WHITE)))
+            col("Status:", DIM), hint_s, col(str(n), WHITE)))
         box_bot()
         print()
 
@@ -3371,6 +3461,44 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
                 col("{:.4f} USDT".format(saved_fees), GREEN)))
         box_bot()
         print()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  DATA FEEDS  (auxiliary harvesters — health only, NOT in trade path)
+    # ══════════════════════════════════════════════════════════════════
+    # 2026-06-22: the bot now runs side harvesters that write data/*_status.json
+    # (TV / L2 order book / option skew / liquidations). They feed research, not
+    # live entries, but an operator still wants to know when one goes dark
+    # (e.g. L2 currently connected:false). Renders only feeds whose status file
+    # exists; fail-safe and clearly labelled so it isn't mistaken for a gate.
+    try:
+        _now_f = time.time()
+        _feed_cells = []
+        for _label, _fp in (("TV", "data/tv_status.json"),
+                            ("L2", "data/l2_status.json"),
+                            ("Skew", "data/skew_status.json"),
+                            ("Liq", "data/liquidations_status.json")):
+            _fs = _file_cache.load(_fp)
+            if not _fs:
+                continue
+            _upd = float(_fs.get("updated") or 0.0)
+            _age = (_now_f - _upd) if _upd else None
+            _stale = (_age is None) or (_age > 600)   # harvesters poll well under 10m
+            if _stale:
+                _dot, _txt = col("●", DIM), col("stale", DIM)
+            elif _fs.get("connected"):
+                _dot, _txt = col("●", GREEN), col("connected", GREEN)
+            else:
+                _dot, _txt = col("●", YELLOW), col("down", YELLOW)
+            _age_s = "{}s".format(int(_age)) if (_age is not None and _age < 600) else "—"
+            _feed_cells.append("{} {} {} {}".format(
+                _dot, col(_label, WHITE), _txt, col("({})".format(_age_s), DIM)))
+        if _feed_cells:
+            box_top("DATA FEEDS  (aux harvesters — not in trade path)")
+            row("  " + "    ".join(_feed_cells))
+            box_bot()
+            print()
+    except Exception:
+        pass
 
     # ══════════════════════════════════════════════════════════════════
     #  FOOTER
