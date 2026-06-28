@@ -27,6 +27,7 @@ Binance public OHLCV via ccxt. NOTE: the keyless MVRV-Z series is ~4 years
 
 Run:  python scripts/run_mvrv_z_screen.py
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -47,7 +48,7 @@ from core.stat_tests import deflated_sharpe, pbo, sharpe
 from core.strategy_readiness import StrategyReadinessThresholds, evaluate_records
 
 MVRVZ_URL = "https://bitcoin-data.com/v1/mvrv-zscore"
-COST_BPS_ROUNDTRIP = 12.0          # taker round-trip on a liquid major (fees+spread+slip)
+COST_BPS_ROUNDTRIP = 12.0  # taker round-trip on a liquid major (fees+spread+slip)
 OOS_FRAC = 0.40
 Z_BUY_GRID = [-0.2, 0.0, 0.5, 1.0]
 Z_SELL_GRID = [2.5, 3.5, 5.0, 7.0]
@@ -58,6 +59,7 @@ def fetch_mvrvz() -> dict[str, float]:
     req = urllib.request.Request(MVRVZ_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=60) as r:
         import json
+
         rows = json.load(r)
     out = {}
     for row in rows:
@@ -132,10 +134,9 @@ def episodes_to_trades(pos, ret, dates):
             start = t
             cum = 1.0
             while t < n and pos[t] == 1:
-                cum *= (1.0 + ret[t])
+                cum *= 1.0 + ret[t]
                 t += 1
-            trades.append({"ts": _date_ts(dates[start]), "pnl": cum - 1.0,
-                           "strategy": "mvrv_z"})
+            trades.append({"ts": _date_ts(dates[start]), "pnl": cum - 1.0, "strategy": "mvrv_z"})
         else:
             t += 1
     return trades
@@ -155,8 +156,10 @@ def main():
     print("=" * 84)
     print("MVRV-Z HONEST-GATE SCREEN  (long-only BTC, keyless data)")
     print("=" * 84)
-    print(f"  span: {dates[0]} -> {dates[-1]}  ({n} days, {span_days/365:.1f}y)")
-    print(f"  MVRV-Z range: [{zs.min():.2f}, {zs.max():.2f}]   cost={COST_BPS_ROUNDTRIP:.0f}bps round-trip")
+    print(f"  span: {dates[0]} -> {dates[-1]}  ({n} days, {span_days / 365:.1f}y)")
+    print(
+        f"  MVRV-Z range: [{zs.min():.2f}, {zs.max():.2f}]   cost={COST_BPS_ROUNDTRIP:.0f}bps round-trip"
+    )
     print(f"  IS = first {cut} days, OOS = last {n - cut} days")
 
     # buy-and-hold benchmark (one entry cost)
@@ -179,8 +182,17 @@ def main():
         oos_sh = sharpe(sret[cut:])
         # count ENTRIES (0->1); a buy-and-hold-to-end episode is 1 trade, not 0
         n_trades = int(np.sum(np.diff(np.concatenate([[0.0], pos])) > 0))
-        rows.append({"zb": zb, "zsell": zsell, "is_sh": is_sh, "oos_sh": oos_sh,
-                     "sret": sret, "pos": pos, "n_trades": n_trades})
+        rows.append(
+            {
+                "zb": zb,
+                "zsell": zsell,
+                "is_sh": is_sh,
+                "oos_sh": oos_sh,
+                "sret": sret,
+                "pos": pos,
+                "n_trades": n_trades,
+            }
+        )
 
     valid = [r for r in rows if r is not None]
     best = max(valid, key=lambda r: r["is_sh"])  # select on IN-SAMPLE only
@@ -189,8 +201,10 @@ def main():
     print(f"  {'z_buy':>6}{'z_sell':>7}{'IS Sh/d':>9}{'OOS Sh/d':>10}{'trades':>8}")
     for r in sorted(valid, key=lambda r: -r["is_sh"])[:8]:
         star = "  <-- best-IS" if r is best else ""
-        print(f"  {r['zb']:>6.1f}{r['zsell']:>7.1f}{r['is_sh']:>9.3f}{r['oos_sh']:>10.3f}"
-              f"{r['n_trades']:>8}{star}")
+        print(
+            f"  {r['zb']:>6.1f}{r['zsell']:>7.1f}{r['is_sh']:>9.3f}{r['oos_sh']:>10.3f}"
+            f"{r['n_trades']:>8}{star}"
+        )
 
     # ---- honest gate on the IS-selected config ----
     oos = best["sret"][cut:]
@@ -206,27 +220,40 @@ def main():
     print("HONEST GATE  (bot's own machinery: stat_tests PBO/DSR + block-MC + readiness)")
     print("=" * 84)
     print(f"  best config        : z_buy={best['zb']}  z_sell={best['zsell']}")
-    print(f"  OOS Sharpe/day     : {oos_sh:+.3f}  (annualized {oos_sh*ANN:+.2f})")
-    print(f"  buy&hold OOS Sh/day: {bh_oos_sh:+.3f}  (annualized {bh_oos_sh*ANN:+.2f})")
+    print(f"  OOS Sharpe/day     : {oos_sh:+.3f}  (annualized {oos_sh * ANN:+.2f})")
+    print(f"  buy&hold OOS Sh/day: {bh_oos_sh:+.3f}  (annualized {bh_oos_sh * ANN:+.2f})")
     print(f"  beats buy&hold OOS : {oos_sh > bh_oos_sh}")
     print(f"  Deflated Sharpe    : {dsr:.3f}  (Pr[true SR>0 | {len(valid)} trials]; gate >= 0.10)")
     print(f"  PBO (CSCV)         : {pbo_val:.3f}  (gate <= 0.50; literature-healthy < 0.25)")
-    print(f"  MC p(total>0)      : {mc.p_total_positive:.3f}   MC maxDD p95: {mc.max_drawdown_p95:.4f}")
-    print(f"  readiness verdict  : {rd['verdict']}  (n_trades={rd['summary']['n']}, "
-          f"WR={rd['summary']['win_rate']}, PF={rd['summary']['profit_factor']})")
+    print(
+        f"  MC p(total>0)      : {mc.p_total_positive:.3f}   MC maxDD p95: {mc.max_drawdown_p95:.4f}"
+    )
+    print(
+        f"  readiness verdict  : {rd['verdict']}  (n_trades={rd['summary']['n']}, "
+        f"WR={rd['summary']['win_rate']}, PF={rd['summary']['profit_factor']})"
+    )
 
     # ---- verdict ----
     insufficient = (span_days / 365.0 < 2.0) or (len(oos) < 60) or (best["n_trades"] < 5)
-    edge = (oos_sh > bh_oos_sh) and (dsr >= 0.10) and (pbo_val <= 0.50) and (mc.p_total_positive >= 0.95)
+    edge = (
+        (oos_sh > bh_oos_sh)
+        and (dsr >= 0.10)
+        and (pbo_val <= 0.50)
+        and (mc.p_total_positive >= 0.95)
+    )
     print("\n" + "-" * 84)
     if insufficient:
         print("VERDICT: INSUFFICIENT DATA / POWER-LIMITED -- keyless MVRV-Z spans ~1 cycle;")
         print("  a cycle-timing signal cannot be honestly validated on <2 cycles. Re-run on")
         print("  multi-cycle realized-cap data (paid CoinMetrics/Glassnode) before any verdict.")
     elif edge:
-        print("VERDICT: GO (provisional) — beats B&H OOS AND clears DSR/PBO/MC. VERIFY before live.")
+        print(
+            "VERDICT: GO (provisional) — beats B&H OOS AND clears DSR/PBO/MC. VERIFY before live."
+        )
     else:
-        print("VERDICT: NO_GO — after-cost OOS edge over buy-and-hold NOT established on the honest gate.")
+        print(
+            "VERDICT: NO_GO — after-cost OOS edge over buy-and-hold NOT established on the honest gate."
+        )
     print("-" * 84)
 
 
