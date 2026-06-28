@@ -31,6 +31,11 @@ import math
 import random
 from dataclasses import dataclass, field
 
+try:
+    from research._stats import _percentiles, resample_blocks
+except ImportError:  # run as a script (python research/funding_carry_lab.py)
+    from _stats import _percentiles, resample_blocks
+
 # Binance/Bybit/Bitget settle perpetual funding every 8h -> 3/day -> 1095/yr.
 SETTLEMENTS_PER_YEAR = 1095
 # Per-side taker cost defaults; the carry crosses 2 legs (spot + perp), entry+exit.
@@ -178,38 +183,9 @@ def summarize_funding(funding_rates, settlements_per_year=SETTLEMENTS_PER_YEAR) 
 # ── Monte-Carlo robustness (block bootstrap of the funding series) ────
 
 
-def _percentiles(values) -> dict:
-    s = sorted(values)
-    n = len(s)
-
-    def q(p):
-        if n == 1:
-            return s[0]
-        idx = p * (n - 1)
-        lo = int(idx)
-        hi = min(lo + 1, n - 1)
-        return s[lo] * (1 - (idx - lo)) + s[hi] * (idx - lo)
-
-    return {
-        "p5": q(0.05),
-        "p25": q(0.25),
-        "p50": q(0.50),
-        "p75": q(0.75),
-        "p95": q(0.95),
-        "mean": sum(s) / n,
-        "min": s[0],
-        "max": s[-1],
-    }
-
-
 def _bootstrap_series(series, n, block, rng) -> list:
-    """Resample a value series to length n by concatenating random contiguous
-    blocks (moving-block bootstrap), preserving short-horizon persistence."""
-    out: list = []
-    while len(out) < n:
-        start = rng.randrange(0, len(series))
-        out.extend(series[start : start + block])
-    return out[:n]
+    """Resample a value series to length n (moving-block bootstrap)."""
+    return resample_blocks(series, n, block, rng)
 
 
 def monte_carlo_carry(funding_rates, n_paths=1000, block=24, seed=0, **sim_kw) -> dict:

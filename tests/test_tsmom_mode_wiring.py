@@ -41,6 +41,14 @@ def test_mcp_monitor_skipped_under_tsmom(monkeypatch):
     fake.mcp_brain.monitor_positions.assert_not_called()
 
 
+def test_mcp_monitor_skipped_under_machine(monkeypatch):
+    _set_signal_source(monkeypatch, "machine")
+    fake = _fake_engine()
+    be.BotEngine._run_mcp_position_monitor(fake)
+    fake.tracker.get_open.assert_not_called()
+    fake.mcp_brain.monitor_positions.assert_not_called()
+
+
 def test_mcp_monitor_runs_under_mcp(monkeypatch):
     _set_signal_source(monkeypatch, "mcp")
     fake = _fake_engine()

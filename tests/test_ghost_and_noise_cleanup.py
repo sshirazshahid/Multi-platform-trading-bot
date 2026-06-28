@@ -125,6 +125,36 @@ def test_ghost_sync_pending_then_reconciled(tmp_path, monkeypatch):
     )
 
 
+def test_failed_fetch_positions_snapshot_does_not_ghost_close(tmp_path, monkeypatch):
+    """An exchange returning [] after a fetch error must not be read as flat."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+
+    tracker = pt.PositionTracker()
+    p = pt.Position(
+        id="LIVE-STAYS-OPEN",
+        exchange="bybit",
+        symbol="BTC/USDT:USDT",
+        side="buy",
+        market_type="futures",
+        strategy="claude_portfolio",
+        entry_price=65000.0,
+        size=0.01,
+        stop_loss=62000.0,
+        take_profit=70000.0,
+        paper_trade=False,
+    )
+    tracker.add(p)
+
+    fake_ex = MagicMock()
+    fake_ex.fetch_positions.return_value = []
+    fake_ex._last_positions_fetch_ok = False
+
+    tracker.sync_with_exchanges({"bybit": fake_ex})
+    assert tracker.is_position_open("LIVE-STAYS-OPEN") is True
+    assert not [c for c in tracker._closed if c.id == "LIVE-STAYS-OPEN"]
+
+
 def test_ghost_fallback_uses_mark_price(tmp_path, monkeypatch):
     """When no ledger record exists, the fallback close price is taken from
     ticker.info.markPrice, NOT ticker.last (Area 1 §2.1 mark_price fallback)."""
@@ -337,7 +367,7 @@ def test_ghost_detected_at_info_level_when_reconciled(tmp_path, monkeypatch, cap
 def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
     """Bybit 110001 'order not exists or too late to cancel' is the race-
     condition expected case (the order already filled). It should log at
-    DEBUG, NOT ERROR, and return {} cleanly (Area 2 demotion + Area 3 swallow)."""
+    DEBUG, NOT ERROR, and return an uncertainty marker (Area 2 demotion + Area 3 swallow)."""
     import ccxt
     from exchanges import base as base_mod
 
@@ -362,8 +392,9 @@ def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
         fake_be, "ABC-123", "BNB/USDT:USDT", "futures"
     )
 
-    # Result should be a clean {} (no exception leaks out)
-    assert result == {}, f"expected swallowed cancel to return {{}}, got {result}"
+    # Result should mark the cancel race as uncertain (no exception leaks out)
+    assert result.get("_cancel_uncertain") is True
+    assert result.get("status") == "gone_or_race"
     # No ERROR-level log allowed for known-race 110001 (DEBUG/INFO are fine)
     error_records = [
         r for r in caplog.records
@@ -381,7 +412,7 @@ def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
 
 
 def test_safe_cancel_order_swallows_110001(caplog):
-    """Bybit 110001 'order not exists or too late to cancel' returns {} cleanly."""
+    """Bybit 110001 'order not exists or too late to cancel' marks uncertainty."""
     import ccxt
     from exchanges import base as base_mod
 
@@ -402,7 +433,8 @@ def test_safe_cancel_order_swallows_110001(caplog):
         fake_be, "ABC-123", "BNB/USDT:USDT", "futures"
     )
 
-    assert result == {}, f"expected swallowed cancel to return empty dict, got {result}"
+    assert result.get("_cancel_uncertain") is True
+    assert result.get("status") == "gone_or_race"
 
 
 def test_safe_cancel_order_swallows_bitget_40034(caplog):
@@ -426,7 +458,8 @@ def test_safe_cancel_order_swallows_bitget_40034(caplog):
     result = base_mod.BaseExchange.cancel_order(
         fake_be, "XYZ-987", "AVAX/USDT:USDT", "futures"
     )
-    assert result == {}
+    assert result.get("_cancel_uncertain") is True
+    assert result.get("status") == "gone_or_race"
 
 
 def test_safe_cancel_order_reraises_unknown_errors(caplog):
@@ -449,7 +482,8 @@ def test_safe_cancel_order_reraises_unknown_errors(caplog):
     result = base_mod.BaseExchange.cancel_order(
         fake_be, "DEF-456", "ETH/USDT:USDT", "futures"
     )
-    assert result == {}  # caller still gets a safe {}; behavior preserved
+    assert result.get("_cancel_uncertain") is True
+    assert result.get("status") == "cancel_failed"
     # But the unknown error MUST surface at ERROR (visibility for real bugs)
     error_records = [
         r for r in caplog.records

@@ -157,6 +157,22 @@ def test_cancel_fails_AND_verify_fails_returns_uncertain():
     assert result.get("_executor_warning") == "cancel+verify both failed"
 
 
+def test_limit_place_failure_does_not_market_fallback():
+    """If limit create_order fails, venue receipt is unknown; do not top up with market."""
+    se = _make_executor()
+    ex = MagicMock()
+    ex.create_order = MagicMock(side_effect=TimeoutError("network timeout"))
+
+    result = se.execute_limit_with_fallback(
+        ex, "DOGE/USDT:USDT", "buy", 100.0,
+        market_type="futures",
+    )
+
+    assert result["status"] == "uncertain"
+    assert result.get("_executor_warning") == "limit_place_failed_unknown"
+    assert not se._market_order.called
+
+
 def test_cancel_succeeds_but_partial_fill_existed():
     """Partial fill scenario: cancel succeeded but ~95% of order filled.
     Return the partial fill state, no market on top (operator can decide)."""

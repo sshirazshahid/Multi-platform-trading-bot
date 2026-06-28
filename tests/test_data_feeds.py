@@ -136,6 +136,13 @@ class TestNewsSentimentFeed:
         assert NewsSentimentFeed._classify_sentiment(
             "Bitcoin trading volume steady") == "NEUTRAL"
 
+    def test_cryptocompare_wrapped_data_normalized(self):
+        from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
+        payload = {"Data": {"Data": [{"title": "A"}, {"title": "B"}]}}
+        assert NewsSentimentFeed._cryptocompare_items(payload) == [
+            {"title": "A"}, {"title": "B"}
+        ]
+
 
 class TestSmartMoneyFeed:
     def test_neutral_structure(self):

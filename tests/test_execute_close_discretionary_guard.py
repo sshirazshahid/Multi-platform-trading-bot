@@ -2,7 +2,7 @@
 
 The portfolio-cycle Claude CLOSE -> _execute_close was ungated (only OBSERVATION-
 gated) — the un-suppressed twin of the disabled 30s monitor CLOSE. Two guards added:
-  (1) ALWAYS-ON is_tsmom_position guard (tsmom owns its exit), and
+  (1) ALWAYS-ON deterministic ownership guard (tsmom/machine own their exits), and
   (2) flag-gated (PORTFOLIO_DISCRETIONARY_CLOSE_GUARD_ENABLED, default-OFF)
       suppression of a Claude-sourced CLOSE of a NON-disaster position, with a
       catastrophic-loss (net <= -8%) escape hatch.
@@ -81,10 +81,36 @@ def test_flag_on_algo_source_exempt(monkeypatch):
     eng.order_mgr.close_position.assert_called_once()
 
 
-# ── tsmom guard is ALWAYS-ON (suppressed even with the flag OFF) ──────────────
-def test_tsmom_close_always_suppressed(monkeypatch):
+# ── deterministic ownership guard is ALWAYS-ON for external closes ───────────
+def test_tsmom_external_close_suppressed(monkeypatch):
     eng = _eng()
     out = _run(monkeypatch, eng, _target(strategy="tsmom"),
                flag=False, source="claude", net_pct=5.0)
     assert out is False
     eng.order_mgr.close_position.assert_not_called()
+
+
+def test_tsmom_own_close_allowed(monkeypatch):
+    eng = _eng()
+    target = _target(strategy="tsmom")
+    out = _run(monkeypatch, eng, target,
+               flag=False, source="tsmom", net_pct=5.0)
+    assert out is True
+    eng.order_mgr.close_position.assert_called_once()
+
+
+def test_machine_external_close_suppressed(monkeypatch):
+    eng = _eng()
+    out = _run(monkeypatch, eng, _target(strategy="machine"),
+               flag=False, source="claude", net_pct=5.0)
+    assert out is False
+    eng.order_mgr.close_position.assert_not_called()
+
+
+def test_machine_own_close_allowed(monkeypatch):
+    eng = _eng()
+    target = _target(strategy="machine")
+    out = _run(monkeypatch, eng, target,
+               flag=False, source="machine", net_pct=5.0)
+    assert out is True
+    eng.order_mgr.close_position.assert_called_once()

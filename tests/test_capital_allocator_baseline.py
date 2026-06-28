@@ -6,9 +6,8 @@ and no code path ever wrote to `self._state["baselines"]`. Result:
 profit = usdt_free - usdt_free = 0 forever, feature permanently inert.
 
 Fix: seed baseline on first observation; reset after a successful
-ACCUMULATE transfer. User explicitly opted in to real transfers via
-AskUserQuestion 2026-05-24 — recommendation_only=False is now the
-default for this feature.
+ACCUMULATE transfer. Safety rule: PAPER may write recommendations but must
+not call exchange.transfer(); real transfers require explicit live mode.
 """
 from __future__ import annotations
 
@@ -25,14 +24,14 @@ def _isolate(tmp_path, monkeypatch):
     yield
 
 
-def _build_allocator(monkeypatch, exchanges=None):
+def _build_allocator(monkeypatch, exchanges=None, *, live=False):
     """Create a CapitalAllocator with feature enabled regardless of config
     default (so test runs deterministically even if config is toggled)."""
     import config
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "enabled", True)
+    monkeypatch.setitem(config.CAPITAL_ALLOCATION, "recommendation_only", not live)
     from core import capital_allocator as ca
-    # ACCUMULATE transfers fire regardless of DRY_RUN (owner opted in, incl.
-    # PAPER — 2026-05-24/2026-05-30); recommendation_only default False is the gate.
+    monkeypatch.setattr(ca, "DRY_RUN", not live)
     return ca.CapitalAllocator(exchanges=exchanges or {})
 
 
@@ -48,7 +47,7 @@ def test_baseline_seeded_on_first_observation(monkeypatch):
     """First call with no prior baseline: write baseline = current free,
     return no actions (can't detect profit on first observation)."""
     ex = _mock_exchange(usdt_free=100.0)
-    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex})
+    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex}, live=True)
     actions = alloc._check_accumulation()
     assert actions == [], (
         "First observation must seed baseline and produce no action"
@@ -62,7 +61,7 @@ def test_profit_above_threshold_produces_accumulate_action(monkeypatch):
     """After seeding, a free-balance increase above the threshold
     must produce an ACCUMULATE action."""
     ex = _mock_exchange(usdt_free=100.0)
-    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex})
+    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex}, live=True)
     # First call seeds at 100.
     alloc._check_accumulation()
     # Simulate $15 of realized profit (above the $10 threshold).
@@ -90,7 +89,7 @@ def test_baseline_resets_after_successful_transfer(monkeypatch):
     """A successful ACCUMULATE must reset the baseline to the
     post-transfer free balance so the same profit isn't re-swept."""
     ex = _mock_exchange(usdt_free=120.0)
-    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex})
+    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex}, live=True)
     # Seed the baseline manually so accumulator detects profit on next call.
     alloc._state.setdefault("baselines", {})["binance"] = 100.0
     actions = alloc._check_accumulation()
@@ -107,9 +106,24 @@ def test_baseline_resets_after_successful_transfer(monkeypatch):
     )
 
 
-def test_real_transfers_default_enabled():
-    """Per 2026-05-24 user directive, recommendation_only must default
-    to False and the feature must be enabled.
+def test_paper_accumulate_recommendation_does_not_transfer(monkeypatch):
+    """In PAPER/DRY_RUN, ACCUMULATE writes a recommendation and never moves funds."""
+    ex = _mock_exchange(usdt_free=120.0)
+    alloc = _build_allocator(monkeypatch, exchanges={"binance": ex}, live=False)
+    action = {
+        "type": "ACCUMULATE",
+        "exchange": "binance",
+        "from": "futures",
+        "to": "spot",
+        "coin": "BTC",
+        "amount_usdt": 12.0,
+    }
+    assert alloc.execute_allocation(action) is False
+    ex.transfer.assert_not_called()
+
+
+def test_real_transfers_default_disabled_to_recommendation_only():
+    """Capital allocation stays enabled for learning, but defaults to recommendations.
 
     NB: do NOT reload config here — other tests cache the module object
     at import time, so popping/re-importing invalidates their cached
@@ -117,4 +131,4 @@ def test_real_transfers_default_enabled():
     """
     import config
     assert config.CAPITAL_ALLOCATION["enabled"] is True
-    assert config.CAPITAL_ALLOCATION["recommendation_only"] is False
+    assert config.CAPITAL_ALLOCATION["recommendation_only"] is True

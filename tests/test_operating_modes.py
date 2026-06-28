@@ -65,6 +65,30 @@ def test_valid_signature_accepted(tmp_path):
     assert "Real Owner" in msg
 
 
+def test_unchecked_acceptance_item_rejects_signature(tmp_path):
+    f = tmp_path / "c.md"
+    today = date.today().isoformat()
+    _write(
+        f,
+        "# Checklist\n\n"
+        "- [x] Tests passing\n"
+        "- [ ] Positive paper expectancy\n\n"
+        f"Signed-By: Real Owner {today}\n",
+    )
+    ok, msg = is_checklist_signed(f)
+    assert ok is False
+    assert "unchecked" in msg
+
+
+def test_stale_signature_rejected(tmp_path):
+    f = tmp_path / "c.md"
+    stale = (date.today() - timedelta(days=31)).isoformat()
+    _write(f, f"# Checklist\n\nSigned-By: Old Owner {stale}\n")
+    ok, msg = is_checklist_signed(f)
+    assert ok is False
+    assert "older than" in msg
+
+
 def test_latest_signature_wins(tmp_path):
     f = tmp_path / "c.md"
     today = date.today().isoformat()
@@ -109,6 +133,19 @@ def test_enforce_controlled_live_signed_passes(tmp_path):
     today = date.today().isoformat()
     _write(f, f"Signed-By: Owner {today}\n")
     enforce_controlled_live_gate("CONTROLLED_LIVE", path=f)  # no raise
+
+
+def test_enforce_controlled_live_requires_env_latch(tmp_path):
+    f = tmp_path / "c.md"
+    today = date.today().isoformat()
+    _write(f, f"Signed-By: Owner {today}\n")
+    with pytest.raises(SystemExit) as exc:
+        enforce_controlled_live_gate(
+            "CONTROLLED_LIVE",
+            path=f,
+            controlled_live_enabled=False,
+        )
+    assert "CONTROLLED_LIVE_ENABLED" in str(exc.value)
 
 
 # ── live_latch_permits_execution (Latch 2: CONTROLLED_LIVE_ENABLED env) ──
