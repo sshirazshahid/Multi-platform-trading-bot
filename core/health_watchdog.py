@@ -94,6 +94,11 @@ COOLDOWN_SEC = {
     "forward_feeds_stale":   30 * 60,
 }
 
+# A forward feed must stay unhealthy this long before we alert — absorbs the
+# startup warmup window (status files from a previous run look stale until the
+# just-launched harvester writes a fresh one) and brief poll flaps.
+FEED_GRACE_SEC = 10 * 60
+
 
 @dataclass
 class WatchdogState:
@@ -179,6 +184,31 @@ class HealthWatchdog:
                 self._notifier.alert(message, title=title, context=context or {})
             except Exception as e:
                 logger.debug(f"[Watchdog] notifier failed: {e}")
+
+    def _edge_alert(self, key: str, is_bad: bool, level: str, message: str,
+                    context: Optional[dict] = None, *, grace_sec: float = 0.0) -> None:
+        """Edge-triggered alert for sticky/known conditions.
+
+        Notify ONCE when a condition becomes true, stay silent while it
+        persists, and re-arm when it clears — so the watchdog stops re-emailing
+        a known, persistent fault on every cooldown tick. With ``grace_sec`` the
+        condition must stay true that long before alerting (debounce for
+        transient startup/flap conditions). Combined with the persisted
+        last_alert state, a still-true condition also stays muted across a
+        restart.
+        """
+        if not is_bad:
+            self._first_seen.pop(key, None)
+            if self._state.last_alert.pop(key, None) is not None:
+                self._persist_cooldowns()  # re-arm survives restart
+            return
+        if grace_sec > 0:
+            first = self._first_seen.setdefault(key, time.time())
+            if (time.time() - first) < grace_sec:
+                return  # not sustained long enough — likely transient
+        if key in self._state.last_alert:
+            return  # already alerted for this episode
+        self._alert(key, level, message, context)
 
     def _check_heartbeat(self) -> None:
         if not HEARTBEAT_PATH.exists():
@@ -330,10 +360,22 @@ class HealthWatchdog:
             )
 
     def _check_model_pointer_valid(self) -> None:
+        # The ML ensemble only drives live decisions on the MCP/Claude path.
+        # Under SIGNAL_SOURCE=machine/tsmom it is shadow/log-only, so a stale
+        # pointer is not operationally relevant — stay silent (and re-arm so it
+        # fires again if the bot is switched back to mcp).
+        try:
+            from config import SIGNAL_SOURCE
+        except Exception:
+            SIGNAL_SOURCE = "mcp"
+        if SIGNAL_SOURCE != "mcp":
+            self._edge_alert("model_pointer_invalid", False, "WARN", "")
+            return
         try:
             from core.promotion_gate import validate_model_pointer
         except Exception:
             return
+        bad = None
         for market in MODEL_POINTER_MARKETS:
             path = Path("data/models") / f"ensemble_{market}_latest.json"
             if not path.exists():
@@ -344,11 +386,13 @@ class HealthWatchdog:
             except Exception as exc:
                 ok, reason, diag = False, str(exc), {}
             if not ok:
-                self._alert(
-                    "model_pointer_invalid", "WARN",
-                    f"{market} latest model pointer rejected: {reason}",
-                    {"market": market, "reason": reason, "diag": diag},
-                )
+                bad = (market, reason, diag)
+                break
+        self._edge_alert(
+            "model_pointer_invalid", bad is not None, "WARN",
+            f"{bad[0]} latest model pointer rejected: {bad[1]}" if bad else "",
+            {"market": bad[0], "reason": bad[1], "diag": bad[2]} if bad else None,
+        )
 
     def _check_no_scan_progress(self) -> None:
         if not HEARTBEAT_PATH.exists():
@@ -418,10 +462,8 @@ class HealthWatchdog:
             return
         records = read_forward_feed_status(Path("."))
         bad = unhealthy_forward_feeds(records)
-        if not bad:
-            return
-        self._alert(
-            "forward_feeds_stale", "WARN",
+        self._edge_alert(
+            "forward_feeds_stale", bool(bad), "WARN",
             f"forward feed status unhealthy: {', '.join(sorted(bad))}",
             {
                 "feeds": [
@@ -435,6 +477,7 @@ class HealthWatchdog:
                     for r in records
                 ]
             },
+            grace_sec=FEED_GRACE_SEC,
         )
 
     def _check_latest_audit(self) -> None:
@@ -452,9 +495,10 @@ class HealthWatchdog:
         except Exception:
             return
         verdict = str(payload.get("verdict") or "")
-        if verdict == "NOT_READY":
-            self._alert(
-                "audit_not_ready", "WARN",
-                "latest trading system audit verdict is NOT_READY",
-                {"report": str(reports[0]), "verdict": verdict},
-            )
+        # NOT_READY is the honest steady-state under NO_EDGE; alert only on the
+        # transition into it (edge-triggered), not every cooldown thereafter.
+        self._edge_alert(
+            "audit_not_ready", verdict == "NOT_READY", "WARN",
+            "latest trading system audit verdict is NOT_READY",
+            {"report": str(reports[0]), "verdict": verdict},
+        )
