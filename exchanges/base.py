@@ -81,9 +81,33 @@ _TRANSIENT_ERRORS = (
 )
 
 
+# Rate-limit / throttle errors. A per-UID or per-IP throttle — Bybit retCode 10006
+# "Too many visits" (per-UID) or an HTTP 403 "access too frequent" per-IP ban that
+# auto-lifts after ~10 min — is transient INFRA, not a logic error. Classifying it as
+# transient makes reads + SL placement retry with backoff instead of failing instantly
+# (a silent non-transient failure could drop a stop-loss → naked position). create_order
+# still does NOT retry these (see its handler): a dropped order is safe (no duplicate
+# fill) and the bot's 10s/60s loops re-attempt naturally once the ban lifts.
+_RATE_LIMIT_ERRORS = (
+    "10006",                 # Bybit per-UID "Too many visits"
+    "too many visits",
+    "access too frequent",   # Bybit per-IP 403 ban
+    "ddos",
+    "ratelimit",             # ccxt RateLimitExceeded message text
+)
+
+
 def _is_transient_error(e: Exception) -> bool:
+    # ccxt raises typed exceptions for HTTP 429/418/403 throttles — the reliable
+    # signal, more robust than substring-matching a bare "403" (which could false-
+    # positive on order ids, prices, etc.).
+    if isinstance(e, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
+        return True
     msg = str(e)
-    return any(s in msg for s in _TRANSIENT_ERRORS)
+    if any(s in msg for s in _TRANSIENT_ERRORS):
+        return True
+    low = msg.lower()
+    return any(s in low for s in _RATE_LIMIT_ERRORS)
 
 
 def _is_symbol_error(e: Exception) -> bool:
