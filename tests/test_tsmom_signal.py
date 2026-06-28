@@ -92,6 +92,27 @@ def test_positive_momentum_opens_long():
     assert a["symbol"].startswith("ETH/")
 
 
+def test_forming_daily_candle_is_ignored(monkeypatch):
+    """A still-open daily candle must not flip the daily-close momentum rule."""
+    day_ms = 86_400_000
+    now_ms = 1_700_000_000_000
+    monkeypatch.setattr("core.tsmom_signal.time.time", lambda: now_ms / 1000)
+
+    closed_closes = [200.0 - i for i in range(25)]  # last closed momentum is negative
+    rows = []
+    start = now_ms - len(closed_closes) * day_ms
+    for i, c in enumerate(closed_closes):
+        rows.append([start + i * day_ms, c, c * 1.01, c * 0.99, c, 1000.0])
+    rows.append([now_ms, 500.0, 500.0, 500.0, 500.0, 1000.0])  # forming, not closed
+
+    ex = FakeExchange({"BTC": []})
+    ex.fetch_ohlcv = lambda *a, **k: rows
+    sig = TSMOMSignal(exchanges={"binance": ex}, universe={"BTC"}, lookback_days=3)
+    actions = sig.analyze_portfolio(coins=["BTC"], open_positions=[], **ENV)
+    assert actions == []
+    assert sig.last_status[0]["state"] == "flat"
+
+
 # ── INVARIANT 3: universe restricted to majors ───────────────────────────────
 
 def test_non_major_is_filtered_out():
@@ -112,6 +133,7 @@ def test_negative_momentum_closes_existing_long():
     closes = [a for a in actions if a["type"] == "CLOSE"]
     assert len(closes) == 1
     assert closes[0]["position_id"] == "pos-1"
+    assert closes[0]["reason"] == "tsmom_momentum_flip"
 
 
 def test_positive_momentum_with_existing_long_holds():

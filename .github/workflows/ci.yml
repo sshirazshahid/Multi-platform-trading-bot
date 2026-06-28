@@ -240,6 +240,54 @@ jobs:
           tests/test_research_labs_realdata.py
           -v
 
+  bot-decision-tests:
+    name: Bot decision-core (import-light)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      # The decision-core seam is deliberately import-light: numpy + scipy (the stat
+      # stack behind promotion_gate/stat_tests) + python-dotenv (config) + pandas.
+      # NO ccxt / schedule — these tests never construct BotEngine or touch an exchange.
+      - name: Install import-light deps
+        run: pip install pytest numpy scipy pandas python-dotenv
+
+      - name: Test decision core (guardrails / monte_carlo / promotion_loop / mutator)
+        run: >
+          python -m pytest
+          tests/test_self_improve_guardrails.py
+          tests/test_monte_carlo.py
+          tests/test_promotion_loop_latch.py
+          tests/test_mutator.py
+          tests/test_promotion_gate_inputs.py
+          -v
+
+  bot-tests:
+    name: Bot full suite
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Full bot test suite (~2002 tests). requirements.txt carries
+      # ccxt/pandas/numpy/scipy/scikit-learn/etc. Runs on windows-latest to match
+      # the runtime OS (the system-audit process snapshot + path tests are
+      # Windows-shaped). Verified 2002 passing locally on this OS + Python.
+      - name: Install bot dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run bot test suite
+        run: python -m pytest tests/ -q -p no:cacheprovider
+
   security:
     name: Security
     runs-on: ubuntu-latest

@@ -109,9 +109,39 @@ def test_interpret_full_fill_uses_intended_size():
     assert _interp({"status": "closed", "id": "X"}, 10.0) == ("filled", 10.0)
 
 
+def test_interpret_closed_uses_reported_filled_or_amount():
+    assert _interp({"status": "closed", "id": "X", "filled": 7.5}, 10.0) == ("filled", 7.5)
+    assert _interp({"status": "closed", "id": "Y", "amount": 6.0}, 10.0) == ("filled", 6.0)
+
+
 def test_interpret_partial_maker_sizes_to_fill():
     assert _interp({"status": "partial_maker", "id": "X", "filled": 4.0}, 10.0) == ("filled", 4.0)
 
 
 def test_interpret_partial_maker_zero_fill_is_no_fill():
     assert _interp({"status": "partial_maker", "id": "X", "filled": 0.0}, 10.0) == ("no_fill", 0.0)
+
+
+def test_twap_aggregate_sums_slices_and_vwaps():
+    from core.order_manager import OrderManager
+
+    order = OrderManager._aggregate_execution_results([
+        {"status": "closed", "id": "A", "filled": 2.0, "average": 100.0, "_fill_type": "maker"},
+        {"status": "closed", "id": "B", "filled": 3.0, "average": 110.0, "_fill_type": "maker"},
+    ], intended_size=5.0)
+
+    assert order["id"] == "A"
+    assert order["filled"] == 5.0
+    assert order["average"] == pytest.approx(106.0)
+    assert order["_twap_slice_ids"] == ["A", "B"]
+
+
+def test_twap_aggregate_uncertain_without_fill():
+    from core.order_manager import OrderManager
+
+    order = OrderManager._aggregate_execution_results([
+        {"status": "uncertain", "id": "A"},
+        {"status": "skipped_maker_only", "id": "B"},
+    ], intended_size=5.0)
+
+    assert order["status"] == "uncertain"

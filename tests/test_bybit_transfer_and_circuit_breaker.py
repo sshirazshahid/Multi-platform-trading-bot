@@ -40,13 +40,12 @@ def _isolate(tmp_path, monkeypatch):
     yield
 
 
-def _build_allocator(monkeypatch, exchanges=None):
+def _build_allocator(monkeypatch, exchanges=None, *, live=True):
     import config
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "enabled", True)
     monkeypatch.setitem(config.CAPITAL_ALLOCATION, "recommendation_only", False)
     from core import capital_allocator as ca
-    # ACCUMULATE transfers fire regardless of DRY_RUN (owner opted in, incl.
-    # PAPER — 2026-05-24/2026-05-30); recommendation_only=False is the gate.
+    monkeypatch.setattr(ca, "DRY_RUN", not live)
     return ca.CapitalAllocator(exchanges=exchanges or {})
 
 
@@ -214,7 +213,7 @@ class TestCapitalAllocatorCircuitBreaker:
         ex.transfer.assert_not_called()
 
     def test_execute_accumulate_calls_bybit_transfer(self, monkeypatch):
-        """Happy path: execute_allocation calls exchange.transfer() and returns True."""
+        """Live happy path: execute_allocation calls exchange.transfer() and returns True."""
         ex = _mock_bybit_exchange(transfer_return=True)
         alloc = _build_allocator(monkeypatch, exchanges={"bybit": ex})
         # Seed a known baseline so profit is detectable
@@ -227,6 +226,19 @@ class TestCapitalAllocatorCircuitBreaker:
         result = alloc.execute_allocation(action)
         assert result is True
         ex.transfer.assert_called_once_with(12.0, "futures", "spot")
+
+    def test_paper_execute_accumulate_recommends_only(self, monkeypatch):
+        """PAPER/DRY_RUN must not move wallet funds even if recommendation_only=False."""
+        ex = _mock_bybit_exchange(transfer_return=True)
+        alloc = _build_allocator(monkeypatch, exchanges={"bybit": ex}, live=False)
+        action = {
+            "type": "ACCUMULATE", "exchange": "bybit",
+            "from": "futures", "to": "spot",
+            "coin": "BTC", "amount_usdt": 12.0,
+        }
+        result = alloc.execute_allocation(action)
+        assert result is False
+        ex.transfer.assert_not_called()
 
     def test_transfer_failure_recorded_in_breaker(self, monkeypatch):
         """A failed transfer must increment the breaker counter."""

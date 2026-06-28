@@ -6,8 +6,11 @@ state on disk and in the live RiskManager / BotEngine attributes,
 and sends a notifier alert when one of the trigger conditions fires.
 
 Each check is independent and rate-limited so a persistent fault doesn't
-flood the notifier. Cooldowns are kept in-process; a process restart
-re-arms every check.
+flood the notifier. Cooldowns are persisted to
+``data/watchdog_cooldown_state.json`` so a process restart does NOT re-arm
+every check — a sticky condition (e.g. a stale model pointer or a
+NOT_READY audit) that is still true after a bounce stays muted until its
+cooldown genuinely elapses, instead of re-emailing on every restart.
 
 Triggers (see WatchdogConfig for thresholds):
 
@@ -68,6 +71,13 @@ LOSS_STREAK_N            = 3
 LOSS_STREAK_WINDOW_MIN   = 60
 MODEL_STARVE_HOURS       = 6
 MODEL_STARVE_DAILY_PNL_FLOOR_PCT = -2.0   # only nag when bot is NOT in drawdown
+MODEL_POINTER_MARKETS    = ("futures", "spot")
+NO_SCAN_PROGRESS_SEC     = 15 * 60
+STUCK_OPEN_HOURS         = 24
+REPORTS_DIR              = Path("reports")
+# Persists per-check last-alert timestamps so cooldowns survive a restart
+# (otherwise every sticky WARN re-emails on each bounce). Runtime state.
+COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
 
 # Per-check cooldowns (seconds) — re-fire once after the cooldown elapses
 COOLDOWN_SEC = {
@@ -77,12 +87,23 @@ COOLDOWN_SEC = {
     "sl_placement_failed":   30 * 60,
     "loss_streak":           60 * 60,
     "model_gate_starving":   60 * 60,
+    "model_pointer_invalid":  60 * 60,
+    "no_scan_progress":      30 * 60,
+    "stuck_open_positions":  60 * 60,
+    "audit_not_ready":       6 * 60 * 60,
+    "forward_feeds_stale":   30 * 60,
 }
+
+# A forward feed must stay unhealthy this long before we alert — absorbs the
+# startup warmup window (status files from a previous run look stale until the
+# just-launched harvester writes a fresh one) and brief poll flaps.
+FEED_GRACE_SEC = 10 * 60
 
 
 @dataclass
 class WatchdogState:
     last_alert: dict[str, float] = field(default_factory=dict)
+    last_cycle_count: int | None = None
 
 
 class HealthWatchdog:
@@ -94,9 +115,35 @@ class HealthWatchdog:
         self._risk = risk_manager
         self._warehouse_path = warehouse_path
         self._state = WatchdogState()
+        # Restore persisted cooldowns so a restart doesn't re-fire every
+        # still-true sticky alert (model_pointer_invalid, audit_not_ready, ...).
+        self._load_cooldowns()
         # Track when a check first observed a sticky condition so we can
         # only alert after it persists past its threshold.
         self._first_seen: dict[str, float] = {}
+
+    def _load_cooldowns(self) -> None:
+        """Load persisted last-alert timestamps into the in-memory state."""
+        try:
+            if COOLDOWN_STATE_PATH.exists():
+                raw = json.loads(COOLDOWN_STATE_PATH.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    self._state.last_alert = {
+                        str(k): float(v)
+                        for k, v in raw.items()
+                        if isinstance(v, (int, float))
+                    }
+        except Exception as e:  # corrupt/partial file must never block startup
+            logger.debug(f"[Watchdog] cooldown state load skipped: {e}")
+
+    def _persist_cooldowns(self) -> None:
+        """Write last-alert timestamps to disk so cooldowns survive a restart."""
+        try:
+            COOLDOWN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            COOLDOWN_STATE_PATH.write_text(
+                json.dumps(self._state.last_alert), encoding="utf-8")
+        except Exception as e:  # persistence is best-effort, never fatal
+            logger.debug(f"[Watchdog] cooldown state persist skipped: {e}")
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -109,6 +156,11 @@ class HealthWatchdog:
             self._check_sl_placement_failed,
             self._check_loss_streak,
             self._check_model_gate_starving,
+            self._check_model_pointer_valid,
+            self._check_no_scan_progress,
+            self._check_stuck_open_positions,
+            self._check_forward_feeds,
+            self._check_latest_audit,
         ):
             try:
                 check()
@@ -124,6 +176,7 @@ class HealthWatchdog:
         if (now - self._state.last_alert.get(key, 0)) < cooldown:
             return
         self._state.last_alert[key] = now
+        self._persist_cooldowns()
         title = f"[Watchdog/{level.upper()}] {key}"
         logger.warning(f"{title} — {message}")
         if self._notifier is not None:
@@ -131,6 +184,31 @@ class HealthWatchdog:
                 self._notifier.alert(message, title=title, context=context or {})
             except Exception as e:
                 logger.debug(f"[Watchdog] notifier failed: {e}")
+
+    def _edge_alert(self, key: str, is_bad: bool, level: str, message: str,
+                    context: Optional[dict] = None, *, grace_sec: float = 0.0) -> None:
+        """Edge-triggered alert for sticky/known conditions.
+
+        Notify ONCE when a condition becomes true, stay silent while it
+        persists, and re-arm when it clears — so the watchdog stops re-emailing
+        a known, persistent fault on every cooldown tick. With ``grace_sec`` the
+        condition must stay true that long before alerting (debounce for
+        transient startup/flap conditions). Combined with the persisted
+        last_alert state, a still-true condition also stays muted across a
+        restart.
+        """
+        if not is_bad:
+            self._first_seen.pop(key, None)
+            if self._state.last_alert.pop(key, None) is not None:
+                self._persist_cooldowns()  # re-arm survives restart
+            return
+        if grace_sec > 0:
+            first = self._first_seen.setdefault(key, time.time())
+            if (time.time() - first) < grace_sec:
+                return  # not sustained long enough — likely transient
+        if key in self._state.last_alert:
+            return  # already alerted for this episode
+        self._alert(key, level, message, context)
 
     def _check_heartbeat(self) -> None:
         if not HEARTBEAT_PATH.exists():
@@ -280,3 +358,147 @@ class HealthWatchdog:
                 {"opens_recent": opens_recent,
                  "window_hours": MODEL_STARVE_HOURS},
             )
+
+    def _check_model_pointer_valid(self) -> None:
+        # The ML ensemble only drives live decisions on the MCP/Claude path.
+        # Under SIGNAL_SOURCE=machine/tsmom it is shadow/log-only, so a stale
+        # pointer is not operationally relevant — stay silent (and re-arm so it
+        # fires again if the bot is switched back to mcp).
+        try:
+            from config import SIGNAL_SOURCE
+        except Exception:
+            SIGNAL_SOURCE = "mcp"
+        if SIGNAL_SOURCE != "mcp":
+            self._edge_alert("model_pointer_invalid", False, "WARN", "")
+            return
+        try:
+            from core.promotion_gate import validate_model_pointer
+        except Exception:
+            return
+        bad = None
+        for market in MODEL_POINTER_MARKETS:
+            path = Path("data/models") / f"ensemble_{market}_latest.json"
+            if not path.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                ok, reason, diag = validate_model_pointer(payload, market_type=market)
+            except Exception as exc:
+                ok, reason, diag = False, str(exc), {}
+            if not ok:
+                bad = (market, reason, diag)
+                break
+        self._edge_alert(
+            "model_pointer_invalid", bad is not None, "WARN",
+            f"{bad[0]} latest model pointer rejected: {bad[1]}" if bad else "",
+            {"market": bad[0], "reason": bad[1], "diag": bad[2]} if bad else None,
+        )
+
+    def _check_no_scan_progress(self) -> None:
+        if not HEARTBEAT_PATH.exists():
+            return
+        try:
+            payload = json.loads(HEARTBEAT_PATH.read_text(encoding="utf-8"))
+            cycle_count = int(payload.get("cycle_count") or 0)
+        except Exception:
+            return
+        if self._state.last_cycle_count is None:
+            self._state.last_cycle_count = cycle_count
+            return
+        if cycle_count != self._state.last_cycle_count:
+            self._state.last_cycle_count = cycle_count
+            self._first_seen.pop("no_scan_progress", None)
+            return
+        first = self._first_seen.setdefault("no_scan_progress", time.time())
+        if time.time() - first >= NO_SCAN_PROGRESS_SEC:
+            self._alert(
+                "no_scan_progress", "WARN",
+                "heartbeat is fresh but cycle_count has not advanced for "
+                f"> {NO_SCAN_PROGRESS_SEC}s",
+                {"cycle_count": cycle_count},
+            )
+
+    def _check_stuck_open_positions(self) -> None:
+        if not self._warehouse_path.exists():
+            return
+        cutoff = time.time() - STUCK_OPEN_HOURS * 3600
+        try:
+            conn = sqlite3.connect(str(self._warehouse_path))
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT id, symbol, side, ts_entry FROM trades
+                    WHERE status='OPEN' AND ts_entry < ?
+                    ORDER BY ts_entry LIMIT 10
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return
+        if rows:
+            self._alert(
+                "stuck_open_positions", "WARN",
+                f"{len(rows)} sampled OPEN warehouse rows are older than "
+                f"{STUCK_OPEN_HOURS}h",
+                {
+                    "sample": [
+                        {
+                            "id": int(r[0]),
+                            "symbol": str(r[1]),
+                            "side": str(r[2]),
+                            "age_h": round((time.time() - float(r[3])) / 3600, 2),
+                        }
+                        for r in rows
+                    ]
+                },
+            )
+
+    def _check_forward_feeds(self) -> None:
+        try:
+            from core.feed_health import read_forward_feed_status, unhealthy_forward_feeds
+        except Exception:
+            return
+        records = read_forward_feed_status(Path("."))
+        bad = unhealthy_forward_feeds(records)
+        self._edge_alert(
+            "forward_feeds_stale", bool(bad), "WARN",
+            f"forward feed status unhealthy: {', '.join(sorted(bad))}",
+            {
+                "feeds": [
+                    {
+                        "name": r.get("name"),
+                        "connected": r.get("connected"),
+                        "age_sec": r.get("age_sec"),
+                        "fresh": r.get("fresh"),
+                        "error": r.get("error"),
+                    }
+                    for r in records
+                ]
+            },
+            grace_sec=FEED_GRACE_SEC,
+        )
+
+    def _check_latest_audit(self) -> None:
+        if not REPORTS_DIR.exists():
+            return
+        reports = sorted(
+            REPORTS_DIR.glob("trading_system_audit_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not reports:
+            return
+        try:
+            payload = json.loads(reports[0].read_text(encoding="utf-8"))
+        except Exception:
+            return
+        verdict = str(payload.get("verdict") or "")
+        # NOT_READY is the honest steady-state under NO_EDGE; alert only on the
+        # transition into it (edge-triggered), not every cooldown thereafter.
+        self._edge_alert(
+            "audit_not_ready", verdict == "NOT_READY", "WARN",
+            "latest trading system audit verdict is NOT_READY",
+            {"report": str(reports[0]), "verdict": verdict},
+        )

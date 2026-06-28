@@ -134,6 +134,11 @@ def test_strategy_selector_importable():
     assert StrategySelector is not None
 
 
+def test_machine_signal_importable():
+    from core.machine_signal import MachineSignal
+    assert MachineSignal is not None
+
+
 # ─── 4. Multi-agent shadow build (Phase A) ────────────────────────────
 
 

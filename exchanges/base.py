@@ -81,9 +81,33 @@ _TRANSIENT_ERRORS = (
 )
 
 
+# Rate-limit / throttle errors. A per-UID or per-IP throttle — Bybit retCode 10006
+# "Too many visits" (per-UID) or an HTTP 403 "access too frequent" per-IP ban that
+# auto-lifts after ~10 min — is transient INFRA, not a logic error. Classifying it as
+# transient makes reads + SL placement retry with backoff instead of failing instantly
+# (a silent non-transient failure could drop a stop-loss → naked position). create_order
+# still does NOT retry these (see its handler): a dropped order is safe (no duplicate
+# fill) and the bot's 10s/60s loops re-attempt naturally once the ban lifts.
+_RATE_LIMIT_ERRORS = (
+    "10006",                 # Bybit per-UID "Too many visits"
+    "too many visits",
+    "access too frequent",   # Bybit per-IP 403 ban
+    "ddos",
+    "ratelimit",             # ccxt RateLimitExceeded message text
+)
+
+
 def _is_transient_error(e: Exception) -> bool:
+    # ccxt raises typed exceptions for HTTP 429/418/403 throttles — the reliable
+    # signal, more robust than substring-matching a bare "403" (which could false-
+    # positive on order ids, prices, etc.).
+    if isinstance(e, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
+        return True
     msg = str(e)
-    return any(s in msg for s in _TRANSIENT_ERRORS)
+    if any(s in msg for s in _TRANSIENT_ERRORS):
+        return True
+    low = msg.lower()
+    return any(s in low for s in _RATE_LIMIT_ERRORS)
 
 
 def _is_symbol_error(e: Exception) -> bool:
@@ -225,12 +249,15 @@ class BaseExchange(ABC):
 
     def fetch_positions(self, symbols: list = None) -> list:
         if not self._ready():
+            self._last_positions_fetch_ok = False
             return []
         try:
             result = self.exchange.fetch_positions(symbols) or []
+            self._last_positions_fetch_ok = True
             return result
         except Exception as e:
             logger.debug(f"[{self.name}] fetch_positions: {e}")
+            self._last_positions_fetch_ok = False
             return []
 
     # ── Symbol verification ──────────────────────────────────────────
@@ -272,27 +299,15 @@ class BaseExchange(ABC):
                 if _is_timestamp_error(e):
                     self._sync_time()
                     continue
-                # Network timeouts on market orders are UNSAFE to retry —
-                # the order may have been filled; retrying doubles position size.
-                if order_type == "market" and _is_transient_error(e):
+                # Network timeouts on order creation are UNSAFE to retry —
+                # the order may have reached the venue. Retrying with either
+                # the same or a different client id can duplicate or desync
+                # the position. Let the caller reconcile/skip instead.
+                if _is_transient_error(e):
                     logger.warning(
-                        f"[{self.name}] create_order {symbol}: network error on MARKET order "
+                        f"[{self.name}] create_order {symbol}: transient network error "
                         f"— NOT retrying to avoid duplicate fill: {str(e)[:80]}")
                     raise
-                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
-                    delay = _backoff_delay(attempt)
-                    # Regenerate clientOrderId for the retry: if the prior
-                    # attempt actually reached the venue before the error,
-                    # the ID is reserved (Bybit 110072 OrderLinkedID is
-                    # duplicate) and reusing it guarantees the retry fails.
-                    _params["clientOrderId"] = _uuid.uuid4().hex[:24]
-                    if "newClientOrderId" in _params:
-                        _params["newClientOrderId"] = _params["clientOrderId"]
-                    logger.warning(
-                        f"[{self.name}] create_order {symbol}: transient, "
-                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
-                    _time.sleep(delay)
-                    continue
                 logger.error(f"[{self.name}] create_order {symbol}: {e}")
                 raise
         logger.error(f"[{self.name}] create_order {symbol}: failed after {MAX_RETRIES} attempts")
@@ -313,10 +328,14 @@ class BaseExchange(ABC):
     def cancel_order(self, order_id: str, symbol: str,
                      market_type: str = "spot") -> dict:
         if not self._ready():
-            return {}
+            return {"_cancel_uncertain": True, "status": "not_ready", "id": order_id}
         try:
             params = self._futures_params() if market_type == "futures" else {}
-            return self.exchange.cancel_order(order_id, symbol, params=params)
+            result = self.exchange.cancel_order(order_id, symbol, params=params)
+            if isinstance(result, dict):
+                result.setdefault("_cancel_confirmed", True)
+                return result
+            return {"_cancel_confirmed": True, "status": "canceled", "id": order_id}
         except Exception as e:
             # Areas 2 + 3 (2026-05-20): swallow known cancel-race errors.
             # If the order is already gone, our intent (cancel) is satisfied;
@@ -326,10 +345,19 @@ class BaseExchange(ABC):
                 logger.debug(
                     f"[{self.name}] cancel_order {order_id}: race "
                     f"(already filled/cancelled) — {str(e)[:80]}")
-                return {}
+                return {
+                    "_cancel_uncertain": True,
+                    "status": "gone_or_race",
+                    "id": order_id,
+                }
             # Unknown error — keep at ERROR
             logger.error(f"[{self.name}] cancel_order {order_id}: {e}")
-            return {}
+            return {
+                "_cancel_uncertain": True,
+                "status": "cancel_failed",
+                "id": order_id,
+                "error": str(e)[:200],
+            }
 
     def cancel_all_orders(self, symbol: str, market_type: str = "spot"):
         if not self._ready():

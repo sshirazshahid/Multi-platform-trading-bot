@@ -16,6 +16,15 @@ import pytest
 from core import health_watchdog as hw
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cooldown_state(tmp_path, monkeypatch):
+    """HealthWatchdog now persists/reloads cooldowns from COOLDOWN_STATE_PATH.
+    Redirect it to a per-test tmp file so state never leaks across tests or
+    into the real data/ directory."""
+    monkeypatch.setattr(
+        hw, "COOLDOWN_STATE_PATH", tmp_path / "watchdog_cooldown_state.json")
+
+
 class _FakeNotifier:
     def __init__(self):
         self.calls: list[dict] = []

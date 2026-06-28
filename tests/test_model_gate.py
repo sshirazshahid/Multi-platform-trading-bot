@@ -54,6 +54,20 @@ def _make_ensemble_json(path: Path, *, n_oos: int, auc: float) -> None:
     }))
 
 
+def _valid_latest_payload(version: str, art: Path) -> dict:
+    return {
+        "model_version": version,
+        "artifact_path": str(art),
+        "promoted_at": int(__import__("time").time()),
+        "diag": {
+            "model_version": version,
+            "oos_wr": 0.59,
+            "deflated_sharpe": 0.80,
+            "pbo": 0.30,
+        },
+    }
+
+
 def test_promotion_gate_refuses_low_oos_wr(tmp_path: Path, monkeypatch):
     """Gate must refuse a model that fails the WR floor regardless of how
     healthy the other metrics look."""
@@ -354,10 +368,10 @@ def test_load_model_bundle_recovers_after_retry_window(tmp_path: Path, monkeypat
             "lr": "lr.pkl", "gbm": "gbm.pkl",
             "iso_lr": "iso_lr.pkl", "iso_gbm": "iso_gbm.pkl",
         },
+        "metrics": {"n_oos_ensemble": 300, "auc_ensemble": 0.62},
     }))
-    (md / "ensemble_futures_latest.json").write_text(json.dumps({
-        "model_version": "fresh", "artifact_path": str(art),
-    }))
+    (md / "ensemble_futures_latest.json").write_text(
+        json.dumps(_valid_latest_payload("fresh", art)))
 
     # 3rd call: still inside retry window, NEW pointer ignored.
     out3 = b._load_model_bundle("futures")
@@ -375,6 +389,35 @@ def test_load_model_bundle_recovers_after_retry_window(tmp_path: Path, monkeypat
 # ─────────────────────────────────────────────────────────────────────────────
 # MCPBrain.score_via_model
 # ─────────────────────────────────────────────────────────────────────────────
+
+def test_load_model_bundle_rejects_overfit_latest_pointer(tmp_path: Path, monkeypatch):
+    """A latest pointer that fails the current gate is treated as revoked."""
+    from core.mcp_brain import MCPBrain
+
+    monkeypatch.chdir(tmp_path)
+    md = tmp_path / "data" / "models"
+    md.mkdir(parents=True)
+    art = md / "ensemble_futures_overfit.json"
+    art.write_text(json.dumps({
+        "model_version": "overfit",
+        "metrics": {"n_oos_ensemble": 4670, "auc_ensemble": 0.76},
+    }))
+    (md / "ensemble_futures_latest.json").write_text(json.dumps({
+        "model_version": "overfit",
+        "artifact_path": str(art),
+        "promoted_at": int(__import__("time").time()),
+        "diag": {
+            "model_version": "overfit",
+            "oos_wr": 0.71,
+            "deflated_sharpe": 0.0008,
+            "pbo": 1.0,
+        },
+    }))
+
+    b = MCPBrain()
+    assert b._load_model_bundle("futures") == {}
+    assert "futures" in b._model_load_failed_at
+
 
 def test_score_via_model_rule_fallback(tmp_path: Path, monkeypatch):
     """No latest pointer => rule-only sigmoid fallback."""
@@ -432,10 +475,8 @@ def test_score_via_model_with_bundle(tmp_path: Path, monkeypatch):
         },
         "metrics": {"n_oos_ensemble": 200, "auc_ensemble": 0.62},
     }))
-    art("ensemble_futures_latest.json").write_text(json.dumps({
-        "model_version": "test_bundle",
-        "artifact_path": str(ens_path),
-    }))
+    art("ensemble_futures_latest.json").write_text(
+        json.dumps(_valid_latest_payload("test_bundle", ens_path)))
 
     b = MCPBrain()
     out = b.score_via_model(

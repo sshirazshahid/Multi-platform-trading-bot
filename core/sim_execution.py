@@ -50,6 +50,13 @@ class SimExecutionModel:
         self.wick_enable  = bool(_SLIP_CFG.get("wick_sl_tp",  True))
         self.funding_on   = bool(_SLIP_CFG.get("funding",     True))
         self.prefer_book  = bool(_SLIP_CFG.get("prefer_book", True))
+        # Spread-aware slippage: a flat constant understates fill cost in thin /
+        # high-volatility markets, where the book is wide and a marketable order
+        # walks deeper past the touch (Talos 2025; market-impact ~ spread +
+        # volatility-during-latency at small size). Add this fraction of the
+        # observed bid/ask spread on top of the flat slip. 0.0 reproduces the
+        # prior flat-slippage behavior exactly.
+        self.spread_slip_mult = float(_SLIP_CFG.get("spread_slip_mult", 0.5))
         # Cumulative slippage paid in USDT-equivalent, for the dashboard
         # "sim-live divergence" panel.
         self._cum_cost_usd = 0.0
@@ -97,6 +104,16 @@ class SimExecutionModel:
             "close": self.close_slip,
             "stop":  self.sl_slip,
         }.get(phase, self.open_slip)
+
+        # Widen slippage by a fraction of the observed spread: a wide book is the
+        # live signature of a thin/stressed market, where fills walk deeper than
+        # the flat constant assumes. Uses bid/ask already fetched above — no extra
+        # call — and never lowers slip (mult>=0, spread>=0).
+        if self.spread_slip_mult > 0 and bid > 0 and ask > 0:
+            mid = 0.5 * (bid + ask)
+            if mid > 0:
+                spread_frac = max(0.0, (ask - bid) / mid)
+                slip += self.spread_slip_mult * spread_frac
 
         if side == "buy":
             ref = ask if (self.prefer_book and ask > 0) else last

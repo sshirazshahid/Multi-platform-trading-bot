@@ -45,3 +45,10 @@ def test_long_spaceless_blob_is_canonical():
 
 def test_idempotent_on_canonical():
     assert _canonical_exit_reason(_canonical_exit_reason("anything with spaces")) == "claude_close"
+
+
+def test_source_specific_prose_fallbacks():
+    assert _canonical_exit_reason("machine time stop: age 433m", source="machine") == "machine_close"
+    assert _canonical_exit_reason("", source="machine") == "machine_close"
+    assert _canonical_exit_reason("TSMOM exit: daily momentum flipped", source="tsmom") == "tsmom_close"
+    assert _canonical_exit_reason("machine_time_stop", source="machine") == "machine_time_stop"

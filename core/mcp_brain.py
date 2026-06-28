@@ -952,6 +952,15 @@ class MCPBrain:
                 self._model_load_failed_at[market_type] = time.time()
                 return {}
             ptr = json.loads(latest.read_text())
+            from core.promotion_gate import validate_model_pointer
+            ptr_ok, ptr_reason, _ptr_diag = validate_model_pointer(
+                ptr, market_type=market_type)
+            if not ptr_ok:
+                logger.warning(
+                    f"[ModelGate] latest pointer rejected for market={market_type}: "
+                    f"{ptr_reason}")
+                self._model_load_failed_at[market_type] = time.time()
+                return {}
             art_path = Path(ptr["artifact_path"])
             if not art_path.exists():
                 logger.warning(
@@ -3864,18 +3873,11 @@ class MCPBrain:
             MAX_LOSS_USD = MAX_LOSS_PER_TRADE_USD  # $2.00 from config
 
             # Get total portfolio value for dollar-cap conversion.
-            # Unified exchanges (Bybit) store the same balance in both
-            # spot and futures — only count spot to avoid double-counting.
-            _unified = {"bybit"}
-            total_bal = sum(
-                b.get("spot", 0) + b.get("futures", 0)
-                for ex, b in exchange_balances.items()
-                if ex not in _unified
-            ) + sum(
-                b.get("spot", 0)
-                for ex, b in exchange_balances.items()
-                if ex in _unified
-            )
+            # Unified exchanges (Bybit) — and ALL exchanges in PAPER mode —
+            # store the same balance in both spot and futures, so the shared
+            # helper counts each wallet once to avoid double-counting.
+            from core.balance_utils import deployable_total as _deployable_total
+            total_bal = _deployable_total(exchange_balances)
 
             size_pct = RISK_PER_TRADE_PCT * 100.0 / (sl_pct * leverage)
 

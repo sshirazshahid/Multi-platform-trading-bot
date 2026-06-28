@@ -1338,17 +1338,129 @@ CLAUDE_PORTFOLIO_MODE = os.getenv("CLAUDE_PORTFOLIO_MODE", "throttled").lower()
 CLAUDE_THROTTLE_N = max(1, int(os.getenv("CLAUDE_THROTTLE_N", "3")))
 
 # ── Signal source (2026-06-15) ──────────────────────────────────────────────
-#   "mcp"   - multi-factor scoring v3.1 / Claude-portfolio path (DEFAULT, unchanged prod)
-#   "tsmom" - long-only time-series-momentum on validated majors (core/tsmom_signal.py).
+#   "mcp"     - multi-factor scoring v3.1 / Claude-portfolio path (DEFAULT, unchanged prod)
+#   "tsmom"   - long-only time-series-momentum on validated majors (core/tsmom_signal.py).
 #             Capital-preservation variant: long while the daily trend is up, else flat;
 #             NEVER shorts. Validated 2026-06-15 (reports/tsmom_validation_2026-06-15.md) as a
 #             drawdown-halver, NOT a profit engine. PAPER-only research path.
+#   "machine" - deterministic detector ensemble (core/machine_signal.py) built from causal
+#             OHLCV-only modules: valuation, harmonics, stochastic, ICT variation, Asian
+#             range, Dow swing, Bollinger squeeze, and EMA/RSI chart-state detection.
+#             PAPER/shadow default until the after-cost OOS gate proves an edge.
 # ⚠ tsmom changes ENTRY selection only; bot_engine's scalp EXIT stack (ATR stop / trailing /
 #   mcp_take_profit / entry_invalidated) still fires and will clip trends — gate those before
 #   trusting PAPER results. Flag is fully reversible: SIGNAL_SOURCE=mcp restores prod.
-SIGNAL_SOURCE = os.getenv("SIGNAL_SOURCE", "mcp").lower()
-if SIGNAL_SOURCE not in ("mcp", "tsmom"):
-    raise ValueError(f"SIGNAL_SOURCE must be 'mcp' or 'tsmom', got {SIGNAL_SOURCE!r}")
+SIGNAL_SOURCE = os.getenv("SIGNAL_SOURCE", "tsmom").lower()
+if SIGNAL_SOURCE not in ("mcp", "tsmom", "machine"):
+    raise ValueError(
+        f"SIGNAL_SOURCE must be 'mcp', 'tsmom', or 'machine', got {SIGNAL_SOURCE!r}"
+    )
+
+# Machine detector scores are vote weights, not MCP confidence. Earlier paper
+# collection used 0.25 and produced too many weak after-cost trades; use the
+# live-equivalent floor by default and rely on explicit env overrides for probes.
+_MACHINE_MIN_SCORE_DEFAULT = "0.34"
+
+MACHINE_STRATEGY = {
+    "enabled": os.getenv("MACHINE_STRATEGY_ENABLED", "true").lower() == "true",
+    "runtime_mode": os.getenv("MACHINE_STRATEGY_RUNTIME_MODE", "paper_shadow"),
+    "market_type": os.getenv("MACHINE_STRATEGY_MARKET_TYPE", "futures").lower(),
+    "exchange_preference": [
+        s.strip().lower()
+        for s in os.getenv("MACHINE_STRATEGY_EXCHANGES", "binance,bybit,bitget").split(",")
+        if s.strip()
+    ],
+    "universe": [
+        s.strip().upper()
+        for s in os.getenv(
+            "MACHINE_STRATEGY_UNIVERSE",
+            "BTC,ETH,SOL,BNB,XRP,ADA,AVAX,LINK,DOGE",
+        ).split(",")
+        if s.strip()
+    ],
+    "timeframe": os.getenv("MACHINE_STRATEGY_TIMEFRAME", "15m"),
+    "context_timeframes": [
+        s.strip()
+        for s in os.getenv("MACHINE_STRATEGY_CONTEXT_TIMEFRAMES", "1h,4h").split(",")
+        if s.strip()
+    ],
+    "lookback_candles": int(os.getenv("MACHINE_STRATEGY_LOOKBACK", "220")),
+    "max_actions_per_cycle": int(os.getenv("MACHINE_STRATEGY_MAX_ACTIONS", "3")),
+    "min_score": float(os.getenv("MACHINE_STRATEGY_MIN_SCORE", _MACHINE_MIN_SCORE_DEFAULT)),
+    "execution_confidence_floor": float(
+        os.getenv("MACHINE_STRATEGY_EXECUTION_CONFIDENCE_FLOOR", "0.50")
+    ),
+    "rr": float(os.getenv("MACHINE_STRATEGY_RR", "1.8")),
+    "atr_period": int(os.getenv("MACHINE_STRATEGY_ATR_PERIOD", "14")),
+    "atr_stop_mult": float(os.getenv("MACHINE_STRATEGY_ATR_STOP_MULT", "1.6")),
+    "min_stop_pct": float(os.getenv("MACHINE_STRATEGY_MIN_STOP_PCT", "0.0035")),
+    "max_stop_pct": float(os.getenv("MACHINE_STRATEGY_MAX_STOP_PCT", "0.025")),
+    "scalp_time_stop_bars": int(os.getenv("MACHINE_STRATEGY_TIME_STOP_BARS", "12")),
+    "allow_short_spot": os.getenv("MACHINE_STRATEGY_ALLOW_SHORT_SPOT", "false").lower() == "true",
+    "default_leverage": int(os.getenv("MACHINE_STRATEGY_LEVERAGE", "1")),
+    "size_pct": float(os.getenv("MACHINE_STRATEGY_SIZE_PCT", "3.0")),
+    "min_quote_volume": float(os.getenv("MACHINE_STRATEGY_MIN_QUOTE_VOLUME", "10000000")),
+    "max_spread_bps": float(os.getenv("MACHINE_STRATEGY_MAX_SPREAD_BPS", "12")),
+    "confirmation_detectors": [
+        s.strip()
+        for s in os.getenv("MACHINE_STRATEGY_CONFIRMATION_DETECTORS", "ema_rsi").split(",")
+        if s.strip()
+    ],
+    "unconfirmed_min_score": float(os.getenv("MACHINE_STRATEGY_UNCONFIRMED_MIN_SCORE", "0.40")),
+    "weights": {
+        "valuation": float(os.getenv("MACHINE_WEIGHT_VALUATION", "0.14")),
+        "harmonic": float(os.getenv("MACHINE_WEIGHT_HARMONIC", "0.14")),
+        "stochastic": float(os.getenv("MACHINE_WEIGHT_STOCHASTIC", "0.10")),
+        "ict": float(os.getenv("MACHINE_WEIGHT_ICT", "0.16")),
+        "asian_range": float(os.getenv("MACHINE_WEIGHT_ASIAN_RANGE", "0.08")),
+        "dow_swing": float(os.getenv("MACHINE_WEIGHT_DOW_SWING", "0.10")),
+        "bb_squeeze": float(os.getenv("MACHINE_WEIGHT_BB_SQUEEZE", "0.12")),
+        "ema_rsi": float(os.getenv("MACHINE_WEIGHT_EMA_RSI", "0.16")),
+    },
+    "detector_params": {
+        "ema_rsi": {
+            "fast_ema": int(os.getenv("MACHINE_EMA_RSI_FAST_EMA", "9")),
+            "slow_ema": int(os.getenv("MACHINE_EMA_RSI_SLOW_EMA", "21")),
+            "trend_ema": int(os.getenv("MACHINE_EMA_RSI_TREND_EMA", "50")),
+            "rsi_period": int(os.getenv("MACHINE_EMA_RSI_RSI_PERIOD", "14")),
+            "rsi_signal_ema": int(os.getenv("MACHINE_EMA_RSI_RSI_SIGNAL_EMA", "5")),
+            "trend_slope_bars": int(os.getenv("MACHINE_EMA_RSI_TREND_SLOPE_BARS", "4")),
+            "min_trend_slope": float(os.getenv("MACHINE_EMA_RSI_MIN_TREND_SLOPE", "0.00005")),
+            "min_ema_spread_pct": float(
+                os.getenv("MACHINE_EMA_RSI_MIN_EMA_SPREAD_PCT", "0.0002")
+            ),
+            "max_ema_spread_pct": float(
+                os.getenv("MACHINE_EMA_RSI_MAX_EMA_SPREAD_PCT", "0.035")
+            ),
+            "long_rsi_floor": float(os.getenv("MACHINE_EMA_RSI_LONG_RSI_FLOOR", "45")),
+            "long_rsi_ceiling": float(os.getenv("MACHINE_EMA_RSI_LONG_RSI_CEILING", "70")),
+            "short_rsi_floor": float(os.getenv("MACHINE_EMA_RSI_SHORT_RSI_FLOOR", "30")),
+            "short_rsi_ceiling": float(os.getenv("MACHINE_EMA_RSI_SHORT_RSI_CEILING", "55")),
+            "hold_bars": int(os.getenv("MACHINE_EMA_RSI_HOLD_BARS", "3")),
+        },
+    },
+}
+
+SELF_HEALING = {
+    "enabled": os.getenv("SELF_HEALING_ENABLED", "true").lower() == "true",
+    "repair_enabled": os.getenv("SELF_HEALING_REPAIR_ENABLED", "true").lower() == "true",
+    "restart_main": os.getenv("SELF_HEALING_RESTART_MAIN", "false").lower() == "true",
+    "retrain_enabled": os.getenv("SELF_HEALING_RETRAIN_ENABLED", "true").lower() == "true",
+    "adapt_enabled": os.getenv("SELF_HEALING_ADAPT_ENABLED", "true").lower() == "true",
+    "dry_run": os.getenv("SELF_HEALING_DRY_RUN", "false").lower() == "true",
+    "min_interval_sec": int(os.getenv("SELF_HEALING_MIN_INTERVAL_SEC", str(15 * 60))),
+    "repair_cooldown_sec": int(os.getenv("SELF_HEALING_REPAIR_COOLDOWN_SEC", str(10 * 60))),
+    "retrain_cooldown_sec": int(os.getenv("SELF_HEALING_RETRAIN_COOLDOWN_SEC", str(12 * 60 * 60))),
+    "adapt_cooldown_sec": int(os.getenv("SELF_HEALING_ADAPT_COOLDOWN_SEC", str(4 * 60 * 60))),
+    "replay_timeframe": os.getenv("SELF_HEALING_REPLAY_TIMEFRAME", "15m"),
+    "replay_max_files": int(os.getenv("SELF_HEALING_REPLAY_MAX_FILES", "8")),
+    "replay_max_bars": int(os.getenv("SELF_HEALING_REPLAY_MAX_BARS", "1500")),
+    "min_trades": int(os.getenv("SELF_HEALING_MIN_TRADES", "100")),
+    "min_profit_factor": float(os.getenv("SELF_HEALING_MIN_PROFIT_FACTOR", "1.05")),
+    "min_avg_ret": float(os.getenv("SELF_HEALING_MIN_AVG_RET", "0.0")),
+    "min_positive_folds": int(os.getenv("SELF_HEALING_MIN_POSITIVE_FOLDS", "2")),
+    "adaptive_ttl_hours": int(os.getenv("SELF_HEALING_ADAPTIVE_TTL_HOURS", "24")),
+}
 
 # Phase 2b: a tsmom long is held to its momentum-flip exit, so the scalp early
 # exits (TP/partial/trailing/BE/age/staleness/3%-hard-loss) are suppressed for
@@ -1781,14 +1893,12 @@ SPOT_PORTFOLIO = {
 # signs docs/CONTROLLED_LIVE_CHECKLIST.md.
 # ==============================================================
 CAPITAL_ALLOCATION = {
-    # 2026-05-24 — User directive (AskUserQuestion answer): enable real
-    # spot accumulation. Baseline-write fix (capital_allocator.py)
-    # makes the feature actually fire. Conservative caps remain:
-    # threshold_usd 10.0 (won't sweep tiny amounts), max_transfer_pct
-    # 0.20 (≤20% of futures wallet per cycle), min_transfer_usdt 5.0.
-    # On a $400 wallet, max sweep per 15-min cycle is ~$80.
+    # Learning-first / safety-first: keep the evaluator enabled so it can
+    # write transfer opportunities for review, but never call wallet-transfer
+    # APIs unless CONTROLLED_LIVE has been explicitly armed and this flag is
+    # deliberately changed.
     "enabled": True,
-    "recommendation_only": False,  # real transfers (futures→spot)
+    "recommendation_only": True,  # recommendations only; no real transfers
     "cycle_interval_min": 15,
     "accumulation_threshold_usd": 10.0,
     "spot_targets": {"BTC": 0.50, "ETH": 0.50},
@@ -1875,7 +1985,7 @@ DAILY_LOSS_BREAKER = {
 # code in the safety-critical exit core; flip ON for a PAPER soak before any live
 # flip. RLock is mandatory (fail-closed re-entry) — see the proof in
 # reports/ / tasks/todo.md B7-P2.
-PER_POSITION_LOCK_ENABLED = os.getenv("PER_POSITION_LOCK_ENABLED", "false").lower() == "true"
+PER_POSITION_LOCK_ENABLED = os.getenv("PER_POSITION_LOCK_ENABLED", "true").lower() == "true"
 
 # ── PORTFOLIO DISCRETIONARY-CLOSE GUARD (A4, audit 2026-06-21) — default OFF ──
 # The portfolio-cycle Claude CLOSE -> _execute_close has NO gate beyond OBSERVATION

@@ -37,6 +37,7 @@ INVARIANTS (capital preservation — pinned by tests/test_tsmom_signal.py):
 from __future__ import annotations
 
 import math
+import time
 import uuid
 
 # Validated liquid majors from reports/tsmom_validation_2026-06-15.md. Kept small on purpose:
@@ -163,10 +164,53 @@ class TSMOMSignal:
                                          market_type=market_type)
                 except Exception:
                     raw = None
+                if raw:
+                    raw = self._closed_ohlcv_rows(raw)
                 if raw and len(raw) >= self._min_bars:
                     closes = [float(r[4]) for r in raw]
                     return closes, ex_name
         return [], None
+
+    def _closed_ohlcv_rows(self, rows: list) -> list:
+        """Return only fully closed candles.
+
+        CCXT OHLCV timestamps are candle-open times. For a daily momentum
+        signal, including the still-forming current candle leaks intraday price
+        into a daily-close rule and can flip a trade too early.
+        """
+        tf_ms = self._timeframe_ms(self.timeframe)
+        if tf_ms <= 0:
+            return rows
+        now_ms = int(time.time() * 1000)
+        closed = []
+        for r in rows or []:
+            try:
+                ts = float(r[0])
+                if ts < 10_000_000_000:  # seconds, not milliseconds
+                    ts *= 1000
+                if ts + tf_ms <= now_ms:
+                    closed.append(r)
+            except Exception:
+                continue
+        return closed
+
+    @staticmethod
+    def _timeframe_ms(timeframe: str) -> int:
+        tf = str(timeframe or "").strip().lower()
+        if not tf:
+            return 0
+        units = {
+            "m": 60_000,
+            "h": 3_600_000,
+            "d": 86_400_000,
+            "w": 7 * 86_400_000,
+        }
+        try:
+            unit = tf[-1]
+            n = int(tf[:-1] or "1")
+            return n * units.get(unit, 0)
+        except Exception:
+            return 0
 
     def _vol_scaled_size_pct(self, closes: list) -> float:
         """Vol-targeted size: smaller position when realized vol is high. Clamped to a
@@ -219,7 +263,8 @@ class TSMOMSignal:
             "sl_pct": 0.0,
             "tp_pct": 0.0,
             "confidence": 0.70,
-            "reason": "TSMOM exit: daily momentum flipped non-positive",
+            "reason": "tsmom_momentum_flip",
+            "rationale": "daily momentum flipped non-positive",
             "position_id": pos.get("id", ""),
             "decision_id": str(uuid.uuid4()),
             "source": "tsmom",

@@ -16,10 +16,11 @@ the full engine (which drags in `schedule`, exchanges, etc.).
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 CHECKLIST_PATH = Path("docs/CONTROLLED_LIVE_CHECKLIST.md")
+MAX_SIGNATURE_AGE_DAYS = 30
 
 # Matches `Signed-By: Owner Name 2026-12-31`, allowing a leading `<!-- ` /
 # trailing ` -->` pair so the repo can ship an example signature that is
@@ -52,7 +53,11 @@ def _line_is_signature(line: str) -> tuple[str, date] | None:
     return (m.group("name").strip(), d)
 
 
-def is_checklist_signed(path: Path | str | None = None) -> tuple[bool, str]:
+def is_checklist_signed(
+    path: Path | str | None = None,
+    *,
+    max_signature_age_days: int = MAX_SIGNATURE_AGE_DAYS,
+) -> tuple[bool, str]:
     """Return (ok, message). `ok=True` means CONTROLLED_LIVE may proceed."""
     p = Path(path) if path else CHECKLIST_PATH
     if not p.exists():
@@ -62,8 +67,17 @@ def is_checklist_signed(path: Path | str | None = None) -> tuple[bool, str]:
     except OSError as e:
         return False, f"cannot read checklist: {e}"
 
-    # Walk every non-empty, non-header line and return on the first valid
-    # signature we find. Multiple signatures just means the latest counts.
+    unchecked = [
+        raw.strip()
+        for raw in text.splitlines()
+        if re.match(r"^\s*-\s*\[\s\]\s+", raw, flags=re.IGNORECASE)
+    ]
+    if unchecked:
+        return False, (
+            f"{len(unchecked)} acceptance item(s) remain unchecked in {p} "
+            "— refusing to run CONTROLLED_LIVE"
+        )
+
     signatures = []
     for raw in text.splitlines():
         sig = _line_is_signature(raw)
@@ -75,22 +89,62 @@ def is_checklist_signed(path: Path | str | None = None) -> tuple[bool, str]:
             f"{p} — refusing to run CONTROLLED_LIVE. See file for criteria."
         )
     name, d = signatures[-1]
+    if max_signature_age_days >= 0:
+        oldest_allowed = date.today() - timedelta(days=max_signature_age_days)
+        if d < oldest_allowed:
+            return False, (
+                f"signature by {name} on {d.isoformat()} is older than "
+                f"{max_signature_age_days} days — re-verify and re-sign {p}"
+            )
     return True, f"signed by {name} on {d.isoformat()}"
 
 
 def enforce_controlled_live_gate(operating_mode: str,
-                                  path: Path | str | None = None) -> None:
+                                  path: Path | str | None = None,
+                                  controlled_live_enabled: bool | None = None) -> None:
     """Raise SystemExit if mode=CONTROLLED_LIVE and the checklist is unsigned.
 
     No-op for OBSERVATION or PAPER modes.
     """
     if (operating_mode or "").upper() != "CONTROLLED_LIVE":
         return
+    if controlled_live_enabled is False:
+        raise SystemExit(
+            "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: "
+            "CONTROLLED_LIVE_ENABLED is not true"
+        )
     ok, msg = is_checklist_signed(path)
     if not ok:
         raise SystemExit(
             "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: " + msg
         )
+
+
+def enforce_strategy_readiness_gate(
+    operating_mode: str,
+    *,
+    db_path: Path | str = "data/warehouse.sqlite",
+    strategy_family: str | None = None,
+) -> None:
+    """Raise SystemExit if CONTROLLED_LIVE lacks proven strategy evidence.
+
+    Checklist signature proves operator intent. This gate proves the selected
+    strategy has recent after-cost evidence. Missing or negative evidence is a
+    hard stop for live startup.
+    """
+    if (operating_mode or "").upper() != "CONTROLLED_LIVE":
+        return
+    from core.strategy_readiness import evaluate_warehouse
+
+    report = evaluate_warehouse(db_path, mode="PAPER", strategy_family=strategy_family)
+    if report.get("ready"):
+        return
+    reasons = "; ".join((report.get("reasons") or [])[:5]) or "not promotion-ready"
+    name = report.get("name", "strategy")
+    raise SystemExit(
+        "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: "
+        f"{name} evidence gate failed: {reasons}"
+    )
 
 
 def live_latch_permits_execution(operating_mode: str,

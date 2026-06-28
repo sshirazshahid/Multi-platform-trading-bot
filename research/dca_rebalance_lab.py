@@ -27,6 +27,11 @@ import math
 import random
 from dataclasses import dataclass, field
 
+try:
+    from research._stats import _percentiles, resample_blocks
+except ImportError:  # run as a script (python research/dca_rebalance_lab.py)
+    from _stats import _percentiles, resample_blocks
+
 DEFAULT_FEE_PCT = 0.001  # 0.1% spot taker, matches strategies/dca_strategy.py
 DEFAULT_SLIPPAGE_PCT = 0.0005  # 5 bps per fill, conservative for liquid spot
 
@@ -191,44 +196,16 @@ def _log_returns(prices) -> list[float]:
 
 
 def _bootstrap_path(p0: float, rets: list[float], n: int, block: int, rng) -> list[float]:
-    """Build one synthetic price path of length n by concatenating random
-    contiguous blocks of historical log-returns (moving-block bootstrap), then
-    compounding from p0. Preserves short-horizon autocorrelation via `block`."""
+    """Build one synthetic price path of length n via a moving-block bootstrap
+    of historical log-returns, compounding from p0. Preserves short-horizon
+    autocorrelation via `block`."""
     if not rets or n < 2:
         return [p0] * max(1, n)
-    out: list[float] = []
-    while len(out) < n - 1:
-        start = rng.randrange(0, len(rets))
-        out.extend(rets[start : start + block])
-    out = out[: n - 1]
+    out = resample_blocks(rets, n - 1, block, rng)
     path = [p0]
     for r in out:
         path.append(path[-1] * math.exp(r))
     return path
-
-
-def _percentiles(values) -> dict:
-    s = sorted(values)
-    n = len(s)
-
-    def q(p):
-        if n == 1:
-            return s[0]
-        idx = p * (n - 1)
-        lo = int(idx)
-        hi = min(lo + 1, n - 1)
-        return s[lo] * (1 - (idx - lo)) + s[hi] * (idx - lo)
-
-    return {
-        "p5": q(0.05),
-        "p25": q(0.25),
-        "p50": q(0.50),
-        "p75": q(0.75),
-        "p95": q(0.95),
-        "mean": sum(s) / n,
-        "min": s[0],
-        "max": s[-1],
-    }
 
 
 _SIMS = {"dca": simulate_dca, "lump_sum": simulate_lump_sum}

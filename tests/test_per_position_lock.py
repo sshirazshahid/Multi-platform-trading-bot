@@ -1,7 +1,7 @@
 """Audit 2026-06-21 B7-P2: per-position close/SL-mutation lock.
 
-Proven design (deadlock-proof workflow): one RLock per position id, default-OFF
-(PER_POSITION_LOCK_ENABLED), 5s timeout-acquire with proceed-on-timeout, in-lock
+Proven design (deadlock-proof workflow): one RLock per position id, default-ON
+(PER_POSITION_LOCK_ENABLED), 5s timeout-acquire with fail-closed timeout, in-lock
 tracker.is_position_open idempotency, dict eviction in _finalize_close.
 
 RLock is MANDATORY: _replace_exchange_sl -> _place_exchange_sl_tp fail-closed
@@ -130,7 +130,7 @@ def test_replace_then_close_reentrancy_no_deadlock():
 
 
 # ── timeout backstop: a held lock must NOT freeze the caller ─────────────────
-def test_timeout_backstop_proceeds_unserialized():
+def test_timeout_backstop_fails_closed():
     om = _om()
     om._pos_lock_timeout = 0.1
     pos = _pos()
@@ -148,12 +148,12 @@ def test_timeout_backstop_proceeds_unserialized():
     holder.start()
     held.wait(timeout=2.0)               # ensure the OTHER thread holds it
     t0 = time.time()
-    out = om.close_position(MagicMock(), pos, "x")   # times out at 0.1s, proceeds
+    out = om.close_position(MagicMock(), pos, "x")   # times out at 0.1s
     elapsed = time.time() - t0
     release.set()
     holder.join(timeout=2.0)
-    assert out == "CLOSED"               # proceeded despite not acquiring
-    om._close_position_impl.assert_called_once()
+    assert out is None                   # refused unsynchronized close
+    om._close_position_impl.assert_not_called()
     assert elapsed < 1.5                 # did not block for the full hold
 
 
@@ -177,3 +177,22 @@ def test_tracker_is_position_open():
     tr._open = {"a": object()}
     assert tr.is_position_open("a") is True
     assert tr.is_position_open("b") is False
+
+
+def test_unconfirmed_live_close_keeps_tracker_open(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    om = _om(enabled=False)
+    om.dry_run = False
+    pos = _pos()
+    pos.paper_trade = False
+    ex = MagicMock()
+    ex.name = "Binance"
+    ex.fetch_ticker.return_value = {"last": 101.0, "close": 101.0}
+    ex.create_order.return_value = {}
+
+    for _ in range(3):
+        assert om.close_position(ex, pos, "manual") is None
+
+    assert om.tracker.close.call_count == 0
+    assert om._close_fail_count[pos.id] == 3

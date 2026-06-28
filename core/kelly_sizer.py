@@ -229,8 +229,15 @@ class KellySizer:
             wr = stats["wins"] / total
             avg_win  = stats["total_win"]  / max(stats["wins"], 1)
             avg_loss = stats["total_loss"] / max(stats["losses"], 1)
-            b = avg_win / avg_loss if avg_loss > 0 else float('inf')
-            kelly = 1.0 if b == float('inf') else (wr * b - (1 - wr)) / b
+            if avg_loss <= 0:
+                b = float("inf")
+                kelly = 1.0
+            elif avg_win <= 0:
+                b = 0.0
+                kelly = -1.0
+            else:
+                b = avg_win / avg_loss
+                kelly = (wr * b - (1 - wr)) / b
             result[strat] = {
                 "trades": total, "win_rate": round(wr * 100, 1),
                 "r_multiple": round(b, 2),

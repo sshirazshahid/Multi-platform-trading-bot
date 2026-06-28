@@ -641,6 +641,8 @@ class PositionTracker:
                 positions = exchange.fetch_positions()
                 if positions is None:
                     raise ValueError("fetch_positions() returned None")
+                if getattr(exchange, "_last_positions_fetch_ok", True) is False:
+                    raise ValueError("fetch_positions() failed")
                 for ep in positions:
                     size = float(ep.get("contracts") or ep.get("contractSize") or 0)
                     if size == 0:
