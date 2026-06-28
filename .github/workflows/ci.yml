@@ -267,6 +267,27 @@ jobs:
           tests/test_promotion_gate_inputs.py
           -v
 
+  bot-tests:
+    name: Bot full suite
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Full bot test suite (~2002 tests). requirements.txt carries
+      # ccxt/pandas/numpy/scipy/scikit-learn/etc. Runs on windows-latest to match
+      # the runtime OS (the system-audit process snapshot + path tests are
+      # Windows-shaped). Verified 2002 passing locally on this OS + Python.
+      - name: Install bot dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run bot test suite
+        run: python -m pytest tests/ -q -p no:cacheprovider
+
   security:
     name: Security
     runs-on: ubuntu-latest

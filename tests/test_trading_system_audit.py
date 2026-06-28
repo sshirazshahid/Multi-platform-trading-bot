@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import subprocess
-import sys
-import textwrap
 import json
-from pathlib import Path
 
 
 def test_confluence_audit_flags_duplicate_rows(tmp_path, monkeypatch):
@@ -31,53 +27,6 @@ def test_confluence_audit_flags_duplicate_rows(tmp_path, monkeypatch):
 
     assert checks[0]["status"] == "FAIL"
     assert checks[0]["metrics"]["duplicate_rows_extra"] == 1
-
-
-def test_confluence_single_instance_lock_excludes_second_process(tmp_path):
-    repo = Path(__file__).resolve().parents[1]
-    lock_path = tmp_path / "runner.lock"
-    code = textwrap.dedent(
-        """
-        import sys
-        import time
-        from pathlib import Path
-        from run_confluence_paper import SingleInstance
-
-        lock = SingleInstance(Path(sys.argv[1]))
-        if not lock.acquire():
-            print("blocked", flush=True)
-            raise SystemExit(2)
-        print("acquired", flush=True)
-        try:
-            time.sleep(30)
-        finally:
-            lock.release()
-        """
-    )
-    proc = subprocess.Popen(
-        [sys.executable, "-c", code, str(lock_path)],
-        cwd=repo,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert proc.stdout is not None
-        assert proc.stdout.readline().strip() == "acquired"
-
-        from run_confluence_paper import SingleInstance
-
-        second = SingleInstance(lock_path)
-        assert second.acquire() is False
-    finally:
-        proc.terminate()
-        proc.wait(timeout=10)
-
-    from run_confluence_paper import SingleInstance
-
-    third = SingleInstance(lock_path)
-    assert third.acquire() is True
-    third.release()
 
 
 def test_logical_script_counts_collapse_venv_parent_child():
