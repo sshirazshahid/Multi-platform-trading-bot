@@ -421,12 +421,18 @@ class SelfHealingSupervisor:
         ]
         if cfg.dry_run:
             cmd.append("--dry-run")
+        # _run_command always spawns the script (dry_run=False) — when cfg.dry_run
+        # the safe behaviour is delegated to the script's own --dry-run flag
+        # (appended above) so its stdout still reports retrain=skipped vs needed.
         result = _run_command(cmd, timeout_sec=3600, dry_run=False)
         needs_retrain = "retrain=skipped" not in str(result.get("stdout") or "")
-        if needs_retrain:
-            if not cfg.dry_run:
-                self.state.last_retrain_at = now
-        return {"type": "retrain_if_stale", "ok": result.get("returncode") == 0, "result": result}
+        # Stamp the cooldown whenever the check actually RAN the script — not only
+        # when a retrain was needed. Previously a "retrain=skipped" result left
+        # last_retrain_at unchanged (0.0), so the 12h cooldown never engaged and the
+        # script re-spawned every supervisor tick (~15 min). Stamp unconditionally.
+        self.state.last_retrain_at = now
+        return {"type": "retrain_if_stale", "ok": result.get("returncode") == 0,
+                "needs_retrain": needs_retrain, "result": result}
 
     def _run_replay_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
         cfg = self.config

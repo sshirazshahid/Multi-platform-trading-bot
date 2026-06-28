@@ -191,7 +191,9 @@ class BotEngine:
         try:
             from core.auto_mutator import AutoMutator
             self.auto_mutator = AutoMutator()
-            logger.info("[Engine] AutoMutator enabled — mutations will self-apply from post-mortems")
+            logger.info("[Engine] AutoMutator init — EVIDENCE-TRACKING ONLY "
+                        "(mutation writes + blacklist/short reads disabled 2026-05/06; "
+                        "applies no live mutations)")
         except Exception as e:
             logger.debug(f"[Engine] AutoMutator init failed: {e}")
             self.auto_mutator = None
@@ -5064,6 +5066,16 @@ class BotEngine:
                 "- Claude/MCP entry scoring AND position monitor DISABLED")
         else:
             logger.info(f"[Engine] Signal source: {_SIG_RUN} (Claude/MCP scoring path)")
+        if _SIG_RUN != "machine":
+            # The self-healing strategy-adaptation and promotion loops tune the
+            # MACHINE signal and write data/adaptive_machine_config.json — which is
+            # ONLY read by MachineSignal. Under any other source those writes are
+            # never consumed, so their "promoted" reports are DORMANT (no live
+            # effect). Say so plainly to avoid false "self-improvement is acting" reads.
+            logger.info(
+                f"[Engine] NOTE: machine-strategy self-improvement (self-healing adapt + "
+                f"promotion loop) is DORMANT under SIGNAL_SOURCE={_SIG_RUN} — adaptive "
+                f"config writes are not consumed by the live signal.")
         self.notifier.alert(
             f"Bot started | {TRADING_MODE.upper()} | "
             f"signal={_SIG_RUN} | "

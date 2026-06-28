@@ -1,6 +1,13 @@
 """
 core/auto_mutator.py — Closed-loop post-mortem learner.
 
+STATUS (2026-06-28): MUTATIONS DISABLED — evidence-tracking only. The mutation
+WRITES were removed 2026-05-27 (loss-driven-halt removal) and the blacklist /
+short-block READS return empty/False since 2026-06-20. refresh() still expires
+stale state and scans post-mortems, but applies NO live mutation. The leverage-cap
+read path remains as defensive cleanup of any stale persisted cap (none is written).
+The pre-disable behaviour is described below for reference only.
+
 Reads the last N entries from data/post_mortem.json on each portfolio
 cycle and auto-tightens the trading mechanism when patterns of loss
 emerge:

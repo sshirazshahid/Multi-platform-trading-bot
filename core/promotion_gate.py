@@ -171,6 +171,14 @@ class PromotionGate:
                 n_obs=max(2, n_obs),
                 skew=skew_val,
                 kurt=kurt_val,
+                # Under the null each of the N trial Sharpes is an i.i.d. estimate
+                # with sampling variance ~1/n_obs, so the cross-trial Sharpe
+                # variance that E[max SR] needs is ~1/n_obs — NOT the placeholder
+                # 1.0, which assumed unit-variance trials and inflated E[max SR],
+                # making the gate reject even strong signals (SR 0.6–1.0). Matches
+                # the sr_var convention in scripts/train_models.py. This is ONE of
+                # four conjunctive conditions; WR>=0.65 remains the binding gate.
+                sr_var=1.0 / max(2, n_obs),
             )
         )
         dsr_p = 1.0 - dsr_prob
