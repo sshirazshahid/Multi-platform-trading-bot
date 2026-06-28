@@ -146,8 +146,11 @@ LEARN_INTERVAL      = CLAUDE_PORTFOLIO.get("learn_interval_min", 60) * 60
 PORTFOLIO_CYCLE_SEC = CLAUDE_PORTFOLIO.get("scan_interval_min", 15) * 60
 MAX_ACTIONS_PER_CYCLE = CLAUDE_PORTFOLIO.get("max_actions_per_cycle", 4)
 
-# Exchanges that use a single Unified Account (fetch balance once only)
-_UNIFIED_EXCHANGES = {"bybit"}
+# Exchanges that use a single Unified Account (fetch balance once only).
+# Shared with the deployable-balance helper so the unified set and the
+# PAPER-aware aggregation never drift apart.
+from core.balance_utils import UNIFIED_EXCHANGES as _UNIFIED_EXCHANGES
+from core.balance_utils import deployable_total as _deployable_total
 
 
 class BotEngine:
@@ -1121,15 +1124,7 @@ class BotEngine:
         total_open = self.tracker.count_open()
         max_new = max(0, RISK.get("max_open_positions", 8) - total_open)
 
-        total_bal = sum(
-            b.get("spot", 0) + b.get("futures", 0)
-            for ex, b in self._balances.items()
-            if ex not in _UNIFIED_EXCHANGES
-        ) + sum(
-            b.get("spot", 0)
-            for ex, b in self._balances.items()
-            if ex in _UNIFIED_EXCHANGES
-        )
+        total_bal = _deployable_total(self._balances)
 
         daily_loss_pct = 0
         if total_bal > 0:
@@ -2746,15 +2741,7 @@ class BotEngine:
             return False
 
         # Correlation check — prevent over-concentration in correlated assets
-        total_bal = sum(
-            b.get("spot", 0) + b.get("futures", 0)
-            for ex, b in self._balances.items()
-            if ex not in _UNIFIED_EXCHANGES
-        ) + sum(
-            b.get("spot", 0)
-            for ex, b in self._balances.items()
-            if ex in _UNIFIED_EXCHANGES
-        )
+        total_bal = _deployable_total(self._balances)
         corr_info = {"can_add": True, "size_multiplier": 1.0}
         if total_bal > 0:
             corr_info = self.risk.check_correlation(
@@ -3091,8 +3078,7 @@ class BotEngine:
         try:
             from config import MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP
             from core.risk_manager import exposure_breached as _exp_breached
-            _equity = sum(float(v.get("spot", 0) or 0) + float(v.get("futures", 0) or 0)
-                          for v in self._balances.values()) or 0.0
+            _equity = _deployable_total(self._balances)
             if _exp_breached(self.tracker.get_open(), size * price, _equity, _MAX_EXP):
                 logger.warning(
                     f"[Risk] §2 EXPOSURE CAP: {symbol} would exceed {_MAX_EXP:g}% of "
@@ -3337,15 +3323,7 @@ class BotEngine:
                 from core.portfolio_risk import PortfolioRisk
                 _pr = PortfolioRisk(self.active_exchanges, _cfg)
                 self._portfolio_risk = _pr
-            _eq = sum(
-                b.get("spot", 0) + b.get("futures", 0)
-                for ex, b in self._balances.items()
-                if ex not in _UNIFIED_EXCHANGES
-            ) + sum(
-                b.get("spot", 0)
-                for ex, b in self._balances.items()
-                if ex in _UNIFIED_EXCHANGES
-            )
+            _eq = _deployable_total(self._balances)
             _pr.evaluate_book(self.tracker.get_open(), _eq)
             return _pr.last_snapshot()
         except Exception:

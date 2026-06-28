@@ -6,8 +6,11 @@ state on disk and in the live RiskManager / BotEngine attributes,
 and sends a notifier alert when one of the trigger conditions fires.
 
 Each check is independent and rate-limited so a persistent fault doesn't
-flood the notifier. Cooldowns are kept in-process; a process restart
-re-arms every check.
+flood the notifier. Cooldowns are persisted to
+``data/watchdog_cooldown_state.json`` so a process restart does NOT re-arm
+every check — a sticky condition (e.g. a stale model pointer or a
+NOT_READY audit) that is still true after a bounce stays muted until its
+cooldown genuinely elapses, instead of re-emailing on every restart.
 
 Triggers (see WatchdogConfig for thresholds):
 
@@ -72,6 +75,9 @@ MODEL_POINTER_MARKETS    = ("futures", "spot")
 NO_SCAN_PROGRESS_SEC     = 15 * 60
 STUCK_OPEN_HOURS         = 24
 REPORTS_DIR              = Path("reports")
+# Persists per-check last-alert timestamps so cooldowns survive a restart
+# (otherwise every sticky WARN re-emails on each bounce). Runtime state.
+COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
 
 # Per-check cooldowns (seconds) — re-fire once after the cooldown elapses
 COOLDOWN_SEC = {
@@ -104,9 +110,35 @@ class HealthWatchdog:
         self._risk = risk_manager
         self._warehouse_path = warehouse_path
         self._state = WatchdogState()
+        # Restore persisted cooldowns so a restart doesn't re-fire every
+        # still-true sticky alert (model_pointer_invalid, audit_not_ready, ...).
+        self._load_cooldowns()
         # Track when a check first observed a sticky condition so we can
         # only alert after it persists past its threshold.
         self._first_seen: dict[str, float] = {}
+
+    def _load_cooldowns(self) -> None:
+        """Load persisted last-alert timestamps into the in-memory state."""
+        try:
+            if COOLDOWN_STATE_PATH.exists():
+                raw = json.loads(COOLDOWN_STATE_PATH.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    self._state.last_alert = {
+                        str(k): float(v)
+                        for k, v in raw.items()
+                        if isinstance(v, (int, float))
+                    }
+        except Exception as e:  # corrupt/partial file must never block startup
+            logger.debug(f"[Watchdog] cooldown state load skipped: {e}")
+
+    def _persist_cooldowns(self) -> None:
+        """Write last-alert timestamps to disk so cooldowns survive a restart."""
+        try:
+            COOLDOWN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            COOLDOWN_STATE_PATH.write_text(
+                json.dumps(self._state.last_alert), encoding="utf-8")
+        except Exception as e:  # persistence is best-effort, never fatal
+            logger.debug(f"[Watchdog] cooldown state persist skipped: {e}")
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -139,6 +171,7 @@ class HealthWatchdog:
         if (now - self._state.last_alert.get(key, 0)) < cooldown:
             return
         self._state.last_alert[key] = now
+        self._persist_cooldowns()
         title = f"[Watchdog/{level.upper()}] {key}"
         logger.warning(f"{title} — {message}")
         if self._notifier is not None:
