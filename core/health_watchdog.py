@@ -68,6 +68,10 @@ LOSS_STREAK_N            = 3
 LOSS_STREAK_WINDOW_MIN   = 60
 MODEL_STARVE_HOURS       = 6
 MODEL_STARVE_DAILY_PNL_FLOOR_PCT = -2.0   # only nag when bot is NOT in drawdown
+MODEL_POINTER_MARKETS    = ("futures", "spot")
+NO_SCAN_PROGRESS_SEC     = 15 * 60
+STUCK_OPEN_HOURS         = 24
+REPORTS_DIR              = Path("reports")
 
 # Per-check cooldowns (seconds) — re-fire once after the cooldown elapses
 COOLDOWN_SEC = {
@@ -77,12 +81,18 @@ COOLDOWN_SEC = {
     "sl_placement_failed":   30 * 60,
     "loss_streak":           60 * 60,
     "model_gate_starving":   60 * 60,
+    "model_pointer_invalid":  60 * 60,
+    "no_scan_progress":      30 * 60,
+    "stuck_open_positions":  60 * 60,
+    "audit_not_ready":       6 * 60 * 60,
+    "forward_feeds_stale":   30 * 60,
 }
 
 
 @dataclass
 class WatchdogState:
     last_alert: dict[str, float] = field(default_factory=dict)
+    last_cycle_count: int | None = None
 
 
 class HealthWatchdog:
@@ -109,6 +119,11 @@ class HealthWatchdog:
             self._check_sl_placement_failed,
             self._check_loss_streak,
             self._check_model_gate_starving,
+            self._check_model_pointer_valid,
+            self._check_no_scan_progress,
+            self._check_stuck_open_positions,
+            self._check_forward_feeds,
+            self._check_latest_audit,
         ):
             try:
                 check()
@@ -279,4 +294,134 @@ class HealthWatchdog:
                 "non-drawdown state — model gate may be starving for signal.",
                 {"opens_recent": opens_recent,
                  "window_hours": MODEL_STARVE_HOURS},
+            )
+
+    def _check_model_pointer_valid(self) -> None:
+        try:
+            from core.promotion_gate import validate_model_pointer
+        except Exception:
+            return
+        for market in MODEL_POINTER_MARKETS:
+            path = Path("data/models") / f"ensemble_{market}_latest.json"
+            if not path.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                ok, reason, diag = validate_model_pointer(payload, market_type=market)
+            except Exception as exc:
+                ok, reason, diag = False, str(exc), {}
+            if not ok:
+                self._alert(
+                    "model_pointer_invalid", "WARN",
+                    f"{market} latest model pointer rejected: {reason}",
+                    {"market": market, "reason": reason, "diag": diag},
+                )
+
+    def _check_no_scan_progress(self) -> None:
+        if not HEARTBEAT_PATH.exists():
+            return
+        try:
+            payload = json.loads(HEARTBEAT_PATH.read_text(encoding="utf-8"))
+            cycle_count = int(payload.get("cycle_count") or 0)
+        except Exception:
+            return
+        if self._state.last_cycle_count is None:
+            self._state.last_cycle_count = cycle_count
+            return
+        if cycle_count != self._state.last_cycle_count:
+            self._state.last_cycle_count = cycle_count
+            self._first_seen.pop("no_scan_progress", None)
+            return
+        first = self._first_seen.setdefault("no_scan_progress", time.time())
+        if time.time() - first >= NO_SCAN_PROGRESS_SEC:
+            self._alert(
+                "no_scan_progress", "WARN",
+                "heartbeat is fresh but cycle_count has not advanced for "
+                f"> {NO_SCAN_PROGRESS_SEC}s",
+                {"cycle_count": cycle_count},
+            )
+
+    def _check_stuck_open_positions(self) -> None:
+        if not self._warehouse_path.exists():
+            return
+        cutoff = time.time() - STUCK_OPEN_HOURS * 3600
+        try:
+            conn = sqlite3.connect(str(self._warehouse_path))
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT id, symbol, side, ts_entry FROM trades
+                    WHERE status='OPEN' AND ts_entry < ?
+                    ORDER BY ts_entry LIMIT 10
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return
+        if rows:
+            self._alert(
+                "stuck_open_positions", "WARN",
+                f"{len(rows)} sampled OPEN warehouse rows are older than "
+                f"{STUCK_OPEN_HOURS}h",
+                {
+                    "sample": [
+                        {
+                            "id": int(r[0]),
+                            "symbol": str(r[1]),
+                            "side": str(r[2]),
+                            "age_h": round((time.time() - float(r[3])) / 3600, 2),
+                        }
+                        for r in rows
+                    ]
+                },
+            )
+
+    def _check_forward_feeds(self) -> None:
+        try:
+            from core.feed_health import read_forward_feed_status, unhealthy_forward_feeds
+        except Exception:
+            return
+        records = read_forward_feed_status(Path("."))
+        bad = unhealthy_forward_feeds(records)
+        if not bad:
+            return
+        self._alert(
+            "forward_feeds_stale", "WARN",
+            f"forward feed status unhealthy: {', '.join(sorted(bad))}",
+            {
+                "feeds": [
+                    {
+                        "name": r.get("name"),
+                        "connected": r.get("connected"),
+                        "age_sec": r.get("age_sec"),
+                        "fresh": r.get("fresh"),
+                        "error": r.get("error"),
+                    }
+                    for r in records
+                ]
+            },
+        )
+
+    def _check_latest_audit(self) -> None:
+        if not REPORTS_DIR.exists():
+            return
+        reports = sorted(
+            REPORTS_DIR.glob("trading_system_audit_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not reports:
+            return
+        try:
+            payload = json.loads(reports[0].read_text(encoding="utf-8"))
+        except Exception:
+            return
+        verdict = str(payload.get("verdict") or "")
+        if verdict == "NOT_READY":
+            self._alert(
+                "audit_not_ready", "WARN",
+                "latest trading system audit verdict is NOT_READY",
+                {"report": str(reports[0]), "verdict": verdict},
             )

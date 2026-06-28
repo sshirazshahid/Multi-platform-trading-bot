@@ -80,7 +80,7 @@ def _tier_blocked_by_cap(tier_name: str, tier_cap, escalation_enabled: bool) -> 
     return bool(cap_to_standard and tier_name not in ("STANDARD", "SCALP"))
 
 
-def _canonical_exit_reason(raw: str) -> str:
+def _canonical_exit_reason(raw: str, source: str = "claude") -> str:
     """Collapse a free-text LLM close rationale into a clean machine label so the
     warehouse `exit_reason` stays a usable GROUP BY key (audit 2026-06-21 H8).
 
@@ -88,16 +88,22 @@ def _canonical_exit_reason(raw: str) -> str:
     straight through, minting 39 one-off labels (e.g. "Lock +2%; OB imb -0.71
     heavy sell pressure") as the learning substrate's exit-type key. A genuine
     machine label is a short, space-free snake_case token; anything containing a
-    space (or absurdly long) is prose and maps to the canonical 'claude_close'.
+    space (or absurdly long) is prose and maps to a source-specific canonical
+    close label.
     The full rationale is preserved in the [Claude] log line and, when threaded,
     via `exit_decision_id` -> mcp_decisions.jsonl. Idempotent on clean labels.
     """
+    source_key = str(source or "claude").strip().lower()
+    fallback = {
+        "machine": "machine_close",
+        "tsmom": "tsmom_close",
+    }.get(source_key, "claude_close")
     r = (raw or "").strip()
     if not r:
-        return "claude_close"
+        return fallback
     if " " not in r and len(r) <= 40:
         return r
-    return "claude_close"
+    return fallback
 
 
 def _effective_tp_threshold(take_profit, entry_price, side, leverage,
@@ -198,6 +204,17 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Engine] HealthWatchdog init failed: {e}")
             self.watchdog = None
+        try:
+            from config import SELF_HEALING
+            if SELF_HEALING.get("enabled", True):
+                from core.self_healing_supervisor import SelfHealingSupervisor
+                self.self_healer = SelfHealingSupervisor(SELF_HEALING)
+                logger.info("[Engine] SelfHealingSupervisor enabled")
+            else:
+                self.self_healer = None
+        except Exception as e:
+            logger.debug(f"[Engine] SelfHealingSupervisor init failed: {e}")
+            self.self_healer = None
         # Universe filter: runtime quality checks before trading
         try:
             from core.pair_discovery import UniverseFilter
@@ -1648,18 +1665,24 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Claude] News context error: {e}")
 
-        # Signal source switch (2026-06-15): SIGNAL_SOURCE=tsmom routes entry selection
-        # through the long-only TSMOM capital-preservation signal instead of the MCP/Claude
-        # scoring path. Same action-dict contract, so everything below is unchanged. Default
-        # "mcp" preserves production behaviour. See config.SIGNAL_SOURCE / core/tsmom_signal.py.
+        # Signal source switch: each source returns the same action-dict
+        # contract, so execution/risk/warehouse plumbing below stays shared.
         from config import SIGNAL_SOURCE
-        _sig_tag = "TSMOM" if SIGNAL_SOURCE == "tsmom" else "Claude"
+        _sig_tag = {
+            "tsmom": "TSMOM",
+            "machine": "Machine",
+        }.get(SIGNAL_SOURCE, "Claude")
         logger.info(
             f"[{_sig_tag}] Portfolio cycle: {len(all_coins)} coins, "
             f"{len(open_positions)} open positions, "
             f"balance=${risk_envelope.get('total_balance', 0):.0f}")
 
-        _signal = self._tsmom_signal() if SIGNAL_SOURCE == "tsmom" else self.mcp_brain
+        if SIGNAL_SOURCE == "tsmom":
+            _signal = self._tsmom_signal()
+        elif SIGNAL_SOURCE == "machine":
+            _signal = self._machine_signal()
+        else:
+            _signal = self.mcp_brain
         actions = _signal.analyze_portfolio(
             coins=all_coins,
             open_positions=open_positions,
@@ -1669,17 +1692,16 @@ class BotEngine:
             news_context=news_context,
         )
 
-        # TSMOM observability (2026-06-15): periodically log WHY it's holding, so a
-        # quiet bot in a downtrend is legible (cures the recurring "why no trades?").
-        # Throttled to ~30 min; uses the per-major 28d momentum from this cycle.
-        if SIGNAL_SOURCE == "tsmom":
+        # Deterministic-source observability: periodically log WHY it is quiet.
+        if SIGNAL_SOURCE in ("tsmom", "machine"):
             import time as _t_w
-            if _t_w.time() - getattr(self, "_tsmom_watch_last", 0.0) >= 1800:
+            _watch_attr = f"_{SIGNAL_SOURCE}_watch_last"
+            if _t_w.time() - getattr(self, _watch_attr, 0.0) >= 1800:
                 try:
-                    logger.info(f"[TSMOM] watching majors: {_signal.watch_summary()}")
+                    logger.info(f"[{_sig_tag}] watch: {_signal.watch_summary()}")
                 except Exception:
                     pass
-                self._tsmom_watch_last = _t_w.time()
+                setattr(self, _watch_attr, _t_w.time())
 
         if not actions:
             logger.info(f"[{_sig_tag}] No actions this cycle")
@@ -1711,10 +1733,11 @@ class BotEngine:
             except Exception as e:
                 logger.error(f"[Claude] Action execution error: {e}")
 
-        # Fund ops (transfers between spot/futures)
-        fund_ops = self.mcp_brain.last_fund_ops()
-        if fund_ops:
-            self._execute_fund_ops(fund_ops)
+        # Fund ops (transfers between spot/futures) are MCP-brain only.
+        if SIGNAL_SOURCE == "mcp" and self.mcp_brain:
+            fund_ops = self.mcp_brain.last_fund_ops()
+            if fund_ops:
+                self._execute_fund_ops(fund_ops)
 
         self._cycle += 1
         logger.info(
@@ -1729,11 +1752,21 @@ class BotEngine:
         """
         cached = getattr(self, "_tsmom", None)
         if cached is None:
-            from core.tsmom_signal import TSMOMSignal
             from config import TSMOM_LOOKBACK_DAYS
+            from core.tsmom_signal import TSMOMSignal
             cached = TSMOMSignal(exchanges=self.exchanges,
                                  lookback_days=TSMOM_LOOKBACK_DAYS)
             self._tsmom = cached
+        return cached
+
+    def _machine_signal(self):
+        """Lazily build + cache the deterministic machine signal source."""
+        cached = getattr(self, "_machine_signal_obj", None)
+        if cached is None:
+            from config import MACHINE_STRATEGY
+            from core.machine_signal import MachineSignal
+            cached = MachineSignal(exchanges=self.exchanges, config=MACHINE_STRATEGY)
+            self._machine_signal_obj = cached
         return cached
 
     def _log_rejection(self, action: dict, reason: str, stage: str):
@@ -3160,11 +3193,12 @@ class BotEngine:
             return False
 
         position_id = action.get("position_id", "")
+        source = str(action.get("source", "claude") or "claude").lower()
         reason = action.get("reason", "claude_portfolio_close")
         # Canonicalize the LLM's free-text rationale to a clean machine label so
         # the warehouse exit_reason stays a usable GROUP BY key (audit H8). The
         # raw prose is preserved in the log line + exit_decision_id below.
-        canon_reason = _canonical_exit_reason(reason)
+        canon_reason = _canonical_exit_reason(reason, source=source)
 
         if not position_id:
             logger.warning("[Claude] CLOSE action missing position_id")
@@ -3186,10 +3220,27 @@ class BotEngine:
         # already enforce this (order_manager.check_sl_tp / _run_mcp_position_
         # monitor); _execute_close was the one path missing it, so a discretionary
         # portfolio-cycle CLOSE could market-close a tsmom hold. ALWAYS-ON invariant.
-        from core.tsmom_signal import is_tsmom_position as _is_tsmom_pos
-        if _is_tsmom_pos(target):
+        from core.tsmom_signal import (
+            is_tsmom_action as _is_tsmom_action,
+            is_tsmom_position as _is_tsmom_pos,
+        )
+        if _is_tsmom_pos(target) and not _is_tsmom_action(action):
             logger.info(
                 f"[Claude] portfolio CLOSE skipped — tsmom owns its exit: "
+                f"{target.symbol} {target.id[:8]}")
+            return False
+
+        try:
+            from core.machine_signal import (
+                is_machine_action as _is_machine_action,
+                is_machine_position as _is_machine_pos,
+            )
+        except Exception:
+            _is_machine_action = lambda _action: False
+            _is_machine_pos = lambda _pos: False
+        if _is_machine_pos(target) and not _is_machine_action(action):
+            logger.info(
+                f"[Claude] portfolio CLOSE skipped - machine owns its exit: "
                 f"{target.symbol} {target.id[:8]}")
             return False
 
@@ -4454,12 +4505,13 @@ class BotEngine:
         # loop (its own 10s thread) keeps disaster stops live. Skip the MCP advisory
         # monitor entirely so the bot is purely tsmom. Logged once to avoid 90s spam.
         from config import SIGNAL_SOURCE as _SIG_MON
-        if _SIG_MON == "tsmom":
-            if not getattr(self, "_tsmom_monitor_off_logged", False):
+        if _SIG_MON in ("tsmom", "machine"):
+            _logged_attr = f"_{_SIG_MON}_monitor_off_logged"
+            if not getattr(self, _logged_attr, False):
                 logger.info(
-                    "[Engine] TSMOM mode — MCP position monitor disabled "
+                    f"[Engine] {_SIG_MON.upper()} mode - MCP position monitor disabled "
                     "(deterministic SL/TP still active; no Claude/MCP advisory).")
-                self._tsmom_monitor_off_logged = True
+                setattr(self, _logged_attr, True)
             return
         try:
             # ── Phase 1: Bot-tracked positions ──
@@ -4912,20 +4964,60 @@ class BotEngine:
             except Exception as e:
                 logger.error(f"[Engine] Optimizer: {e}")
 
+    def _run_self_healing(self):
+        healer = getattr(self, "self_healer", None)
+        if healer is None:
+            return
+        try:
+            report = healer.tick()
+            verdict = report.get("verdict")
+            if verdict not in {"SKIPPED_COOLDOWN", "DISABLED"}:
+                logger.info(
+                    f"[SelfHeal] verdict={verdict} "
+                    f"actions={len(report.get('actions') or [])}"
+                )
+        except Exception as e:
+            logger.debug(f"[SelfHeal] tick skipped: {e}")
+
     # ── Main run ──────────────────────────────────────────────────────
 
     def run(self):
         # Spec Appendix B: refuse to run CONTROLLED_LIVE without a signed checklist.
         try:
-            from config import OPERATING_MODE as _op_mode
-            from core.live_gate import enforce_controlled_live_gate
-            enforce_controlled_live_gate(_op_mode)
+            from config import (
+                CONTROLLED_LIVE_ENABLED as _live_enabled,
+            )
+            from config import (
+                OPERATING_MODE as _op_mode,
+            )
+            from config import (
+                SIGNAL_SOURCE as _live_signal_source,
+            )
+            from core.live_gate import (
+                enforce_controlled_live_gate,
+                enforce_strategy_readiness_gate,
+            )
+            enforce_controlled_live_gate(
+                _op_mode,
+                controlled_live_enabled=_live_enabled,
+            )
+            _strategy_family = (
+                "machine" if _live_signal_source == "machine"
+                else ("tsmom" if _live_signal_source == "tsmom" else None)
+            )
+            enforce_strategy_readiness_gate(
+                _op_mode,
+                strategy_family=_strategy_family,
+            )
         except SystemExit:
             raise
         except Exception as _e:
             logger.warning(f"[LiveGate] check error (non-fatal): {_e}")
 
         logger.info("[Engine] Bot started — Ctrl+C to stop")
+        # `schedule` is module-global. Clear jobs left by a prior in-process
+        # watchdog restart before registering this engine's jobs.
+        schedule.clear()
         # 2026-06-15: announce the active signal source up front so it's unambiguous
         # which engine is deciding trades (the cycle/monitor logs alone read "[Claude]").
         from config import SIGNAL_SOURCE as _SIG_RUN
@@ -4933,6 +5025,10 @@ class BotEngine:
             logger.info(
                 "[Engine] Signal source: TSMOM (long-only majors, capital-preservation) "
                 "— Claude/MCP entry scoring AND position monitor DISABLED")
+        elif _SIG_RUN == "machine":
+            logger.info(
+                "[Engine] Signal source: MACHINE (deterministic OHLCV ensemble) "
+                "- Claude/MCP entry scoring AND position monitor DISABLED")
         else:
             logger.info(f"[Engine] Signal source: {_SIG_RUN} (Claude/MCP scoring path)")
         self.notifier.alert(
@@ -4969,6 +5065,8 @@ class BotEngine:
         # Health watchdog tick — once per minute. Cheap, in-process.
         if self.watchdog is not None:
             schedule.every(60).seconds.do(self.watchdog.tick)
+        if getattr(self, "self_healer", None) is not None:
+            schedule.every(15).minutes.do(self._run_self_healing)
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
         if not DRY_RUN:
@@ -5088,6 +5186,7 @@ class BotEngine:
         if getattr(self, '_shutdown_done', False):
             return
         self._shutdown_done = True
+        schedule.clear()
         logger.info("[Engine] Shutting down...")
         s = self.tracker.summary()
         try:
