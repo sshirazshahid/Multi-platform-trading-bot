@@ -2132,6 +2132,28 @@ class BotEngine:
             except Exception as _bvpe:
                 logger.debug(f"[BtcVolPause] gate skipped ({_bvpe}) -- defaulting to ALLOW")
 
+        # (C.5) Path-dependent drawdown circuit-breaker (opt-in, 2026-06-28).
+        # Per-day loss caps are blind to slow-bleed clustering (e.g. 2%/day for
+        # 30 days ~= 45% drawdown that never trips a 5% daily limit). This refuses
+        # NEW entries when equity is >X% below its running peak, auto-resuming
+        # after a hysteresis recovery. NEW ENTRIES ONLY; fail-OPEN. Default OFF
+        # (env DRAWDOWN_PAUSE_ENABLED). See core/drawdown_pause.py.
+        try:
+            _dp = getattr(self, "_drawdown_pause", None)
+            if _dp is None:
+                from core.drawdown_pause import DrawdownPause
+                _dp = DrawdownPause()
+                self._drawdown_pause = _dp
+            _dd_peak = float(getattr(self.risk, "peak_balance", 0.0) or 0.0)
+            _dd_equity = _deployable_total(self._balances)
+            _dd_paused, _dd_reason, _ = _dp.update_and_evaluate(_dd_peak, _dd_equity)
+            if _dd_paused:
+                logger.info(f"[DrawdownBreaker] WAIT -- {_dd_reason} -- skipping new entry {symbol}")
+                action["reject_reason"] = "drawdown_breaker"
+                return False
+        except Exception as _dpe:
+            logger.debug(f"[DrawdownBreaker] gate skipped ({_dpe}) -- defaulting to ALLOW")
+
         # (D) Per-symbol pause (spec §12). Family pause is checked at (D.1)
         # below once strategy_family is known.
         if self.risk and self.risk.is_symbol_paused(symbol):
