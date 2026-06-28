@@ -4979,6 +4979,39 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[SelfHeal] tick skipped: {e}")
 
+    def _run_self_improve(self):
+        """PAPER-only autonomous mutate->validate->promote cycle (WS4).
+
+        Gated by ``guardrails.self_improve_enabled()`` (env SELF_IMPROVE_ENABLED, hard
+        PAPER). Builds short-lookback machine-strategy candidates, runs them through the
+        honest gate + trade-sequence Monte Carlo, and promotes winners shadow->active-paper
+        (never live — the kernel + PAPER latch forbid it). Fully fail-soft: any error is
+        logged and skipped so it can never disturb trading."""
+        try:
+            from core.decision.guardrails import self_improve_enabled
+
+            if not self_improve_enabled():
+                return
+            from core.decision import promotion_loop
+            from research.mutator import build_candidates
+
+            candidates = build_candidates()
+            if not candidates:
+                return
+            report = promotion_loop.tick(candidates)
+            if report.get("n_promoted"):
+                logger.info(
+                    f"[SelfImprove] promoted {report['n_promoted']}/{report['n_candidates']} "
+                    "variant(s) shadow->active-paper (PAPER)"
+                )
+            else:
+                logger.debug(
+                    f"[SelfImprove] {report.get('n_candidates', 0)} candidates evaluated, "
+                    "0 promoted (no edge cleared the gate)"
+                )
+        except Exception as e:
+            logger.debug(f"[SelfImprove] cycle skipped: {e}")
+
     # ── Main run ──────────────────────────────────────────────────────
 
     def run(self):
@@ -5067,6 +5100,17 @@ class BotEngine:
             schedule.every(60).seconds.do(self.watchdog.tick)
         if getattr(self, "self_healer", None) is not None:
             schedule.every(15).minutes.do(self._run_self_healing)
+        # Autonomous PAPER self-improvement (WS4): mutate->validate->promote, hard-latched
+        # to PAPER by core.decision.guardrails. Default-on in PAPER via SELF_IMPROVE_ENABLED;
+        # never armed off-PAPER (the check is re-evaluated inside _run_self_improve too).
+        try:
+            from core.decision.guardrails import self_improve_enabled as _si_enabled
+
+            if _si_enabled():
+                schedule.every(LEARN_INTERVAL).seconds.do(self._run_self_improve)
+                logger.info("[Engine] Self-improvement loop scheduled (PAPER, learn cadence)")
+        except Exception:
+            pass
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
         if not DRY_RUN:
