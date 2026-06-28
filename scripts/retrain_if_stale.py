@@ -38,10 +38,14 @@ def pointer_status(market: str, *, max_age_days: int) -> dict:
     return {"market": market, "ok": bool(ok), "reason": reason, "diag": diag}
 
 
-def build_commands(markets: list[str], *, tag: str, quick: bool, skip_build: bool) -> list[list[str]]:
+def build_commands(
+    markets: list[str], *, tag: str, quick: bool, skip_build: bool
+) -> list[list[str]]:
     commands: list[list[str]] = []
     if not skip_build:
-        commands.append([sys.executable, "scripts/build_features_dataset.py", "--print-every", "500"])
+        commands.append(
+            [sys.executable, "scripts/build_features_dataset.py", "--print-every", "500"]
+        )
         for market in markets:
             commands.append(
                 [
@@ -153,10 +157,7 @@ def main() -> int:
     markets = ["futures", "spot"] if args.market == "both" else [args.market]
     statuses = [pointer_status(m, max_age_days=args.max_age_days) for m in markets]
     for status in statuses:
-        print(
-            f"model={status['market']} ok={status['ok']} "
-            f"reason={status['reason']}"
-        )
+        print(f"model={status['market']} ok={status['ok']} reason={status['reason']}")
 
     needs_retrain = args.force or any(not s["ok"] for s in statuses)
     if not needs_retrain:

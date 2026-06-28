@@ -10,6 +10,7 @@ Backtest discipline:
 * if one candle touches both SL and TP, the stop wins;
 * fees and slippage are subtracted from every trade.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -99,18 +100,24 @@ def bracket_outcome(
         if not (hit_sl or hit_tp):
             continue
         if hit_sl:
-            exit_px = sl * (1.0 - stop_slip_bps / 10_000.0) if side == "buy" else sl * (
-                1.0 + stop_slip_bps / 10_000.0
+            exit_px = (
+                sl * (1.0 - stop_slip_bps / 10_000.0)
+                if side == "buy"
+                else sl * (1.0 + stop_slip_bps / 10_000.0)
             )
             return ret_for(side, entry, exit_px) - fee_rt, "stop_loss", j - entry_idx
-        exit_px = tp * (1.0 - tp_slip_bps / 10_000.0) if side == "buy" else tp * (
-            1.0 + tp_slip_bps / 10_000.0
+        exit_px = (
+            tp * (1.0 - tp_slip_bps / 10_000.0)
+            if side == "buy"
+            else tp * (1.0 + tp_slip_bps / 10_000.0)
         )
         return ret_for(side, entry, exit_px) - fee_rt, "take_profit", j - entry_idx
 
     close_px = float(df["close"].iloc[end])
-    exit_px = close_px * (1.0 - tp_slip_bps / 10_000.0) if side == "buy" else close_px * (
-        1.0 + tp_slip_bps / 10_000.0
+    exit_px = (
+        close_px * (1.0 - tp_slip_bps / 10_000.0)
+        if side == "buy"
+        else close_px * (1.0 + tp_slip_bps / 10_000.0)
     )
     return ret_for(side, entry, exit_px) - fee_rt, "time_stop", end - entry_idx
 

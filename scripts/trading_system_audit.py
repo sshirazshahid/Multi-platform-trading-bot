@@ -89,8 +89,7 @@ def audit_config(checks: list[dict[str, Any]]) -> None:
     if config.SIGNAL_SOURCE == "machine":
         machine = config.MACHINE_STRATEGY
         min_tier_conf = min(
-            float(t.get("min_confidence", 1.0))
-            for t in config.LEVERAGE_TIERS.values()
+            float(t.get("min_confidence", 1.0)) for t in config.LEVERAGE_TIERS.values()
         )
         floor = float(machine.get("execution_confidence_floor", 0.0))
         ok = floor >= min_tier_conf
@@ -246,7 +245,9 @@ def _windows_python_processes() -> list[dict[str, Any]]:
     return [p for p in payload if isinstance(p, dict)]
 
 
-def _logical_script_counts(processes: list[dict[str, Any]]) -> tuple[dict[str, int], dict[str, int]]:
+def _logical_script_counts(
+    processes: list[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, int]]:
     grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in RUNTIME_SCRIPTS}
     for proc in processes:
         key = _script_key(proc.get("CommandLine"))
@@ -260,15 +261,8 @@ def _logical_script_counts(processes: list[dict[str, Any]]) -> tuple[dict[str, i
         if not group:
             logical[key] = 0
             continue
-        ids = {
-            int(p.get("ProcessId"))
-            for p in group
-            if p.get("ProcessId") is not None
-        }
-        roots = [
-            p for p in group
-            if int(p.get("ParentProcessId") or 0) not in ids
-        ]
+        ids = {int(p.get("ProcessId")) for p in group if p.get("ProcessId") is not None}
+        roots = [p for p in group if int(p.get("ParentProcessId") or 0) not in ids]
         logical[key] = len(roots) if roots else 1
     return logical, raw
 
@@ -521,9 +515,7 @@ def audit_warehouse(checks: list[dict[str, Any]]) -> None:
             "status='CLOSED' AND ts_exit >= ?",
             (now - 30 * 86400,),
         )
-        open_n = int(
-            con.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'").fetchone()[0]
-        )
+        open_n = int(con.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'").fetchone()[0])
         stuck_n = int(
             con.execute(
                 "SELECT COUNT(*) FROM trades WHERE status='OPEN' AND ts_entry < ?",
@@ -541,9 +533,7 @@ def audit_warehouse(checks: list[dict[str, Any]]) -> None:
         **all_closed,
     )
     live_ready = (
-        last_30d["n"] >= 100
-        and last_30d["pnl"] > 0
-        and (last_30d["profit_factor"] or 0.0) > 1.0
+        last_30d["n"] >= 100 and last_30d["pnl"] > 0 and (last_30d["profit_factor"] or 0.0) > 1.0
     )
     add_check(
         checks,
@@ -689,11 +679,7 @@ def audit_paper_live_parity(checks: list[dict[str, Any]]) -> None:
                 """
             ).fetchall()
             recent_paper = len(rows)
-            cost_rows = sum(
-                1
-                for fee, slippage in rows
-                if fee is not None or slippage is not None
-            )
+            cost_rows = sum(1 for fee, slippage in rows if fee is not None or slippage is not None)
         finally:
             con.close()
 
