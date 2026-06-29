@@ -3232,6 +3232,8 @@ class BotEngine:
         # portfolio-cycle CLOSE could market-close a tsmom hold. ALWAYS-ON invariant.
         from core.tsmom_signal import (
             is_tsmom_action as _is_tsmom_action,
+        )
+        from core.tsmom_signal import (
             is_tsmom_position as _is_tsmom_pos,
         )
         if _is_tsmom_pos(target) and not _is_tsmom_action(action):
@@ -3243,6 +3245,8 @@ class BotEngine:
         try:
             from core.machine_signal import (
                 is_machine_action as _is_machine_action,
+            )
+            from core.machine_signal import (
                 is_machine_position as _is_machine_pos,
             )
         except Exception:
