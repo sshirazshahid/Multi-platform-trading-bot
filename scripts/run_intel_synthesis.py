@@ -12,21 +12,24 @@ Sources aggregated (all free / no API key):
   * Regime brief   — latest snapshot from data/market_intel_history.jsonl
                      (produced by scripts/market_intel_report.py)
   * On-chain value — BTC MVRV-Z score (bitcoin-data.com)
+  * On-chain net   — BTC fees / mempool congestion / difficulty (mempool.space)
   * Positioning    — derivs LSR / taker buy-sell / OI change (DerivsHarvester)
   * Funding / OI   — latest funding + 24h OI change per major from
                      data/funding_oi/<SYM>_*.csv (scripts/fetch_binance_funding_oi.py)
 
 HARD SCOPE — read this:
-  * ADVISORY and LOG-ONLY. The output is written to reports/ for HUMAN review.
-  * It is NOT a trade signal. The bot's entries are governed solely by
-    gate-validated quantitative signals (core/promotion_gate.py). Nothing here
-    can change an entry/exit — this module imports NOTHING from the order path
-    and nothing in the order path imports it (enforced by a unit test).
+  * ADVISORY and LOG-ONLY. The output is written to reports/ for HUMAN review
+    (optionally emailed with --email). It is NOT a trade signal.
+  * The bot's entries are governed solely by gate-validated quantitative signals
+    (core/promotion_gate.py). Nothing here can change an entry/exit — this module
+    imports NOTHING from the order path and nothing in the order path imports it
+    (enforced by a unit test).
   * Public data is priced in; this is for awareness/research only.
 
 Usage:
     python scripts/run_intel_synthesis.py
     python scripts/run_intel_synthesis.py --no-llm      # assemble facts, skip Claude
+    python scripts/run_intel_synthesis.py --email       # also email the note (Gmail env)
     python scripts/run_intel_synthesis.py --symbols BTC ETH SOL
 """
 
@@ -35,9 +38,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 import urllib.request
 from datetime import date, datetime, timezone
+from html import escape as _html_escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +84,21 @@ def _safe(fn, default, failed: list, label: str):
         return default
 
 
+def _env(key: str, default: str = "") -> str:
+    """Read a setting from the environment, falling back to a .env line."""
+    val = os.getenv(key, "").strip()
+    if val:
+        return val
+    try:
+        for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(key + "=") and not line.startswith("#"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return default
+
+
 def latest_market_intel(path: Path = INTEL_HISTORY) -> dict | None:
     """Return the most recent snapshot dict from the brief history, or None."""
     if not path.exists():
@@ -90,6 +110,12 @@ def latest_market_intel(path: Path = INTEL_HISTORY) -> dict | None:
         except json.JSONDecodeError:
             continue
     return None
+
+
+def _get_json(url: str, timeout: int = 20):
+    req = urllib.request.Request(url, headers={"User-Agent": "crypto-research/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
 
 
 def fetch_mvrv_z() -> dict[str, float]:
@@ -130,6 +156,24 @@ def mvrv_context(series: dict[str, float]) -> dict | None:
     else:
         zone = "historically euphoric / top zone"
     return {"date": latest_date, "z": z, "pctl": pct, "zone": zone}
+
+
+def fetch_onchain() -> dict | None:
+    """BTC network activity from mempool.space (keyless): fees, mempool, difficulty."""
+    fees = _get_json("https://mempool.space/api/v1/fees/recommended")
+    mp = _get_json("https://mempool.space/api/mempool")
+    out: dict = {
+        "fast_fee": fees.get("fastestFee"),
+        "hour_fee": fees.get("hourFee"),
+        "mempool_count": mp.get("count"),
+        "mempool_vsize_mb": round((mp.get("vsize") or 0) / 1_000_000, 1),
+    }
+    try:
+        diff = _get_json("https://mempool.space/api/v1/difficulty-adjustment")
+        out["diff_change_pct"] = diff.get("difficultyChange")
+    except Exception:
+        pass
+    return out
 
 
 def funding_oi_summary(bases: list[str], directory: Path = FUNDING_OI_DIR) -> dict[str, dict]:
@@ -179,6 +223,7 @@ def build_facts_md(
     mvrv: dict | None,
     derivs: dict[str, dict] | None,
     fundoi: dict[str, dict] | None,
+    onchain: dict | None = None,
 ) -> str:
     """Assemble a compact, numeric facts block (pure -> unit-tested)."""
     L: list[str] = []
@@ -202,6 +247,21 @@ def build_facts_md(
             f"- MVRV-Z = {mvrv['z']:.2f} as of {mvrv['date']} "
             f"({mvrv['pctl']:.0f}th pctl of history) — {mvrv['zone']}"
         )
+    if onchain:
+        L.append("\n### On-chain network activity (BTC, mempool.space)")
+        bits = []
+        if onchain.get("fast_fee") is not None:
+            bits.append(
+                f"fast fee {onchain['fast_fee']} sat/vB (1h tier {onchain.get('hour_fee')})"
+            )
+        if onchain.get("mempool_count") is not None:
+            bits.append(
+                f"mempool {onchain['mempool_count']:,} tx / {onchain.get('mempool_vsize_mb')} MB"
+            )
+        if onchain.get("diff_change_pct") is not None:
+            bits.append(f"next difficulty adj {onchain['diff_change_pct']:+.1f}%")
+        if bits:
+            L.append("- " + "; ".join(bits))
     if derivs:
         L.append("\n### Positioning (derivs)")
         for c, d in derivs.items():
@@ -240,6 +300,44 @@ def synthesize(facts_md: str, now: str, no_llm: bool) -> tuple[str, bool]:
     return (out.strip(), True)
 
 
+def email_note(subject: str, markdown_body: str) -> bool:
+    """Email the note via Gmail SMTP (same env vars as core/report_emailer.py).
+
+    Self-contained on purpose (stdlib only) so the advisory layer never imports
+    the bot. Returns False (never raises) if creds are absent or the send fails;
+    the password is never logged.
+    """
+    sender, pw, rcpt = _env("GMAIL_SENDER"), _env("GMAIL_APP_PASSWORD"), _env("GMAIL_RECIPIENT")
+    if not (sender and pw and rcpt):
+        print("  [warn] email: GMAIL_SENDER/APP_PASSWORD/RECIPIENT not configured; skipped")
+        return False
+    import smtplib
+    import ssl
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    html = (
+        "<html><body style='font-family:monospace;background:#0f172a;color:#e2e8f0;padding:20px'>"
+        "<pre style='white-space:pre-wrap;font-size:13px;line-height:1.5'>"
+        + _html_escape(markdown_body)
+        + "</pre></body></html>"
+    )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"], msg["From"], msg["To"] = subject, sender, rcpt
+    msg.attach(MIMEText(markdown_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=30) as s:
+            s.login(sender, pw)
+            s.sendmail(sender, [rcpt], msg.as_string())
+        print(f"  [email] sent to {rcpt}")
+        return True
+    except Exception as e:  # noqa: BLE001 - never let email failure crash the run
+        print(f"  [warn] email send failed: {str(e)[:100]}")
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -248,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS)
     ap.add_argument("--no-llm", action="store_true", help="Assemble facts only; skip Claude")
+    ap.add_argument("--email", action="store_true", help="Also email the note (Gmail env vars)")
     args = ap.parse_args(argv)
 
     failed: list[str] = []
@@ -257,10 +356,11 @@ def main(argv: list[str] | None = None) -> int:
     if intel is None:
         failed.append("market_intel brief (run market_intel_report.py first)")
     mvrv = mvrv_context(_safe(fetch_mvrv_z, {}, failed, "MVRV-Z"))
+    onchain = _safe(fetch_onchain, None, failed, "on-chain (mempool.space)")
     derivs = _safe(lambda: derivs_summary(args.symbols), {}, failed, "derivs positioning")
     fundoi = _safe(lambda: funding_oi_summary(args.symbols), {}, failed, "funding/OI CSVs")
 
-    facts_md = build_facts_md(intel, mvrv, derivs, fundoi)
+    facts_md = build_facts_md(intel, mvrv, derivs, fundoi, onchain)
     note, llm_used = synthesize(facts_md, now, args.no_llm)
 
     header = (
@@ -278,13 +378,21 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body, encoding="utf-8")
 
+    emailed = (
+        email_note(f"[TradingBot] Daily Intel Synthesis — {date.today().isoformat()}", body)
+        if args.email
+        else False
+    )
+
     rec = {
         "ts_utc": now,
         "mvrv_z": (mvrv or {}).get("z"),
         "mvrv_zone": (mvrv or {}).get("zone"),
+        "btc_fast_fee": (onchain or {}).get("fast_fee"),
         "fng_value": (intel or {}).get("fng_value"),
         "btc_dom": (intel or {}).get("btc_dom"),
         "llm_used": llm_used,
+        "emailed": emailed,
         "note_len": len(note),
         "failed": sorted(set(failed)),
     }
@@ -298,7 +406,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n=== Intel Synthesis ({now}) — ADVISORY / LOG-ONLY, not a trade signal ===")
     if mvrv:
         print(f"MVRV-Z: {mvrv['z']:.2f} ({mvrv['zone']})")
-    print(f"LLM synthesis: {'yes' if llm_used else 'no'} | sources failed: {len(set(failed))}")
+    if onchain and onchain.get("fast_fee") is not None:
+        print(
+            f"BTC fast fee: {onchain['fast_fee']} sat/vB | mempool {onchain.get('mempool_count')}"
+        )
+    print(
+        f"LLM synthesis: {'yes' if llm_used else 'no'} | emailed: {emailed} | "
+        f"sources failed: {len(set(failed))}"
+    )
     print(f"Note written to: {out}")
     return 0
 

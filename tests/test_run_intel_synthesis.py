@@ -99,3 +99,62 @@ def test_synthesize_no_llm_returns_facts_unused():
     note, used = mod.synthesize("### facts\n- x", "2026-06-29 00:00 UTC", no_llm=True)
     assert used is False
     assert "facts" in note
+
+
+def test_build_facts_md_onchain_section():
+    onchain = {
+        "fast_fee": 5,
+        "hour_fee": 3,
+        "mempool_count": 12000,
+        "mempool_vsize_mb": 8.2,
+        "diff_change_pct": 1.7,
+    }
+    md = mod.build_facts_md(None, None, None, None, onchain)
+    assert "mempool.space" in md
+    assert "fast fee 5 sat/vB" in md
+    assert "12,000 tx" in md
+    assert "+1.7%" in md
+
+
+def test_email_note_no_creds_returns_false(monkeypatch):
+    monkeypatch.setattr(mod, "_env", lambda key, default="": "")
+    assert mod.email_note("subj", "body") is False
+
+
+def test_email_note_sends_via_mocked_smtp(monkeypatch):
+    creds = {"GMAIL_SENDER": "a@x.com", "GMAIL_APP_PASSWORD": "pw", "GMAIL_RECIPIENT": "b@x.com"}
+    monkeypatch.setattr(mod, "_env", lambda key, default="": creds.get(key, default))
+
+    sent = []
+
+    class _FakeSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def login(self, user, pw):
+            sent.append(("login", user, pw))
+
+        def sendmail(self, frm, to, msg):
+            sent.append(("sendmail", frm, to, msg))
+
+    import smtplib
+
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _FakeSMTP)
+    assert mod.email_note("subj", "the body") is True
+    sends = [s for s in sent if s[0] == "sendmail"]
+    assert len(sends) == 1
+    # sender/recipient are wired from env (the body is MIME/base64-encoded in the raw msg)
+    assert sends[0][1] == "a@x.com"
+    assert sends[0][2] == ["b@x.com"]
+
+
+def test_env_prefers_environment(monkeypatch):
+    monkeypatch.setenv("INTEL_TEST_KEY_XYZ", "from-environ")
+    assert mod._env("INTEL_TEST_KEY_XYZ") == "from-environ"
+    assert mod._env("DEFINITELY_MISSING_KEY_XYZ", "fallback") == "fallback"
