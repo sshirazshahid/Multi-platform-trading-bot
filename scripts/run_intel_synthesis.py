@@ -115,6 +115,22 @@ def latest_market_intel(path: Path = INTEL_HISTORY) -> dict | None:
     return None
 
 
+def brief_is_stale(intel: dict | None, now: datetime, max_age_h: float = 8.0) -> bool:
+    """True if the brief's ts_utc is older than max_age_h (MarketIntel cadence is ~4h).
+
+    Returns False when the timestamp is missing/unparseable — we flag a *known*
+    stale brief, never guess. Pure (now passed in) so it is unit-testable.
+    """
+    ts = (intel or {}).get("ts_utc")
+    if not ts:
+        return False
+    try:
+        t = datetime.strptime(ts, "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    return (now - t).total_seconds() > max_age_h * 3600
+
+
 def _get_json(url: str, timeout: int = 20):
     req = urllib.request.Request(url, headers={"User-Agent": "crypto-research/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -204,7 +220,14 @@ def funding_oi_summary(bases: list[str], directory: Path = FUNDING_OI_DIR) -> di
             if rows:
                 try:
                     last = float(rows[-1]["open_interest_usd"])
-                    ref = float(rows[max(0, len(rows) - 7)]["open_interest_usd"])  # ~24h @4h bars
+                    # Reference ~24h ago by TIMESTAMP (period-agnostic): correct at any
+                    # --oi-period and for merged mixed-cadence CSVs. A fixed row offset
+                    # silently breaks when the sampling period differs (it did: the
+                    # scheduled task writes 1h bars, not 4h).
+                    last_ts = int(rows[-1]["timestamp"])
+                    target = last_ts - 24 * 3600 * 1000
+                    ref_row = next((r for r in rows if int(r["timestamp"]) >= target), rows[0])
+                    ref = float(ref_row["open_interest_usd"])
                     if ref:
                         rec["oi_chg_24h_pct"] = 100.0 * (last / ref - 1)
                     rec["oi_usd"] = last
@@ -233,7 +256,7 @@ def build_facts_md(
     """Assemble a compact, numeric facts block (pure -> unit-tested)."""
     L: list[str] = []
     if intel:
-        L.append("### Regime (latest brief)")
+        L.append(f"### Regime (latest brief — {intel.get('ts_utc', 'time unknown')})")
         if intel.get("fng_value") is not None:
             L.append(f"- Fear & Greed: {intel.get('fng_value')} ({intel.get('fng_class')})")
         if intel.get("btc_dom") is not None:
@@ -355,11 +378,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     failed: list[str] = []
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.strftime("%Y-%m-%d %H:%M UTC")
 
     intel = latest_market_intel()
     if intel is None:
         failed.append("market_intel brief (run market_intel_report.py first)")
+    elif brief_is_stale(intel, now_dt):
+        failed.append(f"market_intel brief STALE ({intel.get('ts_utc', '?')})")
     mvrv = mvrv_context(_safe(fetch_mvrv_z, {}, failed, "MVRV-Z"))
     onchain = _safe(fetch_onchain, None, failed, "on-chain (mempool.space)")
     derivs = _safe(lambda: derivs_summary(args.symbols), {}, failed, "derivs positioning")
@@ -385,8 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         body += f"\n> ⚠ Sources unavailable this run: {', '.join(sorted(set(failed)))}\n"
 
     out = ROOT / "reports" / f"intel_synthesis_{date.today().isoformat()}.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
     try:
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(body, encoding="utf-8")
     except Exception as e:  # noqa: BLE001 - report write must not crash the run
         print(f"  [warn] failed to write report: {str(e)[:80]}")

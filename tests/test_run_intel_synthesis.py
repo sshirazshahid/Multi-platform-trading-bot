@@ -204,3 +204,32 @@ def test_latest_market_intel_unreadable_returns_none(tmp_path):
     d = tmp_path / "h.jsonl"
     d.mkdir()  # a directory at the path -> read_text raises -> guarded to None
     assert mod.latest_market_intel(d) is None
+
+
+def test_oi_24h_change_is_timestamp_based_not_fixed_offset(tmp_path):
+    """OI 24h change must use the ~24h-ago row by TIMESTAMP, regardless of period.
+
+    Regression for the audit finding: a fixed rows[-7] offset assumed 4h bars but
+    the scheduled task writes 1h bars, turning a 24h change into a ~6h one.
+    """
+    hour = 3_600_000
+    opath = tmp_path / "BTC_oi.csv"
+    with opath.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["timestamp", "datetime", "open_interest_base", "open_interest_usd"])
+        for i in range(30):  # 30 hourly bars (1h cadence, like the live data)
+            w.writerow([i * hour, f"d{i}", i, 100 + i])
+    out = mod.funding_oi_summary(["BTC"], directory=tmp_path)
+    # last=129 (i=29); 24h ago -> first ts >= (29-24)h = i=5 -> ref=105 -> +22.857%
+    # A fixed rows[-7] offset (the old bug) would use i=23 -> ref=123 -> only +4.9%.
+    assert round(out["BTC"]["oi_chg_24h_pct"], 1) == 22.9
+
+
+def test_brief_is_stale():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 29, 12, 0, tzinfo=timezone.utc)
+    assert mod.brief_is_stale({"ts_utc": "2026-06-29 10:00 UTC"}, now) is False  # 2h old
+    assert mod.brief_is_stale({"ts_utc": "2026-06-29 00:00 UTC"}, now) is True  # 12h old
+    assert mod.brief_is_stale({}, now) is False  # missing -> don't guess
+    assert mod.brief_is_stale({"ts_utc": "garbage"}, now) is False  # unparseable -> don't guess
