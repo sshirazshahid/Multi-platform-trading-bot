@@ -117,9 +117,41 @@ def fetch_oi(ex, perp: str, period: str) -> list[dict]:
     return dedup_by_timestamp(out)
 
 
-def write_csv(path: Path, rows: list[dict], columns: list[tuple[str, str]]) -> int:
-    """Write ``rows`` to ``path`` selecting (csv_header, row_key) columns."""
+def read_existing_rows(path: Path, columns: list[tuple[str, str]]) -> list[dict]:
+    """Read an existing CSV back into row dicts keyed by ccxt row_key.
+
+    Reverses the (header, row_key) column map so previously-written rows can be
+    merged with a fresh fetch. Returns [] if the file is absent. Rows whose
+    timestamp won't parse to int are skipped (defensive against partial writes).
+    """
+    if not path.exists():
+        return []
+    keymap = {header: key for header, key in columns}
+    out: list[dict] = []
+    with path.open(newline="", encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            row = {keymap.get(h, h): v for h, v in rec.items()}
+            try:
+                row["timestamp"] = int(row.get("timestamp"))
+            except (TypeError, ValueError):
+                continue
+            out.append(row)
+    return out
+
+
+def write_csv(
+    path: Path, rows: list[dict], columns: list[tuple[str, str]], merge: bool = False
+) -> int:
+    """Write ``rows`` to ``path`` selecting (csv_header, row_key) columns.
+
+    When ``merge`` is set and ``path`` already exists, previously-written rows
+    are unioned with ``rows`` by timestamp (fresh rows win on overlap). This is
+    what lets a periodic run *accumulate* OI history beyond the exchange's
+    ~30-day live window instead of overwriting it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if merge:
+        rows = dedup_by_timestamp(read_existing_rows(path, columns) + list(rows))
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow([h for h, _ in columns])
@@ -151,7 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--no-oi", action="store_true", help="Skip open interest")
     parser.add_argument("--no-funding", action="store_true", help="Skip funding")
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="Overwrite CSVs instead of accumulating (merge is on by default)",
+    )
     args = parser.parse_args(argv)
+    merge = not args.no_merge
 
     try:
         import ccxt
@@ -182,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                         ("datetime", "datetime"),
                         ("funding_rate", "fundingRate"),
                     ],
+                    merge=merge,
                 )
                 print(f"  {base} funding: {n:>6} rows  {_span(fr)}")
             except Exception as exc:  # noqa: BLE001 - report and continue per symbol
@@ -199,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
                         ("open_interest_base", "openInterestAmount"),
                         ("open_interest_usd", "openInterestValue"),
                     ],
+                    merge=merge,
                 )
                 print(f"  {base} OI:      {n:>6} rows  {_span(oi)}")
             except Exception as exc:  # noqa: BLE001

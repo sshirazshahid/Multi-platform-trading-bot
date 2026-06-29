@@ -67,3 +67,44 @@ def test_write_csv_creates_parent_dir(tmp_path):
         [("timestamp", "timestamp"), ("open_interest_base", "openInterestAmount")],
     )
     assert path.exists()
+
+
+_OI_COLS = [
+    ("timestamp", "timestamp"),
+    ("datetime", "datetime"),
+    ("open_interest_base", "openInterestAmount"),
+    ("open_interest_usd", "openInterestValue"),
+]
+
+
+def _oi_row(ts, base):
+    return {
+        "timestamp": ts,
+        "datetime": f"d{ts}",
+        "openInterestAmount": base,
+        "openInterestValue": base * 10,
+    }
+
+
+def test_write_csv_merge_accumulates_and_fresh_wins(tmp_path):
+    """A second merged write keeps old timestamps and overwrites overlaps.
+
+    This is the behaviour that lets the scheduled OI run accumulate history
+    past the exchange's ~30-day live window.
+    """
+    path = tmp_path / "BTC_oi.csv"
+    # First run: ts 1,2 (simulating an older 30d window).
+    mod.write_csv(path, [_oi_row(1, 100), _oi_row(2, 200)], _OI_COLS, merge=True)
+    # Second run: ts 2 (refreshed) + ts 3 (new) — ts 1 is now outside the live
+    # window and absent from the fetch, but must survive in the CSV.
+    n = mod.write_csv(path, [_oi_row(2, 999), _oi_row(3, 300)], _OI_COLS, merge=True)
+    assert n == 3
+    rows = mod.read_existing_rows(path, _OI_COLS)
+    assert [r["timestamp"] for r in rows] == [1, 2, 3]
+    by_ts = {r["timestamp"]: r for r in rows}
+    assert by_ts[1]["openInterestAmount"] == "100"  # old row preserved
+    assert by_ts[2]["openInterestAmount"] == "999"  # fresh fetch wins on overlap
+
+
+def test_read_existing_rows_absent_file_is_empty(tmp_path):
+    assert mod.read_existing_rows(tmp_path / "nope.csv", _OI_COLS) == []
