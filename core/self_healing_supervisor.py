@@ -22,8 +22,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
-
 from core.adaptive_config import ADAPTIVE_MACHINE_CONFIG_PATH, sanitize_adaptive_machine_payload
 from core.feed_health import FORWARD_FEEDS, read_forward_feed_status, unhealthy_forward_feeds
 
