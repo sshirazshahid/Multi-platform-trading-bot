@@ -103,7 +103,10 @@ def latest_market_intel(path: Path = INTEL_HISTORY) -> dict | None:
     """Return the most recent snapshot dict from the brief history, or None."""
     if not path.exists():
         return None
-    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    try:
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+    except Exception:  # noqa: BLE001 - unattended run must not crash on a bad read
+        return None
     for line in reversed(lines):
         try:
             return json.loads(line)
@@ -187,7 +190,8 @@ def funding_oi_summary(bases: list[str], directory: Path = FUNDING_OI_DIR) -> di
         rec: dict = {}
         fpath = directory / f"{base}_funding.csv"
         if fpath.exists():
-            rows = list(csv.DictReader(fpath.open(encoding="utf-8")))
+            with fpath.open(encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
             if rows:
                 try:
                     rec["funding"] = float(rows[-1]["funding_rate"])
@@ -195,7 +199,8 @@ def funding_oi_summary(bases: list[str], directory: Path = FUNDING_OI_DIR) -> di
                     pass
         opath = directory / f"{base}_oi.csv"
         if opath.exists():
-            rows = list(csv.DictReader(opath.open(encoding="utf-8")))
+            with opath.open(encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
             if rows:
                 try:
                     last = float(rows[-1]["open_interest_usd"])
@@ -361,7 +366,12 @@ def main(argv: list[str] | None = None) -> int:
     fundoi = _safe(lambda: funding_oi_summary(args.symbols), {}, failed, "funding/OI CSVs")
 
     facts_md = build_facts_md(intel, mvrv, derivs, fundoi, onchain)
-    note, llm_used = synthesize(facts_md, now, args.no_llm)
+    note, llm_used = _safe(
+        lambda: synthesize(facts_md, now, args.no_llm),
+        ("_(LLM synthesis unavailable this run; raw facts below.)_\n\n" + facts_md, False),
+        failed,
+        "LLM synthesis",
+    )
 
     header = (
         f"# Intel Synthesis — {now}\n\n"
@@ -376,7 +386,11 @@ def main(argv: list[str] | None = None) -> int:
 
     out = ROOT / "reports" / f"intel_synthesis_{date.today().isoformat()}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(body, encoding="utf-8")
+    try:
+        out.write_text(body, encoding="utf-8")
+    except Exception as e:  # noqa: BLE001 - report write must not crash the run
+        print(f"  [warn] failed to write report: {str(e)[:80]}")
+        failed.append("report write")
 
     emailed = (
         email_note(f"[TradingBot] Daily Intel Synthesis — {date.today().isoformat()}", body)

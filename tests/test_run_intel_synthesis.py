@@ -9,6 +9,8 @@ import csv
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_intel_synthesis.py"
 _spec = importlib.util.spec_from_file_location("_run_intel_synthesis", _SCRIPT)
 mod = importlib.util.module_from_spec(_spec)
@@ -158,3 +160,47 @@ def test_env_prefers_environment(monkeypatch):
     monkeypatch.setenv("INTEL_TEST_KEY_XYZ", "from-environ")
     assert mod._env("INTEL_TEST_KEY_XYZ") == "from-environ"
     assert mod._env("DEFINITELY_MISSING_KEY_XYZ", "fallback") == "fallback"
+
+
+def test_env_strips_quotes_from_dotenv(tmp_path, monkeypatch):
+    monkeypatch.delenv("INTEL_TEST_QUOTED_KEY", raising=False)
+    (tmp_path / ".env").write_text('INTEL_TEST_QUOTED_KEY="secret_value"\n', encoding="utf-8")
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    assert mod._env("INTEL_TEST_QUOTED_KEY", "fallback") == "secret_value"
+
+
+def test_email_note_smtp_failure_returns_false(monkeypatch):
+    creds = {"GMAIL_SENDER": "a@x.com", "GMAIL_APP_PASSWORD": "pw", "GMAIL_RECIPIENT": "b@x.com"}
+    monkeypatch.setattr(mod, "_env", lambda key, default="": creds.get(key, default))
+    import smtplib
+
+    class _FailLogin:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def login(self, user, pw):
+            raise smtplib.SMTPAuthenticationError(535, b"bad creds")
+
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _FailLogin)
+    assert mod.email_note("subj", "body") is False  # fail-open, never raises
+
+
+def test_fetch_onchain_propagates_so_safe_can_catch(monkeypatch):
+    def _boom(url, timeout=20):
+        raise OSError("network down")
+
+    monkeypatch.setattr(mod, "_get_json", _boom)
+    with pytest.raises(OSError):
+        mod.fetch_onchain()  # raises by design -> main() wraps it in _safe()
+
+
+def test_latest_market_intel_unreadable_returns_none(tmp_path):
+    d = tmp_path / "h.jsonl"
+    d.mkdir()  # a directory at the path -> read_text raises -> guarded to None
+    assert mod.latest_market_intel(d) is None
