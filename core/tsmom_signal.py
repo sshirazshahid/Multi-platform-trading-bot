@@ -66,6 +66,17 @@ class TSMOMSignal:
         # observability: per-major hold/trade state from the latest cycle (so a
         # quiet bot in a downtrend can explain itself). Populated by analyze_portfolio.
         self.last_status: list = []
+        # provenance tag stamped on emitted actions (subclasses override, e.g. "s3").
+        self._source = "tsmom"
+
+    def _momentum_decision(self, closes: list):
+        """Return ``(mom_positive, mom_pct)`` for the single-lookback rule.
+
+        Extracted so the S3 multi-horizon ensemble subclass can override the
+        trend test while reusing the OPEN/CLOSE/hold-to-flip plumbing below.
+        """
+        mom_pct = (closes[-1] / closes[-1 - self.lookback] - 1.0) * 100.0
+        return mom_pct > 0, mom_pct
 
     # ── public contract ──────────────────────────────────────────────────────
     def analyze_portfolio(self, coins: list, open_positions: list,
@@ -87,8 +98,7 @@ class TSMOMSignal:
                 status.append({"base": base, "state": "no_data", "mom_pct": None})
                 continue  # insufficient history — skip, never guess
 
-            mom_pct = (closes[-1] / closes[-1 - self.lookback] - 1.0) * 100.0
-            mom_positive = mom_pct > 0          # close today > close `lookback` bars ago
+            mom_positive, mom_pct = self._momentum_decision(closes)
             pos = open_long_bases.get(base)
 
             if mom_positive and pos is None:
@@ -247,11 +257,10 @@ class TSMOMSignal:
                        f"(close {c_now:.4f} > {c_past:.4f})"),
             "position_id": "",
             "decision_id": str(uuid.uuid4()),
-            "source": "tsmom",
+            "source": self._source,
         }
 
-    @staticmethod
-    def _close_action(pos: dict) -> dict:
+    def _close_action(self, pos: dict) -> dict:
         return {
             "type": "CLOSE",
             "symbol": pos.get("symbol", ""),
@@ -267,8 +276,63 @@ class TSMOMSignal:
             "rationale": "daily momentum flipped non-positive",
             "position_id": pos.get("id", ""),
             "decision_id": str(uuid.uuid4()),
-            "source": "tsmom",
+            "source": self._source,
         }
+
+
+# ── Phase 1 (S3): multi-horizon momentum ENSEMBLE ────────────────────────────
+# A 28/14/7-day "all-horizons-agree" trend filter on top of the single-lookback
+# TSMOM rule. Long ONLY while momentum is positive on EVERY horizon (the most
+# conservative, capital-preservation combiner); flat otherwise. Reuses the
+# closed-candle guard, vol-size, and hold-to-flip exit from TSMOMSignal.
+DEFAULT_S3_LOOKBACKS = (28, 14, 7)
+
+
+def ensemble_momentum_state(closes, lookbacks=DEFAULT_S3_LOOKBACKS):
+    """Return ``(is_long, per_horizon)`` for the multi-horizon ensemble.
+
+    ``per_horizon`` maps each lookback -> momentum % (or ``None`` when history is
+    too short). ``is_long`` is True iff EVERY horizon has enough history and
+    positive momentum (unanimous-agreement vote). Deterministic; no look-ahead
+    (caller passes only closed-candle closes).
+    """
+    closes = list(closes or [])
+    per = {}
+    for lb in lookbacks:
+        lb = int(lb)
+        if len(closes) < lb + 1:
+            per[lb] = None
+        else:
+            per[lb] = (closes[-1] / closes[-1 - lb] - 1.0) * 100.0
+    vals = [per[int(lb)] for lb in lookbacks]
+    is_long = bool(vals) and all(v is not None and v > 0 for v in vals)
+    return is_long, per
+
+
+class S3EnsembleSignal(TSMOMSignal):
+    """Long-only multi-horizon (28/14/7d) momentum ensemble — SIGNAL_SOURCE=s3.
+
+    Identical contract / exit semantics to ``TSMOMSignal`` (long-only, daily
+    cadence, hold-to-flip, vol-sized, unleveraged); only the trend test changes
+    from a single lookback to an all-horizons-agree vote. Emits ``source='s3'``.
+    """
+
+    def __init__(self, exchanges: dict, *, universe=None,
+                 lookbacks=DEFAULT_S3_LOOKBACKS, timeframe: str = "1d"):
+        self.lookbacks = tuple(int(x) for x in lookbacks)
+        super().__init__(exchanges, universe=universe,
+                         lookback_days=max(self.lookbacks), timeframe=timeframe)
+        # need the longest lookback + a vol window + slack
+        self._min_bars = max(self.lookbacks) + _VOL_WINDOW + 2
+        self._source = "s3"
+
+    def _momentum_decision(self, closes: list):
+        is_long, per = ensemble_momentum_state(closes, self.lookbacks)
+        # display momentum = longest horizon (matches the entry reason text)
+        mom_pct = per.get(max(self.lookbacks))
+        if mom_pct is None:
+            mom_pct = 0.0
+        return is_long, mom_pct
 
 
 # ── Phase 2b: tsmom identity + entry-shape helpers ───────────────────────────
@@ -276,9 +340,14 @@ class TSMOMSignal:
 # (exit gating). A tsmom position is HELD until its own momentum-flip CLOSE, so
 # every scalp early-exit is suppressed; only a wide disaster stop remains.
 
+# tsmom-family sources share the hold-to-flip exit policy (scalp exits suppressed).
+_TSMOM_FAMILY = frozenset({"tsmom", "s3"})
+
+
 def is_tsmom_action(action) -> bool:
-    """True if an OPEN/CLOSE action dict was produced by the TSMOM signal."""
-    return str((action or {}).get("source", "")).lower() == "tsmom"
+    """True if an OPEN/CLOSE action dict was produced by a TSMOM-family signal
+    (single-lookback ``tsmom`` or the ``s3`` multi-horizon ensemble)."""
+    return str((action or {}).get("source", "")).lower() in _TSMOM_FAMILY
 
 
 def is_tsmom_position(pos) -> bool:
@@ -288,7 +357,7 @@ def is_tsmom_position(pos) -> bool:
     ``action['source']`` at entry), so the exit policy follows how the position
     was OPENED — immune to a later ``SIGNAL_SOURCE`` flip with positions open.
     """
-    return str(getattr(pos, "strategy", "") or "").lower() == "tsmom"
+    return str(getattr(pos, "strategy", "") or "").lower() in _TSMOM_FAMILY
 
 
 def tsmom_entry_shape(action, default_sl_pct: float = 8.0):

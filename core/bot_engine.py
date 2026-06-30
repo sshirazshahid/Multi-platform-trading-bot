@@ -1668,6 +1668,7 @@ class BotEngine:
         _sig_tag = {
             "tsmom": "TSMOM",
             "machine": "Machine",
+            "s3": "S3",
         }.get(SIGNAL_SOURCE, "Claude")
         logger.info(
             f"[{_sig_tag}] Portfolio cycle: {len(all_coins)} coins, "
@@ -1676,6 +1677,8 @@ class BotEngine:
 
         if SIGNAL_SOURCE == "tsmom":
             _signal = self._tsmom_signal()
+        elif SIGNAL_SOURCE == "s3":
+            _signal = self._s3_signal()
         elif SIGNAL_SOURCE == "machine":
             _signal = self._machine_signal()
         else:
@@ -1690,7 +1693,7 @@ class BotEngine:
         )
 
         # Deterministic-source observability: periodically log WHY it is quiet.
-        if SIGNAL_SOURCE in ("tsmom", "machine"):
+        if SIGNAL_SOURCE in ("tsmom", "machine", "s3"):
             import time as _t_w
             _watch_attr = f"_{SIGNAL_SOURCE}_watch_last"
             if _t_w.time() - getattr(self, _watch_attr, 0.0) >= 1800:
@@ -1754,6 +1757,18 @@ class BotEngine:
             cached = TSMOMSignal(exchanges=self.exchanges,
                                  lookback_days=TSMOM_LOOKBACK_DAYS)
             self._tsmom = cached
+        return cached
+
+    def _s3_signal(self):
+        """Lazily build + cache the S3 multi-horizon momentum ensemble
+        (SIGNAL_SOURCE=s3). Same venues/clients as the tsmom path."""
+        cached = getattr(self, "_s3", None)
+        if cached is None:
+            from config import S3_LOOKBACKS_DAYS
+            from core.tsmom_signal import S3EnsembleSignal
+            cached = S3EnsembleSignal(exchanges=self.exchanges,
+                                      lookbacks=S3_LOOKBACKS_DAYS)
+            self._s3 = cached
         return cached
 
     def _machine_signal(self):

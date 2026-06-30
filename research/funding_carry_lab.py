@@ -97,6 +97,8 @@ def simulate_cash_and_carry(
     fee_pct_per_side=DEFAULT_FEE_PCT_PER_SIDE,
     slippage_pct_per_side=DEFAULT_SLIPPAGE_PCT_PER_SIDE,
     settlements_per_year=SETTLEMENTS_PER_YEAR,
+    borrow_rate_per_settlement=0.0,
+    spot_exit_extra_taker_pct=0.0,
 ) -> CarryResult:
     """Simulate holding a delta-neutral long-spot/short-perp carry across the
     given per-settlement funding rates (decimal; +0.0001 = +0.01%/8h, longs pay
@@ -114,7 +116,12 @@ def simulate_cash_and_carry(
     n = len(funding_rates)
     entry_cost = notional * (fee_pct_per_side + slippage_pct_per_side) * 2.0  # 2 legs
     exit_cost = entry_cost
-    total_costs = entry_cost + exit_cost
+    # Spot leg is borrowed/financed while held (real cash-and-carry funds the spot
+    # long); the spot exit often crosses a wider/illiquid book than the entry, so
+    # model an ASYMMETRIC extra taker cost on the spot close only.
+    spot_financing = spot_financing_cost(notional, borrow_rate_per_settlement, n)
+    spot_exit_extra = notional * max(0.0, spot_exit_extra_taker_pct)
+    total_costs = entry_cost + exit_cost + spot_financing + spot_exit_extra
 
     equity = -entry_cost  # pay to open
     curve = []
@@ -159,6 +166,8 @@ def simulate_cash_and_carry(
             "round_trip_cost_pct": round_trip_cost_pct(fee_pct_per_side, slippage_pct_per_side)
             * 100.0,
             "avg_funding_clears_breakeven": avg_rate > be,
+            "spot_financing_cost": spot_financing,
+            "spot_exit_extra_cost": spot_exit_extra,
         },
     )
 
@@ -219,6 +228,258 @@ def monte_carlo_carry(funding_rates, n_paths=1000, block=24, seed=0, **sim_kw) -
         "net_yield_pct": _percentiles(netpct),
         "pct_settlements_positive": _percentiles(pos),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# S1 (Phase 4) — delta-neutral carry LAB-SIM primitives.
+# LAB-SIM ONLY. No real legs are ever placed. Verdict: see S1_VERDICT.
+# ══════════════════════════════════════════════════════════════════════
+
+# Final S1 verdict (recorded for the EvidenceRegistry / human review).
+S1_VERDICT = "CONDITIONAL lab-GO / live-INFEASIBLE-AT-$420"
+
+# ── Entry gate thresholds (microstructure quality required to OPEN) ───
+MAX_ENTRY_BASIS_BPS = 25.0      # spot-vs-perp basis must be tight to enter
+MIN_DEPTH_RATIO = 20.0          # top-of-book depth must be >= 20x our clip
+MAX_ENTRY_SPREAD_BPS = 5.0      # combined leg spread cap
+
+# ── Exit gate thresholds ──────────────────────────────────────────────
+MAX_CONSEC_NEG_SETTLEMENTS = 2  # two consecutive PAY settlements -> exit
+MAX_ADVERSE_BASIS_BPS = 50.0    # basis loss beyond this -> exit
+MIN_MARGIN_BUFFER_X = 3.0       # equity/maintenance below 3x -> exit (liq risk)
+DEFAULT_MAX_HEDGE_STALENESS_SEC = 300.0  # stale short-perp hedge leg -> exit
+
+
+def carry_entry_gate(
+    *,
+    basis_bps: float,
+    depth_ratio: float,
+    spread_bps: float,
+    max_basis_bps: float = MAX_ENTRY_BASIS_BPS,
+    min_depth_ratio: float = MIN_DEPTH_RATIO,
+    max_spread_bps: float = MAX_ENTRY_SPREAD_BPS,
+):
+    """Gate the OPEN of a carry position on book quality. Returns (ok, reason).
+
+    Rejects on wide basis (entry slippage / mean-reversion risk), thin depth
+    (can't size the two legs without moving the book), or wide spread.
+    """
+    if abs(basis_bps) > max_basis_bps:
+        return False, f"basis {basis_bps:.1f}bps > {max_basis_bps:.0f}bps"
+    if depth_ratio < min_depth_ratio:
+        return False, f"depth {depth_ratio:.1f}x < {min_depth_ratio:.0f}x"
+    if spread_bps > max_spread_bps:
+        return False, f"spread {spread_bps:.1f}bps > {max_spread_bps:.0f}bps"
+    return True, "ok"
+
+
+@dataclass
+class CarryPositionState:
+    """Rolling state evaluated each settlement to decide whether to CLOSE."""
+    consec_negative_settlements: int = 0
+    adverse_basis_move_bps: float = 0.0  # adverse basis drift since entry
+    margin_buffer_x: float = 10.0        # equity / maintenance margin (short leg)
+    hedge_leg_age_sec: float = 0.0       # since last confirmed short-perp hedge
+
+
+def carry_exit_signal(
+    state: CarryPositionState,
+    *,
+    max_consec_negative: int = MAX_CONSEC_NEG_SETTLEMENTS,
+    max_adverse_basis_bps: float = MAX_ADVERSE_BASIS_BPS,
+    min_margin_buffer_x: float = MIN_MARGIN_BUFFER_X,
+    max_hedge_staleness_sec: float = DEFAULT_MAX_HEDGE_STALENESS_SEC,
+):
+    """Evaluate the four S1 exit gates. Returns (should_exit, reason).
+
+    Gates (any one trips an exit):
+      1. two consecutive negative (PAY) funding settlements,
+      2. adverse basis loss beyond the cap,
+      3. margin buffer below the maintenance multiple (liquidation proximity),
+      4. stale hedge leg (short-perp not confirmed recently -> unhedged drift).
+    """
+    if state.consec_negative_settlements >= max_consec_negative:
+        return True, f"two_consecutive_negative_settlements ({state.consec_negative_settlements})"
+    if state.adverse_basis_move_bps > max_adverse_basis_bps:
+        return True, f"basis_loss {state.adverse_basis_move_bps:.1f}bps > {max_adverse_basis_bps:.0f}"
+    if state.margin_buffer_x < min_margin_buffer_x:
+        return True, f"margin_buffer {state.margin_buffer_x:.2f}x < {min_margin_buffer_x:.1f}x"
+    if state.hedge_leg_age_sec > max_hedge_staleness_sec:
+        return True, f"stale_hedge_leg {state.hedge_leg_age_sec:.0f}s"
+    return False, "hold"
+
+
+def spot_financing_cost(notional, borrow_rate_per_settlement, n_settlements) -> float:
+    """Cost of financing the borrowed/funded SPOT long leg over the hold.
+
+    Real cash-and-carry funds the spot long (margin/borrow); accrues each
+    settlement like funding, but PAID by us. Decimal rate, e.g. 0.00002/8h.
+    """
+    if n_settlements < 0:
+        raise ValueError("n_settlements must be >= 0")
+    return notional * max(0.0, borrow_rate_per_settlement) * n_settlements
+
+
+# ── Funding-persistence pre-validation (does trailing APR predict carry?) ─
+
+def _bootstrap_mean_ci_lb(values, n_boot=1000, alpha=0.05, seed=0) -> float:
+    """Lower bound of the (1-alpha) bootstrap CI for the mean of `values`."""
+    if not values:
+        return float("-inf")
+    rng = random.Random(seed)
+    k = len(values)
+    means = []
+    for _ in range(n_boot):
+        s = sum(values[rng.randrange(k)] for _ in range(k))
+        means.append(s / k)
+    means.sort()
+    idx = int(alpha * n_boot)
+    return means[min(idx, n_boot - 1)]
+
+
+def funding_persistence_test(
+    funding_rates,
+    *,
+    trailing_window: int = 21,
+    forward_horizon: int = 21,
+    fee_pct_per_side: float = DEFAULT_FEE_PCT_PER_SIDE,
+    slippage_pct_per_side: float = DEFAULT_SLIPPAGE_PCT_PER_SIDE,
+    n_boot: int = 1000,
+    seed: int = 0,
+) -> dict:
+    """PRE-VALIDATE whether trailing funding APR predicts forward realized NET
+    carry after costs OUT-OF-SAMPLE, with a bootstrap CI lower bound above costs.
+
+    Method (deterministic given seed):
+      - At each t with `trailing_window` history and `forward_horizon` future,
+        predictor = mean(trailing funding); target = forward NET carry %
+        (simulate_cash_and_carry over the forward slice, net_yield_pct).
+      - Time-split samples IS (first half) / OOS (second half). Threshold =
+        median IS predictor. In OOS, take the cohort where predictor > threshold
+        (the "carry looks good" regime) and bootstrap the CI-LB of its forward
+        NET carry.
+      - GO iff CI-LB > round-trip cost threshold (% of notional). Else NO_GO.
+    """
+    if not funding_rates:
+        raise ValueError("funding_rates must be non-empty")
+    if trailing_window < 1 or forward_horizon < 1:
+        raise ValueError("windows must be >= 1")
+
+    rates = list(funding_rates)
+    cost_threshold_pct = round_trip_cost_pct(fee_pct_per_side, slippage_pct_per_side) * 100.0
+    samples = []  # (t, predictor_apr, forward_net_pct)
+    last = len(rates) - forward_horizon
+    for t in range(trailing_window, last + 1):
+        trailing = rates[t - trailing_window:t]
+        fwd = rates[t:t + forward_horizon]
+        if not fwd:
+            continue
+        pred = annualize_funding(sum(trailing) / len(trailing))
+        r = simulate_cash_and_carry(
+            fwd, notional=10_000.0,
+            fee_pct_per_side=fee_pct_per_side, slippage_pct_per_side=slippage_pct_per_side)
+        # Target = forward GROSS carry captured (% of notional); GO requires its
+        # CI-LB to clear the round-trip cost threshold (i.e. net carry > 0 OOS).
+        fwd_gross_pct = r.gross_funding_pnl / 10_000.0 * 100.0
+        samples.append((t, pred, fwd_gross_pct))
+
+    if len(samples) < 4:
+        return {
+            "verdict": "NO_GO", "reason": "insufficient_samples",
+            "n_samples": len(samples), "n_oos_cohort": 0,
+            "ci_lb_net_pct": float("-inf"), "cost_threshold_pct": cost_threshold_pct,
+        }
+
+    mid = len(samples) // 2
+    is_preds = sorted(s[1] for s in samples[:mid])
+    thr = is_preds[len(is_preds) // 2]  # median IS predictor
+    oos = samples[mid:]
+    cohort = [s[2] for s in oos if s[1] > thr]
+    ci_lb = _bootstrap_mean_ci_lb(cohort, n_boot=n_boot, seed=seed) if cohort else float("-inf")
+    verdict = "GO" if (cohort and ci_lb > cost_threshold_pct) else "NO_GO"
+    return {
+        "verdict": verdict,
+        "n_samples": len(samples),
+        "n_oos_cohort": len(cohort),
+        "threshold_apr_pct": thr,
+        "ci_lb_net_pct": ci_lb,
+        "cost_threshold_pct": cost_threshold_pct,
+        "cohort_mean_net_pct": (sum(cohort) / len(cohort)) if cohort else float("-inf"),
+    }
+
+
+# ── Two-leg notional-matched Position primitive + leg-aware risk model ─
+
+# Hedged-leg family (mirror of tsmom_signal._TSMOM_FAMILY). A leg tagged with one
+# of these strategies is part of a delta-neutral pair, so the DIRECTIONAL ATR-SL /
+# 8%-guardian must NOT fire on it (the other leg offsets the price move).
+_HEDGED_FAMILY = frozenset({"carry", "s1"})
+
+
+@dataclass
+class CarryLeg:
+    symbol: str
+    side: str          # "long" (spot) | "short" (perp)
+    qty: float
+    entry_px: float
+    notional: float
+    leverage: float
+    strategy: str = "carry"  # tag -> is_hedged_leg() True
+
+
+@dataclass
+class TwoLegCarryPosition:
+    symbol: str
+    spot_leg: CarryLeg
+    perp_leg: CarryLeg
+
+    @classmethod
+    def open(cls, *, symbol, notional, spot_px, perp_px, perp_leverage=1.0):
+        """Open a notional-matched spot-long + perp-short delta-neutral pair (SIM)."""
+        if notional <= 0 or spot_px <= 0 or perp_px <= 0:
+            raise ValueError("notional and prices must be > 0")
+        spot_qty = notional / spot_px
+        perp_qty = notional / perp_px
+        spot = CarryLeg(symbol, "long", spot_qty, spot_px, notional, 1.0, "carry")
+        perp = CarryLeg(symbol, "short", perp_qty, perp_px, notional, perp_leverage, "carry")
+        return cls(symbol=symbol, spot_leg=spot, perp_leg=perp)
+
+
+def is_hedged_leg(pos) -> bool:
+    """True if a leg/Position is tagged as part of a delta-neutral hedge.
+
+    Mirror of tsmom_signal.is_tsmom_position: keys on the ``strategy`` tag so the
+    risk policy follows how the leg was OPENED, not the current SIGNAL_SOURCE.
+    """
+    return str(getattr(pos, "strategy", "") or "").lower() in _HEDGED_FAMILY
+
+
+def directional_stop_should_fire(pos, *, pnl_pct, atr_sl_hit, guardian_pct=8.0) -> bool:
+    """Leg-aware directional stop. SUPPRESSED on a hedged leg.
+
+    For a normal directional position the ATR-SL or the 8% guardian fires; for a
+    hedged carry leg the offsetting leg cancels the price move, so neither fires
+    (per-leg LIQUIDATION via ``per_leg_liquidation_price`` is the real rail).
+    """
+    if is_hedged_leg(pos):
+        return False
+    if atr_sl_hit:
+        return True
+    return pnl_pct <= -abs(guardian_pct)
+
+
+def per_leg_liquidation_price(*, entry_px, side, leverage, maintenance_margin_pct=0.005):
+    """Approximate isolated-margin liquidation price for one leg (SIM).
+
+    Unleveraged spot long (leverage<=1) has no liquidation -> None. The short perp
+    leg liquidates ABOVE entry as price rises and erodes margin.
+    """
+    if leverage <= 1.0 and side == "long":
+        return None
+    move = (1.0 / leverage) - maintenance_margin_pct
+    if side == "short":
+        return entry_px * (1.0 + move)
+    return entry_px * (1.0 - move)
 
 
 def _fmt(r: CarryResult) -> str:

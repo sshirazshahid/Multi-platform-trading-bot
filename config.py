@@ -1350,11 +1350,20 @@ CLAUDE_THROTTLE_N = max(1, int(os.getenv("CLAUDE_THROTTLE_N", "3")))
 # ⚠ tsmom changes ENTRY selection only; bot_engine's scalp EXIT stack (ATR stop / trailing /
 #   mcp_take_profit / entry_invalidated) still fires and will clip trends — gate those before
 #   trusting PAPER results. Flag is fully reversible: SIGNAL_SOURCE=mcp restores prod.
+#   "s3"      - multi-horizon (28/14/7d) long-only momentum ENSEMBLE on the same
+#             validated majors (core/tsmom_signal.py:S3EnsembleSignal). Phase-1
+#             vertical-slice strategy; tsmom-family exit policy (hold-to-flip).
+#             PAPER/sim research path.
 SIGNAL_SOURCE = os.getenv("SIGNAL_SOURCE", "tsmom").lower()
-if SIGNAL_SOURCE not in ("mcp", "tsmom", "machine"):
+if SIGNAL_SOURCE not in ("mcp", "tsmom", "machine", "s3"):
     raise ValueError(
-        f"SIGNAL_SOURCE must be 'mcp', 'tsmom', or 'machine', got {SIGNAL_SOURCE!r}"
+        f"SIGNAL_SOURCE must be 'mcp', 'tsmom', 'machine', or 's3', got {SIGNAL_SOURCE!r}"
     )
+
+# S3 ensemble horizons (days). Comma-separated; longest gates min-history.
+S3_LOOKBACKS_DAYS = tuple(
+    int(x) for x in os.getenv("S3_LOOKBACKS_DAYS", "28,14,7").split(",") if x.strip()
+) or (28, 14, 7)
 
 # Machine detector scores are vote weights, not MCP confidence. Earlier paper
 # collection used 0.25 and produced too many weak after-cost trades; use the
