@@ -35,7 +35,14 @@ def db(tmp_path):
         );
         CREATE TABLE shadow_decisions (
             id INTEGER PRIMARY KEY, ts INTEGER, model_version TEXT, symbol TEXT,
-            side TEXT, decision TEXT, p_win REAL, sim_pnl REAL, sim_r_multiple REAL
+            side TEXT, decision TEXT, p_win REAL, sim_pnl REAL, sim_r_multiple REAL,
+            proposal_id TEXT, label_status TEXT
+        );
+        CREATE TABLE shadow_outcomes (
+            proposal_id TEXT PRIMARY KEY, exit_px REAL, exit_reason TEXT,
+            gross_pnl REAL, net_pnl REAL, fees REAL, slippage REAL, funding REAL,
+            mfe REAL, mae REAL, bars_held INTEGER, r_multiple REAL,
+            resolved_ts INTEGER, label_status TEXT
         );
         """
     )
@@ -58,8 +65,14 @@ def db(tmp_path):
     )
     conn.execute(
         "INSERT INTO shadow_decisions (ts, model_version, symbol, side, "
-        "decision, p_win, sim_pnl) VALUES (1, 'm1', 'BTC/USDT:USDT', 'buy', "
-        "'OPEN', 0.6, 3.5)"
+        "decision, p_win, sim_pnl, proposal_id, label_status) VALUES "
+        "(1, 'm1', 'BTC/USDT:USDT', 'buy', 'OPEN', 0.6, 3.5, 'p-1', 'RESOLVED')"
+    )
+    # Phase 0b: shadow_vs_live reports RESOLVED net PnL from shadow_outcomes,
+    # not the projected sim_pnl on the decision row.
+    conn.execute(
+        "INSERT INTO shadow_outcomes (proposal_id, net_pnl, label_status) "
+        "VALUES ('p-1', 1.25, 'RESOLVED')"
     )
     conn.commit()
     conn.close()
@@ -104,8 +117,8 @@ def test_recent_candidates_skip_reason(db):
 
 def test_shadow_vs_live(db):
     cmp = wr.shadow_vs_live(db_path=db)
-    assert cmp["shadow"]["decisions"] == 1
-    assert cmp["shadow"]["total_sim_pnl"] == 3.5
+    assert cmp["shadow"]["resolved"] == 1
+    assert cmp["shadow"]["total_resolved_pnl"] == 1.25
     assert cmp["live"]["trades"] == 3
 
 

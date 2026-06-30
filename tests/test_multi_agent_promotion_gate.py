@@ -27,16 +27,26 @@ def wh(tmp_path):
 
 
 def _seed_shadow(wh, n_shadow, win_pct, sym_offset=0):
+    # Phase 0b: the gate reads RESOLVED net PnL from shadow_outcomes, so each
+    # decision needs a matching resolved outcome row.
     now = int(time.time())
     conn = wh._conn()
     for i in range(n_shadow):
         pnl = 0.20 if i < int(n_shadow * win_pct) else -0.15
+        pid = f"p-{sym_offset+i}"
         conn.execute(
             "INSERT INTO shadow_decisions (ts, model_version, symbol, side, decision, "
             "p_win, sim_pnl, sim_r_multiple, agent_id, projected_fee, "
-            "projected_notional_current, projected_notional_alt, projected_pnl) "
-            "VALUES (?, 'v1', ?, 'buy', 'ALLOW', 0.6, ?, 0.0, 'ScalpAgent', 0.05, 8.0, 200.0, ?)",
-            (now - 3600 - i, f"S{sym_offset+i}/USDT:USDT", pnl, pnl * 25),
+            "projected_notional_current, projected_notional_alt, projected_pnl, "
+            "proposal_id, label_status) "
+            "VALUES (?, 'v1', ?, 'buy', 'ALLOW', 0.6, ?, 0.0, 'ScalpAgent', 0.05, "
+            "8.0, 200.0, ?, ?, 'RESOLVED')",
+            (now - 3600 - i, f"S{sym_offset+i}/USDT:USDT", pnl, pnl * 25, pid),
+        )
+        conn.execute(
+            "INSERT INTO shadow_outcomes (proposal_id, net_pnl, fees, "
+            "label_status, resolved_ts) VALUES (?, ?, 0.05, 'RESOLVED', ?)",
+            (pid, pnl, now - 3600 - i),
         )
     conn.commit()
 

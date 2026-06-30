@@ -44,9 +44,16 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
     con = _connect(db_path)
     cutoff = int(time.time() - window_hours * 3600)
 
+    # Phase 0b: report forward-RESOLVED net PnL (after-cost, SL-first) from
+    # shadow_outcomes joined to the decision rows — NOT the projected-at-TP
+    # shadow_decisions.sim_pnl, which never feeds a promotion decision.
     shadow_rows = list(
         con.execute(
-            "SELECT * FROM shadow_decisions WHERE ts >= ? AND decision='ALLOW'",
+            "SELECT d.agent_id AS agent_id, o.net_pnl AS net_pnl "
+            "FROM shadow_decisions d JOIN shadow_outcomes o "
+            "ON o.proposal_id = d.proposal_id "
+            "WHERE d.ts >= ? AND d.decision='ALLOW' "
+            "AND o.label_status='RESOLVED'",
             (cutoff,),
         ).fetchall()
     )
@@ -57,8 +64,7 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
         ).fetchall()
     )
 
-    s_stats = _stats(shadow_rows, "sim_pnl")
-    s_stats_alt = _stats(shadow_rows, "projected_pnl")
+    s_stats = _stats(shadow_rows, "net_pnl")
     l_stats = _stats(live_rows, "realized_pnl")
 
     by_agent: dict[str, list] = {}
@@ -73,18 +79,14 @@ def build_report(db_path: Path, window_hours: int = 24) -> str:
     lines.append(
         f"- n={l_stats['n']} sum=${l_stats['sum']:.2f} mean=${l_stats['mean']:.3f} WR={l_stats['wr']:.1%}"
     )
-    lines.append("\n## Shadow (current notional, sim_pnl)\n")
+    lines.append("\n## Shadow (RESOLVED net PnL, after-cost SL-first)\n")
     lines.append(
         f"- n={s_stats['n']} sum=${s_stats['sum']:.2f} mean=${s_stats['mean']:.3f} WR={s_stats['wr']:.1%}"
-    )
-    lines.append("\n## Shadow (alt notional $200, projected_pnl)\n")
-    lines.append(
-        f"- n={s_stats_alt['n']} sum=${s_stats_alt['sum']:.2f} mean=${s_stats_alt['mean']:.3f}"
     )
     lines.append("\n## Per-agent shadow breakdown\n")
     if by_agent:
         for agent, rows in sorted(by_agent.items()):
-            st = _stats(rows, "sim_pnl")
+            st = _stats(rows, "net_pnl")
             lines.append(f"- **{agent}**: n={st['n']} sum=${st['sum']:.2f} WR={st['wr']:.1%}")
     else:
         lines.append("- (no shadow decisions in window)")

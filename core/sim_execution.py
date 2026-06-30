@@ -26,12 +26,40 @@ can show how much of the paper P&L was "borrowed" from LIVE reality.
 
 Stateless except for a small slippage counter used for diagnostics.
 """
-from typing import Optional, Tuple
+import time
+from typing import List, Optional, Sequence, Tuple
 
 try:
     from config import SLIPPAGE as _SLIP_CFG
 except Exception:  # pragma: no cover — config should always import
     _SLIP_CFG = {}
+
+
+def last_closed_bar(
+    candles: Sequence,
+    now: Optional[float] = None,
+    timeframe_sec: int = 60,
+) -> Optional[List]:
+    """Return the most recent CLOSED bar from an OHLCV list.
+
+    A candle's timestamp (index 0, in ms) is its OPEN time; it closes
+    `timeframe_sec` later. The forming (un-closed) bar — whose close time is
+    still in the future relative to `now` — is dropped so the wick-trigger
+    path never repaints on an intrabar print. If no closed bar is found
+    (or timestamps are unparseable), returns None.
+    """
+    if not candles:
+        return None
+    now_ms = (time.time() if now is None else float(now)) * 1000.0
+    span_ms = float(timeframe_sec) * 1000.0
+    for c in reversed(list(candles)):
+        try:
+            ts = float(c[0])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if ts + span_ms <= now_ms:
+            return list(c)
+    return None
 
 
 class SimExecutionModel:
@@ -137,7 +165,7 @@ class SimExecutionModel:
 
     def check_wick_trigger(
         self, exchange, symbol: str, market_type: str, side: str,
-        sl: float, tp: float,
+        sl: float, tp: float, now: Optional[float] = None,
     ) -> Tuple[Optional[str], Optional[float]]:
         """
         Did the last 1m candle's high/low cross SL or TP?
@@ -155,15 +183,21 @@ class SimExecutionModel:
             return (None, None)
 
         try:
+            # Fetch 3 so a closed bar survives after dropping the forming one.
             candles = exchange.fetch_ohlcv(
-                symbol, "1m", limit=2, market_type=market_type)
+                symbol, "1m", limit=3, market_type=market_type)
         except Exception:
             return (None, None)
         if not candles:
             return (None, None)
 
-        # Last closed candle: [timestamp, open, high, low, close, volume]
-        c = candles[-1]
+        # Use the last CLOSED candle, never the forming/un-closed bar (which
+        # repaints intrabar). [timestamp, open, high, low, close, volume]
+        c = last_closed_bar(candles, now=now, timeframe_sec=60)
+        if c is None:
+            # Timestamps unusable → fall back to the second-to-last bar if we
+            # have one (the forming bar is conventionally last), else the last.
+            c = candles[-2] if len(candles) >= 2 else candles[-1]
         try:
             high = float(c[2])
             low  = float(c[3])
@@ -210,6 +244,26 @@ class SimExecutionModel:
         if position.side == "buy":
             return notional * rate
         return -notional * rate
+
+    def funding_payment_at(
+        self, position, mark_price: float, funding_rate: float,
+        settlement_ts: float, now: float,
+    ) -> float:
+        """Settlement-aligned funding accrual.
+
+        Funding for a settlement interval is only realized once that interval
+        has actually settled at the venue (`settlement_ts <= now`). A future
+        funding interval is NEVER credited at time `t` — this prevents
+        look-ahead leakage where a simulator books funding the live venue has
+        not yet charged. Returns the signed USDT amount (same sign convention
+        as `funding_payment`), or 0.0 if settlement is still in the future.
+        """
+        try:
+            if float(settlement_ts) > float(now):
+                return 0.0
+        except (TypeError, ValueError):
+            return 0.0
+        return self.funding_payment(position, mark_price, funding_rate)
 
     # ── Diagnostics ────────────────────────────────────────────────────
 
