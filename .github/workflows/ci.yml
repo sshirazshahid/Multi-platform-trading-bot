@@ -31,6 +31,10 @@ jobs:
       - name: Codespell
         run: codespell --toml pyproject.toml skills/ scripts/
 
+      # Phase 0e: byte-compile sweep over core/ + scripts/ (syntax-shape gate).
+      - name: Compile sweep (core + scripts)
+        run: python scripts/compile_sweep.py
+
   test:
     name: Test
     runs-on: ubuntu-latest

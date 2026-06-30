@@ -207,6 +207,29 @@ CREATE TABLE IF NOT EXISTS labels (
 );
 CREATE INDEX IF NOT EXISTS idx_labels_market_ts ON labels(market_type, ts);
 CREATE INDEX IF NOT EXISTS idx_labels_symbol    ON labels(symbol);
+
+-- shadow_outcomes (Phase 0b): forward-RESOLVED, SL-first, after-cost result for
+-- each shadow_decisions row. Keyed by proposal_id (1:1 with the decision). This
+-- is the ONLY shadow PnL a promotion gate may read — shadow_decisions.sim_pnl is
+-- a projected-at-TP diagnostic and must never feed a promotion decision.
+CREATE TABLE IF NOT EXISTS shadow_outcomes (
+    proposal_id   TEXT PRIMARY KEY,
+    exit_px       REAL,
+    exit_reason   TEXT,
+    gross_pnl     REAL,
+    net_pnl       REAL,
+    fees          REAL,
+    slippage      REAL,
+    funding       REAL,
+    mfe           REAL,
+    mae           REAL,
+    bars_held     INTEGER,
+    r_multiple    REAL,
+    resolved_ts   INTEGER,
+    label_status  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_outcomes_status
+    ON shadow_outcomes(label_status);
 """
 
 
@@ -317,11 +340,30 @@ class Warehouse:
                 "projected_notional_alt REAL",
                 "projected_pnl REAL",
                 "projected_fee REAL",
+                # Phase 0a — raw barriers so a shadow decision is forward-resolvable
+                # by the 0b resolver (sim_pnl stays a projected-at-TP diagnostic).
+                "entry_px REAL",
+                "sl_px REAL",
+                "tp_px REAL",
+                "venue TEXT",
+                "timeframe TEXT",
+                "horizon_bars INTEGER",
+                "label_status TEXT",
             ):
                 try:
                     conn.execute(f"ALTER TABLE shadow_decisions ADD COLUMN {col_def}")
                 except sqlite3.OperationalError:
                     pass
+            # Phase 0a — legacy rows (written before barriers existed) can never be
+            # resolved forward; flag them so the 0b resolver + promotion gate skip
+            # them. Idempotent: new PENDING rows carry entry_px and are untouched.
+            try:
+                conn.execute(
+                    "UPDATE shadow_decisions SET label_status='UNRESOLVABLE' "
+                    "WHERE label_status IS NULL AND entry_px IS NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         logger.info(f"[Warehouse] Ready at {self.path}")
 

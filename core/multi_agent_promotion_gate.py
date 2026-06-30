@@ -87,8 +87,13 @@ def evaluate_multi_agent_shadow(
     cutoff = now - cri.days_window * 86400
 
     con = _connect(db_path)
+    # Phase 0b: promotion reads forward-RESOLVED net PnL from shadow_outcomes,
+    # NOT the projected-at-TP shadow_decisions.sim_pnl. Only RESOLVED rows count.
     shadow_rows = list(con.execute(
-        "SELECT * FROM shadow_decisions WHERE ts >= ? AND decision='ALLOW'",
+        "SELECT o.net_pnl AS net_pnl, o.fees AS fees "
+        "FROM shadow_decisions d JOIN shadow_outcomes o "
+        "ON o.proposal_id = d.proposal_id "
+        "WHERE d.ts >= ? AND d.decision='ALLOW' AND o.label_status='RESOLVED'",
         (cutoff,),
     ).fetchall())
     live_rows = list(con.execute(
@@ -97,7 +102,7 @@ def evaluate_multi_agent_shadow(
     ).fetchall())
     con.close()
 
-    s = _stats(shadow_rows, "sim_pnl", "projected_fee")
+    s = _stats(shadow_rows, "net_pnl", "fees")
     l = _stats(live_rows, "realized_pnl", "fee")
 
     fail_reasons: list[str] = []

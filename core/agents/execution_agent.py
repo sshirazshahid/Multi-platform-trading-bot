@@ -62,6 +62,11 @@ class ExecutionAgent:
             "side": side,
             "decision": "ALLOW",
             "p_win": proposal.confidence,
+            # PROJECTED-ONLY diagnostics (close-at-TP best case). NEVER read by a
+            # promotion gate — Phase 0b resolves the true after-cost, SL-first
+            # net PnL into shadow_outcomes.net_pnl and the resolved r_multiple
+            # (net / entry-to-stop risk) lives there. sim_r_multiple below is a
+            # net/fees ratio, retained only for backward-compat panels.
             "sim_pnl": net_pnl_cur,
             "sim_r_multiple": (net_pnl_cur / fees_cur) if fees_cur > 0 else 0.0,
             "agent_id": proposal.agent_id,
@@ -73,6 +78,15 @@ class ExecutionAgent:
             "projected_notional_alt": projected_notional_alt,
             "projected_pnl": net_pnl_alt,
             "projected_fee": fees_alt,
+            # Phase 0a — raw barriers for the forward resolver. sim_pnl above stays
+            # a projected-at-TP diagnostic and is NOT used for resolved-only promotion.
+            "entry_px": proposal.entry,
+            "sl_px": proposal.sl,
+            "tp_px": proposal.tp,
+            "venue": proposal.venue,
+            "timeframe": proposal.timeframe,
+            "horizon_bars": proposal.horizon_bars,
+            "label_status": "PENDING",
         }
         if self._wh is not None:
             self._write(row)
@@ -97,6 +111,14 @@ class ExecutionAgent:
             "projected_notional_alt": 0.0,
             "projected_pnl": 0.0,
             "projected_fee": 0.0,
+            # Phase 0a — a vetoed decision never executed; nothing to resolve forward.
+            "entry_px": proposal.entry,
+            "sl_px": proposal.sl,
+            "tp_px": proposal.tp,
+            "venue": proposal.venue,
+            "timeframe": proposal.timeframe,
+            "horizon_bars": proposal.horizon_bars,
+            "label_status": "UNRESOLVABLE",
         }
         if self._wh is not None:
             self._write(row)

@@ -182,11 +182,13 @@ def shadow_vs_live(db_path: str | Path | None = None) -> dict[str, Any]:
     """
     conn = _connect(db_path)
     try:
+        # Phase 0b: report forward-RESOLVED net PnL (after-cost, SL-first) from
+        # shadow_outcomes, NOT the projected-at-TP shadow_decisions.sim_pnl.
         shadow = _rows(
             conn,
-            "SELECT COUNT(*) AS n, COALESCE(SUM(sim_pnl),0) AS total, "
-            "COALESCE(AVG(sim_pnl),0) AS avg FROM shadow_decisions "
-            "WHERE sim_pnl IS NOT NULL",
+            "SELECT COUNT(*) AS n, COALESCE(SUM(net_pnl),0) AS total, "
+            "COALESCE(AVG(net_pnl),0) AS avg FROM shadow_outcomes "
+            "WHERE label_status='RESOLVED' AND net_pnl IS NOT NULL",
         )[0]
         live = _rows(
             conn,
@@ -196,9 +198,9 @@ def shadow_vs_live(db_path: str | Path | None = None) -> dict[str, Any]:
         )[0]
         return {
             "shadow": {
-                "decisions": shadow["n"],
-                "total_sim_pnl": round(float(shadow["total"]), 4),
-                "avg_sim_pnl": round(float(shadow["avg"]), 4),
+                "resolved": shadow["n"],
+                "total_resolved_pnl": round(float(shadow["total"]), 4),
+                "avg_resolved_pnl": round(float(shadow["avg"]), 4),
             },
             "live": {
                 "trades": live["n"],

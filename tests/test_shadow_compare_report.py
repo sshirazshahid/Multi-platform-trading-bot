@@ -31,12 +31,20 @@ def _seed(wh):
     now = int(time.time())
     conn = wh._conn()
     for i in range(5):
+        pid = f"p-{i}"
+        net = 0.05 if i % 2 == 0 else -0.04
         conn.execute(
             "INSERT INTO shadow_decisions (ts, model_version, symbol, side, decision, "
             "p_win, sim_pnl, sim_r_multiple, agent_id, projected_pnl, projected_fee, "
-            "projected_notional_current, projected_notional_alt) "
-            "VALUES (?, 'v1', 'BTC/USDT:USDT', 'buy', 'ALLOW', 0.6, ?, 0.0, 'ScalpAgent', ?, 0.05, 8.0, 200.0)",
-            (now - 3600, 0.05 if i % 2 == 0 else -0.04, 1.20 if i % 2 == 0 else -0.50),
+            "projected_notional_current, projected_notional_alt, proposal_id, label_status) "
+            "VALUES (?, 'v1', 'BTC/USDT:USDT', 'buy', 'ALLOW', 0.6, ?, 0.0, 'ScalpAgent', ?, 0.05, 8.0, 200.0, ?, 'RESOLVED')",
+            (now - 3600, net, 1.20 if i % 2 == 0 else -0.50, pid),
+        )
+        # Phase 0b: report reads RESOLVED net PnL from shadow_outcomes.
+        conn.execute(
+            "INSERT INTO shadow_outcomes (proposal_id, net_pnl, label_status, "
+            "resolved_ts) VALUES (?, ?, 'RESOLVED', ?)",
+            (pid, net, now - 3600),
         )
     for i in range(3):
         conn.execute(
