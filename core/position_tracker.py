@@ -722,8 +722,8 @@ class PositionTracker:
             # the warehouse row stays OPEN forever (~57 stuck-OPEN rows).
             # Create the OPEN row now so the close can patch it. Idempotent.
             try:
-                from core.warehouse import get_warehouse as _gw
                 from config import OPERATING_MODE as _mode
+                from core.warehouse import get_warehouse as _gw
                 _gw().record_trade_open(
                     exchange=ex_name, symbol=sym, side=side,
                     ts_entry=float(pos.open_time),
@@ -1166,8 +1166,8 @@ class PositionTracker:
                 # idempotent (INSERT OR IGNORE on exch+sym+ts_entry+side)
                 # and returns the id for the close update.
                 try:
-                    from core.warehouse import get_warehouse as _gw
                     from config import OPERATING_MODE as _mode
+                    from core.warehouse import get_warehouse as _gw
                     _wh = _gw()
                     _tid = _wh.record_trade_open(
                         exchange=ex_lower, symbol=sym, side=side,

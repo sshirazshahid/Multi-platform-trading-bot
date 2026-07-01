@@ -7,6 +7,7 @@ could drop a stop-loss. Now these (and the ccxt RateLimitExceeded/DDoSProtection
 types) retry with backoff. create_order still does not retry (no duplicate risk).
 """
 import ccxt
+
 from exchanges.base import _is_transient_error
 
 

@@ -11,13 +11,13 @@ project signal-interface contract:
 * STRICTLY CAUSAL: the value at row ``i`` is a function of rows ``0..i`` only.
 """
 
-from core.signals.session_breakout import signal as session_breakout_signal
-from core.signals.squeeze_breakout import signal as squeeze_breakout_signal
-from core.signals.swing_structure import signal as swing_structure_signal
 from core.signals.ema_rsi import signal as ema_rsi_signal
 from core.signals.harmonic_patterns import signal as harmonic_pattern_signal
 from core.signals.ict_variation import signal as ict_variation_signal
+from core.signals.session_breakout import signal as session_breakout_signal
+from core.signals.squeeze_breakout import signal as squeeze_breakout_signal
 from core.signals.stochastic_crossover import signal as stochastic_crossover_signal
+from core.signals.swing_structure import signal as swing_structure_signal
 from core.signals.valuation_model import signal as valuation_model_signal
 
 __all__ = [

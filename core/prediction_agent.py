@@ -447,8 +447,8 @@ class PredictionAgent:
 
         # Call Claude
         try:
-            from utils.claude_client import call_claude_cli
             from core.claude_advisor import _extract_json_object
+            from utils.claude_client import call_claude_cli
 
             raw_text = call_claude_cli(
                 prompt=user_prompt,

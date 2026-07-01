@@ -40,7 +40,7 @@ _POSITIVE_KEYWORDS = frozenset({
     "etf approved", "etf approval", "institutional",
     "record high", "all-time high", "ath",
     "integration", "expansion", "listing",
-    "mainnet", "upgrade", "v2", "v3",
+    "mainnet", "v2", "v3",
 })
 
 

@@ -11,10 +11,7 @@ Verifies:
 """
 
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import MagicMock
 
 # ── Feed module structure tests ────────────────────────────────────────
 

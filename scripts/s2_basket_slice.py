@@ -167,7 +167,8 @@ def simulate_basket(
         short_syms = [uni[i] for i in order[:n_short]]
 
         # inverse-vol weights, dollar-neutral (each side gross 0.5)
-        def _side_weights(side_syms):
+        # bind loop var t explicitly (called immediately; avoids late-binding closure, ruff B023)
+        def _side_weights(side_syms, t=t):
             inv = {}
             for s in side_syms:
                 v = _realized_vol(closes, s, t, vol_lookback)

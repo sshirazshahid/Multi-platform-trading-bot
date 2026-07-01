@@ -44,10 +44,10 @@ def test_finalize_close_does_not_coerce_pnl_pct_to_zero():
 def test_record_trade_result_passes_through_none_pnl_pct():
     """Sanity: record_trade_result with pnl_pct=None must not scratch."""
     import json
+    import os
     import tempfile
     from datetime import date
     from pathlib import Path as P
-    import os
 
     with tempfile.TemporaryDirectory() as tdir:
         cwd = os.getcwd()

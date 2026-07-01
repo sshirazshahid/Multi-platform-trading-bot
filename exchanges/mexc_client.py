@@ -8,8 +8,10 @@ Quirks handled:
 
 import ccxt
 from loguru import logger
-from .base  import BaseExchange
+
 from config import MEXC_API_KEY, MEXC_SECRET_KEY
+
+from .base import BaseExchange
 
 _PLACEHOLDERS = {"", "none", "null",
                  "your_mexc_api_key_here",

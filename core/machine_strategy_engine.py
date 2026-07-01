@@ -17,8 +17,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from core.signals.harmonic_patterns import signal as harmonic_signal
 from core.signals.ema_rsi import signal as ema_rsi_signal
+from core.signals.harmonic_patterns import signal as harmonic_signal
 from core.signals.ict_variation import signal as ict_signal
 from core.signals.session_breakout import signal as asian_range_signal
 from core.signals.squeeze_breakout import signal as squeeze_signal

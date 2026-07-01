@@ -16,7 +16,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -26,13 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.prediction_agent import (
     PredictionAgent,
     PredictionResult,
-    _PredictionCache,
     _estimate_cost,
+    _PredictionCache,
     _validate_prediction,
 )
 from core.prediction_prompt import build_prediction_prompt
 from core.prediction_tracker import PredictionTracker
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

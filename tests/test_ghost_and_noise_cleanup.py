@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -369,6 +369,7 @@ def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
     condition expected case (the order already filled). It should log at
     DEBUG, NOT ERROR, and return an uncertainty marker (Area 2 demotion + Area 3 swallow)."""
     import ccxt
+
     from exchanges import base as base_mod
 
     # Build a tiny fake BaseExchange that throws ccxt-style 110001
@@ -414,6 +415,7 @@ def test_bybit_110001_cancel_logged_at_debug(monkeypatch, caplog):
 def test_safe_cancel_order_swallows_110001(caplog):
     """Bybit 110001 'order not exists or too late to cancel' marks uncertainty."""
     import ccxt
+
     from exchanges import base as base_mod
 
     class _FakeBybit:
@@ -440,6 +442,7 @@ def test_safe_cancel_order_swallows_110001(caplog):
 def test_safe_cancel_order_swallows_bitget_40034(caplog):
     """Bitget 40034 'order does not exist' race — same swallow semantics."""
     import ccxt
+
     from exchanges import base as base_mod
 
     class _FakeBitget:
@@ -536,8 +539,8 @@ def _make_short_position(age_min: float, entry: float, current_mark: float):
 def test_age_aware_tighten_fires_at_60min_in_profit(monkeypatch):
     """Age 70min, pnl +0.8%, SL far from entry → _replace_exchange_sl called
     with the breakeven price (entry × (1 + 2·fee + 0.0005))."""
-    from core import bot_engine
     from config import FEE
+    from core import bot_engine
 
     # Long position +0.8% in profit at age 70min
     entry = 1.00
@@ -722,6 +725,7 @@ def test_area5_checked_before_area4_ordering():
     the [1%, 2%) overlap band could have its SL moved instead of being
     closed for the +1-2% profit — losing the captured win."""
     import inspect
+
     from core import bot_engine
 
     src = inspect.getsource(bot_engine.BotEngine._run_mcp_position_monitor)

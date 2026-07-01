@@ -16,7 +16,6 @@ These tests verify:
 """
 from __future__ import annotations
 
-
 # ── Config tests ──────────────────────────────────────────────────────────
 
 def test_min_hold_minutes_default():

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 
 
 def test_self_healing_repairs_missing_feed_process(tmp_path, monkeypatch):

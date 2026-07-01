@@ -34,7 +34,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ─── Lock fraction returns 0.95 when position age >= 120min ───────────
 
 

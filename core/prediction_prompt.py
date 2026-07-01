@@ -324,9 +324,9 @@ def _section_history(ctx: dict) -> str:
 
         # Flag concerning patterns
         if wr is not None and wr < 0.40:
-            lines.append(f"  WARNING: Win rate below 40% on this symbol")
+            lines.append("  WARNING: Win rate below 40% on this symbol")
         if avg_pnl is not None and avg_pnl < -0.20:
-            lines.append(f"  WARNING: Negative historical expectancy")
+            lines.append("  WARNING: Negative historical expectancy")
     else:
         lines.append("- No closed trades for this symbol in the window.")
 
@@ -342,7 +342,7 @@ def _section_portfolio(ctx: dict) -> str:
 
     corr = ps.get("correlated_positions", [])
     if corr:
-        lines.append(f"- WARNING: Same-symbol positions already open:")
+        lines.append("- WARNING: Same-symbol positions already open:")
         for p in corr:
             lines.append(
                 f"  - {p.get('symbol')} {p.get('side')} on {p.get('exchange')} "
