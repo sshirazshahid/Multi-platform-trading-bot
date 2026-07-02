@@ -54,6 +54,7 @@ from typing import Optional
 from loguru import logger
 
 HEARTBEAT_PATH        = Path("data/heartbeat.json")
+CARRY_HEARTBEAT_PATH  = Path("data/carry_heartbeat.json")
 REVIEW_FLAG_PATH      = Path("data/review_required.json")
 POST_MORTEM_PATH      = Path("data/post_mortem.json")
 DECISIONS_PATH        = Path("data/mcp_decisions.jsonl")
@@ -65,6 +66,9 @@ WAREHOUSE_PATH        = Path("data/warehouse.sqlite")
 # threshold fired alert emails on TRANSIENT slow cycles, not real
 # stalls. 10min gives 2 cycles of buffer before alarming on a genuine hang.
 HEARTBEAT_STALE_SEC      = 10 * 60        # 10 min
+# Carry runner is scheduled externally (~15 min); 1h stale = several missed
+# passes. File existence is the opt-in — no file, no check.
+CARRY_HEARTBEAT_STALE_SEC = 60 * 60       # 1 h
 EXCHANGE_HALT_SEC        = 10 * 60        # 10 min
 SL_FAIL_PNL_PCT          = -3.0
 LOSS_STREAK_N            = 3
@@ -82,6 +86,7 @@ COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
 # Per-check cooldowns (seconds) — re-fire once after the cooldown elapses
 COOLDOWN_SEC = {
     "heartbeat_stale":       30 * 60,
+    "carry_heartbeat_stale": 60 * 60,
     "spec12_review_required": 60 * 60,
     "exchange_halted":       30 * 60,
     "sl_placement_failed":   30 * 60,
@@ -151,6 +156,7 @@ class HealthWatchdog:
         """Run every check. Safe to call from a scheduler — never raises."""
         for check in (
             self._check_heartbeat,
+            self._check_carry_heartbeat,
             self._check_review_flag,
             self._check_exchange_halted,
             self._check_sl_placement_failed,
@@ -220,6 +226,20 @@ class HealthWatchdog:
                 f"heartbeat.json is {int(age)}s old (> {HEARTBEAT_STALE_SEC}s threshold)",
                 {"age_sec": int(age), "path": str(HEARTBEAT_PATH)},
             )
+
+    def _check_carry_heartbeat(self) -> None:
+        # NOT gated on SIGNAL_SOURCE — the heartbeat file's existence is the
+        # opt-in ("carry never ran" is not an alert). Edge-triggered.
+        if not CARRY_HEARTBEAT_PATH.exists():
+            self._edge_alert("carry_heartbeat_stale", False, "WARN", "")
+            return
+        age = time.time() - CARRY_HEARTBEAT_PATH.stat().st_mtime
+        self._edge_alert(
+            "carry_heartbeat_stale", age > CARRY_HEARTBEAT_STALE_SEC, "WARN",
+            f"carry heartbeat is {int(age)}s old "
+            f"(> {CARRY_HEARTBEAT_STALE_SEC}s threshold)",
+            {"age_sec": int(age), "path": str(CARRY_HEARTBEAT_PATH)},
+        )
 
     def _check_review_flag(self) -> None:
         if not REVIEW_FLAG_PATH.exists():
