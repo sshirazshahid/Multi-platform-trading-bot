@@ -1670,6 +1670,7 @@ class BotEngine:
             "machine": "Machine",
             "s3": "S3",
             "mcp_det": "MCPDet",
+            "none": "NoSignal",
         }.get(SIGNAL_SOURCE, "Claude")
         logger.info(
             f"[{_sig_tag}] Portfolio cycle: {len(all_coins)} coins, "
@@ -1684,6 +1685,8 @@ class BotEngine:
             _signal = self._machine_signal()
         elif SIGNAL_SOURCE == "mcp_det":
             _signal = self._mcp_det_signal()
+        elif SIGNAL_SOURCE == "none":
+            _signal = self._none_signal()
         else:
             _signal = self.mcp_brain
         actions = _signal.analyze_portfolio(
@@ -1782,6 +1785,20 @@ class BotEngine:
             from core.machine_signal import MachineSignal
             cached = MachineSignal(exchanges=self.exchanges, config=MACHINE_STRATEGY)
             self._machine_signal_obj = cached
+        return cached
+
+    def _none_signal(self):
+        """SIGNAL_SOURCE=none (Rev 5 carry-first): no-op signal — directional
+        entries OFF, analyze_portfolio always returns []. The carry runner is
+        the only opener; deterministic monitoring still manages open positions."""
+        cached = getattr(self, "_none_signal_obj", None)
+        if cached is None:
+            class _NoSignal:
+                @staticmethod
+                def analyze_portfolio(**_kwargs):
+                    return []
+            cached = _NoSignal()
+            self._none_signal_obj = cached
         return cached
 
     def _mcp_det_signal(self):
@@ -4558,7 +4575,7 @@ class BotEngine:
         # loop (its own 10s thread) keeps disaster stops live. Skip the MCP advisory
         # monitor entirely so the bot is purely tsmom. Logged once to avoid 90s spam.
         from config import SIGNAL_SOURCE as _SIG_MON
-        if _SIG_MON in ("tsmom", "machine"):
+        if _SIG_MON in ("tsmom", "machine", "none"):
             _logged_attr = f"_{_SIG_MON}_monitor_off_logged"
             if not getattr(self, _logged_attr, False):
                 logger.info(
