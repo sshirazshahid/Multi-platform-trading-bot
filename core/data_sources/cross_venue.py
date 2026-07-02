@@ -429,6 +429,10 @@ def two_leg_round_trip_cost(venue_a: str, venue_b: str, **kw: Any) -> float:
 # latency/cost would otherwise dominate); this is documented in the F2 spec.
 F2_MIN_NET_EDGE_BPS = 20.0
 F2_COST_MULT_FLOOR = 4.0
+# 1bp per side — the tier where maker routing materially changes a 4-leg
+# cross-venue round trip (config.FEE bybit_futures_maker=0.0001 passes <=,
+# generic futures_maker=0.0002 fails).
+F2_MAX_MAKER_FEE_FRAC = 0.0001
 
 
 def funding_spread_frame(
@@ -544,12 +548,20 @@ def f2_activation_allowed(
     *,
     registry_path: Any = None,
     min_paper_days: float = 30.0,
+    maker_fee_frac: float | None = None,
+    max_maker_fee_frac: float = F2_MAX_MAKER_FEE_FRAC,
+    taker_economics_acknowledged: bool = False,
 ) -> dict[str, Any]:
     """ACTIVATION LATCH: F2 may only activate on >=30d of CLEAN F1 paper evidence.
 
     Reads the F1 EvidenceRegistry row: requires ``oos_metrics.paper_span_days
     >= min_paper_days``, ``paper_cycles > 0`` and ZERO ``failed_leg_events``
     (no unresolved one-leg events). Fail-closed on any missing data.
+
+    Fee-tier precondition (applied AFTER evidence checks pass): either the
+    verified maker fee tier is <= ``max_maker_fee_frac``, or the operator
+    acknowledges the taker/taker floor (``f2_entry_gate``'s floor already
+    prices taker/taker two_leg_cost_frac at 4x). Defaults fail closed.
     """
     try:
         from core.decision.promotion_loop import ACTIVE_STRATEGIES_PATH, load_registry
@@ -569,8 +581,22 @@ def f2_activation_allowed(
     if failed > 0:
         return {"allowed": False,
                 "reason": f"{failed} unresolved one-leg event(s) in F1 evidence"}
+    # Fee-tier precondition — evidence is clean; now require verified maker
+    # economics OR an explicit taker/taker acknowledgement (fail-closed).
+    if taker_economics_acknowledged:
+        fee_note = "taker/taker floor acknowledged"
+    elif maker_fee_frac is None:
+        return {"allowed": False,
+                "reason": "maker fee tier unverified and taker/taker floor "
+                          "not acknowledged (fail-closed)"}
+    elif float(maker_fee_frac) > float(max_maker_fee_frac):
+        return {"allowed": False,
+                "reason": f"maker fee {float(maker_fee_frac):.6f} > "
+                          f"max {float(max_maker_fee_frac):.6f}"}
+    else:
+        fee_note = f"maker fee {float(maker_fee_frac):.6f} <= {float(max_maker_fee_frac):.6f}"
     return {"allowed": True,
-            "reason": f"F1 evidence clean over {span:.1f}d ({cycles} cycles)"}
+            "reason": f"F1 evidence clean over {span:.1f}d ({cycles} cycles); {fee_note}"}
 
 
 def build_f2_spec():
@@ -604,6 +630,12 @@ def build_f2_spec():
         risk_limits={
             "activation_latch": "f2_activation_allowed",
             "requires_f1_clean_paper_days": 30,
+            "maker_fee_precondition_frac": F2_MAX_MAKER_FEE_FRAC,
+            "taker_taker_floor_ack_alternative": True,
+            "live_execution_notes": [
+                "asymmetric maker/taker leg routing is a live-execution concern; "
+                "the paper floor prices taker/taker both legs"
+            ],
         },
         validation_status="untested",
         promotion_status="disabled_until_f1_stable",
