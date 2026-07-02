@@ -183,6 +183,154 @@ class BitgetDerivsHarvester(_VenueHarvester):
         return rec
 
 
+# ------------------------------------------------- funding metadata (Phase 1)
+def _neutral_funding(venue: str, symbol: str) -> dict[str, Any]:
+    return {
+        "venue": venue,
+        "symbol": symbol,
+        "rate": None,
+        "interval_hours": None,
+        "next_funding_ts": None,
+        "ts": None,
+        "age_sec": float("inf"),
+        "stale": True,
+    }
+
+
+def _ms_to_s(x: Any) -> float | None:
+    v = _f(x)
+    return v / 1000.0 if v else None
+
+
+class _FundingMetaHarvester:
+    """Per-venue funding INTERVAL + NEXT-FUNDING-TIME harvester (fail-open).
+
+    Subclasses implement ``_fetch(coin)`` using the ``_get`` seam only; any
+    error yields a neutral stale record (``age_sec=inf``) — never raises.
+    """
+
+    venue = "?"
+
+    def __init__(self, *, cache_ttl: int = 300):
+        self._cache_ttl = cache_ttl
+        self._cache: dict[str, dict] = {}
+        self._cache_time = 0.0
+
+    def _get(self, url: str) -> Any | None:  # seam (stubbed in tests)
+        return _http_get(url)
+
+    def _fetch(self, coin: str) -> dict[str, Any]:  # pragma: no cover
+        raise NotImplementedError
+
+    def snapshot(self, coins: list[str], *, force: bool = False) -> dict[str, dict[str, Any]]:
+        now = time.time()
+        if not force and self._cache and (now - self._cache_time) < self._cache_ttl:
+            return self._cache
+        out: dict[str, dict] = {}
+        for coin in coins:
+            try:
+                out[coin] = self._fetch(coin)
+            except Exception:
+                out[coin] = _neutral_funding(self.venue, coin)
+        self._cache, self._cache_time = out, now
+        return out
+
+
+class BinanceFundingMetaHarvester(_FundingMetaHarvester):
+    """Binance USD-M: fundingInfo lists ONLY per-symbol ADJUSTED intervals;
+    absent symbols default to 8h. Rate + nextFundingTime from premiumIndex."""
+
+    venue = "binance"
+    _BASE = "https://fapi.binance.com"
+    _DEFAULT_INTERVAL_H = 8.0
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        prem = self._get(f"{self._BASE}/fapi/v1/premiumIndex?symbol={sym}")
+        if not isinstance(prem, dict):
+            return rec
+        rec["rate"] = _f(prem.get("lastFundingRate"))
+        rec["next_funding_ts"] = _ms_to_s(prem.get("nextFundingTime"))
+        interval = self._DEFAULT_INTERVAL_H
+        info = self._get(f"{self._BASE}/fapi/v1/fundingInfo")
+        if isinstance(info, list):
+            for row in info:
+                if isinstance(row, dict) and row.get("symbol") == sym:
+                    ih = _f(row.get("fundingIntervalHours"))
+                    if ih:
+                        interval = ih
+                    break
+        rec["interval_hours"] = interval
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
+class BybitFundingMetaHarvester(_FundingMetaHarvester):
+    """Bybit v5 linear: instruments-info fundingInterval is MINUTES -> hours;
+    fundingRate + nextFundingTime from tickers."""
+
+    venue = "bybit"
+    _BASE = "https://api.bybit.com"
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        tick = self._get(f"{self._BASE}/v5/market/tickers?category=linear&symbol={sym}")
+        try:
+            trow = (tick or {}).get("result", {}).get("list", [])[0]
+        except (AttributeError, IndexError, TypeError):
+            return rec
+        rec["rate"] = _f(trow.get("fundingRate"))
+        rec["next_funding_ts"] = _ms_to_s(trow.get("nextFundingTime"))
+        inst = self._get(
+            f"{self._BASE}/v5/market/instruments-info?category=linear&symbol={sym}"
+        )
+        try:
+            irow = (inst or {}).get("result", {}).get("list", [])[0]
+            minutes = _f(irow.get("fundingInterval"))
+            if minutes:
+                rec["interval_hours"] = minutes / 60.0
+        except (AttributeError, IndexError, TypeError):
+            pass
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
+class BitgetFundingMetaHarvester(_FundingMetaHarvester):
+    """Bitget v2 usdt-futures current-fund-rate carries fundingRateInterval
+    (hours, VARIABLE — never hardcode) + nextUpdate (ms)."""
+
+    venue = "bitget"
+    _BASE = "https://api.bitget.com"
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        raw = self._get(
+            f"{self._BASE}/api/v2/mix/market/current-fund-rate"
+            f"?symbol={sym}&productType=usdt-futures"
+        )
+        try:
+            row = (raw or {}).get("data", [])[0]
+        except (AttributeError, IndexError, TypeError):
+            return rec
+        rec["rate"] = _f(row.get("fundingRate"))
+        rec["interval_hours"] = _f(row.get("fundingRateInterval"))
+        rec["next_funding_ts"] = _ms_to_s(row.get("nextUpdate"))
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
 # ----------------------------------------------------- cross-venue frames
 def cross_venue_quote_frame(
     snaps: dict[str, dict[str, dict[str, Any]]],
