@@ -9,8 +9,9 @@ it persists, re-arms when it clears, and (with grace_sec) debounces transients.
 Plus the model-pointer check is silent unless the model is on the live path
 (SIGNAL_SOURCE=mcp).
 """
-import core.health_watchdog as hw
 import pytest
+
+import core.health_watchdog as hw
 from core.health_watchdog import HealthWatchdog
 
 

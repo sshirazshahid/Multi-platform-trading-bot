@@ -183,6 +183,154 @@ class BitgetDerivsHarvester(_VenueHarvester):
         return rec
 
 
+# ------------------------------------------------- funding metadata (Phase 1)
+def _neutral_funding(venue: str, symbol: str) -> dict[str, Any]:
+    return {
+        "venue": venue,
+        "symbol": symbol,
+        "rate": None,
+        "interval_hours": None,
+        "next_funding_ts": None,
+        "ts": None,
+        "age_sec": float("inf"),
+        "stale": True,
+    }
+
+
+def _ms_to_s(x: Any) -> float | None:
+    v = _f(x)
+    return v / 1000.0 if v else None
+
+
+class _FundingMetaHarvester:
+    """Per-venue funding INTERVAL + NEXT-FUNDING-TIME harvester (fail-open).
+
+    Subclasses implement ``_fetch(coin)`` using the ``_get`` seam only; any
+    error yields a neutral stale record (``age_sec=inf``) — never raises.
+    """
+
+    venue = "?"
+
+    def __init__(self, *, cache_ttl: int = 300):
+        self._cache_ttl = cache_ttl
+        self._cache: dict[str, dict] = {}
+        self._cache_time = 0.0
+
+    def _get(self, url: str) -> Any | None:  # seam (stubbed in tests)
+        return _http_get(url)
+
+    def _fetch(self, coin: str) -> dict[str, Any]:  # pragma: no cover
+        raise NotImplementedError
+
+    def snapshot(self, coins: list[str], *, force: bool = False) -> dict[str, dict[str, Any]]:
+        now = time.time()
+        if not force and self._cache and (now - self._cache_time) < self._cache_ttl:
+            return self._cache
+        out: dict[str, dict] = {}
+        for coin in coins:
+            try:
+                out[coin] = self._fetch(coin)
+            except Exception:
+                out[coin] = _neutral_funding(self.venue, coin)
+        self._cache, self._cache_time = out, now
+        return out
+
+
+class BinanceFundingMetaHarvester(_FundingMetaHarvester):
+    """Binance USD-M: fundingInfo lists ONLY per-symbol ADJUSTED intervals;
+    absent symbols default to 8h. Rate + nextFundingTime from premiumIndex."""
+
+    venue = "binance"
+    _BASE = "https://fapi.binance.com"
+    _DEFAULT_INTERVAL_H = 8.0
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        prem = self._get(f"{self._BASE}/fapi/v1/premiumIndex?symbol={sym}")
+        if not isinstance(prem, dict):
+            return rec
+        rec["rate"] = _f(prem.get("lastFundingRate"))
+        rec["next_funding_ts"] = _ms_to_s(prem.get("nextFundingTime"))
+        interval = self._DEFAULT_INTERVAL_H
+        info = self._get(f"{self._BASE}/fapi/v1/fundingInfo")
+        if isinstance(info, list):
+            for row in info:
+                if isinstance(row, dict) and row.get("symbol") == sym:
+                    ih = _f(row.get("fundingIntervalHours"))
+                    if ih:
+                        interval = ih
+                    break
+        rec["interval_hours"] = interval
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
+class BybitFundingMetaHarvester(_FundingMetaHarvester):
+    """Bybit v5 linear: instruments-info fundingInterval is MINUTES -> hours;
+    fundingRate + nextFundingTime from tickers."""
+
+    venue = "bybit"
+    _BASE = "https://api.bybit.com"
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        tick = self._get(f"{self._BASE}/v5/market/tickers?category=linear&symbol={sym}")
+        try:
+            trow = (tick or {}).get("result", {}).get("list", [])[0]
+        except (AttributeError, IndexError, TypeError):
+            return rec
+        rec["rate"] = _f(trow.get("fundingRate"))
+        rec["next_funding_ts"] = _ms_to_s(trow.get("nextFundingTime"))
+        inst = self._get(
+            f"{self._BASE}/v5/market/instruments-info?category=linear&symbol={sym}"
+        )
+        try:
+            irow = (inst or {}).get("result", {}).get("list", [])[0]
+            minutes = _f(irow.get("fundingInterval"))
+            if minutes:
+                rec["interval_hours"] = minutes / 60.0
+        except (AttributeError, IndexError, TypeError):
+            pass
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
+class BitgetFundingMetaHarvester(_FundingMetaHarvester):
+    """Bitget v2 usdt-futures current-fund-rate carries fundingRateInterval
+    (hours, VARIABLE — never hardcode) + nextUpdate (ms)."""
+
+    venue = "bitget"
+    _BASE = "https://api.bitget.com"
+
+    def _fetch(self, coin: str) -> dict[str, Any]:
+        sym = f"{coin.upper()}USDT"
+        rec = _neutral_funding(self.venue, sym)
+        raw = self._get(
+            f"{self._BASE}/api/v2/mix/market/current-fund-rate"
+            f"?symbol={sym}&productType=usdt-futures"
+        )
+        try:
+            row = (raw or {}).get("data", [])[0]
+        except (AttributeError, IndexError, TypeError):
+            return rec
+        rec["rate"] = _f(row.get("fundingRate"))
+        rec["interval_hours"] = _f(row.get("fundingRateInterval"))
+        rec["next_funding_ts"] = _ms_to_s(row.get("nextUpdate"))
+        if rec["rate"] is not None:
+            rec["ts"] = time.time()
+            rec["age_sec"] = 0.0
+            rec["stale"] = False
+        return rec
+
+
 # ----------------------------------------------------- cross-venue frames
 def cross_venue_quote_frame(
     snaps: dict[str, dict[str, dict[str, Any]]],
@@ -270,6 +418,196 @@ def two_leg_round_trip_cost(venue_a: str, venue_b: str, **kw: Any) -> float:
     """Total round-trip cost of a two-leg cross-venue trade = leg_a + leg_b."""
     frame = round_trip_cost_frame([venue_a, venue_b], **kw)
     return frame[venue_a] + frame[venue_b]
+
+
+# --------------------------------------- F2 funding differential (Phase 7)
+# F2 = cross-venue funding-spread carry: long the perp on the venue paying
+# LESS funding per hour, short it on the venue paying MORE, collect the
+# differential. Built DISABLED (promotion_status='disabled_until_f1_stable').
+# PRE-FUNDED-VENUES ASSUMPTION: both venues already hold enough margin for
+# their leg — no cross-venue transfer is modeled in the hold window (transfer
+# latency/cost would otherwise dominate); this is documented in the F2 spec.
+F2_MIN_NET_EDGE_BPS = 20.0
+F2_COST_MULT_FLOOR = 4.0
+
+
+def funding_spread_frame(
+    snaps: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Interval-NORMALIZED cross-venue funding differential per coin.
+
+    Consumes Phase-1 funding-meta snapshots ``{venue: {coin: rec}}`` where each
+    rec carries ``rate`` (per settlement) + ``interval_hours``. Rates are
+    normalized to bps PER HOUR (``rate / interval_hours * 1e4``) so an 8h venue
+    and a 4h venue are comparable before differencing. Stale records or records
+    without a usable interval are excluded; with <2 usable venues the spread is
+    ``None`` and the row is flagged ``stale``.
+    """
+    coins: set[str] = set()
+    for per_coin in snaps.values():
+        coins.update(per_coin)
+    frame: dict[str, dict[str, Any]] = {}
+    for coin in sorted(coins):
+        per_hour: dict[str, float] = {}
+        for venue, per_coin in snaps.items():
+            rec = per_coin.get(coin) or {}
+            rate = _f(rec.get("rate"))
+            interval = _f(rec.get("interval_hours"))
+            if rec.get("stale") or rate is None or not interval:
+                continue
+            per_hour[venue] = rate / interval * 1e4
+        row: dict[str, Any] = {
+            "per_hour_bps": per_hour,
+            "spread_bps_per_hour": None,
+            "long_venue": None,
+            "short_venue": None,
+            "stale": True,
+        }
+        if len(per_hour) >= 2:
+            long_v = min(per_hour, key=lambda v: per_hour[v])
+            short_v = max(per_hour, key=lambda v: per_hour[v])
+            row.update(
+                spread_bps_per_hour=per_hour[short_v] - per_hour[long_v],
+                long_venue=long_v,
+                short_venue=short_v,
+                stale=False,
+            )
+        frame[coin] = row
+    return frame
+
+
+def f2_entry_gate(
+    *,
+    spread_bps_per_hour: float | None,
+    hold_hours: float,
+    two_leg_cost_frac: float,
+    slippage_bps: float = 5.0,
+    latency_buffer_bps: float = 2.0,
+    failed_leg_buffer_bps: float = 5.0,
+    min_edge_bps: float = F2_MIN_NET_EDGE_BPS,
+    cost_mult: float = F2_COST_MULT_FLOOR,
+) -> dict[str, Any]:
+    """F2 entry math (no orders): does the funding differential clear the floor?
+
+    ``net_edge_bps = spread*hold - fees(both venues) - slippage - latency
+    buffer - failed-leg buffer`` must be ``>= max(20bps, 4x total round-trip
+    cost)``. Fees come in as ``two_leg_cost_frac`` (see
+    ``two_leg_round_trip_cost``). Refuses (fail-closed) on a missing spread.
+    """
+    if spread_bps_per_hour is None:
+        return {"enter": False, "net_edge_bps": None, "floor_bps": None,
+                "reason": "missing spread (stale/insufficient venues)"}
+    cost_bps = float(two_leg_cost_frac) * 1e4
+    gross_bps = float(spread_bps_per_hour) * float(hold_hours)
+    net = (gross_bps - cost_bps - float(slippage_bps)
+           - float(latency_buffer_bps) - float(failed_leg_buffer_bps))
+    floor = max(float(min_edge_bps), float(cost_mult) * cost_bps)
+    return {
+        "enter": net >= floor,
+        "net_edge_bps": net,
+        "gross_bps": gross_bps,
+        "cost_bps": cost_bps,
+        "floor_bps": floor,
+        "reason": "ok" if net >= floor else f"net {net:.1f}bps < floor {floor:.1f}bps",
+    }
+
+
+def run_one_leg_failure_sims(
+    *,
+    n: int = 25,
+    long_book: Book | None = None,
+    short_book: Book | None = None,
+    qty: float = 1.0,
+    now: float = 100.0,
+    max_age_sec: float = 10.0,
+) -> list[dict[str, Any]]:
+    """Run the one-leg-failure scenario ``n`` times through ``TwoBookSimulator``.
+
+    Deterministic by construction (no randomness in the fill walk): every run
+    must yield the SAME result — one fresh leg fills, the stale/timed-out leg
+    rejects, leaving explicit unhedged exposure. Default books encode the
+    canonical hazard: fresh long book, stale short book.
+    """
+    if long_book is None:
+        long_book = Book(venue="binance",
+                         bids=[(100.0, 5.0)], asks=[(100.1, 5.0)], ts=now)
+    if short_book is None:
+        short_book = Book(venue="bybit",
+                          bids=[(100.0, 5.0)], asks=[(100.1, 5.0)],
+                          ts=now - max_age_sec - 1.0)
+    sim = TwoBookSimulator(max_age_sec=max_age_sec)
+    return [sim.execute_two_leg(long_book, short_book, qty, now=now)
+            for _ in range(int(n))]
+
+
+def f2_activation_allowed(
+    *,
+    registry_path: Any = None,
+    min_paper_days: float = 30.0,
+) -> dict[str, Any]:
+    """ACTIVATION LATCH: F2 may only activate on >=30d of CLEAN F1 paper evidence.
+
+    Reads the F1 EvidenceRegistry row: requires ``oos_metrics.paper_span_days
+    >= min_paper_days``, ``paper_cycles > 0`` and ZERO ``failed_leg_events``
+    (no unresolved one-leg events). Fail-closed on any missing data.
+    """
+    try:
+        from core.decision.promotion_loop import ACTIVE_STRATEGIES_PATH, load_registry
+
+        reg = load_registry(registry_path or ACTIVE_STRATEGIES_PATH)
+        rec = (reg.get("strategies") or {}).get("F1") or {}
+        m = rec.get("oos_metrics") or {}
+        span = float(m.get("paper_span_days") or 0.0)
+        cycles = int(m.get("paper_cycles") or 0)
+        failed = int(m.get("failed_leg_events") or 0)
+    except Exception:
+        return {"allowed": False, "reason": "F1 evidence unreadable (fail-closed)"}
+    if cycles <= 0 or span < float(min_paper_days):
+        return {"allowed": False,
+                "reason": f"F1 clean paper span {span:.1f}d/{cycles} cycles "
+                          f"< required {min_paper_days:.0f}d"}
+    if failed > 0:
+        return {"allowed": False,
+                "reason": f"{failed} unresolved one-leg event(s) in F1 evidence"}
+    return {"allowed": True,
+            "reason": f"F1 evidence clean over {span:.1f}d ({cycles} cycles)"}
+
+
+def build_f2_spec():
+    """Declarative F2 spec — registered DISABLED until F1 is stable (latch above)."""
+    from core.strategy_spec import StrategySpec
+
+    return StrategySpec(
+        id="F2_XVENUE_FUNDING_SPREAD",
+        family="carry",
+        market_type="perp_perp_cross_venue",
+        venues=["binance", "bybit", "bitget"],
+        symbols=["BTC/USDT", "ETH/USDT"],
+        data_required=[
+            "funding_rate", "funding_interval", "next_funding_ts",
+            "perp_bbo_both_venues", "book_depth", "fees",
+        ],
+        entry_rules={
+            "type": "cross_venue_funding_spread",
+            "interval_normalized_per_hour": True,
+            "min_net_edge_bps_floor": F2_MIN_NET_EDGE_BPS,
+            "cost_mult_floor": F2_COST_MULT_FLOOR,
+            "buffers": ["slippage", "latency", "failed_leg"],
+            "pre_funded_venues_assumed": True,
+            "atomic_two_leg_fill": True,
+        },
+        exit_rules={
+            "spread_decay_below_floor": True,
+            "one_leg_failure_block": True,
+        },
+        sizing={"per_venue_pre_funded_margin_required": True},
+        risk_limits={
+            "activation_latch": "f2_activation_allowed",
+            "requires_f1_clean_paper_days": 30,
+        },
+        validation_status="untested",
+        promotion_status="disabled_until_f1_stable",
+    )
 
 
 # ------------------------------------------------- two-book legging sim

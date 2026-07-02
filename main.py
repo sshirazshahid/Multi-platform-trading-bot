@@ -6,12 +6,14 @@ Usage:
     python main.py --status     # Show current open positions & stats
 """
 
+import argparse
 import sys
 import time
-import argparse
+
 from loguru import logger
-from utils.logger import setup_logger
+
 from config import DRY_RUN
+from utils.logger import setup_logger
 
 
 def parse_args():
@@ -25,10 +27,11 @@ def parse_args():
 
 def print_status():
     """Quick status dump without starting the full engine."""
-    from core.position_tracker import PositionTracker
+    from rich import box
     from rich.console import Console
-    from rich.table   import Table
-    from rich         import box
+    from rich.table import Table
+
+    from core.position_tracker import PositionTracker
 
     console  = Console()
     tracker  = PositionTracker()
@@ -136,6 +139,46 @@ def run_with_watchdog():
             time.sleep(cooldown)
 
 
+def _acquire_single_instance_lock():
+    """Refuse to start a second engine against the same data dir.
+
+    Two live processes each load positions.json / warehouse / the paper wallet
+    independently and corrupt shared state (a duplicate instance once left a
+    +913 phantom paper balance). Best-effort and fail-SAFE: any failure of the
+    lock *mechanism* must never block a legitimate start; only a genuinely-held
+    lock aborts this (second) instance. Returns the handle to keep alive for the
+    process lifetime.
+    """
+    import os
+    lock_path = os.path.join("data", "bot.lock")
+    try:
+        os.makedirs("data", exist_ok=True)
+        fh = open(lock_path, "a+")
+        fh.seek(0)
+    except OSError as e:
+        logger.warning(f"[Lock] cannot open {lock_path}: {e}; single-instance guard disabled")
+        return None
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.critical(
+            "[Lock] Another bot instance already holds data/bot.lock — refusing to "
+            "start a second instance (it would corrupt positions/paper wallet).")
+        try:
+            fh.close()
+        except Exception:
+            pass
+        sys.exit(1)
+    except Exception as e:  # lock mechanism unavailable — do NOT block startup
+        logger.warning(f"[Lock] single-instance check unavailable ({e}); continuing")
+    return fh
+
+
 def main():
     setup_logger()
     args = parse_args()
@@ -144,6 +187,7 @@ def main():
         print_status()
         sys.exit(0)
 
+    _lock = _acquire_single_instance_lock()  # noqa: F841 — held for process lifetime
     run_with_watchdog()
 
 

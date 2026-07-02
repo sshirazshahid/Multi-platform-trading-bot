@@ -14,8 +14,7 @@ Missing score/confidence default to 0 → fail-closed (block).
 """
 from __future__ import annotations
 
-from core.short_side_filter import ShortFilterDecision, evaluate
-
+from core.short_side_filter import evaluate
 
 # ── Original BTC-trend tests (must still pass) ────────────────────────────
 

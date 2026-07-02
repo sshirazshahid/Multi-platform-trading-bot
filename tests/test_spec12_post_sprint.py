@@ -60,7 +60,7 @@ def test_ghost_and_sl_placement_reasons_are_neutral_for_spec12(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     _seed_risk_state(tmp_path)
 
-    from core.risk_manager import RiskManager, _SPEC12_NEUTRAL_REASONS
+    from core.risk_manager import _SPEC12_NEUTRAL_REASONS, RiskManager
 
     for reason in ("ghost_reconciled", "ghost_sync",
                    "sl_crossed_at_placement", "sl_crossed_during_placement"):
@@ -106,7 +106,6 @@ def test_five_consecutive_losses_tracked_in_global_streak(tmp_path, monkeypatch)
     # Import patches so we know they are loaded and active in the test
     # process even though they don't drive behavior here.
     from core import order_manager  # noqa: F401
-
     from core.risk_manager import RiskManager
 
     rm = RiskManager()

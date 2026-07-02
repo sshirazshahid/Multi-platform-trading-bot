@@ -4,8 +4,9 @@ Per-period loss caps miss slow-bleed clustering; this breaker refuses NEW entrie
 when equity is >X% below its running peak, with a hysteresis deadband and
 restart-persistent state. Default OFF (opt-in via env). Fail-OPEN on bad data.
 """
-import core.drawdown_pause as dp_mod
 import pytest
+
+import core.drawdown_pause as dp_mod
 from core.drawdown_pause import DrawdownPause
 
 PEAK = 10_000.0

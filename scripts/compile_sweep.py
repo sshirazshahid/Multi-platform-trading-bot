@@ -11,7 +11,6 @@ Exit code 0 = all clean, 1 = at least one file failed to compile.
 from __future__ import annotations
 
 import compileall
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]

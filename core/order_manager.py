@@ -361,6 +361,32 @@ class OrderManager:
         self._recent_client_ids.add(cid)
         return cid
 
+    def _fill_freshness_reason(self, ticker: dict, exchange) -> str | None:
+        """Phase C: reason a fill should be rejected for a stale ticker, else None.
+
+        Reuses ``core.feed_health.stale_fill_reason``. Fail-OPEN on a MISSING
+        timestamp (mocked tickers / thin venues) so it never blocks a fill it
+        cannot prove is stale — only a present, definitely-old timestamp rejects.
+        """
+        try:
+            max_age = float(getattr(__import__("config"), "FILL_FRESHNESS_MAX_AGE_SEC", 300.0))
+        except Exception:
+            max_age = 300.0
+        if max_age <= 0:
+            return None
+        ts_ms = (ticker or {}).get("timestamp")
+        if not ts_ms:
+            return None  # missing timestamp -> allow
+        try:
+            mark_ts = float(ts_ms) / 1000.0
+        except (TypeError, ValueError):
+            return None
+        from core.feed_health import FeedFreshness, stale_fill_reason
+        venue = str(getattr(exchange, "name", "") or "?")
+        snap = FeedFreshness(venue=venue, mark_ts=mark_ts)
+        import time as _t
+        return stale_fill_reason(snap, _t.time(), max_age_sec=max_age, require=("mark",))
+
     def _check_price_band(self, symbol: str, side: str,
                           fill_price: float, exchange,
                           market_type: str) -> bool:
@@ -869,6 +895,14 @@ class OrderManager:
             ticker     = exchange.fetch_ticker(symbol, market_type)
             fill_price = ticker.get("last") or ticker.get("close") or price
             entry_mid  = _mid_from_ticker(ticker)
+            # Phase C fill-time freshness gate: reject on a DEFINITELY-stale
+            # ticker timestamp; a MISSING timestamp is allowed (fail-open).
+            _fresh_reason = self._fill_freshness_reason(ticker, exchange)
+            if _fresh_reason:
+                logger.warning(
+                    f"[Orders] {symbol} fill rejected: stale feed ({_fresh_reason})")
+                self.last_open_reject = f"stale_feed:{_fresh_reason}"
+                return None
         if not fill_price:
             logger.error(f"[Orders] Cannot get price for {symbol}")
             self.last_open_reject = "no_price"
@@ -2302,9 +2336,12 @@ class OrderManager:
                                     rows = ex_obj.exchange.fetch_funding_history(
                                         pos.symbol, since=open_ms)
                                     close_ms = int(ts_exit * 1000)
-                                    sign = 1.0 if pos.side == "buy" else -1.0
+                                    # A2 audit: fetchFundingHistory amount is
+                                    # ALREADY signed by the venue (side-aware);
+                                    # re-applying a manual side sign inverted the
+                                    # paper 'positive=paid' convention. Use direct.
                                     funding_paid = sum(
-                                        sign * float(r.get("amount") or 0.0)
+                                        float(r.get("amount") or 0.0)
                                         for r in (rows or [])
                                         if open_ms <= int(r.get("timestamp") or 0) <= close_ms
                                         and (r.get("symbol") in (pos.symbol, None)

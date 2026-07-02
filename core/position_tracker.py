@@ -615,7 +615,11 @@ class PositionTracker:
         # placed on the exchange, so close_position() would fail with
         # "position is zero" on every 10-second cycle.
         if not DRY_RUN and self._open:
-            paper_ghosts = [p for p in self._open.values() if p.paper_trade]
+            # A2 audit: snapshot under the lock before iterating — the SL/TP
+            # daemon's close() can mutate _open concurrently (dict changed size).
+            with self._lock:
+                _snap = list(self._open.values())
+            paper_ghosts = [p for p in _snap if p.paper_trade]
             for pos in paper_ghosts:
                 logger.warning(
                     f"[Positions] PAPER GHOST in LIVE mode: {pos.symbol} "
@@ -663,7 +667,9 @@ class PositionTracker:
         # manual position the user opened outside the bot. Import it so the
         # position monitor, SL/TP manager, and dashboard see it.
         tracked_keys = set()
-        for p in self._open.values():
+        with self._lock:
+            _tracked_snap = list(self._open.values())
+        for p in _tracked_snap:
             tracked_keys.add((p.exchange.lower(), p.symbol, p.side))
 
         imported_list: list = []
@@ -722,8 +728,8 @@ class PositionTracker:
             # the warehouse row stays OPEN forever (~57 stuck-OPEN rows).
             # Create the OPEN row now so the close can patch it. Idempotent.
             try:
-                from core.warehouse import get_warehouse as _gw
                 from config import OPERATING_MODE as _mode
+                from core.warehouse import get_warehouse as _gw
                 _gw().record_trade_open(
                     exchange=ex_name, symbol=sym, side=side,
                     ts_entry=float(pos.open_time),
@@ -751,7 +757,9 @@ class PositionTracker:
                 self._save()
             logger.info(f"[Positions] Synced: imported {len(imported_list)} manual position(s)")
 
-        live_open = [p for p in self._open.values() if not p.paper_trade]
+        with self._lock:
+            _live_snap = list(self._open.values())
+        live_open = [p for p in _live_snap if not p.paper_trade]
         if not live_open:
             return imported_list
 
@@ -1166,8 +1174,8 @@ class PositionTracker:
                 # idempotent (INSERT OR IGNORE on exch+sym+ts_entry+side)
                 # and returns the id for the close update.
                 try:
-                    from core.warehouse import get_warehouse as _gw
                     from config import OPERATING_MODE as _mode
+                    from core.warehouse import get_warehouse as _gw
                     _wh = _gw()
                     _tid = _wh.record_trade_open(
                         exchange=ex_lower, symbol=sym, side=side,

@@ -1354,10 +1354,20 @@ CLAUDE_THROTTLE_N = max(1, int(os.getenv("CLAUDE_THROTTLE_N", "3")))
 #             validated majors (core/tsmom_signal.py:S3EnsembleSignal). Phase-1
 #             vertical-slice strategy; tsmom-family exit policy (hold-to-flip).
 #             PAPER/sim research path.
+#   "mcp_det" - deterministic MCPStrategyScorer (core/mcp_strategy_scorer.py): the
+#             rebuilt algorithmic layer that reads approved StrategySpec(s) + market
+#             context and emits the entry action-dict with NO Claude/LLM value blended
+#             into the score/confidence (LLM demoted to a research-only warehouse note).
+#   "none"    - directional entries OFF (Rev 5 carry-first posture, 2026-07-02).
+#             analyze_portfolio always returns [] so the bot opens NOTHING itself;
+#             the carry runner (scripts/run_f1_carry_paper.py) is the only opener.
+#             Engine stays alive: feeds, deterministic SL/TP monitoring, and the
+#             spot manager keep managing anything already open.
 SIGNAL_SOURCE = os.getenv("SIGNAL_SOURCE", "tsmom").lower()
-if SIGNAL_SOURCE not in ("mcp", "tsmom", "machine", "s3"):
+if SIGNAL_SOURCE not in ("mcp", "mcp_det", "tsmom", "machine", "s3", "none"):
     raise ValueError(
-        f"SIGNAL_SOURCE must be 'mcp', 'tsmom', 'machine', or 's3', got {SIGNAL_SOURCE!r}"
+        f"SIGNAL_SOURCE must be 'mcp', 'mcp_det', 'tsmom', 'machine', 's3', or 'none', "
+        f"got {SIGNAL_SOURCE!r}"
     )
 
 # S3 ensemble horizons (days). Comma-separated; longest gates min-history.
@@ -1496,6 +1506,13 @@ if TSMOM_LOOKBACK_DAYS < 2:
 # Note: gross notional includes leverage, so at futures_max_leverage=2 a single ~5%
 # margin trade is ~10% notional — 12% allows ~1-2 leveraged positions by design.
 MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "12.0"))
+
+# Phase C fill-time freshness gate (core/feed_health): reject a market/no-price
+# fill when the ticker carries a DEFINITELY-stale timestamp (older than this many
+# seconds). A ticker with NO timestamp (mocked tests, thin venues) is ALLOWED —
+# the gate is fail-open on missing data. Generous default so live fresh tickers
+# never trip it; runtime behavior is unchanged. Set 0 to disable the gate.
+FILL_FRESHNESS_MAX_AGE_SEC = float(os.getenv("FILL_FRESHNESS_MAX_AGE_SEC", "300"))
 
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
@@ -1872,6 +1889,14 @@ SPOT_PROTECT_V2 = {
     "enabled": True,
     "drawdown_pct": 0.15,
     "p_win_floor": 0.40,
+}
+
+# Rev 5 Phase 5 — Spot S1 defensive allocation (risk control, PAPER-only).
+# Opt-in: default OFF so runtime behavior is unchanged until the owner flips it.
+# When enabled, SpotPortfolioManager.run_s1_cycle emits REBALANCE
+# recommendations to data/spot_recommendations.jsonl — never orders.
+SPOT_S1 = {
+    "enabled": os.getenv("SPOT_S1_ENABLED", "false").lower() == "true",
 }
 
 SPOT_PORTFOLIO = {

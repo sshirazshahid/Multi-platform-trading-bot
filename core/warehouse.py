@@ -860,6 +860,42 @@ class Warehouse:
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_model_version error: {e}")
 
+    def record_carry_cycle(self, cyc: dict) -> None:
+        """Book one F1 carry cycle row (Phase 3 paper runner; lazy migration).
+
+        ``carry_cycles`` follows the shadow_outcomes convention: one RESOLVED
+        (or FAILED) after-cost row per closed carry pair.
+        """
+        try:
+            conn = self._conn()
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS carry_cycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT, venue TEXT,
+                    opened_ts REAL, resolved_ts REAL, notional REAL,
+                    gross_funding REAL, basis_pnl REAL, fees REAL,
+                    slippage REAL, net_pnl REAL,
+                    settlements_held INTEGER, bars_held INTEGER,
+                    exit_reason TEXT, label_status TEXT)"""
+            )
+            conn.execute(
+                """INSERT INTO carry_cycles(
+                    symbol, venue, opened_ts, resolved_ts, notional,
+                    gross_funding, basis_pnl, fees, slippage, net_pnl,
+                    settlements_held, bars_held, exit_reason, label_status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (str(cyc.get("symbol")), str(cyc.get("venue")),
+                 float(cyc.get("opened_ts") or 0), float(cyc.get("resolved_ts") or 0),
+                 float(cyc.get("notional") or 0),
+                 float(cyc.get("gross_funding") or 0), float(cyc.get("basis_pnl") or 0),
+                 float(cyc.get("fees") or 0), float(cyc.get("slippage") or 0),
+                 float(cyc.get("net_pnl") or 0),
+                 int(cyc.get("settlements_held") or 0), int(cyc.get("bars_held") or 0),
+                 str(cyc.get("exit_reason")), str(cyc.get("label_status"))),
+            )
+        except sqlite3.Error as e:
+            logger.warning(f"[Warehouse] record_carry_cycle error: {e}")
+
     # ── Query helpers ─────────────────────────────────────────────────
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict]:

@@ -21,7 +21,6 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 

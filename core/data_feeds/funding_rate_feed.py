@@ -70,7 +70,7 @@ class FundingRateFeed:
 
         # Refresh 7-day history if stale (used for z-score)
         if now - self._history_time > self._history_ttl:
-            self._refresh_history(coins[:10])
+            self._refresh_history(coins[:15])  # warm history for the same coins we score below
             self._history_time = now
 
         result: dict[str, dict] = {}

@@ -16,7 +16,6 @@ T3 — Binance income ledger returns side=None. The prior code defaulted
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

@@ -32,7 +32,6 @@ from typing import Any
 
 from loguru import logger
 
-
 _COINDESK_INSTRUMENT_FMT = "{base}-USDT-VANILLA-PERPETUAL"
 _COINDESK_MARKET = "binance"
 
@@ -131,8 +130,8 @@ class OpenInterestFeed:
         # Try CoinDesk first
         try:
             from core.data_feeds._coindesk_caller import (
-                call_coindesk_oi_tick,
                 call_coindesk_oi_ohlcv,
+                call_coindesk_oi_tick,
             )
 
             # Current tick

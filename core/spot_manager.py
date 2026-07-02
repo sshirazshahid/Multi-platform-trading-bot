@@ -358,6 +358,39 @@ class SpotPortfolioManager:
                         self._emit_recommendation(eval_result)
         return actions
 
+    def run_s1_cycle(self, daily_closes: dict, *, current_weights: dict,
+                     portfolio_value: float):
+        """Spot S1 defensive-allocation advisory (Rev 5 Phase 5, PAPER-only).
+
+        Opt-in via config.SPOT_S1['enabled'] (default False -> returns None).
+        Computes the daily-EMA200 regime from CLOSED daily closes for BTC+ETH,
+        proposes a long-only rebalance toward the regime targets, and — when it
+        recommends action — appends to data/spot_recommendations.jsonl.
+        NEVER places orders; recommendation-only by construction.
+        """
+        try:
+            from config import SPOT_S1 as _S1
+        except ImportError:
+            _S1 = {"enabled": False}
+        if not _S1.get("enabled", False):
+            return None
+        from core.spot_regime import daily_ema200_regime, rebalance_decision
+        try:
+            regime = daily_ema200_regime(
+                daily_closes.get("BTC") or [], daily_closes.get("ETH") or [])
+            decision = rebalance_decision(
+                current_weights, regime, portfolio_value=portfolio_value)
+        except (ValueError, AssertionError) as e:
+            logger.debug(f"[SpotMgr] S1 cycle skipped: {e}")
+            return None
+        if decision["action"] != "HOLD":
+            self._emit_recommendation(
+                {**decision, "strategy": "SPOT_S1_DEFENSIVE"})
+            logger.info(
+                f"[SpotMgr] [S1-RECOMMEND-ONLY] regime={regime} "
+                f"→ {decision['action']} ({decision['reason']})")
+        return decision
+
     def _emit_recommendation(self, action: dict) -> None:
         """Append a spot action recommendation to jsonl. Never calls exchange."""
         entry = {**action, "ts": time.time(), "executed": False}

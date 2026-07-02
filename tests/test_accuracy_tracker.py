@@ -12,11 +12,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 # Root is already on sys.path via conftest.py
-from core.mcp_brain import AccuracyTracker, ACCURACY_FILE
-
+from core.mcp_brain import AccuracyTracker
 
 # ---------------------------------------------------------------------------
 # Helpers

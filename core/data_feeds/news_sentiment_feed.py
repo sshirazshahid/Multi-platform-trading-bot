@@ -40,7 +40,7 @@ _POSITIVE_KEYWORDS = frozenset({
     "etf approved", "etf approval", "institutional",
     "record high", "all-time high", "ath",
     "integration", "expansion", "listing",
-    "mainnet", "upgrade", "v2", "v3",
+    "mainnet", "v2", "v3",
 })
 
 
@@ -204,10 +204,16 @@ class NewsSentimentFeed:
                     categories = [
                         c for c in item.get("CATEGORY_DATA", [])
                     ]
+                    # A2 audit: CoinDesk items return no usable SENTIMENT (all
+                    # NEUTRAL), which silently disabled the negative-news veto.
+                    # Classify locally on title(+body) like the CryptoCompare path.
+                    title = item.get("TITLE", "")
+                    body = item.get("BODY", "")
+                    sentiment = self._classify_sentiment(f"{title} {body}")
                     articles.append({
-                        "title": item.get("TITLE", ""),
-                        "body": item.get("BODY", ""),
-                        "sentiment": item.get("SENTIMENT", "NEUTRAL").upper(),
+                        "title": title,
+                        "body": body,
+                        "sentiment": sentiment,
                         "published_on": item.get("PUBLISHED_ON", 0),
                         "source": item.get("SOURCE_DATA", {}).get("NAME", ""),
                         "categories": categories,

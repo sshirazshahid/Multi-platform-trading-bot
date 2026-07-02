@@ -1669,6 +1669,8 @@ class BotEngine:
             "tsmom": "TSMOM",
             "machine": "Machine",
             "s3": "S3",
+            "mcp_det": "MCPDet",
+            "none": "NoSignal",
         }.get(SIGNAL_SOURCE, "Claude")
         logger.info(
             f"[{_sig_tag}] Portfolio cycle: {len(all_coins)} coins, "
@@ -1681,6 +1683,10 @@ class BotEngine:
             _signal = self._s3_signal()
         elif SIGNAL_SOURCE == "machine":
             _signal = self._machine_signal()
+        elif SIGNAL_SOURCE == "mcp_det":
+            _signal = self._mcp_det_signal()
+        elif SIGNAL_SOURCE == "none":
+            _signal = self._none_signal()
         else:
             _signal = self.mcp_brain
         actions = _signal.analyze_portfolio(
@@ -1779,6 +1785,37 @@ class BotEngine:
             from core.machine_signal import MachineSignal
             cached = MachineSignal(exchanges=self.exchanges, config=MACHINE_STRATEGY)
             self._machine_signal_obj = cached
+        return cached
+
+    def _none_signal(self):
+        """SIGNAL_SOURCE=none (Rev 5 carry-first): no-op signal — directional
+        entries OFF, analyze_portfolio always returns []. The carry runner is
+        the only opener; deterministic monitoring still manages open positions."""
+        cached = getattr(self, "_none_signal_obj", None)
+        if cached is None:
+            class _NoSignal:
+                @staticmethod
+                def analyze_portfolio(**_kwargs):
+                    return []
+            cached = _NoSignal()
+            self._none_signal_obj = cached
+        return cached
+
+    def _mcp_det_signal(self):
+        """Lazily build + cache the deterministic MCPStrategyScorer
+        (SIGNAL_SOURCE=mcp_det). Wraps the existing self.mcp_brain so the algo
+        scoring stack is reused; the Claude blend is removed entirely (LLM
+        demoted to a research-only warehouse note)."""
+        cached = getattr(self, "_mcp_det_obj", None)
+        if cached is None:
+            from core.mcp_strategy_scorer import MCPStrategyScorer
+            from core.strategy_spec import load_all_specs
+            cached = MCPStrategyScorer(
+                brain=self.mcp_brain,
+                specs=load_all_specs(),
+                warehouse=getattr(self, "warehouse", None),
+            )
+            self._mcp_det_obj = cached
         return cached
 
     def _log_rejection(self, action: dict, reason: str, stage: str):
@@ -2147,7 +2184,11 @@ class BotEngine:
                     action["reject_reason"] = "btc_vol_pause"
                     return False
             except Exception as _bvpe:
-                logger.debug(f"[BtcVolPause] gate skipped ({_bvpe}) -- defaulting to ALLOW")
+                # A2 audit: fail CLOSED — a broken vol-pause evaluation blocks the
+                # new entry rather than defaulting to ALLOW.
+                logger.warning(f"[BtcVolPause] gate FAILED, blocking entry {symbol}: {_bvpe}")
+                action["reject_reason"] = "btc_vol_pause_error"
+                return False
 
         # (C.5) Path-dependent drawdown circuit-breaker (opt-in, 2026-06-28).
         # Per-day loss caps are blind to slow-bleed clustering (e.g. 2%/day for
@@ -2169,7 +2210,11 @@ class BotEngine:
                 action["reject_reason"] = "drawdown_breaker"
                 return False
         except Exception as _dpe:
-            logger.debug(f"[DrawdownBreaker] gate skipped ({_dpe}) -- defaulting to ALLOW")
+            # A2 audit: fail CLOSED — a broken drawdown-breaker evaluation blocks
+            # the new entry rather than defaulting to ALLOW.
+            logger.warning(f"[DrawdownBreaker] gate FAILED, blocking entry {symbol}: {_dpe}")
+            action["reject_reason"] = "drawdown_breaker_error"
+            return False
 
         # (D) Per-symbol pause (spec §12). Family pause is checked at (D.1)
         # below once strategy_family is known.
@@ -3125,7 +3170,11 @@ class BotEngine:
                 action["reject_reason"] = "portfolio_exposure_cap"
                 return False
         except Exception as _ee:
-            logger.debug(f"[Risk] exposure-cap check skipped: {_ee}")
+            # A2 audit: this is a HARD risk rail — a broken exposure check must
+            # BLOCK the entry (fail-closed), not silently fall through to open.
+            logger.warning(f"[Risk] exposure-cap check FAILED, blocking entry: {_ee}")
+            action["reject_reason"] = "exposure_cap_error"
+            return False
 
         # Pre-check: will this size survive exchange rounding?
         # BTC at $83k with step=0.001 needs min $83 notional (or $16.6 at 5x).
@@ -4526,7 +4575,7 @@ class BotEngine:
         # loop (its own 10s thread) keeps disaster stops live. Skip the MCP advisory
         # monitor entirely so the bot is purely tsmom. Logged once to avoid 90s spam.
         from config import SIGNAL_SOURCE as _SIG_MON
-        if _SIG_MON in ("tsmom", "machine"):
+        if _SIG_MON in ("tsmom", "machine", "none"):
             _logged_attr = f"_{_SIG_MON}_monitor_off_logged"
             if not getattr(self, _logged_attr, False):
                 logger.info(

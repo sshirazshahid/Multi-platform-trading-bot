@@ -45,10 +45,16 @@ def refuse_as_standalone_alpha() -> None:
 
 
 def _bar_high_low(bar) -> tuple[float, float]:
-    """Extract (high, low) from a dict {high,low} or a sequence [o,h,l,c,...]."""
+    """Extract (high, low) from a dict {high,low} or a sequence.
+
+    Handles BOTH layouts by length: the repo-standard [ts,o,h,l,c,v] (len>=6 ->
+    high=bar[2], low=bar[3]) and the short [o,h,l,c] (high=bar[1], low=bar[2]).
+    """
     if isinstance(bar, Mapping):
         return float(bar["high"]), float(bar["low"])
-    return float(bar[1]), float(bar[2])  # OHLCV ordering: [ts? no -> o,h,l]
+    if len(bar) >= 6:
+        return float(bar[2]), float(bar[3])  # [ts,o,h,l,c,v]
+    return float(bar[1]), float(bar[2])  # [o,h,l,c]
 
 
 def maker_fills(side: str, limit_px: float, bar) -> bool:

@@ -73,7 +73,7 @@ def test_microstructure_keys_deferred_until_retrain():
     (13 shadow tests). They get appended at retrain time, together with the
     model that trains on them. funding_rate/ob_imbalance are already in
     FEATURE_KEYS (legacy) and stay."""
-    from scripts.train_models import FEATURE_KEYS, _MICROSTRUCTURE_FEATURES_PENDING
+    from scripts.train_models import _MICROSTRUCTURE_FEATURES_PENDING, FEATURE_KEYS
     for k in ("oi_delta_6h", "depth_ratio", "basis_bps"):
         assert k not in FEATURE_KEYS, (
             f"{k} added to FEATURE_KEYS prematurely — breaks inference on the "

@@ -12,7 +12,6 @@ Bearish setup mirrors the above around prior liquidity highs.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 

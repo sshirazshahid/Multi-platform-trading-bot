@@ -314,14 +314,12 @@ class LearningEngine:
         if km["dry_run_trades"] > 0 and km["live_trades"] == 0:
             if dry_net > 0 and len(dry_trades) >= MIN_SAMPLE_SIZE:
                 suggestions.append(
-                    "Paper net {:+.2f} USDT over {} trades. NOTE: a small positive paper "
-                    "sample is not proof of a live edge — verify before risking real money.".format(
-                        dry_net, len(dry_trades)))
+                    f"Paper net {dry_net:+.2f} USDT over {len(dry_trades)} trades. NOTE: a small positive paper "
+                    "sample is not proof of a live edge — verify before risking real money.")
             else:
                 suggestions.append(
-                    "NOT READY FOR LIVE: paper net {:+.2f} USDT over {} trades — the paper "
-                    "account is NOT profitable. Stay in PAPER; do NOT switch to live.".format(
-                        dry_net, len(dry_trades)))
+                    f"NOT READY FOR LIVE: paper net {dry_net:+.2f} USDT over {len(dry_trades)} trades — the paper "
+                    "account is NOT profitable. Stay in PAPER; do NOT switch to live.")
         elif not km["graduated"] and km["live_trades"] > 0:
             suggestions.append(
                 "BLENDING: {:.0f}% graduated to live data ({}/50 live trades). "

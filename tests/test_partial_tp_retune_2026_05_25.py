@@ -35,8 +35,8 @@ class _StubPos:
 def test_partial_tp_books_smaller_chunk_now():
     """_should_fire_partial_tp must return take_size 0.3 (was 0.6) when
     price reaches the 35%-of-TP partial level."""
-    from core.order_manager import _should_fire_partial_tp
     import config
+    from core.order_manager import _should_fire_partial_tp
 
     pos = _StubPos()
     # partial level = entry + (tp-entry)*0.35 = 100 + 1.8*0.35 = 100.63

@@ -109,6 +109,11 @@ def resolve_one(
             break
 
     if exit_level is None:
+        # No barrier hit. If the full horizon of forward CLOSED bars hasn't accrued
+        # yet, leave the row PENDING rather than resolving a censored time-exit — that
+        # would inject a biased outcome into shadow_outcomes, the promotion-trusted table.
+        if horizon > 0 and len(scan) < horizon:
+            return None
         exit_level = last_close  # time barrier: mark out at last closed price
 
     slip_bps = sl_slip_bps if exit_reason == "stop_loss" else exit_slip_bps
