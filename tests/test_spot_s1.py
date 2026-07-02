@@ -179,3 +179,63 @@ def test_s1_cycle_enabled_emits_recommendation_only(monkeypatch, tmp_path):
     rec = json.loads(lines[-1])
     assert rec["strategy"] == "SPOT_S1_DEFENSIVE"
     assert rec["executed"] is False
+
+
+# ── W4: hysteresis regime state persistence (round-trip) ───────────────
+def test_s1_cycle_persists_and_reuses_regime_state(monkeypatch, tmp_path):
+    import config
+
+    mgr, sm = _mgr(monkeypatch, tmp_path)
+    state_file = tmp_path / "s1_regime_state.json"
+    monkeypatch.setattr(sm, "S1_REGIME_STATE_FILE", state_file)
+    monkeypatch.setattr(config, "SPOT_S1", {"enabled": True}, raising=False)
+
+    # call 1: decisively above the band -> NORMAL, states persisted
+    out = mgr.run_s1_cycle(
+        {"BTC": _closes(110.0), "ETH": _closes(120.0)},
+        current_weights=ALLOCATION_TARGETS[REGIME_NORMAL],
+        portfolio_value=1000.0,
+    )
+    assert out["regime"] == REGIME_NORMAL
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state["regime"] == REGIME_NORMAL
+    assert state["states"] == {"BTC": "above", "ETH": "above"}
+    assert "ts" in state
+
+    # call 2: flat closes sit ON the EMA (inside the zero-width band);
+    # the persisted "above" states are retained -> still NORMAL
+    flat = [100.0] * 250
+    out2 = mgr.run_s1_cycle(
+        {"BTC": flat, "ETH": flat},
+        current_weights=ALLOCATION_TARGETS[REGIME_NORMAL],
+        portfolio_value=1000.0,
+    )
+    assert out2["regime"] == REGIME_NORMAL
+
+
+def test_s1_cycle_cold_start_missing_or_corrupt_state(monkeypatch, tmp_path):
+    import config
+
+    mgr, sm = _mgr(monkeypatch, tmp_path)
+    state_file = tmp_path / "s1_regime_state.json"
+    monkeypatch.setattr(sm, "S1_REGIME_STATE_FILE", state_file)
+    monkeypatch.setattr(config, "SPOT_S1", {"enabled": True}, raising=False)
+
+    flat = [100.0] * 250  # on the EMA: cold start falls back to stateless sign
+    out = mgr.run_s1_cycle(
+        {"BTC": flat, "ETH": flat},
+        current_weights=ALLOCATION_TARGETS[REGIME_DEFENSIVE],
+        portfolio_value=1000.0,
+    )
+    assert out["regime"] == REGIME_DEFENSIVE
+
+    state_file.write_text("{not json", encoding="utf-8")  # corrupt -> stateless
+    out2 = mgr.run_s1_cycle(
+        {"BTC": flat, "ETH": flat},
+        current_weights=ALLOCATION_TARGETS[REGIME_DEFENSIVE],
+        portfolio_value=1000.0,
+    )
+    assert out2["regime"] == REGIME_DEFENSIVE
+    # a valid state file was re-persisted after the corrupt read
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state["states"] == {"BTC": "below", "ETH": "below"}

@@ -29,6 +29,7 @@ except ImportError:
 
 STATE_FILE = Path("data/spot_portfolio.json")
 RECOMMENDATIONS_FILE = Path("data/spot_recommendations.jsonl")
+S1_REGIME_STATE_FILE = Path("data/s1_regime_state.json")
 
 
 @dataclass
@@ -363,9 +364,11 @@ class SpotPortfolioManager:
         """Spot S1 defensive-allocation advisory (Rev 5 Phase 5, PAPER-only).
 
         Opt-in via config.SPOT_S1['enabled'] (default False -> returns None).
-        Computes the daily-EMA200 regime from CLOSED daily closes for BTC+ETH,
-        proposes a long-only rebalance toward the regime targets, and — when it
-        recommends action — appends to data/spot_recommendations.jsonl.
+        Computes the hysteresis daily-EMA200 regime from CLOSED daily closes
+        for BTC+ETH (above/below band states persisted across cycles in
+        S1_REGIME_STATE_FILE), proposes a long-only rebalance toward the
+        regime targets, and — when it recommends action — appends to
+        data/spot_recommendations.jsonl.
         NEVER places orders; recommendation-only by construction.
         """
         try:
@@ -374,10 +377,12 @@ class SpotPortfolioManager:
             _S1 = {"enabled": False}
         if not _S1.get("enabled", False):
             return None
-        from core.spot_regime import daily_ema200_regime, rebalance_decision
+        from core.spot_regime import daily_ema200_regime_hysteresis, rebalance_decision
         try:
-            regime = daily_ema200_regime(
-                daily_closes.get("BTC") or [], daily_closes.get("ETH") or [])
+            regime, states = daily_ema200_regime_hysteresis(
+                daily_closes.get("BTC") or [], daily_closes.get("ETH") or [],
+                prev_states=self._load_s1_regime_states())
+            self._persist_s1_regime_state(regime, states)
             decision = rebalance_decision(
                 current_weights, regime, portfolio_value=portfolio_value)
         except (ValueError, AssertionError) as e:
@@ -390,6 +395,29 @@ class SpotPortfolioManager:
                 f"[SpotMgr] [S1-RECOMMEND-ONLY] regime={regime} "
                 f"→ {decision['action']} ({decision['reason']})")
         return decision
+
+    @staticmethod
+    def _load_s1_regime_states():
+        """Persisted S1 hysteresis states dict, or None (missing/corrupt file)."""
+        try:
+            raw = json.loads(S1_REGIME_STATE_FILE.read_text(encoding="utf-8"))
+            states = raw.get("states")
+            return states if isinstance(states, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _persist_s1_regime_state(regime: str, states: dict) -> None:
+        """Atomically persist the S1 hysteresis regime state (tmp + replace)."""
+        try:
+            S1_REGIME_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = S1_REGIME_STATE_FILE.with_suffix(".json.tmp")
+            tmp.write_text(
+                json.dumps({"ts": time.time(), "regime": regime, "states": states}),
+                encoding="utf-8")
+            tmp.replace(S1_REGIME_STATE_FILE)
+        except Exception as e:
+            logger.debug(f"[SpotMgr] S1 regime state save error: {e}")
 
     def _emit_recommendation(self, action: dict) -> None:
         """Append a spot action recommendation to jsonl. Never calls exchange."""

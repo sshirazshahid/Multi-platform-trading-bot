@@ -8,10 +8,16 @@ is pipeline honesty, not alpha.
 """
 from __future__ import annotations
 
+import json
+import math
+
 import numpy as np
 import pandas as pd
 
 from scripts.spot_rotation_slice import (
+    ADMISSION_RETURN_WINDOW,
+    MIN_ADMITTED,
+    admit_universe,
     rank_scores,
     select_targets,
     should_rebalance,
@@ -147,3 +153,179 @@ def test_spot_rotation_slice_end_to_end(tmp_path):
     assert spec.market_type == "spot"
     assert spec.promotion_status == "research"
     assert approved_symbols([spec]) == set()
+
+
+# ── W3: absolute-return admission gate ───────────────────────────────────────
+def _panel_from(series_map: dict, vol: float = 1000.0):
+    """(closes, opens, volumes) panel from explicit per-symbol close paths."""
+    closes = pd.DataFrame({s: pd.Series(v, dtype=float) for s, v in series_map.items()})
+    opens = pd.DataFrame({s: closes[s].shift(1).fillna(closes[s].iloc[0])
+                          for s in series_map})
+    volumes = pd.DataFrame({s: pd.Series(np.full(len(closes), vol)) for s in series_map})
+    return closes, opens, volumes
+
+
+def _legacy_simulate(closes, opens, volumes, regimes, *, top_n=3,
+                     rebalance_every=7, venue="binance", spread_bps=None):
+    """Faithful replica of the pre-admission simulate_rotation (W3 A/B pin)."""
+    from core.cost_model import round_trip_cost
+    from scripts.s2_basket_slice import point_in_time_universe
+    from scripts.spot_rotation_slice import LOOKBACK
+
+    n = len(closes)
+    per_side = round_trip_cost(venue, market_type="spot") / 2.0
+    start = LOOKBACK + 1
+    rebal = list(range(start, n - 1, max(1, int(rebalance_every))))
+    held: dict = {}
+    periods: list = []
+    for ri, t in enumerate(rebal):
+        uni = point_in_time_universe(closes, t, lookback=LOOKBACK)
+        regime = regimes[t]
+        scores = rank_scores(closes, volumes, t, uni, spread_bps) if uni else {}
+        targets = select_targets(scores, regime, top_n=top_n)
+        coin_targets = {c: w for c, w in targets.items() if c != "USDT"}
+        decision = should_rebalance(held, targets, portfolio_value=1.0, venue=venue)
+        cost = 0.0
+        if decision["action"] == "REBALANCE":
+            cost = decision["est_cost"]
+            held = coin_targets
+        weights = dict(held)
+        ei = t + 1
+        t_next = rebal[ri + 1] if ri + 1 < len(rebal) else (n - 1)
+        xi = min(t_next + 1, n - 1)
+        gross = 0.0
+        legs = []
+        for s, w in sorted(weights.items()):
+            entry_px = float(opens.iloc[ei][s])
+            exit_px = float(opens.iloc[xi][s])
+            if math.isnan(exit_px):
+                path = closes[s].iloc[ei: xi + 1].to_numpy(float)
+                path = path[~np.isnan(path)]
+                if path.size == 0 or math.isnan(entry_px):
+                    continue
+                exit_px = float(path[-1])
+            if math.isnan(entry_px):
+                continue
+            r = exit_px / entry_px - 1.0
+            gross += w * r
+            legs.append({"symbol": s, "weight": float(w), "entry_idx": int(ei),
+                         "entry_px": entry_px, "exit_idx": int(xi),
+                         "exit_px": exit_px, "gross_pnl": float(r)})
+        periods.append({
+            "decision_idx": int(t), "entry_idx": int(ei), "exit_idx": int(xi),
+            "regime": regime, "action": decision["action"],
+            "weights": {k: float(v) for k, v in weights.items()},
+            "n_legs": len(legs), "legs": legs,
+            "gross_pnl": float(gross), "cost": float(cost),
+            "net_pnl": float(gross - cost),
+            "fees_slippage": float(per_side * 2.0),
+            "label_status": "RESOLVED",
+        })
+    return periods
+
+
+def test_admission_constants():
+    assert ADMISSION_RETURN_WINDOW == 30
+    assert MIN_ADMITTED == 2
+
+
+def test_admit_universe_positive_only_sorted_nan_excluded():
+    n = 120
+    up = 100 + 0.2 * np.arange(n)
+    down = 200 - 0.5 * np.arange(n)
+    gap = up.copy()
+    gap[70] = np.nan  # NaN at t-30 endpoint for t=100
+    closes = pd.DataFrame({"ZUP": pd.Series(up), "ADN": pd.Series(down),
+                           "BGAP": pd.Series(gap), "CUP": pd.Series(up.copy())})
+    admitted = admit_universe(closes, 100, list(closes.columns))
+    assert admitted == ["CUP", "ZUP"]  # sorted; negative + NaN excluded
+    # NaN at t itself also excludes
+    gap2 = up.copy()
+    gap2[100] = np.nan
+    closes2 = pd.DataFrame({"ZUP": pd.Series(up), "BGAP": pd.Series(gap2)})
+    assert admit_universe(closes2, 100, list(closes2.columns)) == ["ZUP"]
+
+
+def test_negative_30d_leader_never_held(monkeypatch):
+    """A z-score leader with a NEGATIVE raw 30d return is never admitted/held."""
+    import scripts.spot_rotation_slice as srs
+
+    n = 120
+    series = {"LLL": 200 - 0.5 * np.arange(n)}  # negative 30d return everywhere
+    for i, s in enumerate(("AAA", "BBB", "CCC", "DDD", "EEE")):
+        series[s] = 100 + 10 * i + 0.2 * np.arange(n)  # positive 30d return
+    closes, opens, volumes = _panel_from(series)
+    regimes = ["NORMAL"] * n
+
+    real_rank = rank_scores
+
+    def biased_rank(c, v, t, universe, spread_bps=None):
+        scores = real_rank(c, v, t, universe, spread_bps)
+        if "LLL" in universe:  # force LLL to the top of any ranking it enters
+            scores = {"LLL": 99.0, **{k: w for k, w in scores.items() if k != "LLL"}}
+        return scores
+
+    monkeypatch.setattr(srs, "rank_scores", biased_rank)
+
+    legacy = srs.simulate_rotation(closes, opens, volumes, regimes,
+                                   admission_window=None)
+    assert any("LLL" in p["weights"] for p in legacy)  # ranker would hold it
+
+    gated = srs.simulate_rotation(closes, opens, volumes, regimes)
+    assert gated
+    for p in gated:
+        assert "LLL" not in p["weights"]
+        assert p["n_admitted"] == 5
+
+
+def test_exactly_one_admitted_goes_fully_usdt():
+    n = 120
+    series = {"AAA": 100 + 0.2 * np.arange(n)}  # the only positive 30d return
+    for i, s in enumerate(("BBB", "CCC", "DDD", "EEE", "FFF")):
+        series[s] = 200 - (0.3 + 0.05 * i) * np.arange(n)
+    closes, opens, volumes = _panel_from(series)
+    periods = simulate_rotation(closes, opens, volumes, ["NORMAL"] * n)
+    assert periods
+    for p in periods:
+        assert p["n_admitted"] == 1
+        assert p["weights"] == {}  # < MIN_ADMITTED -> 100% USDT
+        assert p["net_pnl"] == 0.0
+
+
+def test_all_negative_universe_goes_fully_usdt():
+    n = 120
+    series = {s: 200 - (0.3 + 0.05 * i) * np.arange(n)
+              for i, s in enumerate(("AAA", "BBB", "CCC", "DDD", "EEE", "FFF"))}
+    closes, opens, volumes = _panel_from(series)
+    periods = simulate_rotation(closes, opens, volumes, ["NORMAL"] * n)
+    assert periods
+    for p in periods:
+        assert p["n_admitted"] == 0
+        assert p["weights"] == {}
+        assert p["net_pnl"] == 0.0
+
+
+def test_admission_determinism():
+    closes, opens, volumes = _synthetic_panel()
+    regimes = ["NORMAL"] * len(closes)
+    a = simulate_rotation(closes, opens, volumes, regimes)
+    b = simulate_rotation(closes, opens, volumes, regimes)
+    assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+    assert all("n_admitted" in p for p in a)
+
+
+def test_admission_none_matches_legacy_byte_identical():
+    closes, opens, volumes = _synthetic_panel()
+    regimes = ["NORMAL"] * len(closes)
+    a = simulate_rotation(closes, opens, volumes, regimes, admission_window=None)
+    b = _legacy_simulate(closes, opens, volumes, regimes)
+    assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+    assert all("n_admitted" not in p for p in a)  # exact legacy shape
+
+
+def test_spec_documents_admission_gate():
+    from scripts.spot_rotation_slice import build_spot_s2_spec
+
+    spec = build_spot_s2_spec()
+    assert "admission" in spec.entry_rules
+    assert "30d" in spec.entry_rules["admission"]
