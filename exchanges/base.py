@@ -120,6 +120,20 @@ def _is_timestamp_error(e: Exception) -> bool:
     return any(s in msg for s in _TIMESTAMP_ERRORS)
 
 
+def _first_float(*vals) -> Optional[float]:
+    """First value coercible to a positive float, else None."""
+    for v in vals:
+        if v is None or v == "":
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f > 0:
+            return f
+    return None
+
+
 class BaseExchange(ABC):
 
     def __init__(self, api_key: str, secret: str, testnet: bool = False):
@@ -209,6 +223,57 @@ class BaseExchange(ABC):
                     logger.debug(f"[{self.name}] fetch_ticker {symbol}: {e}")
                 return {}
         return {}
+
+    def fetch_mark_index(self, symbol: str, market_type: str = "futures") -> dict:
+        """Return ``{'mark', 'index', 'ts'}`` for a perp symbol.
+
+        Mark and index prices are distinct from ``last``: mark drives liquidation
+        and unrealized-PnL, index is the underlying spot reference. ccxt exposes
+        them on the futures ticker ``info`` (venue-specific keys) with a
+        mark/index-OHLCV fallback. Fail-open: any error yields ``None`` fields so
+        the caller (MarketDataLedger) never raises. Guarded — no call when the
+        client is not connected.
+        """
+        out = {"mark": None, "index": None, "ts": None}
+        if not self._ready():
+            return out
+        mark = index = None
+        try:
+            params = self._futures_params() if market_type == "futures" else {}
+            tkr = self.exchange.fetch_ticker(symbol, params=params) or {}
+            info = tkr.get("info") or {}
+            mark = _first_float(
+                tkr.get("markPrice"), info.get("markPrice"),
+                info.get("markPx"), info.get("mark_price"),
+            )
+            index = _first_float(
+                tkr.get("indexPrice"), info.get("indexPrice"),
+                info.get("indexPx"), info.get("index_price"),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[{self.name}] fetch_mark_index ticker {symbol}: {e}")
+        if mark is None:
+            mark = self._last_ohlcv_close(
+                getattr(self.exchange, "fetch_mark_ohlcv", None), symbol)
+        if index is None:
+            index = self._last_ohlcv_close(
+                getattr(self.exchange, "fetch_index_ohlcv", None), symbol)
+        out["mark"], out["index"] = mark, index
+        if mark is not None or index is not None:
+            out["ts"] = _time.time()
+        return out
+
+    def _last_ohlcv_close(self, fn, symbol: str) -> Optional[float]:
+        """Last close of a mark/index OHLCV series, or None (fail-open seam)."""
+        if fn is None:
+            return None
+        try:
+            rows = fn(symbol, "1m", limit=1)
+            if rows:
+                return float(rows[-1][4])
+        except Exception:  # noqa: BLE001
+            return None
+        return None
 
     def fetch_order_book(self, symbol: str, limit: int = 20,
                          market_type: str = "spot") -> dict:

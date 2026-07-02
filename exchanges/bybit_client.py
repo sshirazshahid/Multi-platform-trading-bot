@@ -167,6 +167,19 @@ class BybitClient(BaseExchange):
                 self.switch_to_spot()
         return result
 
+    def fetch_mark_index(self, symbol: str, market_type: str = "futures") -> dict:
+        if not self._ok():
+            return {"mark": None, "index": None, "ts": None}
+        with self._defaultType_lock:
+            if market_type == "futures":
+                self.switch_to_futures()
+            else:
+                self.switch_to_spot()
+            try:
+                return super().fetch_mark_index(symbol, market_type)
+            finally:
+                self.switch_to_spot()
+
     # ── fetch_balance ─────────────────────────────────────────────────
 
     def fetch_balance(self, market_type: str = "spot") -> dict:

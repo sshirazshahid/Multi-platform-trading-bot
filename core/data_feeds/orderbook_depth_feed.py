@@ -195,10 +195,14 @@ class OrderBookDepthFeed:
         return max(0.0, slippage)
 
     def _fetch_binance_depth(self, coin: str) -> dict | None:
-        """Fetch depth from Binance."""
+        """Fetch depth from Binance USDT-M perp (futures) book.
+
+        A2 audit: point at the perp book (fapi/fapi/v1/depth), not the spot book —
+        perp entries must be gated on the venue they actually trade on.
+        """
         sym = f"{coin}USDT"
         try:
-            url = f"https://api.binance.com/api/v3/depth?symbol={sym}&limit=20"
+            url = f"https://fapi.binance.com/fapi/v1/depth?symbol={sym}&limit=20"
             req = urllib.request.Request(
                 url, headers={"User-Agent": "TradingBot/2.0"})
             with urllib.request.urlopen(req, timeout=5) as resp:

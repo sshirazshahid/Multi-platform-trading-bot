@@ -33,11 +33,17 @@ def exposure_breached(open_positions, new_notional: float, equity: float,
     """CLAUDE.md §2 (R2) helper: would adding ``new_notional`` (gross market notional,
     leverage included) push total open GROSS NOTIONAL over ``max_pct`` of ``equity``?
 
-    Pure + side-effect-free so it's unit-testable without the engine. Fail-open on bad
-    inputs (returns False) — a glitchy equity reading must never wedge all entries.
+    Pure + side-effect-free so it's unit-testable without the engine.
+
+    Fail-CLOSED on a bad EQUITY reading (2026 A2 audit): equity None or <= 0 means
+    we cannot prove we are under the cap, so treat it as BREACHED (return True) — a
+    hard risk rail must never open the gate on a glitch. A bad/disabled cap
+    (max_pct None or <= 0) still fails OPEN (the cap is intentionally off).
     """
-    if equity is None or max_pct is None or equity <= 0 or max_pct <= 0:
+    if max_pct is None or max_pct <= 0:
         return False
+    if equity is None or equity <= 0:
+        return True
     gross = float(new_notional or 0.0)
     for p in open_positions or []:
         try:
@@ -765,7 +771,8 @@ class RiskManager:
             today = _utc_today()
             if today != self._trading_day:
                 self._daily_pnl   = 0.0
-                self._trading_day = today
+                self._opens_today = 0  # A2: reset open-count too, else a post-
+                self._trading_day = today  # midnight close carries yesterday's count
                 logger.info("[Risk] Daily PnL reset (new day)")
 
             self._daily_pnl += pnl

@@ -482,6 +482,159 @@ def per_leg_liquidation_price(*, entry_px, side, leverage, maintenance_margin_pc
     return entry_px * (1.0 - move)
 
 
+# ══════════════════════════════════════════════════════════════════════
+# F1 (Phase D) — delta-neutral funding/basis carry StrategySpec primitives.
+# Extends S1 with an explicit net-expected-edge entry gate fed by the
+# MarketDataLedger fields, and a StrategySpec builder. LAB-SIM ONLY.
+# ══════════════════════════════════════════════════════════════════════
+
+F1_LIVE_FEASIBILITY = "INFEASIBLE-AT-$420"
+F1_VERDICT = "lab-slice / live-INFEASIBLE-AT-$420"
+
+# Entry-gate thresholds: require net expected edge >= max(15bps, 3x round-trip
+# cost), plus depth / liquidation-buffer / funding-freshness / atomic-fill.
+F1_MIN_EDGE_BPS = 15.0
+F1_COST_MULT = 3.0
+F1_MIN_DEPTH_RATIO = MIN_DEPTH_RATIO           # reuse S1 depth floor (20x)
+F1_MIN_LIQ_BUFFER_X = MIN_MARGIN_BUFFER_X      # reuse S1 maintenance floor (3x)
+F1_MAX_FUNDING_AGE_SEC = DEFAULT_MAX_HEDGE_STALENESS_SEC  # 300s funding freshness
+# Pipeline acceptance gates (plan): cycles / stress / one-leg / concentration.
+F1_MIN_CYCLES = 60
+F1_MAX_PNL_CONCENTRATION_PCT = 40.0
+F1_STRESS_COST_MULT = 2.0
+
+
+def f1_net_expected_edge_bps(
+    *, funding_per_settlement: float, hold_settlements: int, round_trip_cost_frac: float
+) -> float:
+    """Net expected carry edge over the hold, in basis points.
+
+    gross = funding_per_settlement * hold_settlements (fraction of notional the
+    short-perp leg collects); net = gross - round-trip cost. * 1e4 -> bps.
+    """
+    if hold_settlements <= 0:
+        raise ValueError("hold_settlements must be > 0")
+    gross_frac = float(funding_per_settlement) * int(hold_settlements)
+    return (gross_frac - float(round_trip_cost_frac)) * 1e4
+
+
+def f1_entry_gate(
+    *,
+    funding_per_settlement: float,
+    hold_settlements: int,
+    round_trip_cost_frac: float,
+    depth_ratio: float,
+    liq_buffer_x: float,
+    funding_age_sec: float,
+    both_legs_fillable: bool,
+    min_edge_bps: float = F1_MIN_EDGE_BPS,
+    cost_mult: float = F1_COST_MULT,
+    min_depth_ratio: float = F1_MIN_DEPTH_RATIO,
+    min_liq_buffer_x: float = F1_MIN_LIQ_BUFFER_X,
+    max_funding_age_sec: float = F1_MAX_FUNDING_AGE_SEC,
+):
+    """F1 OPEN gate. Returns (ok, reason, details).
+
+    Passes only when ALL hold:
+      * net expected edge (bps) >= max(``min_edge_bps``, ``cost_mult`` x cost),
+      * top-of-book depth >= ``min_depth_ratio`` x our clip,
+      * short-perp liquidation buffer >= ``min_liq_buffer_x`` maintenance,
+      * funding quote fresher than ``max_funding_age_sec`` (freshness),
+      * BOTH legs are atomically fillable now (no one-leg legging exposure).
+    """
+    cost_bps = float(round_trip_cost_frac) * 1e4
+    edge_bps = f1_net_expected_edge_bps(
+        funding_per_settlement=funding_per_settlement,
+        hold_settlements=hold_settlements,
+        round_trip_cost_frac=round_trip_cost_frac,
+    )
+    threshold = max(float(min_edge_bps), float(cost_mult) * cost_bps)
+    det = {
+        "net_edge_bps": edge_bps,
+        "edge_threshold_bps": threshold,
+        "cost_bps": cost_bps,
+        "depth_ratio": float(depth_ratio),
+        "liq_buffer_x": float(liq_buffer_x),
+        "funding_age_sec": float(funding_age_sec),
+        "both_legs_fillable": bool(both_legs_fillable),
+    }
+    if edge_bps < threshold:
+        return False, f"edge {edge_bps:.1f}bps < {threshold:.1f}bps", det
+    if depth_ratio < min_depth_ratio:
+        return False, f"depth {depth_ratio:.1f}x < {min_depth_ratio:.0f}x", det
+    if liq_buffer_x < min_liq_buffer_x:
+        return False, f"liquidation_buffer {liq_buffer_x:.2f}x < {min_liq_buffer_x:.1f}x", det
+    if funding_age_sec > max_funding_age_sec:
+        return False, f"funding_stale {funding_age_sec:.0f}s > {max_funding_age_sec:.0f}s", det
+    if not both_legs_fillable:
+        return False, "atomic_two_leg_fill unavailable (one-leg legging risk)", det
+    return True, "ok", det
+
+
+def pnl_concentration_ok(pnl_by_key: dict, *, max_pct: float = F1_MAX_PNL_CONCENTRATION_PCT):
+    """Guard: no single venue/symbol contributes > ``max_pct`` of |PnL|.
+
+    Returns (ok, worst_share_pct, worst_key). Share uses absolute PnL so a large
+    single-name LOSS also trips the diversification guard. Empty/zero -> ok.
+    """
+    items = {k: abs(float(v)) for k, v in (pnl_by_key or {}).items()}
+    total = sum(items.values())
+    if total <= 0:
+        return True, 0.0, None
+    worst_key = max(items, key=items.get)
+    worst_share = items[worst_key] / total * 100.0
+    return worst_share <= float(max_pct), worst_share, worst_key
+
+
+def build_f1_spec(
+    *,
+    symbols=("BTC/USDT", "ETH/USDT"),
+    venues=("binance", "bybit"),
+):
+    """Build the F1 delta-neutral carry ``StrategySpec`` (declarative; no orders).
+
+    Returns a ``core.strategy_spec.StrategySpec`` (lazy import to avoid a cycle).
+    """
+    from core.strategy_spec import StrategySpec
+
+    return StrategySpec(
+        id="F1",
+        family="carry",
+        market_type="spot_perp_hedge",
+        venues=list(venues),
+        symbols=list(symbols),
+        data_required=[
+            "spot_bbo", "perp_mark", "basis", "funding_rate", "funding_interval",
+            "book_depth", "fees",
+        ],
+        entry_rules={
+            "type": "delta_neutral_funding_carry",
+            "net_expected_edge_bps_floor": F1_MIN_EDGE_BPS,
+            "cost_mult": F1_COST_MULT,
+            "min_depth_ratio": F1_MIN_DEPTH_RATIO,
+            "min_liq_buffer_x": F1_MIN_LIQ_BUFFER_X,
+            "max_funding_age_sec": F1_MAX_FUNDING_AGE_SEC,
+            "atomic_two_leg_fill": True,
+        },
+        exit_rules={
+            "max_consecutive_negative_settlements": MAX_CONSEC_NEG_SETTLEMENTS,
+            "max_adverse_basis_bps": MAX_ADVERSE_BASIS_BPS,
+            "min_margin_buffer_x": MIN_MARGIN_BUFFER_X,
+            "max_hedge_staleness_sec": DEFAULT_MAX_HEDGE_STALENESS_SEC,
+        },
+        sizing={"notional_matched": True, "delta_neutral": True},
+        risk_limits={
+            "leg_aware_hedged": True,
+            "suppress_directional_atr_sl_on_hedged_leg": True,
+            "max_pnl_concentration_pct": F1_MAX_PNL_CONCENTRATION_PCT,
+            "min_cycles": F1_MIN_CYCLES,
+            "live_feasibility": F1_LIVE_FEASIBILITY,
+        },
+        validation_status="lab_sim",
+        promotion_status="untested",
+    )
+
+
 def _fmt(r: CarryResult) -> str:
     return (
         f"  net={r.net_pnl:+10.2f} ({r.net_yield_pct:+.3f}% / "

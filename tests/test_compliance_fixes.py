@@ -36,8 +36,11 @@ def test_exposure_existing_under_cap():
     assert exposure_breached(pos, new_notional=10.0, equity=1000.0, max_pct=12.0) is False  # 11%
 
 
-def test_exposure_fail_open_on_zero_equity():
-    assert exposure_breached([_pos(1, 100)], 1000.0, equity=0.0, max_pct=12.0) is False
+def test_exposure_fail_closed_on_zero_equity():
+    # A2 audit: a bad equity reading is now fail-CLOSED (BREACHED) — a hard risk
+    # rail must not open the gate on a glitchy/zero equity snapshot.
+    assert exposure_breached([_pos(1, 100)], 1000.0, equity=0.0, max_pct=12.0) is True
+    assert exposure_breached([_pos(1, 100)], 1000.0, equity=None, max_pct=12.0) is True
 
 
 def test_exposure_disabled_when_max_pct_zero():
