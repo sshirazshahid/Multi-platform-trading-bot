@@ -261,6 +261,56 @@ def test_carry_heartbeat_refresh_rearms_then_fires_again(tmp_path):
     assert len(_carry_alerts(n)) == 2
 
 
+# ── Rev 5.2: carry reduce-only recovery latched (edge-triggered) ──────
+
+def _recovery_alerts(n):
+    return [c for c in n.calls if "carry_recovery_active" in c["title"]]
+
+
+def _write_carry_hb(tmp_path, recovery_active):
+    (tmp_path / "carry_heartbeat.json").write_text(
+        json.dumps({"ts": time.time(),
+                    "summary": {"recovery_active": recovery_active}}))
+
+
+def test_carry_recovery_missing_file_silent(tmp_path):
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    assert _recovery_alerts(n) == []
+
+
+def test_carry_recovery_missing_key_silent(tmp_path):
+    (tmp_path / "carry_heartbeat.json").write_text(
+        json.dumps({"ts": time.time(), "summary": {"opened": 0}}))
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    assert _recovery_alerts(n) == []
+
+
+def test_carry_recovery_fires_once_then_rearms_on_clear(tmp_path):
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    _write_carry_hb(tmp_path, True)
+    wd.tick()
+    alerts = _recovery_alerts(n)
+    assert len(alerts) == 1
+    assert "ALERT" in alerts[0]["title"]
+    assert "--clear-recovery" in alerts[0]["message"]
+    wd.tick()
+    assert len(_recovery_alerts(n)) == 1  # edge-triggered: silent while sticky
+    _write_carry_hb(tmp_path, False)      # operator cleared -> re-arm
+    wd.tick()
+    assert len(_recovery_alerts(n)) == 1
+    _write_carry_hb(tmp_path, True)       # latched again -> fires again
+    wd.tick()
+    assert len(_recovery_alerts(n)) == 2
+
+
 def test_cooldown_suppresses_repeat(tmp_path):
     flag = tmp_path / "review_required.json"
     flag.write_text("{}")
