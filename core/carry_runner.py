@@ -52,6 +52,16 @@ RECONCILE_TIMEOUT_SEC = 10.0
 # funding_carry_lab.per_leg_liquidation_price defaults; conservative vs
 # Binance/Bybit tier-1 0.4-0.5% for BTC/ETH at these notionals.
 F1_MMR_FRAC = 0.005
+# Maker-first execution (research report actionable update): the spot leg is
+# modeled as a post-only maker fill at MID (conservative vs the touch) with the
+# venue maker fee, and NO slippage — but ONLY when the spot leg spread is wide
+# enough to plausibly rest an order. Below this, fall back to a taker cross so
+# the model never credits a fill that could not happen. The perp hedge ALWAYS
+# stays taker (immediate cross to lock delta-neutrality). NOTE: on Binance/Bybit
+# spot maker fee == spot taker fee, so the maker saving here is slippage +
+# half-spread, NOT fees; the futures maker discount is only reachable via a fee
+# tier (see F2 latch). Default execution mode stays "taker" (unchanged evidence).
+F1_MAKER_MIN_SPREAD_BPS = 2.0
 
 _EMPTY_STATE: dict[str, Any] = {
     "positions": {}, "blocks": {}, "cycles": [],
@@ -91,6 +101,7 @@ class CarryRunner:
         registry_path: Path | str | None = None,
         slip_frac: float = DEFAULT_SLIP_FRAC,
         heartbeat_path: Path | str | None = DEFAULT_HEARTBEAT_PATH,
+        execution_mode: str = "taker",
     ):
         self.state_path = Path(state_path)
         self.snapshot_provider = snapshot_provider
@@ -106,6 +117,9 @@ class CarryRunner:
         self.registry_path = registry_path
         self.slip_frac = float(slip_frac)
         self.heartbeat_path = Path(heartbeat_path) if heartbeat_path is not None else None
+        if execution_mode not in ("taker", "maker_first"):
+            raise ValueError(f"execution_mode must be taker|maker_first, got {execution_mode!r}")
+        self.execution_mode = execution_mode
 
     # ── state I/O (atomic) ─────────────────────────────────────────────
     def load_state(self) -> dict:
@@ -158,11 +172,13 @@ class CarryRunner:
                         "recovery_latched": True, "reason": reason})
 
     # ── fills (pessimistic taker, PAPER) ───────────────────────────────
-    def _fees_per_leg_frac(self) -> tuple[float, float]:
+    def _fees_per_leg_frac(self, spot_liq: str = "taker") -> tuple[float, float]:
+        # Spot leg fee reflects the fill type (maker on a rested spot leg);
+        # the perp hedge always crosses, so it is always taker.
         try:
-            spot_fee = fee_rate(self.venue, "spot", "taker")
+            spot_fee = fee_rate(self.venue, "spot", spot_liq)
         except KeyError:
-            spot_fee = fee_rate(self.venue, "futures", "taker")
+            spot_fee = fee_rate(self.venue, "futures", spot_liq)
         perp_fee = fee_rate(self.venue, "futures", "taker")
         return spot_fee, perp_fee
 
@@ -243,10 +259,22 @@ class CarryRunner:
             )["buffer_x"]
         except Exception:  # noqa: BLE001 - fail-closed at entry
             liq_buffer_x, liq_uncomputable = 0.0, True
+        # maker-first: rest the spot leg at mid when the spread allows, and
+        # recompute the effective round-trip cost so the entry floor
+        # (max(15bps, 3x cost)) reflects the cheaper execution. The flat 15bps
+        # absolute floor is deliberately NOT lowered.
+        use_maker = (self.execution_mode == "maker_first"
+                     and spot_spread_bps >= F1_MAKER_MIN_SPREAD_BPS)
+        if use_maker:
+            m_spot_fee, m_perp_fee = self._fees_per_leg_frac(spot_liq="maker")
+            # spot legs rest at mid (no slip); only the 2 perp crossings pay slip.
+            rt_cost = 2.0 * m_spot_fee + 2.0 * m_perp_fee + 2.0 * self.slip_frac
+        else:
+            rt_cost = float(snap["round_trip_cost_frac"])
         out = {
             "funding_per_settlement": float(f.get("rate") or 0.0),
             "hold_settlements": self.hold_settlements,
-            "round_trip_cost_frac": float(snap["round_trip_cost_frac"]),
+            "round_trip_cost_frac": rt_cost,
             "depth_ratio": float(snap.get("depth_ratio", 0.0)),
             "liq_buffer_x": liq_buffer_x,
             "funding_age_sec": float(f.get("age_sec", float("inf"))),
@@ -286,11 +314,18 @@ class CarryRunner:
             return
         f = snap["funding"]
         slip = self.slip_frac
-        spot_px = float(snap["spot_ask"]) * (1.0 + slip)   # buy spot: pay up
-        perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # sell perp: hit bid
+        use_maker = (self.execution_mode == "maker_first"
+                     and gi["spot_spread_bps"] >= F1_MAKER_MIN_SPREAD_BPS)
+        if use_maker:
+            spot_px = gi["spot_mid"]                           # rest spot at mid (maker)
+            perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # taker hedge cross
+            spot_fee, perp_fee = self._fees_per_leg_frac(spot_liq="maker")
+        else:
+            spot_px = float(snap["spot_ask"]) * (1.0 + slip)   # buy spot: pay up
+            perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # sell perp: hit bid
+            spot_fee, perp_fee = self._fees_per_leg_frac()
         spot_qty = notional / spot_px
         perp_qty = notional / perp_px
-        spot_fee, perp_fee = self._fees_per_leg_frac()
         entry_fees = notional * (spot_fee + perp_fee)
 
         # simulate the atomic two-leg fill; a deterministic hook injects failures.
@@ -343,6 +378,7 @@ class CarryRunner:
             "funding_accrued": 0.0, "settlements_held": 0,
             "consec_negative_settlements": 0, "runs_seen": 0,
             "perp_leverage": 1.0, "mmr": F1_MMR_FRAC,
+            "execution_mode": self.execution_mode,
         }
         summary["opened"] += 1
 
@@ -417,12 +453,21 @@ class CarryRunner:
     def _close(self, state, symbol, snap, now, exit_reason) -> None:
         pos = state["positions"].pop(f"{self.venue}:{symbol}")
         slip = self.slip_frac
-        spot_exit = float(snap["spot_bid"]) * (1.0 - slip)  # sell spot: hit bid
-        perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: pay up
+        spot_mid = (float(snap["spot_bid"]) + float(snap["spot_ask"])) / 2.0
+        spot_spread_bps = (float(snap["spot_ask"]) - float(snap["spot_bid"])) / spot_mid * 1e4
+        use_maker = (pos.get("execution_mode") == "maker_first"
+                     and spot_spread_bps >= F1_MAKER_MIN_SPREAD_BPS)
+        if use_maker:
+            spot_exit = spot_mid                                # rest spot at mid (maker)
+            perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: taker
+            spot_fee, perp_fee = self._fees_per_leg_frac(spot_liq="maker")
+        else:
+            spot_exit = float(snap["spot_bid"]) * (1.0 - slip)  # sell spot: hit bid
+            perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: pay up
+            spot_fee, perp_fee = self._fees_per_leg_frac()
         spot_pnl = (spot_exit - pos["spot_entry_px"]) * pos["spot_qty"]
         perp_pnl = (pos["perp_entry_px"] - perp_exit) * pos["perp_qty"]
         basis_pnl = spot_pnl + perp_pnl
-        spot_fee, perp_fee = self._fees_per_leg_frac()
         exit_fees = pos["notional"] * (spot_fee + perp_fee)
         fees = pos["entry_fees"] + exit_fees
         gross_funding = pos["funding_accrued"]

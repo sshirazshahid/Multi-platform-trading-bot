@@ -1370,6 +1370,18 @@ if SIGNAL_SOURCE not in ("mcp", "mcp_det", "tsmom", "machine", "s3", "none"):
         f"got {SIGNAL_SOURCE!r}"
     )
 
+# F1 carry execution model (PAPER). "taker" (default) = pessimistic taker/taker
+# both legs, the shipped baseline evidence. "maker_first" = model the spot leg
+# as a post-only maker fill at mid (perp hedge stays taker) when the spread
+# allows — the research-report actionable update. maker_first models an
+# UNVERIFIED fill assumption; keep taker as the honest default baseline and
+# opt into maker_first only to measure the sensitivity.
+F1_EXECUTION_MODE = os.getenv("F1_EXECUTION_MODE", "taker").lower()
+if F1_EXECUTION_MODE not in ("taker", "maker_first"):
+    raise ValueError(
+        f"F1_EXECUTION_MODE must be 'taker' or 'maker_first', got {F1_EXECUTION_MODE!r}"
+    )
+
 # S3 ensemble horizons (days). Comma-separated; longest gates min-history.
 S3_LOOKBACKS_DAYS = tuple(
     int(x) for x in os.getenv("S3_LOOKBACKS_DAYS", "28,14,7").split(",") if x.strip()
