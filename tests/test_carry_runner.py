@@ -373,6 +373,56 @@ def test_two_venues_share_one_state_file_with_venue_keyed_positions(tmp_path):
     assert set(state["positions"]) == {"binance:BTC/USDT", "bybit:BTC/USDT"}
 
 
+def test_three_venues_share_one_state_file_with_venue_keyed_positions(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    summaries = [build(tmp_path, clock, provider, venue=v).run_once()
+                 for v in ("binance", "bybit", "bitget")]
+    assert [s["venue"] for s in summaries] == ["binance", "bybit", "bitget"]
+    assert all(s["opened"] == 1 for s in summaries)
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert set(state["positions"]) == {
+        "binance:BTC/USDT", "bybit:BTC/USDT", "bitget:BTC/USDT"}
+
+
+def test_bitget_block_does_not_block_other_venues(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+
+    def hook(symbol):
+        return {"spot_fill_frac": 1.0, "perp_fill_frac": 0.0}
+
+    rg = build(tmp_path, clock, provider, venue="bitget", failure_hook=hook)
+    assert rg.run_once()["failed"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "bitget:BTC/USDT" in state["blocks"]
+    assert "binance:BTC/USDT" not in state["blocks"]
+    # Rev 5.2: the one-leg failure latches portfolio-wide recovery; clear it
+    # so we can see that the BLOCK itself stays scoped to bitget only.
+    state["recovery"] = {"active": False}
+    (tmp_path / "carry_positions.json").write_text(json.dumps(state))
+    sb = build(tmp_path, clock, provider).run_once()                  # binance
+    sy = build(tmp_path, clock, provider, venue="bybit").run_once()
+    assert sb["opened"] == 1 and sy["opened"] == 1
+    sg = build(tmp_path, clock, provider, venue="bitget").run_once()  # no hook
+    assert sg["opened"] == 0 and sg["blocked"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "bitget:BTC/USDT" in state["blocks"]
+    assert {"binance:BTC/USDT", "bybit:BTC/USDT"} <= set(state["positions"])
+
+
+def test_bitget_venue_books_bitget_fee_schedule_on_entry(tmp_path):
+    # config.FEE: bitget_spot_taker (0.001) + bitget_futures_taker (0.0006),
+    # both taker in the default execution mode.
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider, venue="bitget")
+    assert r.run_once()["opened"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    pos = state["positions"]["bitget:BTC/USDT"]
+    assert pos["entry_fees"] == pytest.approx(pos["notional"] * 0.0016)
+
+
 def test_bybit_block_does_not_block_binance(tmp_path):
     clock = FakeClock()
     provider = Provider(clock)
@@ -458,17 +508,17 @@ def test_report_renders_live_activation_preconditions(tmp_path):
         "Live-activation preconditions")
 
 
-def test_build_f1_spec_binance_bybit_requires_latch():
+def test_build_f1_spec_paper_venues_require_latch():
     # extends tests/test_f1_rev5_gates.py latch coverage with the exact
-    # two-venue set the paper script now uses (kept here: file ownership).
+    # three-venue set the paper script now uses (kept here: file ownership).
     from research.funding_carry_lab import build_f1_spec
 
     with pytest.raises(ValueError):
-        build_f1_spec(venues=("binance", "bybit"))
+        build_f1_spec(venues=("binance", "bybit", "bitget"))
     spec = build_f1_spec(symbols=("BTC/USDT", "ETH/USDT"),
-                         venues=("binance", "bybit"),
+                         venues=("binance", "bybit", "bitget"),
                          allow_extended_universe=True)
-    assert spec.venues == ["binance", "bybit"]
+    assert spec.venues == ["binance", "bybit", "bitget"]
 
 
 # ── Rev 5.2: portfolio-wide reduce-only recovery ───────────────────────

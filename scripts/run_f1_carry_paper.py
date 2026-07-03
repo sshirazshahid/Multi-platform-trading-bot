@@ -1,8 +1,8 @@
-"""Single-shot F1 delta-neutral carry PAPER runner (Rev 5 Phase 3, W2 two-venue).
+"""Single-shot F1 delta-neutral carry PAPER runner (Rev 5 Phase 3, three-venue).
 
 Copies the harvest_derivs pattern: one pass per invocation, scheduled
 externally (e.g. Windows Task Scheduler, ~15 min). Each run loops the PAPER
-venues (binance, bybit — opted in via the build_f1_spec Rev-5 latch) over ONE
+venues (binance, bybit, bitget — opted in via the build_f1_spec Rev-5 latch) over ONE
 shared ``data/carry_positions.json`` state file, reads a live BTC/ETH snapshot
 per venue (spot BBO/depth, perp BBO/mark, Phase-1 funding frame incl interval +
 next_funding_ts, fees via cost_model), evaluates the full Rev-5 entry gate,
@@ -35,7 +35,7 @@ from core.carry_runner import (  # noqa: E402
 
 STATE_PATH = ROOT / DEFAULT_STATE_PATH
 HEARTBEAT_PATH = ROOT / "data" / "carry_heartbeat.json"
-VENUES = ("binance", "bybit")
+VENUES = ("binance", "bybit", "bitget")
 SYMBOLS = ("BTC/USDT", "ETH/USDT")
 # EXIT-SIDE FALLBACK ONLY: entry gating and exit management now compute a
 # per-position margin buffer via fill_reality.perp_short_margin_buffer_x;
@@ -64,9 +64,11 @@ def build_live_snapshot_provider(venue: str):
     from core.cost_model import round_trip_cost
     from core.market_data_ledger import MarketDataLedger
     from exchanges.binance_client import BinanceClient
+    from exchanges.bitget_client import BitgetClient
     from exchanges.bybit_client import BybitClient
 
-    factory = {"binance": BinanceClient, "bybit": BybitClient}
+    factory = {"binance": BinanceClient, "bybit": BybitClient,
+               "bitget": BitgetClient}
     client = factory[venue]()
     # Single-venue ledger: this provider only reads its own venue, and a
     # multi-client ledger would double the funding API calls per pass.
@@ -176,7 +178,8 @@ def main() -> None:
     from research.funding_carry_lab import build_f1_spec
 
     # Rev-5 documented opt-in latch: raises loudly at startup if this venue
-    # set is not explicitly allowed (bybit is outside the F1 default universe).
+    # set is not explicitly allowed (bybit and bitget are outside the F1
+    # default universe).
     build_f1_spec(symbols=SYMBOLS, venues=VENUES, allow_extended_universe=True)
     warehouse = Warehouse()
     summaries = []
