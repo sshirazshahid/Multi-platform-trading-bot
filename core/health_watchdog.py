@@ -87,6 +87,7 @@ COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
 COOLDOWN_SEC = {
     "heartbeat_stale":       30 * 60,
     "carry_heartbeat_stale": 60 * 60,
+    "carry_recovery_active": 60 * 60,
     "spec12_review_required": 60 * 60,
     "exchange_halted":       30 * 60,
     "sl_placement_failed":   30 * 60,
@@ -157,6 +158,7 @@ class HealthWatchdog:
         for check in (
             self._check_heartbeat,
             self._check_carry_heartbeat,
+            self._check_carry_recovery,
             self._check_review_flag,
             self._check_exchange_halted,
             self._check_sl_placement_failed,
@@ -239,6 +241,25 @@ class HealthWatchdog:
             f"carry heartbeat is {int(age)}s old "
             f"(> {CARRY_HEARTBEAT_STALE_SEC}s threshold)",
             {"age_sec": int(age), "path": str(CARRY_HEARTBEAT_PATH)},
+        )
+
+    def _check_carry_recovery(self) -> None:
+        # Rev 5.2: the carry runner's heartbeat stores its pass summary;
+        # summary.recovery_active true means the portfolio-wide reduce-only
+        # latch is set. Missing file / missing key -> silent + re-arm.
+        # Edge-triggered: one alert per episode, re-arms when the flag clears.
+        active = False
+        if CARRY_HEARTBEAT_PATH.exists():
+            try:
+                payload = json.loads(CARRY_HEARTBEAT_PATH.read_text(encoding="utf-8"))
+                active = bool((payload.get("summary") or {}).get("recovery_active"))
+            except Exception:
+                active = False
+        self._edge_alert(
+            "carry_recovery_active", active, "ALERT",
+            "carry reduce-only recovery latched — new carry entries halted; "
+            "clear with scripts/run_f1_carry_paper.py --clear-recovery",
+            {"path": str(CARRY_HEARTBEAT_PATH)},
         )
 
     def _check_review_flag(self) -> None:

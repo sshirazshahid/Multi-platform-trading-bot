@@ -74,13 +74,13 @@ class Provider:
 
 def build(tmp_path, clock, provider, **kw):
     kw.setdefault("heartbeat_path", tmp_path / "carry_heartbeat.json")
+    kw.setdefault("symbols", ("BTC/USDT",))
     return CarryRunner(
         state_path=tmp_path / "carry_positions.json",
         snapshot_provider=provider,
         now_fn=clock,
         paper_equity=100_000.0,
         gate_log_path=tmp_path / "carry_gate_log.jsonl",
-        symbols=("BTC/USDT",),
         **kw,
     )
 
@@ -384,7 +384,18 @@ def test_bybit_block_does_not_block_binance(tmp_path):
     assert ry.run_once()["failed"] == 1
     rb = build(tmp_path, clock, provider)  # binance, no failure hook
     s = rb.run_once()
-    assert s["opened"] == 1 and s["blocked"] == 0
+    # Rev 5.2: the one-leg failure latches portfolio-wide recovery, so the
+    # binance open is refused by the LATCH (reduce_only_recovery), NOT by a
+    # cross-venue block — the block itself stays venue-scoped.
+    assert s["opened"] == 0 and s["blocked"] == 0
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "bybit:BTC/USDT" in state["blocks"]
+    assert "binance:BTC/USDT" not in state["blocks"]
+    # once the operator clears recovery, binance opens; bybit stays blocked
+    state["recovery"] = {"active": False}
+    (tmp_path / "carry_positions.json").write_text(json.dumps(state))
+    s2 = rb.run_once()
+    assert s2["opened"] == 1 and s2["blocked"] == 0
     state = json.loads((tmp_path / "carry_positions.json").read_text())
     assert "bybit:BTC/USDT" in state["blocks"]
     assert "binance:BTC/USDT" in state["positions"]
@@ -458,6 +469,261 @@ def test_build_f1_spec_binance_bybit_requires_latch():
                          venues=("binance", "bybit"),
                          allow_extended_universe=True)
     assert spec.venues == ["binance", "bybit"]
+
+
+# ── Rev 5.2: portfolio-wide reduce-only recovery ───────────────────────
+def _fail_perp(symbol):
+    return {"spot_fill_frac": 1.0, "perp_fill_frac": 0.0}
+
+
+def _gate_recs(tmp_path):
+    return [json.loads(x) for x in
+            (tmp_path / "carry_gate_log.jsonl").read_text().strip().splitlines()]
+
+
+def test_one_leg_failure_latches_recovery_portfolio_wide(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider, failure_hook=_fail_perp)
+    assert r.run_once()["failed"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    rec = state["recovery"]
+    assert rec["active"] is True
+    assert rec["reason"].startswith("one_leg_failure:")
+    assert rec["requires_manual_review"] is True
+    assert rec["venue"] == "binance" and rec["symbol"] == "BTC/USDT"
+
+    # NEXT pass: same venue, DIFFERENT symbol -> refused portfolio-wide
+    r2 = build(tmp_path, clock, provider, symbols=("ETH/USDT",))
+    s2 = r2.run_once()
+    assert s2["opened"] == 0 and s2["gate_evals"] == 0
+    last = _gate_recs(tmp_path)[-1]
+    assert last["reason"] == "reduce_only_recovery" and last["ok"] is False
+    assert last["symbol"] == "ETH/USDT"
+
+    # OTHER venue (fresh runner, same shared state file) -> also refused
+    r3 = build(tmp_path, clock, provider, venue="bybit")
+    s3 = r3.run_once()
+    assert s3["opened"] == 0 and s3["gate_evals"] == 0
+    last = _gate_recs(tmp_path)[-1]
+    assert last["reason"] == "reduce_only_recovery" and last["venue"] == "bybit"
+
+
+def test_notional_mismatch_exit_latches_recovery(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+    # spot rallies vs perp: hedge legs drift apart >1% of notional while the
+    # basis move is favorable and margin is healthy -> ONLY gate 5 can fire.
+    provider.kw["spot"] = 102.0
+    provider.kw["perp"] = 100.0
+    clock.advance(60.0)
+    s = r.run_once()
+    assert s["closed"] == 1 and s["recovery_active"] is True
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    (cyc,) = state["cycles"]
+    assert cyc["exit_reason"].startswith("notional_mismatch")
+    rec = state["recovery"]
+    assert rec["active"] is True
+    assert rec["reason"].startswith("notional_mismatch_exit:")
+
+
+def test_max_hold_exit_does_not_latch_recovery(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+    clock.advance(42 * 8 * HOUR + 1)  # 42 settlements -> max_hold_window exit
+    s = r.run_once()
+    assert s["closed"] == 1 and s["recovery_active"] is False
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    (cyc,) = state["cycles"]
+    assert cyc["exit_reason"].startswith("max_hold_window")
+    assert state["recovery"] == {"active": False}
+
+
+def test_reduce_only_position_accrues_and_closes_while_latched(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+
+    def hook(symbol):
+        return _fail_perp(symbol) if symbol == "ETH/USDT" else None
+
+    r = build(tmp_path, clock, provider,
+              symbols=("BTC/USDT", "ETH/USDT"), failure_hook=hook)
+    s = r.run_once()
+    assert s["opened"] == 1 and s["failed"] == 1 and s["recovery_active"] is True
+
+    # latched: the BTC position still accrues its settlement normally ...
+    clock.advance(2 * HOUR + 1)
+    s = r.run_once()
+    assert s["held"] == 1 and s["closed"] == 0
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert state["positions"]["binance:BTC/USDT"]["settlements_held"] == 1
+
+    # ... and can still close (reduce-only: exits keep firing)
+    provider.kw["rate"] = -0.0001
+    clock.advance(8 * HOUR)
+    s = r.run_once()
+    assert s["closed"] == 1 and s["recovery_active"] is True
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert state["positions"] == {}
+    resolved = [c for c in state["cycles"] if c["label_status"] == "RESOLVED"]
+    assert len(resolved) == 1
+
+
+def test_latch_mid_pass_stops_later_symbols_same_pass(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+
+    def hook(symbol):
+        return _fail_perp(symbol) if symbol == "BTC/USDT" else None
+
+    r = build(tmp_path, clock, provider,
+              symbols=("BTC/USDT", "ETH/USDT"), failure_hook=hook)
+    s = r.run_once()
+    assert s["failed"] == 1 and s["opened"] == 0
+    assert s["recovery_active"] is True
+    recs = _gate_recs(tmp_path)
+    assert any(rec.get("reason") == "reduce_only_recovery"
+               and rec.get("symbol") == "ETH/USDT" for rec in recs)
+
+
+def test_latch_idempotent_keeps_original_reason_and_ts(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+
+    def hook(symbol):
+        return _fail_perp(symbol) if symbol == "ETH/USDT" else None
+
+    r = build(tmp_path, clock, provider,
+              symbols=("BTC/USDT", "ETH/USDT"), failure_hook=hook)
+    assert r.run_once()["recovery_active"] is True
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    orig = dict(state["recovery"])
+    assert orig["reason"].startswith("one_leg_failure:")
+
+    # second trigger while latched: the held BTC position mismatch-exits
+    provider.kw["spot"] = 102.0
+    provider.kw["perp"] = 100.0
+    clock.advance(60.0)
+    assert r.run_once()["closed"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert state["recovery"]["reason"] == orig["reason"]
+    assert state["recovery"]["ts"] == orig["ts"]
+    # the second trigger is still gate-logged
+    latch_logs = [x for x in _gate_recs(tmp_path) if x.get("recovery_latched")]
+    assert len(latch_logs) == 2
+
+
+def test_legacy_state_without_recovery_key_migrates_inactive(tmp_path):
+    p = tmp_path / "carry_positions.json"
+    p.write_text(json.dumps({"positions": {}, "blocks": {}, "cycles": []}))
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    assert r.load_state()["recovery"] == {"active": False}
+    s = r.run_once()
+    assert s["opened"] == 1 and s["recovery_active"] is False
+    state = json.loads(p.read_text())
+    assert state["recovery"] == {"active": False}
+
+
+def test_summary_and_heartbeat_reflect_recovery_state(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    hb = tmp_path / "carry_heartbeat.json"
+    r = build(tmp_path, clock, provider, heartbeat_path=hb)
+    s = r.run_once()
+    assert s["recovery_active"] is False
+    assert json.loads(hb.read_text())["summary"]["recovery_active"] is False
+
+    r2 = build(tmp_path, clock, provider, symbols=("ETH/USDT",),
+               failure_hook=_fail_perp, heartbeat_path=hb)
+    s2 = r2.run_once()
+    assert s2["recovery_active"] is True
+    assert json.loads(hb.read_text())["summary"]["recovery_active"] is True
+
+
+def test_clear_recovery_resets_latch_and_archives_history(tmp_path, capsys):
+    from scripts.run_f1_carry_paper import clear_recovery
+
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider, failure_hook=_fail_perp)
+    assert r.run_once()["recovery_active"] is True
+    p = tmp_path / "carry_positions.json"
+
+    assert clear_recovery(state_path=p) is True
+    out = capsys.readouterr().out
+    assert "one_leg_failure:" in out and "cleared" in out
+    state = json.loads(p.read_text())
+    assert state["recovery"] == {"active": False}
+    (hist,) = state["recovery_history"]
+    assert hist["active"] is True and hist["reason"].startswith("one_leg_failure:")
+    assert hist["cleared_ts"] > 0
+    assert not list(tmp_path.glob("*.tmp"))  # atomic save, no temp litter
+
+    # next pass opens normally again (the venue:symbol block stays put)
+    r2 = build(tmp_path, clock, provider, symbols=("ETH/USDT",))
+    assert r2.run_once()["opened"] == 1
+
+    # not latched -> no-op (and a missing state file is also a no-op)
+    assert clear_recovery(state_path=p) is False
+    assert "not latched" in capsys.readouterr().out
+    assert len(json.loads(p.read_text())["recovery_history"]) == 1
+    assert clear_recovery(state_path=tmp_path / "missing.json") is False
+
+
+def test_null_recovery_state_normalizes_inactive(tmp_path):
+    # Hand-edited state with "recovery": null must load as inactive, not crash.
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    p = tmp_path / "carry_positions.json"
+    p.write_text(json.dumps(
+        {"positions": {}, "blocks": {}, "cycles": [], "recovery": None}))
+    s = r.run_once()
+    assert s["recovery_active"] is False
+    assert s["opened"] == 1
+
+
+def test_one_leg_latch_reason_has_single_prefix(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider, failure_hook=_fail_perp)
+    assert r.run_once()["failed"] == 1
+    rec = json.loads((tmp_path / "carry_positions.json").read_text())["recovery"]
+    assert rec["reason"].startswith("one_leg_failure:")
+    assert not rec["reason"].startswith("one_leg_failure:one_leg_failure")
+
+
+def test_clear_recovery_corrupt_state_file_is_safe(tmp_path, capsys):
+    from scripts.run_f1_carry_paper import clear_recovery
+
+    p = tmp_path / "carry_positions.json"
+    p.write_text("{not json", encoding="utf-8")
+    assert clear_recovery(state_path=p) is False
+    assert "cannot read state file" in capsys.readouterr().out
+    assert p.read_text(encoding="utf-8") == "{not json"  # file untouched
+
+
+def test_clear_recovery_drops_heartbeat_flag(tmp_path):
+    # Clearing must also drop the heartbeat's flag so the watchdog re-arms
+    # immediately (per-episode alerting) rather than at the next pass.
+    from scripts.run_f1_carry_paper import clear_recovery
+
+    clock = FakeClock()
+    provider = Provider(clock)
+    hb = tmp_path / "carry_heartbeat.json"
+    r = build(tmp_path, clock, provider, failure_hook=_fail_perp, heartbeat_path=hb)
+    assert r.run_once()["recovery_active"] is True
+    assert json.loads(hb.read_text())["summary"]["recovery_active"] is True
+
+    assert clear_recovery(state_path=tmp_path / "carry_positions.json",
+                          heartbeat_path=hb) is True
+    assert json.loads(hb.read_text())["summary"]["recovery_active"] is False
 
 
 # ── grep-proof: no order path on the runner ────────────────────────────

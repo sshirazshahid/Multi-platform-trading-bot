@@ -11,13 +11,15 @@ manages/settles open PAPER positions, and saves state atomically.
 PAPER/SIM ONLY: no exchange order call exists on this path and there is no
 directional fallback. Read-only w.r.t. the live bot.
 
-    python scripts/run_f1_carry_paper.py            # one runner pass
-    python scripts/run_f1_carry_paper.py --report   # emit the markdown report
+    python scripts/run_f1_carry_paper.py                  # one runner pass
+    python scripts/run_f1_carry_paper.py --report         # markdown report
+    python scripts/run_f1_carry_paper.py --clear-recovery # unlatch reduce-only
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -117,10 +119,58 @@ def run_report_only(
     return write_report(state, out_dir=out_dir)
 
 
+def clear_recovery(*, state_path: Path | str = STATE_PATH,
+                   heartbeat_path: Path | str = HEARTBEAT_PATH) -> bool:
+    """Operator latch-clear for Rev 5.2 reduce-only recovery.
+
+    Prints the latched record, archives it (with an added ``cleared_ts``) to
+    ``state["recovery_history"]``, resets ``state["recovery"]`` to inactive and
+    saves atomically (tmp + os.replace, same pattern as CarryRunner.save_state).
+    Never runs a market pass. Returns True iff a latch was cleared.
+    """
+    p = Path(state_path)
+    try:
+        state = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[f1_carry_paper] cannot read state file ({e}) — nothing cleared")
+        return False
+    rec = state.get("recovery") or {}
+    if not rec.get("active"):
+        print("[f1_carry_paper] recovery is not latched — nothing to clear")
+        return False
+    print(f"[f1_carry_paper] recovery record: {json.dumps(rec, sort_keys=True)}")
+    archived = dict(rec)
+    archived["cleared_ts"] = time.time()
+    state.setdefault("recovery_history", []).append(archived)
+    state["recovery"] = {"active": False}
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, p)
+    # Best-effort: also drop the heartbeat's recovery flag so the watchdog
+    # re-arms immediately (per-episode alerting) instead of waiting for the
+    # next scheduled pass to rewrite the heartbeat.
+    try:
+        hb_p = Path(heartbeat_path)
+        hb = json.loads(hb_p.read_text(encoding="utf-8"))
+        if (hb.get("summary") or {}).get("recovery_active"):
+            hb["summary"]["recovery_active"] = False
+            hb_tmp = hb_p.with_suffix(".json.tmp")
+            hb_tmp.write_text(json.dumps(hb), encoding="utf-8")
+            os.replace(hb_tmp, hb_p)
+            print("[f1_carry_paper] heartbeat recovery flag cleared (watchdog re-arms)")
+    except Exception:  # noqa: BLE001 - heartbeat is advisory; never block the clear
+        pass
+    print("[f1_carry_paper] recovery cleared — new entries allowed from next pass")
+    return True
+
+
 def main() -> None:
     if "--report" in sys.argv[1:]:
         out = run_report_only()
         print(f"[f1_carry_paper] report -> {out}")
+        return
+    if "--clear-recovery" in sys.argv[1:]:
+        clear_recovery()
         return
     from core.warehouse import Warehouse
     from research.funding_carry_lab import build_f1_spec

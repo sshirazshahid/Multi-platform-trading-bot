@@ -11,6 +11,12 @@ boundary using the venue's ACTUAL interval, evaluates every exit gate, and on
 exit writes a RESOLVED cycle row (warehouse ``carry_cycles``) and refreshes the
 F1 EvidenceRegistry record. State saves are atomic (tmp + replace).
 
+Rev 5.2: execution-integrity anomalies (one-leg failure / reconcile timeout,
+notional-mismatch exit) latch a portfolio-wide reduce-only RECOVERY mode in the
+shared state file — no new entries on ANY venue/symbol until an operator clears
+it (``scripts/run_f1_carry_paper.py --clear-recovery``); open positions keep
+being managed and closed.
+
 PAPER/SIM ONLY: no exchange order call and no directional fallback exists here.
 """
 from __future__ import annotations
@@ -47,7 +53,10 @@ RECONCILE_TIMEOUT_SEC = 10.0
 # Binance/Bybit tier-1 0.4-0.5% for BTC/ETH at these notionals.
 F1_MMR_FRAC = 0.005
 
-_EMPTY_STATE: dict[str, Any] = {"positions": {}, "blocks": {}, "cycles": []}
+_EMPTY_STATE: dict[str, Any] = {
+    "positions": {}, "blocks": {}, "cycles": [],
+    "recovery": {"active": False},
+}
 
 # Static preconditions that MUST be independently verified before ANY live
 # activation of the carry strategy. Rendered (always UNMET) in the report;
@@ -112,6 +121,10 @@ class CarryRunner:
             (k if ":" in k else f"{self.venue}:{k}"): v
             for k, v in (state.get("positions") or {}).items()
         }
+        # Rev 5.2 migration: pre-recovery state files gain the inactive latch.
+        # isinstance guard: setdefault would keep a hand-edited null/scalar.
+        if not isinstance(state.get("recovery"), dict):
+            state["recovery"] = {"active": False}
         return state
 
     def save_state(self, state: dict) -> None:
@@ -124,6 +137,25 @@ class CarryRunner:
         self.gate_log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.gate_log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
+
+    def _latch_recovery(self, state, now, venue, symbol, reason) -> None:
+        """Latch portfolio-wide reduce-only RECOVERY mode (Rev 5.2).
+
+        Execution-integrity anomalies (one-leg failure, notional-mismatch
+        exit) stop ALL new entries across every venue/symbol sharing this
+        state file; existing positions keep being managed and closed. Cleared
+        only by an operator via ``run_f1_carry_paper.py --clear-recovery``.
+        Idempotent: an already-active latch keeps its original reason/ts;
+        every trigger is still gate-logged.
+        """
+        if not (state.get("recovery") or {}).get("active"):
+            state["recovery"] = {
+                "active": True, "reason": reason, "ts": now,
+                "venue": venue, "symbol": symbol,
+                "requires_manual_review": True,
+            }
+        self._log_gate({"ts": now, "venue": venue, "symbol": symbol,
+                        "recovery_latched": True, "reason": reason})
 
     # ── fills (pessimistic taker, PAPER) ───────────────────────────────
     def _fees_per_leg_frac(self) -> tuple[float, float]:
@@ -148,16 +180,26 @@ class CarryRunner:
                                 "blocked": True,
                                 "reason": "venue_symbol_blocked_pending_manual_review"})
                 continue
+            has_position = key in state["positions"]
+            if not has_position and state["recovery"]["active"]:
+                # Rev 5.2 reduce-only: manage/close existing positions only;
+                # a mid-pass latch stops later symbols in this SAME pass too.
+                self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
+                                "ok": False, "reason": "reduce_only_recovery"})
+                continue
             snap = self.snapshot_provider(symbol)
             if snap is None:
                 self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
                                 "ok": False, "reason": "no_snapshot"})
                 continue
-            if key in state["positions"]:
+            if has_position:
                 summary["held"] += 1
                 self._manage(state, symbol, snap, now, summary)
             else:
                 self._maybe_open(state, symbol, snap, now, summary)
+        # set AFTER the pass so a latch fired mid-pass is reflected (and flows
+        # into the heartbeat below, which stores this summary).
+        summary["recovery_active"] = bool(state["recovery"]["active"])
         self.save_state(state)
         self._write_heartbeat(now, summary)
         return summary
@@ -282,6 +324,10 @@ class CarryRunner:
                     "reason": exit_reason, "ts": now,
                     "requires_manual_review": True,
                 }
+                self._latch_recovery(
+                    state, now, self.venue, symbol,
+                    exit_reason if exit_reason.startswith("one_leg_failure")
+                    else f"one_leg_failure:{exit_reason}")
                 summary["failed"] += 1
                 return
 
@@ -359,6 +405,14 @@ class CarryRunner:
             return
         self._close(state, symbol, snap, now, why)
         summary["closed"] += 1
+        # Rev 5.2: a hedge-drift (notional mismatch) exit is an execution-
+        # integrity anomaly -> latch portfolio-wide reduce-only recovery.
+        # "notional_mismatch" is the stable reason prefix emitted by gate 5 of
+        # research/funding_carry_lab.carry_exit_signal; the other exits
+        # (funding flip, spread widen, max-hold, margin buffer) must NOT latch.
+        if why.startswith("notional_mismatch"):
+            self._latch_recovery(state, now, self.venue, symbol,
+                                 f"notional_mismatch_exit:{why}")
 
     def _close(self, state, symbol, snap, now, exit_reason) -> None:
         pos = state["positions"].pop(f"{self.venue}:{symbol}")
