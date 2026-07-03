@@ -190,6 +190,7 @@ def main() -> None:
             warehouse=warehouse,
             registry_path=ROOT / "data" / "strategy_specs",
             heartbeat_path=HEARTBEAT_PATH,
+            execution_mode=os.getenv("F1_EXECUTION_MODE", "taker").lower(),
         )
         summaries.append(runner.run_once())
     print(f"[f1_carry_paper] PAPER pass: {json.dumps(summaries)}")

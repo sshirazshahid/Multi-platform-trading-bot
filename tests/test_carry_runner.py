@@ -752,6 +752,54 @@ def test_report_measured_accuracy_is_honest(tmp_path):
     assert "n/a (0 resolved cycles" in text0
 
 
+def _pos(tmp_path):
+    return json.loads(
+        (tmp_path / "carry_positions.json").read_text())["positions"]["binance:BTC/USDT"]
+
+
+def test_maker_first_fills_spot_at_mid(tmp_path):
+    # Wide-enough spread (4bps, within the 5bps gate cap): the spot leg rests at
+    # mid as a maker; the effective RT cost is the real-fee maker formula.
+    clock = FakeClock()
+    provider = Provider(clock, spread_bps=4.0, rate=0.0010)
+    r = build(tmp_path, clock, provider, execution_mode="maker_first")
+    assert r.run_once()["opened"] == 1
+    pos = _pos(tmp_path)
+    assert pos["execution_mode"] == "maker_first"
+    assert abs(pos["spot_entry_px"] - 100.0) < 1e-9              # rested at mid, no slip
+    # maker RT = 2*spot_maker + 2*perp_taker + 2*slip (binance: 2*.001+2*.0005+2*.0005)
+    assert abs(pos["round_trip_cost_frac"] - 0.004) < 1e-9
+
+
+def test_maker_first_narrow_spread_falls_back_to_taker(tmp_path):
+    # Below the 2bps maker threshold there is no room to rest -> taker cross.
+    # This is the anti-optimism guard: the model never credits an impossible fill.
+    clock = FakeClock()
+    provider = Provider(clock, spread_bps=1.0, rate=0.0010)
+    r = build(tmp_path, clock, provider, execution_mode="maker_first")
+    assert r.run_once()["opened"] == 1
+    pos = _pos(tmp_path)
+    assert pos["execution_mode"] == "maker_first"
+    assert pos["spot_entry_px"] > 100.0                          # crossed at ask+slip
+    assert abs(pos["round_trip_cost_frac"] - 0.0002) < 1e-9      # taker baseline (snap)
+
+
+def test_taker_mode_fills_spot_at_ask_plus_slip(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, spread_bps=4.0, rate=0.0010)
+    r = build(tmp_path, clock, provider)  # default taker
+    assert r.run_once()["opened"] == 1
+    pos = _pos(tmp_path)
+    assert pos["execution_mode"] == "taker"
+    assert abs(pos["spot_entry_px"] - 100.02 * (1.0 + 0.0005)) < 1e-6
+
+
+def test_invalid_execution_mode_raises(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        build(tmp_path, FakeClock(), Provider(FakeClock()), execution_mode="bogus")
+
+
 # ── grep-proof: no order path on the runner ────────────────────────────
 def test_no_order_path_symbols_in_runner_sources():
     root = Path(__file__).resolve().parents[1]

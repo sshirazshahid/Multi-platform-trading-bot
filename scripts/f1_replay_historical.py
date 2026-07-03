@@ -42,13 +42,6 @@ AVG_WINDOW = 21          # 7d of 8h settlements — mirrors avg_funding_7d
 PLAN_HOLD = 21           # planning horizon, mirrors DEFAULT_HOLD_SETTLEMENTS
 
 
-def _cost_frac(venue: str = "binance") -> float:
-    """Round-trip cost fraction: both legs taker + 4 slippage crossings."""
-    spot = round_trip_cost(venue, market_type="spot")
-    fut = round_trip_cost(venue, market_type="futures")
-    return spot + fut + 4.0 * DEFAULT_SLIP_FRAC
-
-
 def load_funding(sym: str) -> list[float]:
     rows = []
     with open(DATA_DIR / f"{sym}_funding.csv", newline="", encoding="utf-8") as f:
@@ -104,41 +97,71 @@ def stats(cycles: list[float]) -> dict:
             "net_bps": sum(cycles) * 1e4, "avg_bps": sum(cycles) / n * 1e4}
 
 
+def _scenario_costs(venue: str = "binance") -> list:
+    """(label, round-trip cost fraction) per execution scenario — honest + bounded.
+
+    Mirrors core.carry_runner: maker-first rests the spot leg (no slip) but the
+    perp hedge stays taker, and on Binance/Bybit spot maker fee == taker fee, so
+    the only maker saving is 2 slippage crossings. The VIP row additionally
+    discounts fees and makes both legs — the bigger lever, but it needs a fee
+    tier and accepts perp hedge-fill risk, so it is an OPTIMISTIC bound.
+    """
+    slip = DEFAULT_SLIP_FRAC
+    taker = (round_trip_cost(venue, market_type="spot")
+             + round_trip_cost(venue, market_type="futures") + 4.0 * slip)
+    maker_first = (round_trip_cost(venue, market_type="spot", entry_liq="maker",
+                                   exit_liq="maker")
+                   + round_trip_cost(venue, market_type="futures") + 2.0 * slip)
+    vip_both = (round_trip_cost(venue, market_type="spot", entry_liq="maker",
+                                exit_liq="maker", tier_mult=0.5)
+                + round_trip_cost(venue, market_type="futures", entry_liq="maker",
+                                  exit_liq="maker", tier_mult=0.5))
+    return [
+        ("taker/taker (shipped baseline)", taker),
+        ("maker-first spot, perp taker", maker_first),
+        ("VIP fee-tier + both-maker (optimistic bound)", vip_both),
+    ]
+
+
 def main() -> None:
-    cost = _cost_frac()
+    rates_by_sym = {sym: load_funding(sym) for sym in SYMBOLS}
+    scenarios = _scenario_costs()
     lines = [
         "# F1 carry — historical replay (real Binance funding, research-only)",
         f"Generated {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())} | "
-        f"cost/cycle {cost * 1e4:.1f}bps (taker/taker + 4x slip) | "
-        f"entry floor max({F1_MIN_EDGE_BPS}bps, {F1_COST_MULT}x cost) | "
-        "basis PnL assumed 0 (see module docstring)", "",
-        "| symbol | settlements | cycles | win rate | PF | avg net/cycle |",
-        "|---|---|---|---|---|---|",
+        "basis PnL assumed 0 (see module docstring) | 5 majors, no lookahead",
+        "",
+        "## Execution-scenario sensitivity (the actionable-update measurement)",
+        "| scenario | cost/cycle | entry floor | cycles | win rate | PF | avg net |",
+        "|---|---|---|---|---|---|---|",
     ]
-    all_cycles: list[float] = []
-    for sym in SYMBOLS:
-        rates = load_funding(sym)
-        cyc = replay(rates, cost)
-        all_cycles += cyc
+    for label, cost in scenarios:
+        floor = max(F1_MIN_EDGE_BPS, F1_COST_MULT * cost * 1e4)
+        cyc = [c for sym in SYMBOLS for c in replay(rates_by_sym[sym], cost)]
         s = stats(cyc)
         if s["n"]:
-            lines.append(f"| {sym} | {len(rates)} | {s['n']} | {s['wr']:.1f}% "
-                         f"| {s['pf']:.2f} | {s['avg_bps']:+.1f}bps |")
+            lines.append(f"| {label} | {cost * 1e4:.1f}bps | {floor:.0f}bps | {s['n']} "
+                         f"| {s['wr']:.1f}% | {s['pf']:.2f} | {s['avg_bps']:+.1f}bps |")
         else:
-            lines.append(f"| {sym} | {len(rates)} | 0 | n/a | n/a | n/a |")
-    s = stats(all_cycles)
-    lines += ["",
-              f"**ALL: {s['n']} cycles | win rate {s['wr']:.1f}% | PF {s['pf']:.2f} "
-              f"| avg {s['avg_bps']:+.1f}bps/cycle**", "", "Cost stress:"]
-    for mult in (1.5, 2.0):
-        sc = stats([c for sym in SYMBOLS for c in replay(load_funding(sym), cost, mult)])
-        if sc["n"]:
-            lines.append(f"- {mult}x costs: {sc['n']} cycles, WR {sc['wr']:.1f}%, "
-                         f"PF {sc['pf']:.2f}")
-        else:
-            lines.append(f"- {mult}x costs: 0 cycles (entry floor never met)")
-    lines += ["", "Replay-grade evidence (backtest, stated assumptions) — the live",
-              "PAPER runner is the confirming instrument; this is not a guarantee."]
+            lines.append(f"| {label} | {cost * 1e4:.1f}bps | {floor:.0f}bps "
+                         "| 0 | n/a | n/a | n/a |")
+    lines += ["", "## Per-symbol: baseline vs maker-first",
+              "| symbol | settlements | taker cycles | maker-first cycles |",
+              "|---|---|---|---|"]
+    t_cost, m_cost = scenarios[0][1], scenarios[1][1]
+    for sym in SYMBOLS:
+        r = rates_by_sym[sym]
+        lines.append(f"| {sym} | {len(r)} | {len(replay(r, t_cost))} "
+                     f"| {len(replay(r, m_cost))} |")
+    lines += [
+        "",
+        "Scenario 2 (maker-first spot) is the honest actionable update: on Binance/Bybit",
+        "spot maker fee == taker fee, so the saving is slippage + half-spread only — a",
+        "modest floor reduction. Scenario 3 needs a VIP fee tier AND making the perp leg",
+        "(hedge-fill risk), the bigger lever but not free. The replay assumes maker fills",
+        "are achievable (spread room); the live PAPER runner applies a per-cycle spread",
+        "gate, so these counts are an UPPER bound. Replay-grade; not a guarantee.",
+    ]
     report = "\n".join(lines) + "\n"
     out = ROOT / "reports" / f"f1_replay_historical_{time.strftime('%Y%m%d')}.md"
     out.write_text(report, encoding="utf-8")
