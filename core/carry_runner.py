@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from core.cost_model import fee_rate
-from core.fill_reality import failed_leg_outcome
+from core.fill_reality import failed_leg_outcome, perp_short_margin_buffer_x
 from research.funding_carry_lab import (
     F1_DEFAULT_SYMBOLS,
     F1_MAX_PNL_CONCENTRATION_PCT,
@@ -37,11 +37,29 @@ from research.funding_carry_lab import (
 
 DEFAULT_STATE_PATH = Path("data/carry_positions.json")
 DEFAULT_GATE_LOG = Path("data/carry_gate_log.jsonl")
+DEFAULT_HEARTBEAT_PATH = Path("data/carry_heartbeat.json")
 DEFAULT_HOLD_SETTLEMENTS = 21  # planning horizon for the edge gate (half of max)
 DEFAULT_SLIP_FRAC = 0.0005     # 5 bps pessimistic taker slippage per crossing
 RECONCILE_TIMEOUT_SEC = 10.0
+# Maintenance-margin rate for the short perp leg's per-position liquidation
+# model. Matches fill_reality.liquidation_price and
+# funding_carry_lab.per_leg_liquidation_price defaults; conservative vs
+# Binance/Bybit tier-1 0.4-0.5% for BTC/ETH at these notionals.
+F1_MMR_FRAC = 0.005
 
 _EMPTY_STATE: dict[str, Any] = {"positions": {}, "blocks": {}, "cycles": []}
+
+# Static preconditions that MUST be independently verified before ANY live
+# activation of the carry strategy. Rendered (always UNMET) in the report;
+# nothing in this PAPER runner can evaluate or satisfy them.
+LIVE_ACTIVATION_PRECONDITIONS = (
+    "collateral unification verified on target venue (UTA/PM): spot collateral "
+    "backs the perp short in ONE margin pool — Binance separate spot/futures "
+    "wallets do NOT satisfy this; Bybit UTA 2.0 must be verified per account",
+    "spot-leg maker/limit-first execution with immediate perp hedge "
+    "(paper models pessimistic taker/taker)",
+    "event-driven hedge monitoring (user-data stream) replacing the 15-min poll",
+)
 
 
 class CarryRunner:
@@ -63,6 +81,7 @@ class CarryRunner:
         warehouse: Any = None,
         registry_path: Path | str | None = None,
         slip_frac: float = DEFAULT_SLIP_FRAC,
+        heartbeat_path: Path | str | None = DEFAULT_HEARTBEAT_PATH,
     ):
         self.state_path = Path(state_path)
         self.snapshot_provider = snapshot_provider
@@ -77,12 +96,23 @@ class CarryRunner:
         self.warehouse = warehouse
         self.registry_path = registry_path
         self.slip_frac = float(slip_frac)
+        self.heartbeat_path = Path(heartbeat_path) if heartbeat_path is not None else None
 
     # ── state I/O (atomic) ─────────────────────────────────────────────
     def load_state(self) -> dict:
+        """Load state; one-time migration of legacy bare-symbol position keys.
+
+        Positions are keyed ``venue:symbol`` (like blocks) so multiple venue
+        runners can share ONE state file for cross-venue evidence aggregation.
+        """
         if not self.state_path.exists():
             return json.loads(json.dumps(_EMPTY_STATE))
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        state["positions"] = {
+            (k if ":" in k else f"{self.venue}:{k}"): v
+            for k, v in (state.get("positions") or {}).items()
+        }
+        return state
 
     def save_state(self, state: dict) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,8 +138,8 @@ class CarryRunner:
     def run_once(self) -> dict:
         now = float(self.now_fn())
         state = self.load_state()
-        summary = {"ts": now, "opened": 0, "closed": 0, "failed": 0, "blocked": 0,
-                   "held": 0, "gate_evals": 0}
+        summary = {"ts": now, "venue": self.venue, "opened": 0, "closed": 0,
+                   "failed": 0, "blocked": 0, "held": 0, "gate_evals": 0}
         for symbol in self.symbols:
             key = f"{self.venue}:{symbol}"
             if key in state["blocks"]:
@@ -123,13 +153,28 @@ class CarryRunner:
                 self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
                                 "ok": False, "reason": "no_snapshot"})
                 continue
-            if symbol in state["positions"]:
+            if key in state["positions"]:
                 summary["held"] += 1
                 self._manage(state, symbol, snap, now, summary)
             else:
                 self._maybe_open(state, symbol, snap, now, summary)
         self.save_state(state)
+        self._write_heartbeat(now, summary)
         return summary
+
+    def _write_heartbeat(self, now: float, summary: dict) -> None:
+        """Best-effort atomic liveness marker; a write failure never fails the pass."""
+        if self.heartbeat_path is None:
+            return
+        try:
+            self.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.heartbeat_path.with_suffix(".json.tmp")
+            tmp.write_text(
+                json.dumps({"ts": now, "venue": self.venue, "summary": summary}),
+                encoding="utf-8")
+            os.replace(tmp, self.heartbeat_path)
+        except Exception:  # noqa: BLE001 - liveness marker must not break the run
+            pass
 
     # ── open path ──────────────────────────────────────────────────────
     def _gate_inputs(self, snap: Mapping[str, Any], now: float) -> dict:
@@ -142,12 +187,26 @@ class CarryRunner:
         ttf_min = (float(next_ts) - now) / 60.0 if next_ts is not None else None
         snap_age = now - float(snap.get("ts", now))
         feeds_fresh = (not f.get("stale", True)) and snap_age <= 300.0
-        return {
+        # W1: COMPUTE the entry liq buffer from the planned short entry price
+        # (perp_bid net of slip, same as _maybe_open) via the per-position
+        # liquidation model. NEVER fall back to snap["liq_buffer_x"] at entry;
+        # fail-closed: uncomputable -> 0.0 (the gate rejects) + flag for the log.
+        liq_uncomputable = False
+        try:
+            liq_buffer_x = perp_short_margin_buffer_x(
+                entry_px=float(snap["perp_bid"]) * (1.0 - self.slip_frac),
+                mark_px=float(snap.get("perp_mark", perp_mid)),
+                leverage=1.0,
+                mmr=F1_MMR_FRAC,
+            )["buffer_x"]
+        except Exception:  # noqa: BLE001 - fail-closed at entry
+            liq_buffer_x, liq_uncomputable = 0.0, True
+        out = {
             "funding_per_settlement": float(f.get("rate") or 0.0),
             "hold_settlements": self.hold_settlements,
             "round_trip_cost_frac": float(snap["round_trip_cost_frac"]),
             "depth_ratio": float(snap.get("depth_ratio", 0.0)),
-            "liq_buffer_x": float(snap.get("liq_buffer_x", 0.0)),
+            "liq_buffer_x": liq_buffer_x,
             "funding_age_sec": float(f.get("age_sec", float("inf"))),
             "both_legs_fillable": bool(snap.get("both_legs_fillable", False)),
             "avg_funding_7d": snap.get("avg_funding_7d"),
@@ -158,9 +217,13 @@ class CarryRunner:
             "time_to_next_funding_min": ttf_min,
             "feeds_fresh": feeds_fresh,
         }
+        if liq_uncomputable:
+            out["liq_buffer_uncomputable"] = True
+        return out
 
     def _maybe_open(self, state, symbol, snap, now, summary) -> None:
         gi = self._gate_inputs(snap, now)
+        liq_uncomputable = gi.pop("liq_buffer_uncomputable", False)
         ok, reason, det = f1_entry_gate(**gi)
         summary["gate_evals"] += 1
         notional = self.paper_equity * 0.05
@@ -169,10 +232,14 @@ class CarryRunner:
             ok, reason = f1_sizing_gate(
                 paper_equity=self.paper_equity, symbol_notional=notional,
                 total_carry_notional=total, leverage=1.0, is_initial_entry=True)
-        self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
-                        "ok": bool(ok), "reason": reason,
-                        "net_edge_bps": det.get("net_edge_bps"),
-                        "feeds_fresh": det.get("feeds_fresh")})
+        rec = {"ts": now, "symbol": symbol, "venue": self.venue,
+               "ok": bool(ok), "reason": reason,
+               "net_edge_bps": det.get("net_edge_bps"),
+               "liq_buffer_x": gi["liq_buffer_x"],
+               "feeds_fresh": det.get("feeds_fresh")}
+        if liq_uncomputable:
+            rec["liq_buffer_uncomputable"] = True
+        self._log_gate(rec)
         if not ok:
             return
         f = snap["funding"]
@@ -218,7 +285,7 @@ class CarryRunner:
                 summary["failed"] += 1
                 return
 
-        state["positions"][symbol] = {
+        state["positions"][f"{self.venue}:{symbol}"] = {
             "symbol": symbol, "venue": self.venue, "notional": notional,
             "spot_qty": spot_qty, "perp_qty": perp_qty,
             "spot_entry_px": spot_px, "perp_entry_px": perp_px,
@@ -229,12 +296,13 @@ class CarryRunner:
             "next_settlement_ts": float(f.get("next_funding_ts") or (now + 8 * 3600)),
             "funding_accrued": 0.0, "settlements_held": 0,
             "consec_negative_settlements": 0, "runs_seen": 0,
+            "perp_leverage": 1.0, "mmr": F1_MMR_FRAC,
         }
         summary["opened"] += 1
 
     # ── manage path (settlement accrual + exit gates) ──────────────────
     def _manage(self, state, symbol, snap, now, summary) -> None:
-        pos = state["positions"][symbol]
+        pos = state["positions"][f"{self.venue}:{symbol}"]
         f = snap.get("funding") or {}
         rate = float(f.get("rate") or 0.0)
         # accrue every PASSED settlement boundary at the venue's ACTUAL interval
@@ -260,10 +328,24 @@ class CarryRunner:
             (float(snap["spot_ask"]) - float(snap["spot_bid"])) / spot_mid * 1e4,
             (float(snap["perp_ask"]) - float(snap["perp_bid"])) / perp_mid * 1e4)
         remaining = max(1, self.hold_settlements - pos["settlements_held"])
+        # W1: margin buffer from the STORED entry price + current mark via the
+        # per-position liquidation model. Fail-safe-but-logged: only when the
+        # computation is impossible, fall back to the snapshot's field.
+        try:
+            margin_buffer_x = perp_short_margin_buffer_x(
+                entry_px=float(pos["perp_entry_px"]),
+                mark_px=float(snap.get("perp_mark", perp_mid)),
+                leverage=float(pos.get("perp_leverage", 1.0)),
+                mmr=float(pos.get("mmr", F1_MMR_FRAC)),
+            )["buffer_x"]
+        except Exception:  # noqa: BLE001 - exit-side fallback, logged
+            margin_buffer_x = float(snap.get("liq_buffer_x", 10.0))
+            self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
+                            "liq_buffer_fallback": True})
         cs = CarryPositionState(
             consec_negative_settlements=pos["consec_negative_settlements"],
             adverse_basis_move_bps=max(0.0, cur_basis_bps - pos["entry_basis_bps"]),
-            margin_buffer_x=float(snap.get("liq_buffer_x", 10.0)),
+            margin_buffer_x=margin_buffer_x,
             hedge_leg_age_sec=now - float(snap.get("ts", now)),
             notional_mismatch_pct=mismatch_pct,
             spread_bps=spread_bps,
@@ -279,7 +361,7 @@ class CarryRunner:
         summary["closed"] += 1
 
     def _close(self, state, symbol, snap, now, exit_reason) -> None:
-        pos = state["positions"].pop(symbol)
+        pos = state["positions"].pop(f"{self.venue}:{symbol}")
         slip = self.slip_frac
         spot_exit = float(snap["spot_bid"]) * (1.0 - slip)  # sell spot: hit bid
         perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: pay up
@@ -428,6 +510,15 @@ def write_report(state: dict, *, out_dir: Path | str = "reports",
         f"({chk['zero_unresolved_one_leg']['value']} blocks pending manual review)",
         f"- [{_mark(chk['concentration'])}] no symbol/venue > "
         f"{F1_MAX_PNL_CONCENTRATION_PCT:.0f}% of |PnL| concentration",
+        "",
+        "## Live-activation preconditions (static — NOT evaluated by this report)",
+    ]
+    for item in LIVE_ACTIVATION_PRECONDITIONS:
+        lines.append(f"- [UNMET] {item}")
+    lines += [
+        "",
+        "All items above are UNMET by definition in PAPER; this report cannot mark "
+        "them met. Live activation is prohibited while any item is unmet.",
         "",
         "PAPER/SIM only — no real orders were or can be placed by this runner.",
     ]

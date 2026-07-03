@@ -38,7 +38,7 @@ from core.spot_regime import (  # noqa: E402
     REGIME_DEFENSIVE,
     REGIME_NORMAL,
     REGIME_REDUCED,
-    daily_ema200_regime,
+    daily_ema200_regime_hysteresis,
 )
 from core.walk_forward import WalkForward  # noqa: E402
 from scripts.s2_basket_slice import point_in_time_universe  # noqa: E402
@@ -57,6 +57,8 @@ DEFAULT_TOP_N = 3                 # hold strongest 2-4
 MIN_TOP_N, MAX_TOP_N = 2, 4
 DEFAULT_REBALANCE_EVERY = 7       # bars between scheduled rebalances
 MIN_TURNOVER_FRAC = 0.05          # cost-aware skip floor
+ADMISSION_RETURN_WINDOW = 30      # raw abs-return admission horizon (reuses 30d)
+MIN_ADMITTED = 2                  # fewer admitted symbols -> 100% USDT
 # Regime -> total coin exposure (rest is USDT). Long-only by construction.
 REGIME_EXPOSURE = {REGIME_NORMAL: 1.0, REGIME_REDUCED: 0.5, REGIME_DEFENSIVE: 0.0}
 LOOKBACK = max(max(RETURN_WINDOWS), EMA_SLOPE_PERIOD + EMA_SLOPE_LOOKBACK, VOL_LOOKBACK)
@@ -161,6 +163,30 @@ def rank_scores(
     return dict(ordered)
 
 
+# ── absolute-return admission gate ─────────────────────────────────────
+def admit_universe(
+    closes: pd.DataFrame,
+    t: int,
+    universe: list,
+    *,
+    window: int = ADMISSION_RETURN_WINDOW,
+) -> list:
+    """Symbols whose RAW absolute return over the last ``window`` bars ending
+    at ``t`` is > 0. NaN at either endpoint excludes the symbol. Deterministic
+    (sorted)."""
+    if t - window < 0:
+        return []
+    admitted = []
+    for s in sorted(universe):
+        now = float(closes[s].iloc[t])
+        past = float(closes[s].iloc[t - window])
+        if math.isnan(now) or math.isnan(past):
+            continue
+        if now / past - 1.0 > 0.0:
+            admitted.append(s)
+    return admitted
+
+
 # ── regime-gated selection ─────────────────────────────────────────────
 def select_targets(scores: dict, regime: str, *, top_n: int = DEFAULT_TOP_N) -> dict:
     """Target weights (incl. USDT) from ranked scores under the regime gate.
@@ -223,20 +249,30 @@ def should_rebalance(
 
 # ── backtest ───────────────────────────────────────────────────────────
 def compute_regimes(closes: pd.DataFrame, *, ema_period: int = 200) -> list:
-    """Per-bar regime from closed daily closes (DEFENSIVE until enough history)."""
+    """Per-bar regime from closed daily closes (DEFENSIVE until enough history).
+
+    Uses the hysteresis regime variant, threading the BTC/ETH band states
+    through the sequential replay (reset on missing-history/NaN bars) so the
+    replay is deterministic and whipsaw-damped.
+    """
     n = len(closes)
     out = []
     btc = closes["BTC"].to_numpy(float) if "BTC" in closes else None
     eth = closes["ETH"].to_numpy(float) if "ETH" in closes else None
+    prev_states = None
     for t in range(n):
         if btc is None or eth is None or t + 1 < ema_period:
             out.append(REGIME_DEFENSIVE)
+            prev_states = None
             continue
         b, e = btc[: t + 1], eth[: t + 1]
         if np.isnan(b).any() or np.isnan(e).any():
             out.append(REGIME_DEFENSIVE)
+            prev_states = None
             continue
-        out.append(daily_ema200_regime(list(b), list(e), ema_period=ema_period))
+        regime, prev_states = daily_ema200_regime_hysteresis(
+            list(b), list(e), ema_period=ema_period, prev_states=prev_states)
+        out.append(regime)
     return out
 
 
@@ -250,13 +286,17 @@ def simulate_rotation(
     rebalance_every: int = DEFAULT_REBALANCE_EVERY,
     venue: str = "binance",
     spread_bps: dict | None = None,
+    admission_window: int | None = ADMISSION_RETURN_WINDOW,
 ) -> list[dict]:
     """Replay the regime-gated rotation; one RESOLVED record per period.
 
     Rank at closed bar ``t`` (regime known at ``t``), fill at ``t+1`` OPEN,
     hold to the next scheduled bar's t+1 open. A scheduled rebalance is
     SKIPPED (holdings carried, no cost) when ``should_rebalance`` says so.
-    Deterministic; long-only.
+    When ``admission_window`` is set (default), only symbols with a positive
+    raw absolute return over that window are ranked; fewer than
+    ``MIN_ADMITTED`` admitted -> 100% USDT. ``admission_window=None``
+    reproduces the exact legacy behavior. Deterministic; long-only.
     """
     n = len(closes)
     per_side = round_trip_cost(venue, market_type="spot") / 2.0
@@ -268,7 +308,13 @@ def simulate_rotation(
     for ri, t in enumerate(rebal):
         uni = point_in_time_universe(closes, t, lookback=LOOKBACK)
         regime = regimes[t]
-        scores = rank_scores(closes, volumes, t, uni, spread_bps) if uni else {}
+        admitted = None
+        if admission_window is None:
+            ranked = uni
+        else:
+            admitted = admit_universe(closes, t, uni, window=admission_window)
+            ranked = admitted if len(admitted) >= MIN_ADMITTED else []
+        scores = rank_scores(closes, volumes, t, ranked, spread_bps) if ranked else {}
         targets = select_targets(scores, regime, top_n=top_n)
         coin_targets = {c: w for c, w in targets.items() if c != "USDT"}
         decision = should_rebalance(held, targets, portfolio_value=1.0, venue=venue)
@@ -299,7 +345,7 @@ def simulate_rotation(
             legs.append({"symbol": s, "weight": float(w), "entry_idx": int(ei),
                          "entry_px": entry_px, "exit_idx": int(xi),
                          "exit_px": exit_px, "gross_pnl": float(r)})
-        periods.append({
+        period = {
             "decision_idx": int(t), "entry_idx": int(ei), "exit_idx": int(xi),
             "regime": regime, "action": decision["action"],
             "weights": {k: float(v) for k, v in weights.items()},
@@ -308,7 +354,10 @@ def simulate_rotation(
             "net_pnl": float(gross - cost),
             "fees_slippage": float(per_side * 2.0),
             "label_status": "RESOLVED",
-        })
+        }
+        if admitted is not None:
+            period["n_admitted"] = len(admitted)
+        periods.append(period)
     return periods
 
 
@@ -329,6 +378,7 @@ def build_spot_s2_spec():
             "rank": "z(ret30/14/7)+z(ema50_slope)+z(volume_confirm)-z(realized_vol)-spread",
             "hold_top_n": [MIN_TOP_N, MAX_TOP_N],
             "regime_gate": "daily_ema200_btc_eth (NORMAL only; REDUCED half; DEFENSIVE USDT)",
+            "admission": "raw 30d abs return > 0; <2 admitted -> 100% USDT",
         },
         exit_rules={
             "scheduled_rebalance_bars": DEFAULT_REBALANCE_EVERY,

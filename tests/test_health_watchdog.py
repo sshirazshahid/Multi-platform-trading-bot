@@ -64,6 +64,8 @@ def _reset_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "POST_MORTEM_PATH", tmp_path / "post_mortem.json")
     monkeypatch.setattr(hw, "DECISIONS_PATH",   tmp_path / "mcp_decisions.jsonl")
     monkeypatch.setattr(hw, "WAREHOUSE_PATH",   tmp_path / "wh.sqlite")
+    monkeypatch.setattr(hw, "CARRY_HEARTBEAT_PATH",
+                        tmp_path / "carry_heartbeat.json")
     yield
 
 
@@ -198,6 +200,65 @@ def test_model_starving_silent_when_in_drawdown(tmp_path):
                            warehouse_path=tmp_path / "wh.sqlite")
     wd.tick()
     assert not any("model_gate_starving" in c["title"] for c in n.calls)
+
+
+# ── W6: carry-runner heartbeat staleness (edge-triggered) ─────────────
+
+def _carry_alerts(n):
+    return [c for c in n.calls if "carry_heartbeat_stale" in c["title"]]
+
+
+def test_carry_heartbeat_missing_no_alert(tmp_path):
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    assert _carry_alerts(n) == []  # "carry never ran" is not an alert
+
+
+def test_carry_heartbeat_fresh_no_alert(tmp_path):
+    (tmp_path / "carry_heartbeat.json").write_text("{}")
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    assert _carry_alerts(n) == []
+
+
+def test_carry_heartbeat_stale_fires_once_then_silent(tmp_path):
+    import os
+    hb = tmp_path / "carry_heartbeat.json"
+    hb.write_text("{}")
+    old = time.time() - 2 * 3600  # 2h > 1h threshold
+    os.utime(hb, (old, old))
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    alerts = _carry_alerts(n)
+    assert len(alerts) == 1
+    assert "WARN" in alerts[0]["title"]
+    wd.tick()
+    assert len(_carry_alerts(n)) == 1  # edge-triggered: silent while sticky
+
+
+def test_carry_heartbeat_refresh_rearms_then_fires_again(tmp_path):
+    import os
+    hb = tmp_path / "carry_heartbeat.json"
+    hb.write_text("{}")
+    old = time.time() - 2 * 3600
+    os.utime(hb, (old, old))
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    wd.tick()
+    assert len(_carry_alerts(n)) == 1
+    hb.write_text("{}")  # runner wrote again -> condition clears -> re-arm
+    wd.tick()
+    assert len(_carry_alerts(n)) == 1
+    os.utime(hb, (old, old))  # goes stale again
+    wd.tick()
+    assert len(_carry_alerts(n)) == 2
 
 
 def test_cooldown_suppresses_repeat(tmp_path):

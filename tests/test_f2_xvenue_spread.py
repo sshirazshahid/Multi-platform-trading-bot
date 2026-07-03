@@ -166,7 +166,8 @@ class TestActivationLatch:
         assert res["allowed"] is False
         assert "one-leg" in res["reason"]
 
-    def test_accepts_synthetic_qualifying_record(self, tmp_path):
+    @staticmethod
+    def _qualifying_registry(tmp_path):
         p = tmp_path / "reg.json"
         register_evidence(
             "F1",
@@ -175,8 +176,31 @@ class TestActivationLatch:
             promotion_status="lab_paper",
             path=p,
         )
+        return p
+
+    def test_qualifying_evidence_alone_refuses_fee_unverified(self, tmp_path):
+        # Fail-closed pin: clean evidence but NO fee-tier verification -> refuse.
+        p = self._qualifying_registry(tmp_path)
         res = f2_activation_allowed(registry_path=p)
+        assert res["allowed"] is False
+        assert "fail-closed" in res["reason"]
+
+    def test_qualifying_evidence_with_maker_fee_tier_allows(self, tmp_path):
+        p = self._qualifying_registry(tmp_path)
+        res = f2_activation_allowed(registry_path=p, maker_fee_frac=0.0001)
         assert res["allowed"] is True
+
+    def test_qualifying_evidence_with_high_maker_fee_refuses(self, tmp_path):
+        p = self._qualifying_registry(tmp_path)
+        res = f2_activation_allowed(registry_path=p, maker_fee_frac=0.0005)
+        assert res["allowed"] is False
+        assert "maker fee" in res["reason"]
+
+    def test_qualifying_evidence_with_taker_ack_allows(self, tmp_path):
+        p = self._qualifying_registry(tmp_path)
+        res = f2_activation_allowed(registry_path=p, taker_economics_acknowledged=True)
+        assert res["allowed"] is True
+        assert "taker/taker floor acknowledged" in res["reason"]
 
 
 # ── spec registration ──────────────────────────────────────────────────
@@ -189,6 +213,10 @@ class TestF2Spec:
         assert spec.entry_rules["pre_funded_venues_assumed"] is True
         assert spec.entry_rules["min_net_edge_bps_floor"] == 20.0
         assert spec.entry_rules["cost_mult_floor"] == 4.0
+        assert spec.risk_limits["maker_fee_precondition_frac"] == pytest.approx(0.0001)
+        assert spec.risk_limits["taker_taker_floor_ack_alternative"] is True
+        notes = spec.risk_limits["live_execution_notes"]
+        assert any("taker/taker" in n for n in notes)
 
     def test_spec_registers_disabled_in_registry(self, tmp_path):
         p = tmp_path / "reg.json"

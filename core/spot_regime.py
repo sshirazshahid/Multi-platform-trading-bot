@@ -19,6 +19,10 @@ REGIME_REDUCED = "REDUCED"
 REGIME_DEFENSIVE = "DEFENSIVE"
 
 EMA_PERIOD = 200
+# Hysteresis band around the EMA: band = mult x mean(|close-to-close delta|)
+# over the last HYSTERESIS_BAND_LOOKBACK deltas (whipsaw damping, W4).
+HYSTERESIS_BAND_MULT = 0.5
+HYSTERESIS_BAND_LOOKBACK = 14
 DRIFT_THRESHOLD = 0.05
 # Expected risk-reduction value per $1 of drift notional closed (conservative
 # placeholder; a paper soak calibrates it). Compared against per-side spot cost.
@@ -74,6 +78,52 @@ def daily_ema200_regime(
         if closes[-1] > _ema(closes, ema_period)
     )
     return {2: REGIME_NORMAL, 1: REGIME_REDUCED, 0: REGIME_DEFENSIVE}[above]
+
+
+def daily_ema200_regime_hysteresis(
+    btc_closes: list,
+    eth_closes: list,
+    *,
+    ema_period: int = EMA_PERIOD,
+    band_mult: float = HYSTERESIS_BAND_MULT,
+    band_lookback: int = HYSTERESIS_BAND_LOOKBACK,
+    prev_states: dict | None = None,
+) -> tuple:
+    """Whipsaw-damped EMA200 regime: ``(regime, {"BTC"/"ETH": "above"|"below"})``.
+
+    Per symbol the band is ``band_mult`` x mean(|close-to-close delta|) over the
+    last ``band_lookback`` deltas. Beyond ``ema +/- band`` the state flips;
+    inside the band the previous state (``prev_states``) is retained. Cold start
+    inside the band falls back to the stateless sign, so the FIRST evaluation is
+    bit-identical to ``daily_ema200_regime``. Closed-candle discipline is the
+    caller's job.
+    """
+    states = {}
+    for name, closes in (("BTC", btc_closes), ("ETH", eth_closes)):
+        if len(closes) < ema_period:
+            raise ValueError(
+                f"{name}: need >= {ema_period} closed daily candles, got {len(closes)}"
+            )
+        ema = _ema(closes, ema_period)
+        close = closes[-1]
+        deltas = [
+            abs(closes[i] - closes[i - 1])
+            for i in range(len(closes) - band_lookback, len(closes))
+        ]
+        band = band_mult * (sum(deltas) / band_lookback)
+        if close > ema + band:
+            state = "above"
+        elif close < ema - band:
+            state = "below"
+        else:
+            prev = (prev_states or {}).get(name)
+            if prev in ("above", "below"):
+                state = prev
+            else:  # cold start inside the band -> stateless sign fallback
+                state = "above" if close > ema else "below"
+        states[name] = state
+    above = sum(1 for s in states.values() if s == "above")
+    return {2: REGIME_NORMAL, 1: REGIME_REDUCED, 0: REGIME_DEFENSIVE}[above], states
 
 
 # ── rebalance decision ─────────────────────────────────────────────────

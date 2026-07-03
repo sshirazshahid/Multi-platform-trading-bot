@@ -73,6 +73,7 @@ class Provider:
 
 
 def build(tmp_path, clock, provider, **kw):
+    kw.setdefault("heartbeat_path", tmp_path / "carry_heartbeat.json")
     return CarryRunner(
         state_path=tmp_path / "carry_positions.json",
         snapshot_provider=provider,
@@ -106,7 +107,7 @@ def test_full_lifecycle_resolved_cycle_net_is_funding_minus_costs(tmp_path):
     s = r.run_once()
     assert s["opened"] == 1
     state = json.loads((tmp_path / "carry_positions.json").read_text())
-    pos = state["positions"]["BTC/USDT"]
+    pos = state["positions"]["binance:BTC/USDT"]
     notional = pos["notional"]
 
     # accrue two positive settlements (8h apart), then flip funding negative:
@@ -146,7 +147,7 @@ def test_settlement_accounting_per_interval(tmp_path, interval_hours, n_expected
     clock.advance(24 * HOUR + 1)
     r.run_once()
     state = json.loads((tmp_path / "carry_positions.json").read_text())
-    assert state["positions"]["BTC/USDT"]["settlements_held"] == n_expected
+    assert state["positions"]["binance:BTC/USDT"]["settlements_held"] == n_expected
 
 
 def test_interval_change_mid_hold(tmp_path):
@@ -161,7 +162,7 @@ def test_interval_change_mid_hold(tmp_path):
     clock.advance(8 * HOUR)       # boundaries at +9h and +13h -> 2 more at 4h
     r.run_once()
     state = json.loads((tmp_path / "carry_positions.json").read_text())
-    pos = state["positions"]["BTC/USDT"]
+    pos = state["positions"]["binance:BTC/USDT"]
     assert pos["settlements_held"] == 3
     assert pos["interval_hours"] == 4.0
 
@@ -251,6 +252,212 @@ def test_runner_report_flag_via_cli_helper(tmp_path):
     out = run_report_only(state_path=tmp_path / "carry_positions.json",
                           out_dir=tmp_path / "reports")
     assert Path(out).exists()
+
+
+# ── W1: per-position liquidation model (fill_reality) ─────────────────
+def test_entry_gate_logs_computed_liq_buffer_and_ignores_lying_snapshot(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, liq_buffer_x=0.5)  # lying snapshot: would fail gate
+    r = build(tmp_path, clock, provider)
+    s = r.run_once()
+    assert s["opened"] == 1  # computed 1x buffer (~200x) wins over the lie
+    rec = json.loads(
+        (tmp_path / "carry_gate_log.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["ok"] is True
+    assert rec["liq_buffer_x"] == pytest.approx(200.0, rel=0.05)
+    # the position persists the per-position liquidation-model inputs
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    pos = state["positions"]["binance:BTC/USDT"]
+    assert pos["perp_leverage"] == 1.0
+    assert pos["mmr"] == 0.005
+
+
+def test_exit_fires_on_computed_margin_buffer_despite_lying_snapshot(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, liq_buffer_x=10.0)  # snapshot claims all is well
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+    # perp mark ~2x above entry: stored-entry margin buffer collapses to 0.
+    provider.kw["spot"] = 200.0
+    provider.kw["perp"] = 200.04
+    clock.advance(60.0)
+    s = r.run_once()
+    assert s["closed"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    (cyc,) = state["cycles"]
+    assert "margin_buffer" in cyc["exit_reason"]
+
+
+def test_entry_fail_closed_when_buffer_computation_raises(tmp_path, monkeypatch):
+    import core.carry_runner as cr
+
+    def boom(**kw):
+        raise RuntimeError("no mark")
+
+    monkeypatch.setattr(cr, "perp_short_margin_buffer_x", boom)
+    clock = FakeClock()
+    provider = Provider(clock, liq_buffer_x=5.0)  # healthy snap must NOT rescue entry
+    r = build(tmp_path, clock, provider)
+    s = r.run_once()
+    assert s["opened"] == 0
+    rec = json.loads(
+        (tmp_path / "carry_gate_log.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["ok"] is False
+    assert rec["liq_buffer_uncomputable"] is True
+    assert "liquidation" in rec["reason"]
+
+
+def test_exit_fallback_to_snapshot_buffer_is_logged(tmp_path, monkeypatch):
+    import core.carry_runner as cr
+
+    clock = FakeClock()
+    provider = Provider(clock, liq_buffer_x=10.0)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+
+    def boom(**kw):
+        raise RuntimeError("no mark")
+
+    monkeypatch.setattr(cr, "perp_short_margin_buffer_x", boom)
+    clock.advance(60.0)
+    s = r.run_once()
+    assert s["held"] == 1 and s["closed"] == 0  # snap fallback 10x > 3x floor
+    recs = [json.loads(x) for x in
+            (tmp_path / "carry_gate_log.jsonl").read_text().strip().splitlines()]
+    assert any(rec.get("liq_buffer_fallback") is True for rec in recs)
+
+
+# ── W6: liveness heartbeat ─────────────────────────────────────────────
+def test_run_once_writes_heartbeat_with_ts_and_summary(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    hb = tmp_path / "carry_heartbeat.json"
+    r = build(tmp_path, clock, provider, heartbeat_path=hb)
+    summary = r.run_once()
+    payload = json.loads(hb.read_text(encoding="utf-8"))
+    assert payload["ts"] == clock()
+    assert payload["venue"] == "binance"
+    assert payload["summary"] == summary
+    assert not list(tmp_path.glob("*.tmp"))  # atomic write, no temp litter
+
+
+def test_heartbeat_path_none_disables_write(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider, heartbeat_path=None)
+    r.run_once()
+    assert not list(tmp_path.glob("carry_heartbeat*"))
+
+
+def test_heartbeat_unwritable_path_does_not_raise(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x")  # a FILE where the heartbeat's parent dir must go
+    r = build(tmp_path, clock, provider, heartbeat_path=blocker / "hb.json")
+    summary = r.run_once()  # must not raise
+    assert summary["opened"] == 1
+
+
+# ── W2: multi-venue state keying, migration, concentration pin ────────
+def test_two_venues_share_one_state_file_with_venue_keyed_positions(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    rb = build(tmp_path, clock, provider)                  # binance (default)
+    ry = build(tmp_path, clock, provider, venue="bybit")
+    sb = rb.run_once()
+    sy = ry.run_once()
+    assert sb["venue"] == "binance" and sy["venue"] == "bybit"
+    assert sb["opened"] == 1 and sy["opened"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert set(state["positions"]) == {"binance:BTC/USDT", "bybit:BTC/USDT"}
+
+
+def test_bybit_block_does_not_block_binance(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+
+    def hook(symbol):
+        return {"spot_fill_frac": 1.0, "perp_fill_frac": 0.0}
+
+    ry = build(tmp_path, clock, provider, venue="bybit", failure_hook=hook)
+    assert ry.run_once()["failed"] == 1
+    rb = build(tmp_path, clock, provider)  # binance, no failure hook
+    s = rb.run_once()
+    assert s["opened"] == 1 and s["blocked"] == 0
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "bybit:BTC/USDT" in state["blocks"]
+    assert "binance:BTC/USDT" in state["positions"]
+
+
+def test_legacy_bare_symbol_state_migrates_on_load_and_is_managed(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+    # rewrite the state file with a legacy bare-symbol position key
+    p = tmp_path / "carry_positions.json"
+    state = json.loads(p.read_text())
+    state["positions"] = {"BTC/USDT": state["positions"]["binance:BTC/USDT"]}
+    p.write_text(json.dumps(state))
+    s = r.run_once()
+    assert s["held"] == 1  # migrated key is picked up and managed
+    state = json.loads(p.read_text())
+    assert set(state["positions"]) == {"binance:BTC/USDT"}
+
+
+def test_promotion_checklist_venue_concentration_regression_pin():
+    """Structural pin: binance-only history CANNOT pass the concentration gate."""
+    from core.carry_runner import promotion_checklist
+
+    def cyc(venue, symbol, pnl):
+        return {"symbol": symbol, "venue": venue, "net_pnl": pnl,
+                "gross_funding": pnl, "basis_pnl": 0.0, "fees": 0.0,
+                "label_status": "RESOLVED"}
+
+    binance_only = [cyc("binance", s, 1.0)
+                    for s in ("BTC/USDT", "ETH/USDT") for _ in range(5)]
+    chk = promotion_checklist(binance_only, {})
+    assert chk["concentration"]["pass"] is False
+    assert chk["concentration"]["venue_share_pct"] == pytest.approx(100.0)
+
+    split = (binance_only
+             + [cyc("bybit", s, 1.0)
+                for s in ("BTC/USDT", "ETH/USDT") for _ in range(5)])
+    chk2 = promotion_checklist(split, {})
+    assert chk2["concentration"]["pass"] is True
+    assert chk2["concentration"]["venue_share_pct"] == pytest.approx(50.0)
+
+
+def test_report_renders_live_activation_preconditions(tmp_path):
+    from core.carry_runner import LIVE_ACTIVATION_PRECONDITIONS
+
+    assert len(LIVE_ACTIVATION_PRECONDITIONS) == 3
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    r.run_once()
+    out = write_report(r.load_state(), out_dir=tmp_path / "reports", now_fn=clock)
+    text = Path(out).read_text(encoding="utf-8")
+    assert "Live-activation preconditions" in text
+    assert text.count("[UNMET]") == 3
+    assert "Live activation is prohibited while any item is unmet." in text
+    # rendered AFTER the promotion checklist
+    assert text.index("Promotion-gate checklist") < text.index(
+        "Live-activation preconditions")
+
+
+def test_build_f1_spec_binance_bybit_requires_latch():
+    # extends tests/test_f1_rev5_gates.py latch coverage with the exact
+    # two-venue set the paper script now uses (kept here: file ownership).
+    from research.funding_carry_lab import build_f1_spec
+
+    with pytest.raises(ValueError):
+        build_f1_spec(venues=("binance", "bybit"))
+    spec = build_f1_spec(symbols=("BTC/USDT", "ETH/USDT"),
+                         venues=("binance", "bybit"),
+                         allow_extended_universe=True)
+    assert spec.venues == ["binance", "bybit"]
 
 
 # ── grep-proof: no order path on the runner ────────────────────────────

@@ -105,6 +105,27 @@ def liquidation_buffer_breach(
     }
 
 
+def perp_short_margin_buffer_x(
+    *, entry_px: float, mark_px: float, leverage: float, mmr: float = 0.005
+) -> dict[str, Any]:
+    """Margin buffer of an isolated SHORT perp leg as a multiple of maintenance (SIM).
+
+    ``equity_frac = 1/leverage + (entry_px - mark_px)/entry_px`` (short PnL in
+    entry-notional units); ``buffer_x = max(0, equity_frac)/mmr``, so buffer_x
+    is exactly 1.0 at ``liquidation_price("short", ...)`` and 0 past equity
+    exhaustion. Returns ``{buffer_x, liq_px, equity_frac}``.
+    """
+    e, m, lev = float(entry_px), float(mark_px), float(leverage)
+    if e <= 0 or m <= 0 or lev <= 0:
+        raise ValueError("entry_px, mark_px and leverage must be > 0")
+    equity_frac = 1.0 / lev + (e - m) / e
+    return {
+        "buffer_x": max(0.0, equity_frac) / float(mmr),
+        "liq_px": liquidation_price("short", e, lev, mmr=mmr),
+        "equity_frac": equity_frac,
+    }
+
+
 # ------------------------------------------------------------- failed leg
 def failed_leg_outcome(legs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Detect partially/failed legs and the residual UNHEDGED quantity.
