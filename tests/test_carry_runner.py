@@ -726,6 +726,32 @@ def test_clear_recovery_drops_heartbeat_flag(tmp_path):
     assert json.loads(hb.read_text())["summary"]["recovery_active"] is False
 
 
+def test_report_measured_accuracy_is_honest(tmp_path):
+    # Win rate is reported as measured, flagged on small samples, and framed
+    # as informational — never a promotion gate.
+    from core.carry_runner import write_report
+
+    def _cyc(net):
+        return {"symbol": "BTC/USDT", "venue": "binance", "net_pnl": net,
+                "gross_funding": max(net, 0.0), "basis_pnl": 0.0, "fees": 0.01,
+                "slippage": 0.01, "label_status": "RESOLVED"}
+
+    state = {"positions": {}, "blocks": {},
+             "cycles": [_cyc(1.0), _cyc(0.5), _cyc(0.25), _cyc(0.1), _cyc(-0.6)],
+             "recovery": {"active": False}}
+    p = write_report(state, out_dir=tmp_path, now_fn=lambda: 1_783_000_000.0)
+    text = p.read_text(encoding="utf-8")
+    assert "Measured accuracy (informational — NOT a promotion gate)" in text
+    assert "80.0% (n=5) — insufficient sample" in text
+    assert "Win rate is not expectancy" in text
+
+    empty = {"positions": {}, "blocks": {}, "cycles": [],
+             "recovery": {"active": False}}
+    text0 = write_report(empty, out_dir=tmp_path / "e",
+                         now_fn=lambda: 1_783_000_000.0).read_text(encoding="utf-8")
+    assert "n/a (0 resolved cycles" in text0
+
+
 # ── grep-proof: no order path on the runner ────────────────────────────
 def test_no_order_path_symbols_in_runner_sources():
     root = Path(__file__).resolve().parents[1]

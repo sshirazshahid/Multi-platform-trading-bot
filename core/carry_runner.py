@@ -513,6 +513,20 @@ def promotion_checklist(cycles: list[dict], blocks: dict) -> dict:
     }
 
 
+def _cycle_win_rate_line(res: list[dict]) -> str:
+    """Honest measured per-cycle win rate over RESOLVED cycles.
+
+    Informational only — never a gate. Small samples are flagged so a lucky
+    early streak cannot masquerade as 'accuracy'.
+    """
+    n = len(res)
+    if n == 0:
+        return "n/a (0 resolved cycles — no accuracy claim can be made yet)"
+    wr = 100.0 * sum(1 for c in res if float(c["net_pnl"]) > 0) / n
+    caveat = " — insufficient sample (n < 20), interpret with caution" if n < 20 else ""
+    return f"{wr:.1f}% (n={n}){caveat}"
+
+
 def write_report(state: dict, *, out_dir: Path | str = "reports",
                  now_fn: Callable[[], float] = time.time) -> Path:
     """Emit reports/f1_carry_report_<YYYYMMDD>.md from the runner state."""
@@ -551,6 +565,12 @@ def write_report(state: dict, *, out_dir: Path | str = "reports",
         f"- Slippage (modeled, in fill px): {sum(c['slippage'] for c in res):.4f}",
         f"- Net PnL: {sum(c['net_pnl'] for c in res):+.4f}",
         f"- Failed-leg count: {len(failed)}",
+        "",
+        "## Measured accuracy (informational — NOT a promotion gate)",
+        f"- Per-cycle win rate: {_cycle_win_rate_line(res)}",
+        "- Win rate is not expectancy: profit factor and the checklist below decide "
+        "promotion. A high win rate with negative expectancy is a failure mode, "
+        "not a target.",
         "",
         "## Promotion-gate checklist (Rev 5)",
         f"- [{_mark(chk['min_cycles'])}] >= 60 cycles ({chk['min_cycles']['value']})",
