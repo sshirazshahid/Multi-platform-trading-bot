@@ -322,3 +322,45 @@ def test_cooldown_suppresses_repeat(tmp_path):
     wd.tick()
     review_alerts = [c for c in n.calls if "spec12_review_required" in c["title"]]
     assert len(review_alerts) == 1
+
+
+# ------------------------------------------------ carry sample milestones
+def _carry_state_file(tmp_path, n_resolved, wins):
+    cycles = [{"label_status": "RESOLVED", "net_pnl": 1.0 if i < wins else -1.0}
+              for i in range(n_resolved)]
+    p = tmp_path / "carry_positions.json"
+    p.write_text(json.dumps({"positions": {}, "blocks": {}, "cycles": cycles}),
+                 encoding="utf-8")
+    return p
+
+
+def test_carry_milestone_announces_measured_wr_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "CARRY_STATE_PATH", _carry_state_file(tmp_path, 1, 1))
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n)
+    wd._check_carry_sample_milestones()
+    assert len(n.calls) == 1
+    msg = n.calls[0]["message"]
+    assert "milestone 1" in msg and "1 resolved cycles" in msg and "100%" in msg
+    wd._check_carry_sample_milestones()  # same count: no re-announce
+    assert len(n.calls) == 1
+
+
+def test_carry_milestone_ten_reports_sub_bar_wr(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "CARRY_STATE_PATH", _carry_state_file(tmp_path, 10, 7))
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n)
+    wd._check_carry_sample_milestones()
+    assert len(n.calls) == 1
+    msg = n.calls[0]["message"]
+    assert "milestone 10" in msg and "70%" in msg and "7W/3L" in msg
+    assert n.calls[0]["context"]["win_rate_pct"] == 70.0
+
+
+def test_carry_milestone_silent_without_file_or_cycles(tmp_path, monkeypatch):
+    n = _FakeNotifier()
+    monkeypatch.setattr(hw, "CARRY_STATE_PATH", tmp_path / "missing.json")
+    hw.HealthWatchdog(_make_engine(), notifier=n)._check_carry_sample_milestones()
+    monkeypatch.setattr(hw, "CARRY_STATE_PATH", _carry_state_file(tmp_path, 0, 0))
+    hw.HealthWatchdog(_make_engine(), notifier=n)._check_carry_sample_milestones()
+    assert n.calls == []
