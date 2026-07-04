@@ -32,6 +32,7 @@ from core.carry_runner import (  # noqa: E402
     CarryRunner,
     write_report,
 )
+from core.funding_history import avg_7d  # noqa: E402
 
 STATE_PATH = ROOT / DEFAULT_STATE_PATH
 HEARTBEAT_PATH = ROOT / "data" / "carry_heartbeat.json"
@@ -99,7 +100,11 @@ def build_live_snapshot_provider(venue: str):
             "depth_ratio": min(spot[2], perp[2]) / PAPER_NOTIONAL_HINT,
             "liq_buffer_x": PAPER_LIQ_BUFFER_X,
             "both_legs_fillable": True,
-            "avg_funding_7d": None,  # optional gate input (pass-through)
+            # 7d funding regime from the hourly harvester's rolling history;
+            # honest None (gate pass-through, exactly as before) until >=6
+            # periods exist in the window (core/funding_history).
+            "avg_funding_7d": avg_7d(venue, coin,
+                                     base_dir=ROOT / "data" / "funding_carry"),
             "round_trip_cost_frac": rt_cost,
             "funding": funding,
             "ts": now,
