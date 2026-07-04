@@ -180,3 +180,33 @@ def test_ledger_funding_frame_immutable():
     frame = ledger.funding(["BTC"], force=True)
     with pytest.raises(TypeError):
         frame["BTC"]["bybit"]["rate"] = 1.0
+
+
+# ------------------------------------------------- coin-aware snapshot cache
+def test_snapshot_ttl_hit_fetches_missing_coins():
+    # Regression: a TTL-fresh cache holding only BTC must FETCH ETH on request,
+    # never return the BTC-only cache (which made ETH permanently stale for any
+    # holder of the instance).
+    harv = _binance()
+    fetches = []
+    orig_fetch = harv._fetch
+    harv._fetch = lambda c: (fetches.append(c) or orig_fetch(c))
+
+    first = harv.snapshot(["BTC"])
+    assert fetches == ["BTC"] and first["BTC"]["rate"] == 0.0001
+
+    second = harv.snapshot(["ETH"])          # TTL hit, ETH missing -> fetch it
+    assert fetches == ["BTC", "ETH"]
+    assert second["ETH"]["rate"] == -0.00025 and not second["ETH"]["stale"]
+    assert "BTC" in second                   # cached BTC retained, not refetched
+
+    harv.snapshot(["BTC", "ETH"])            # fully cached -> zero new fetches
+    assert fetches == ["BTC", "ETH"]
+
+
+def test_ledger_memoizes_funding_harvesters():
+    ledger = MarketDataLedger({})
+    first = ledger._venue_funding_harvesters()
+    second = ledger._venue_funding_harvesters()
+    assert first is second
+    assert first["binance"] is second["binance"]

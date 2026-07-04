@@ -224,15 +224,23 @@ class _FundingMetaHarvester:
 
     def snapshot(self, coins: list[str], *, force: bool = False) -> dict[str, dict[str, Any]]:
         now = time.time()
-        if not force and self._cache and (now - self._cache_time) < self._cache_ttl:
+        cache_fresh = bool(self._cache) and (now - self._cache_time) < self._cache_ttl
+        if not force and cache_fresh and all(c in self._cache for c in coins):
             return self._cache
-        out: dict[str, dict] = {}
+        # Coin-aware cache: a TTL-hit for coins NOT in the cache must fetch the
+        # missing coins, never hand back a wrong-coin cache (a holder of this
+        # instance would otherwise see ETH permanently stale after a BTC call).
+        out: dict[str, dict] = dict(self._cache) if (not force and cache_fresh) else {}
         for coin in coins:
+            if coin in out:
+                continue
             try:
                 out[coin] = self._fetch(coin)
             except Exception:
                 out[coin] = _neutral_funding(self.venue, coin)
-        self._cache, self._cache_time = out, now
+        self._cache = out
+        if force or not cache_fresh:
+            self._cache_time = now  # merged-in coins expire with the batch
         return out
 
 

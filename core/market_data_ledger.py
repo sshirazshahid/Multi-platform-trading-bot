@@ -89,13 +89,16 @@ class MarketDataLedger:
 
     # ----------------------------------------------------------------- funding
     def _venue_funding_harvesters(self) -> dict[str, Any]:
-        if self._funding_harvesters is not None:
-            return self._funding_harvesters
-        return {
-            "binance": BinanceFundingMetaHarvester(),
-            "bybit": BybitFundingMetaHarvester(),
-            "bitget": BitgetFundingMetaHarvester(),
-        }
+        # Memoized: recreating instances per call defeated the harvesters'
+        # snapshot cache, re-fetching every venue's full funding surface on
+        # every funding() call within one process.
+        if self._funding_harvesters is None:
+            self._funding_harvesters = {
+                "binance": BinanceFundingMetaHarvester(),
+                "bybit": BybitFundingMetaHarvester(),
+                "bitget": BitgetFundingMetaHarvester(),
+            }
+        return self._funding_harvesters
 
     def funding(
         self, coins: list[str], *, force: bool = False
