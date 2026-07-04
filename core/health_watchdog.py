@@ -55,6 +55,10 @@ from loguru import logger
 
 HEARTBEAT_PATH        = Path("data/heartbeat.json")
 CARRY_HEARTBEAT_PATH  = Path("data/carry_heartbeat.json")
+CARRY_STATE_PATH      = Path("data/carry_positions.json")
+# Live-sample accuracy milestones: announce measured per-cycle WR when the
+# resolved-cycle count first reaches each level (owner goal bar: 80%).
+CARRY_SAMPLE_MILESTONES = (1, 10, 30, 60)
 REVIEW_FLAG_PATH      = Path("data/review_required.json")
 POST_MORTEM_PATH      = Path("data/post_mortem.json")
 DECISIONS_PATH        = Path("data/mcp_decisions.jsonl")
@@ -88,6 +92,7 @@ COOLDOWN_SEC = {
     "heartbeat_stale":       30 * 60,
     "carry_heartbeat_stale": 60 * 60,
     "carry_recovery_active": 60 * 60,
+    "carry_sample_milestone": 60,  # milestones dedupe via _announced_milestones
     "spec12_review_required": 60 * 60,
     "exchange_halted":       30 * 60,
     "sl_placement_failed":   30 * 60,
@@ -159,6 +164,7 @@ class HealthWatchdog:
             self._check_heartbeat,
             self._check_carry_heartbeat,
             self._check_carry_recovery,
+            self._check_carry_sample_milestones,
             self._check_review_flag,
             self._check_exchange_halted,
             self._check_sl_placement_failed,
@@ -260,6 +266,39 @@ class HealthWatchdog:
             "carry reduce-only recovery latched — new carry entries halted; "
             "clear with scripts/run_f1_carry_paper.py --clear-recovery",
             {"path": str(CARRY_HEARTBEAT_PATH)},
+        )
+
+    def _check_carry_sample_milestones(self) -> None:
+        """Announce the live carry sample's measured accuracy at milestones.
+
+        The owner's goal (80% per-cycle accuracy) resolves in market time; this
+        makes the sample self-announcing — at 1/10/30/60 resolved cycles the
+        notifier reports the measured win rate instead of relying on anyone
+        reading reports. Once per milestone per process; an engine restart may
+        re-announce the highest reached milestone once (harmless reminder).
+        """
+        if not CARRY_STATE_PATH.exists():
+            return
+        cycles = json.loads(
+            CARRY_STATE_PATH.read_text(encoding="utf-8")).get("cycles", [])
+        resolved = [c for c in cycles if c.get("label_status") == "RESOLVED"]
+        n = len(resolved)
+        if n == 0:
+            return
+        announced = getattr(self, "_announced_milestones", set())
+        due = [m for m in CARRY_SAMPLE_MILESTONES if n >= m and m not in announced]
+        if not due:
+            return
+        announced.update(m for m in CARRY_SAMPLE_MILESTONES if n >= m)
+        self._announced_milestones = announced
+        wins = sum(1 for c in resolved if float(c.get("net_pnl", 0.0)) > 0)
+        wr = 100.0 * wins / n
+        self._alert(
+            "carry_sample_milestone", "WARN",
+            f"carry live sample milestone {max(due)}: {n} resolved cycles, "
+            f"measured win rate {wr:.0f}% ({wins}W/{n - wins}L) — owner goal "
+            f"bar is 80%; small samples overstate certainty",
+            {"resolved": n, "wins": wins, "win_rate_pct": round(wr, 1)},
         )
 
     def _check_review_flag(self) -> None:
