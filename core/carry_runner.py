@@ -213,6 +213,14 @@ class CarryRunner:
                 self._manage(state, symbol, snap, now, summary)
             else:
                 self._maybe_open(state, symbol, snap, now, summary)
+            # FIX 3 (crash-safety): _book_cycle / warehouse.record_carry_cycle /
+            # registry writes fire IMMEDIATELY inside the calls above, but state
+            # persisted only once after the whole loop. A mid-pass exception or
+            # kill after this symbol closed (cycle already warehoused) but before
+            # a later symbol finished would resurrect the closed position on
+            # reload -> double count. Persist after EACH symbol's mutation; the
+            # atomic tmp+replace preserves the shared multi-venue file semantics.
+            self.save_state(state)
         # set AFTER the pass so a latch fired mid-pass is reflected (and flows
         # into the heartbeat below, which stores this summary).
         summary["recovery_active"] = bool(state["recovery"]["active"])
@@ -386,6 +394,21 @@ class CarryRunner:
     def _manage(self, state, symbol, snap, now, summary) -> None:
         pos = state["positions"][f"{self.venue}:{symbol}"]
         f = snap.get("funding") or {}
+        # Feed-staleness guard (mirror the _gate_inputs freshness check): a stale
+        # or None-rate funding frame coerces rate->0, drives net_edge negative,
+        # and would FORCE-CLOSE a healthy held position (booking full exit fees +
+        # poisoning RESOLVED evidence). SKIP management this pass -> HOLD. A
+        # genuinely stale hedge is still caught by the hedge-leg-age / stale exit
+        # when the frame is FRESH but old.
+        snap_age = now - float(snap.get("ts", now))
+        feeds_fresh = (
+            (not f.get("stale", True)) and snap_age <= 300.0 and f.get("rate") is not None
+        )
+        if not feeds_fresh:
+            self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
+                            "ok": False, "held": True,
+                            "reason": "manage_skipped_stale_feed"})
+            return
         rate = float(f.get("rate") or 0.0)
         # accrue every PASSED settlement boundary at the venue's ACTUAL interval
         # (the interval is re-read from the frame at each boundary so a mid-hold

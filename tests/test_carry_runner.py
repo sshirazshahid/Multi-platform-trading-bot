@@ -31,7 +31,8 @@ class FakeClock:
 
 def make_snap(now, *, rate=0.0004, interval_hours=8.0, next_in_sec=2 * HOUR,
               spot=100.0, perp=100.02, spread_bps=1.0, depth_ratio=30.0,
-              liq_buffer_x=5.0, stale=False, avg_funding_7d=0.0003):
+              liq_buffer_x=5.0, stale=False, avg_funding_7d=0.0003,
+              rt_cost=0.0002):
     half = spot * spread_bps / 1e4 / 2.0
     phalf = perp * spread_bps / 1e4 / 2.0
     return {
@@ -42,7 +43,7 @@ def make_snap(now, *, rate=0.0004, interval_hours=8.0, next_in_sec=2 * HOUR,
         "liq_buffer_x": liq_buffer_x,
         "both_legs_fillable": True,
         "avg_funding_7d": avg_funding_7d,
-        "round_trip_cost_frac": 0.0002,
+        "round_trip_cost_frac": rt_cost,
         "funding": {
             "rate": rate, "interval_hours": interval_hours,
             "next_funding_ts": now + next_in_sec, "ts": now,
@@ -848,6 +849,127 @@ def test_invalid_execution_mode_raises(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         build(tmp_path, FakeClock(), Provider(FakeClock()), execution_mode="bogus")
+
+
+# ── FIX 1: gate cost == booked full-carry (spot+perp, 4 crossings) cost ─
+def test_carry_round_trip_cost_is_full_four_crossing_taker_cost():
+    # The provider must feed the gate the SAME cost the runner books in taker
+    # mode: spot round-trip fee + perp round-trip fee + slippage on all 4
+    # crossings, NOT the futures-only ~20bps it fed before.
+    #   binance: 2*.001(spot) + 2*.0005(perp) + 4*.0005(slip) = .005 (~50bps).
+    from core.cost_model import round_trip_cost
+    from scripts.run_f1_carry_paper import carry_round_trip_cost_frac
+
+    assert carry_round_trip_cost_frac("binance") == pytest.approx(0.005)
+    # strictly larger than the old futures-only round trip (~20bps) it replaces
+    assert carry_round_trip_cost_frac("binance") > round_trip_cost(
+        "binance", market_type="futures")
+    # bybit/bitget carry the higher perp taker (0.0006): 2*.001+2*.0006+4*.0005
+    for v in ("bybit", "bitget"):
+        assert carry_round_trip_cost_frac(v) == pytest.approx(0.0052)
+
+
+def test_true_carry_cost_raises_entry_floor_and_is_stored(tmp_path):
+    # rate 5bps/settlement x 21 = 105bps gross.
+    #   old futures-only cost 20bps -> floor max(15, 3*20)=60bps; net 85 -> OPEN
+    #   true carry cost   50bps -> floor max(15, 3*50)=150bps; net 55 -> REJECT
+    clock = FakeClock()
+    r_old = build(tmp_path / "old", clock, Provider(clock, rate=0.0005, rt_cost=0.002))
+    assert r_old.run_once()["opened"] == 1
+
+    clock2 = FakeClock()
+    r_true = build(tmp_path / "true", clock2, Provider(clock2, rate=0.0005, rt_cost=0.005))
+    assert r_true.run_once()["opened"] == 0
+    rec = json.loads(
+        (tmp_path / "true" / "carry_gate_log.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["ok"] is False and "edge" in rec["reason"]
+
+    # at a richer rate the true-cost position opens and STORES the full cost
+    clock3 = FakeClock()
+    r_rich = build(tmp_path / "rich", clock3, Provider(clock3, rate=0.0020, rt_cost=0.005))
+    assert r_rich.run_once()["opened"] == 1
+    pos = json.loads((tmp_path / "rich" / "carry_positions.json").read_text())[
+        "positions"]["binance:BTC/USDT"]
+    assert pos["round_trip_cost_frac"] == pytest.approx(0.005)
+
+
+# ── FIX 2: _manage feed-staleness guard (hold, do NOT force-close) ──────
+def test_manage_skips_on_stale_feed_and_holds(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+
+    # STALE frame with a negative rate: WITHOUT the guard, rate coerces the net
+    # edge negative and FORCE-CLOSES the healthy position (booking exit fees +
+    # poisoning RESOLVED evidence). WITH the guard: skip this pass, HOLD.
+    provider.kw["stale"] = True
+    provider.kw["rate"] = -0.0001
+    clock.advance(60.0)
+    s = r.run_once()
+    assert s["held"] == 1 and s["closed"] == 0
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "binance:BTC/USDT" in state["positions"]   # still open
+    assert state["cycles"] == []                       # nothing booked
+    assert any("stale" in (x.get("reason") or "") for x in _gate_recs(tmp_path))
+
+    # a FRESH negative-edge frame then closes normally (no regression)
+    provider.kw["stale"] = False
+    clock.advance(60.0)
+    assert r.run_once()["closed"] == 1
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert state["positions"] == {}
+    (cyc,) = state["cycles"]
+    assert "net_edge" in cyc["exit_reason"]
+
+
+# ── FIX 3: per-symbol crash-safe state persistence (no double-book) ─────
+class _CycleRecorder:
+    def __init__(self):
+        self.cycles = []
+
+    def record_carry_cycle(self, cyc):
+        self.cycles.append(dict(cyc))
+
+
+def test_midpass_crash_persists_first_symbol_close_no_double_book(tmp_path):
+    clock = FakeClock()
+    wh = _CycleRecorder()
+    box = {"rate": 0.0004, "crash": False}
+
+    def provider(symbol):
+        if symbol == "ETH/USDT" and box["crash"]:
+            raise RuntimeError("mid-pass kill after BTC closed")
+        return make_snap(clock(), rate=box["rate"])
+
+    def mk():
+        return build(tmp_path, clock, provider,
+                     symbols=("BTC/USDT", "ETH/USDT"), warehouse=wh)
+
+    assert mk().run_once()["opened"] == 2                 # BTC + ETH open
+
+    # arm the crash: BTC will net_edge-exit (rate negative), then ETH raises.
+    box["rate"] = -0.0001
+    box["crash"] = True
+    clock.advance(8 * HOUR)
+    with pytest.raises(RuntimeError):
+        mk().run_once()
+
+    # BTC's close was persisted BEFORE the ETH crash -> no resurrection
+    state = json.loads((tmp_path / "carry_positions.json").read_text())
+    assert "binance:BTC/USDT" not in state["positions"]
+    assert "binance:ETH/USDT" in state["positions"]        # ETH untouched, still open
+    btc_resolved = [c for c in state["cycles"]
+                    if c["symbol"] == "BTC/USDT" and c["label_status"] == "RESOLVED"]
+    assert len(btc_resolved) == 1
+
+    # replay the pass with ETH healthy: BTC is NOT re-closed / re-booked
+    box["crash"] = False
+    clock.advance(8 * HOUR)
+    mk().run_once()
+    btc_wh = [c for c in wh.cycles
+              if c["symbol"] == "BTC/USDT" and c["label_status"] == "RESOLVED"]
+    assert len(btc_wh) == 1                                 # booked exactly once
 
 
 # ── grep-proof: no order path on the runner ────────────────────────────

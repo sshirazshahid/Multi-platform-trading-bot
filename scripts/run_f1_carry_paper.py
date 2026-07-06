@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.carry_runner import (  # noqa: E402
+    DEFAULT_SLIP_FRAC,
     DEFAULT_STATE_PATH,
     CarryRunner,
     write_report,
@@ -37,13 +38,50 @@ from core.funding_history import avg_7d  # noqa: E402
 STATE_PATH = ROOT / DEFAULT_STATE_PATH
 HEARTBEAT_PATH = ROOT / "data" / "carry_heartbeat.json"
 VENUES = ("binance", "bybit", "bitget")
-SYMBOLS = ("BTC/USDT", "ETH/USDT")
+# 2026-07-05 pre-registered PAPER universe expansion (owner-approved; see
+# research/prereg_carry_universe_expansion_2026_07_05.md). The full 15-symbol
+# set is frozen — including the 0-entry symbols — to keep later evaluation
+# selection-bias-free. Env escape hatch: F1_UNIVERSE=legacy reverts to the
+# Rev-5 BTC/ETH pair without a code change. Symbols missing on a venue are
+# gate-skipped per symbol (snapshot unavailable -> no entry), fail-closed.
+from research.funding_carry_lab import F1_EXPANDED_UNIVERSE_2026_07_05  # noqa: E402
+
+SYMBOLS = (
+    ("BTC/USDT", "ETH/USDT")
+    if os.getenv("F1_UNIVERSE", "expanded").lower() == "legacy"
+    else F1_EXPANDED_UNIVERSE_2026_07_05
+)
 # EXIT-SIDE FALLBACK ONLY: entry gating and exit management now compute a
 # per-position margin buffer via fill_reality.perp_short_margin_buffer_x;
 # this constant is used only when that computation is impossible mid-hold
 # (the runner logs {"liq_buffer_fallback": true} when it happens).
 PAPER_LIQ_BUFFER_X = 10.0
 PAPER_NOTIONAL_HINT = 500.0  # depth_ratio denominator (paper clip size)
+
+
+def carry_round_trip_cost_frac(venue: str) -> float:
+    """TRUE delta-neutral carry round-trip cost fraction (TAKER execution).
+
+    The entry gate's edge floor is ``max(15bps, 3x cost)``, so the cost fed to it
+    MUST equal what ``CarryRunner._maybe_open``/``_close`` actually book in taker
+    mode, or the floor is silently understated. Booked cost = spot round-trip FEE
+    + perp round-trip FEE + slippage on all 4 crossings (buy spot + sell perp at
+    entry; sell spot + buy perp at exit) — mirrors ``_close``'s booked
+    ``fees`` (2 legs x entry+exit) plus ``slippage`` (``notional * 4 * slip``).
+
+    ~50bps on binance vs the ~20bps futures-only figure the provider fed before
+    (which counted only the perp leg). This correctly RAISES the effective entry
+    floor to ~150bps => fewer/None entries, which is the intended behavior.
+    The maker-first branch in ``CarryRunner._gate_inputs`` computes its OWN
+    cheaper cost and does not use this value.
+    """
+    from core.cost_model import round_trip_fee
+
+    return (
+        round_trip_fee(venue, market_type="spot")
+        + round_trip_fee(venue, market_type="futures")
+        + 4.0 * DEFAULT_SLIP_FRAC
+    )
 
 
 def _bbo_depth(book: dict) -> tuple[float, float, float] | None:
@@ -62,7 +100,6 @@ def build_live_snapshot_provider(venue: str):
     — Bybit requires the wrapper's _defaultType_lock; never call
     ``client.exchange.fetch_order_book`` directly.
     """
-    from core.cost_model import round_trip_cost
     from core.market_data_ledger import MarketDataLedger
     from exchanges.binance_client import BinanceClient
     from exchanges.bitget_client import BitgetClient
@@ -74,7 +111,9 @@ def build_live_snapshot_provider(venue: str):
     # Single-venue ledger: this provider only reads its own venue, and a
     # multi-client ledger would double the funding API calls per pass.
     ledger = MarketDataLedger(clients={venue: client})
-    rt_cost = round_trip_cost(venue, market_type="futures")
+    # TRUE carry round-trip cost (spot+perp fees + 4-crossing slip, ~50bps), NOT
+    # the futures-only ~20bps — so the gate's edge floor == the booked cost.
+    rt_cost = carry_round_trip_cost_frac(venue)
 
     def provider(symbol: str) -> dict | None:
         coin = symbol.split("/")[0]
