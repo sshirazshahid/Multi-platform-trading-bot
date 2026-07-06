@@ -392,16 +392,81 @@ class BotEngine:
         return total
 
     def _shadow_symbols(self) -> list:
-        """Universe for shadow eval — first 5 futures pairs (cap so OHLCV
-        fetch budget stays bounded)."""
+        """Universe for shadow eval — the day's biggest |24h %| MOVERS among
+        the liquidity-screened futures pairs (2026-07-06 owner ask: keep
+        testing 'scalp the daily movers' in the log-only lane). One batched
+        fetch_tickers call ranks the whole screened universe, cached for
+        ``mover_refresh_s``; capped at ``mover_cap`` so the OHLCV ctx budget
+        stays bounded. Fail-open on ANY error to the legacy first-N pairs —
+        the shadow lane must never go dark on a ticker hiccup."""
+        try:
+            from config import SHADOW_MODE
+            cap = int(SHADOW_MODE.get("mover_cap", 10))
+            if not SHADOW_MODE.get("mover_universe", True):
+                return self._shadow_symbols_legacy(5)  # true pre-change budget
+            now = time.time()
+            cached = getattr(self, "_shadow_mover_cache", None)
+            if cached and now - cached[0] < float(SHADOW_MODE.get("mover_refresh_s", 900)):
+                return list(cached[1])
+            screened: list[str] = []
+            for _ename, pairs in (self.current_pairs or {}).items():
+                for sym in (pairs.get("futures") or []):
+                    if sym not in screened:
+                        screened.append(sym)
+            if not screened or not self.active_exchanges:
+                return self._shadow_symbols_legacy(cap)
+            ex = next(iter(self.active_exchanges.values()))
+            # Route through the wrapper's fetch_tickers(market_type='futures'),
+            # which passes _futures_params() so the call hits the PERP endpoint
+            # and returns unified swap-keyed tickers ('BTC/USDT:USDT'). The raw
+            # ccxt fetch_tickers() routes by the client's steady-state
+            # defaultType='spot' and returns spot keys that never match the
+            # swap universe — the silent-fallback bug found 2026-07-06 (24h of
+            # shadow proposals stuck on BTC/ETH). Fail-open to {} inside.
+            raw = ex.fetch_tickers(market_type="futures") if ex else {}
+            min_qv = float(SHADOW_MODE.get("mover_min_qv_usd", 5_000_000))
+            moves: list[tuple[float, str]] = []
+            for sym in screened:
+                t = raw.get(sym)
+                if not t:
+                    continue
+                pct, qv = t.get("percentage"), t.get("quoteVolume")
+                if pct is None or qv is None or float(qv) < min_qv:
+                    continue
+                moves.append((abs(float(pct)), sym))
+            moves.sort(reverse=True)
+            out = [s for _, s in moves[:cap]]
+            if not out:
+                # Screened symbols but zero usable tickers = key-format or
+                # venue trouble. Be LOUD (silent fallback is undiagnosable)
+                # and cache the fallback so the ticker call is not re-fired
+                # on every 300s shadow tick.
+                logger.warning(
+                    f"[Shadow] mover ranking empty ({len(screened)} screened, "
+                    f"{len(raw) if raw else 0} tickers) — legacy fallback"
+                )
+                out = self._shadow_symbols_legacy(cap)
+            self._shadow_mover_cache = (now, out)
+            return list(out)
+        except Exception as e:
+            # WARNING, not DEBUG: a silent debug-level fallback here is exactly
+            # what hid the 2026-07-06 mover bug for 24h. Make it visible.
+            logger.warning(f"[Shadow] mover universe fallback (exception): {e}")
+            try:
+                return self._shadow_symbols_legacy(5)
+            except Exception:
+                return []  # never let the provider raise into the tick
+
+    def _shadow_symbols_legacy(self, cap: int = 5) -> list:
+        """Pre-2026-07-06 selection: first futures pairs per exchange."""
         out: list[str] = []
         for _ename, pairs in (self.current_pairs or {}).items():
             for sym in (pairs.get("futures") or [])[:2]:
                 if sym not in out:
                     out.append(sym)
-            if len(out) >= 5:
+            if len(out) >= cap:
                 break
-        return out[:5]
+        return out[:cap]
 
     def _shadow_ctx_for_symbol(self, symbol: str) -> dict | None:
         """Best-effort OHLCV pull for the multi-timeframe agent context.
@@ -4913,6 +4978,28 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Engine] MCP Position Monitor: {e}")
 
+    def _ext_position_still_open(self, exchange, symbol: str) -> bool:
+        """Confirm a non-zero live position for `symbol` before a reduceOnly-stripped
+        close retry. Fail-CLOSED: any fetch error returns False so the caller aborts
+        the retry — a stripped market order on an already-flat symbol would FILL and
+        open an untracked NAKED REVERSE (no SL, no tracker entry). Ported from
+        order_manager._close_position_impl's 2026-04-20 naked-short guard."""
+        try:
+            live = exchange.fetch_positions([symbol]) or []
+        except Exception as fe:
+            logger.warning(
+                f"[MCP-Brain] fetch_positions failed during ext close-retry guard "
+                f"for {symbol}: {str(fe)[:120]} — treating as closed to avoid naked reverse")
+            return False
+        for p in live:
+            try:
+                sz = abs(float(p.get("contracts") or p.get("contractSize") or 0))
+            except (TypeError, ValueError):
+                sz = 0.0
+            if sz > 0:
+                return True
+        return False
+
     def _close_external_position(self, ex_name: str, pos: dict, reason: str):
         """Close an exchange-discovered position NOT tracked internally.
         Futures: market close order. Spot: market sell coins."""
@@ -4981,6 +5068,12 @@ class BotEngine:
                 err = str(e)
                 if "reduceonly" in err.lower() or "-1106" in err:
                     self.order_mgr._oneway_mode.add(ex_lower)
+                    if not self._ext_position_still_open(exchange, symbol):
+                        logger.info(
+                            f"[MCP-Brain] {symbol} on {ex_name} already flat — "
+                            f"skipping naked-reverse retry (fail-closed guard) — "
+                            f"external position already closed")
+                        return
                     try:
                         exchange.create_order(
                             symbol, "market", close_side, size, None, {}, "futures")
@@ -4992,6 +5085,12 @@ class BotEngine:
                         "unilateral", "position mode", "positionside", "-4061", "40774")):
                     self.order_mgr._oneway_mode.add(ex_lower)
                     _ow = {"reduceOnly": True} if getattr(exchange, '_is_oneway', False) else {}
+                    if not self._ext_position_still_open(exchange, symbol):
+                        logger.info(
+                            f"[MCP-Brain] {symbol} on {ex_name} already flat — "
+                            f"skipping naked-reverse retry (fail-closed guard) — "
+                            f"external position already closed")
+                        return
                     try:
                         exchange.create_order(
                             symbol, "market", close_side, size, None, _ow, "futures")
