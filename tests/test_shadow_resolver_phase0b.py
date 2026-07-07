@@ -138,3 +138,71 @@ def test_wide_tp_no_edge_resolves_negative_and_is_rejected(wh, tmp_path):
     returns = read_shadow_returns(db_path=str(wh.path))
     assert returns, "expected at least one resolved return"
     assert all(x <= 0 for x in returns)
+
+
+# --- 2026-07-07 evidence-integrity fixes -----------------------------------
+
+
+def test_resolver_defaults_zero_horizon_and_censors_short_scans():
+    """horizon_bars=0 (legacy agents) must NOT resolve prematurely as a 'time'
+    exit at whatever bars happened to be closed when the runner fired — it
+    defaults to DEFAULT_HORIZON_BARS and stays PENDING until that accrues."""
+    from core.shadow_resolver import DEFAULT_HORIZON_BARS, resolve_one
+    row = {
+        "side": "buy", "entry_px": 100.0, "sl_px": 95.0, "tp_px": 110.0,
+        "horizon_bars": 0, "projected_notional_current": 100.0,
+    }
+    # 3 quiet bars, no barrier touched — far fewer than the default horizon.
+    candles = [_bar(i, 100, 101, 99, 100) for i in range(3)]
+    assert resolve_one(row, candles) is None  # censored -> stays PENDING
+
+    # With a full default horizon of closed bars it resolves as a time exit.
+    candles = [_bar(i, 100, 101, 99, 100) for i in range(DEFAULT_HORIZON_BARS)]
+    out = resolve_one(row, candles)
+    assert out is not None
+    assert out["exit_reason"] == "time"
+    assert out["bars_held"] == DEFAULT_HORIZON_BARS
+
+
+def test_resolver_zero_horizon_barrier_hit_still_resolves():
+    """A barrier hit resolves immediately even for horizon_bars=0 rows —
+    censoring only applies to time exits."""
+    from core.shadow_resolver import resolve_one
+    row = {
+        "side": "buy", "entry_px": 100.0, "sl_px": 95.0, "tp_px": 110.0,
+        "horizon_bars": 0, "projected_notional_current": 100.0,
+    }
+    candles = [_bar(0, 100, 111, 99, 110)]
+    out = resolve_one(row, candles)
+    assert out is not None and out["exit_reason"] == "take_profit"
+
+
+def test_resolver_vacuous_notional_falls_back_to_alt():
+    """projected_notional_current ~ $0 (fully-deployed paper wallet) must not
+    bake micro-dollar outcomes into the promotion-trusted table — the resolver
+    falls back to the row's $200 reference (projected_notional_alt)."""
+    from core.shadow_resolver import resolve_one
+    base = {
+        "side": "buy", "entry_px": 100.0, "sl_px": 95.0, "tp_px": 110.0,
+        "horizon_bars": 5,
+    }
+    candles = [_bar(0, 100, 112, 100, 111)]  # clean TP hit
+    vac = resolve_one({**base, "projected_notional_current": 0.002,
+                       "projected_notional_alt": 200.0}, candles)
+    ref = resolve_one({**base, "projected_notional_current": 200.0}, candles)
+    assert vac["net_pnl"] == pytest.approx(ref["net_pnl"])
+    assert vac["net_pnl"] > 0.5  # dollars, not micro-dollar noise
+
+
+def test_resolver_vacuous_both_notionals_use_reference_constant():
+    from core.shadow_resolver import REFERENCE_NOTIONAL_USD, resolve_one
+    row = {
+        "side": "buy", "entry_px": 100.0, "sl_px": 95.0, "tp_px": 110.0,
+        "horizon_bars": 5, "projected_notional_current": 0.0,
+        "projected_notional_alt": 0.0,
+    }
+    candles = [_bar(0, 100, 112, 100, 111)]
+    out = resolve_one(row, candles)
+    scaled = resolve_one(
+        {**row, "projected_notional_current": REFERENCE_NOTIONAL_USD}, candles)
+    assert out["net_pnl"] == pytest.approx(scaled["net_pnl"])

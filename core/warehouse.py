@@ -33,6 +33,10 @@ from typing import Any
 
 from loguru import logger
 
+# NOTE: relative-to-cwd is the repo-wide contract (tests isolate by chdir'ing
+# to tmp). Standalone entrypoints must chdir to the repo root before touching
+# the warehouse — see scripts/resolve_shadow_outcomes.py (2026-07-07: launched
+# by Task Scheduler with cwd=System32, mkdir("data") crashed every hourly run).
 WAREHOUSE_PATH = Path("data/warehouse.sqlite")
 
 _SCHEMA = """

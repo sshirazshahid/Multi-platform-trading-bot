@@ -27,6 +27,24 @@ OPEN_SLIP_BPS = 5.0
 EXIT_SLIP_BPS = 5.0
 SL_SLIP_BPS = 10.0  # fast-move stop fills are worse
 
+# Legacy agents never set Proposal.horizon_bars, so their rows carry 0.
+# horizon=0 used to bypass the censoring guard below, resolving those rows as
+# premature, non-deterministic "time" exits at whatever bars happened to be
+# closed when the runner fired (found 2026-07-07: 1,746 of 2,042 pending rows).
+# A missing/zero horizon now maps to this documented default — applied in BOTH
+# the runner's fetch cap and resolve_one, so they always agree.
+DEFAULT_HORIZON_BARS = 24
+
+# Dollar outcomes are meaningless when projected sizing rounds to ~$0 (a
+# fully-deployed paper wallet sized 2,175 outcomes at ~$0.002 notional on
+# 2026-07-05..07, making net_pnl/fees/mfe/mae micro-dollar noise). Below this
+# floor the resolver falls back to the row's reference sizing
+# (projected_notional_alt, normally $200), then to REFERENCE_NOTIONAL_USD, so
+# dollar evidence stays meaningful and comparable across rows. r_multiple is
+# size-invariant either way.
+MIN_RESOLVE_NOTIONAL_USD = 1.0
+REFERENCE_NOTIONAL_USD = 200.0
+
 
 def resolve_one(
     row: dict,
@@ -58,7 +76,13 @@ def resolve_one(
         return None
 
     horizon = int(row.get("horizon_bars") or 0)
+    if horizon <= 0:
+        horizon = DEFAULT_HORIZON_BARS
     notional = float(row.get("projected_notional_current") or 0.0)
+    if notional < MIN_RESOLVE_NOTIONAL_USD:
+        notional = float(row.get("projected_notional_alt") or 0.0)
+    if notional < MIN_RESOLVE_NOTIONAL_USD:
+        notional = REFERENCE_NOTIONAL_USD
     is_buy = side == "buy"
 
     open_slip = entry * open_slip_bps / 10_000.0
@@ -145,23 +169,32 @@ def resolve_one(
 
 def _write_outcome(warehouse, proposal_id: str, outcome: dict, now: int) -> None:
     conn = warehouse._conn()
-    conn.execute(
-        "INSERT OR REPLACE INTO shadow_outcomes "
-        "(proposal_id, exit_px, exit_reason, gross_pnl, net_pnl, fees, slippage, "
-        " funding, mfe, mae, bars_held, r_multiple, resolved_ts, label_status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED')",
-        (
-            proposal_id, outcome["exit_px"], outcome["exit_reason"],
-            outcome["gross_pnl"], outcome["net_pnl"], outcome["fees"],
-            outcome["slippage"], outcome["funding"], outcome["mfe"],
-            outcome["mae"], outcome["bars_held"], outcome["r_multiple"], now,
-        ),
-    )
-    conn.execute(
-        "UPDATE shadow_decisions SET label_status='RESOLVED' WHERE proposal_id=?",
-        (proposal_id,),
-    )
-    conn.commit()
+    # Warehouse connections run in autocommit (isolation_level=None), so the
+    # INSERT and UPDATE would otherwise commit independently: a crash between
+    # them leaves an outcome row whose decision is still PENDING, which gets
+    # re-resolved (and possibly RELABELLED) on the next run. One transaction.
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO shadow_outcomes "
+            "(proposal_id, exit_px, exit_reason, gross_pnl, net_pnl, fees, slippage, "
+            " funding, mfe, mae, bars_held, r_multiple, resolved_ts, label_status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED')",
+            (
+                proposal_id, outcome["exit_px"], outcome["exit_reason"],
+                outcome["gross_pnl"], outcome["net_pnl"], outcome["fees"],
+                outcome["slippage"], outcome["funding"], outcome["mfe"],
+                outcome["mae"], outcome["bars_held"], outcome["r_multiple"], now,
+            ),
+        )
+        conn.execute(
+            "UPDATE shadow_decisions SET label_status='RESOLVED' WHERE proposal_id=?",
+            (proposal_id,),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def resolve_pending(
@@ -181,7 +214,8 @@ def resolve_pending(
     now_ts = int(time.time()) if now is None else int(now)
     rows = warehouse.query(
         "SELECT * FROM shadow_decisions "
-        "WHERE label_status='PENDING' AND entry_px IS NOT NULL"
+        "WHERE label_status='PENDING' AND entry_px IS NOT NULL "
+        "ORDER BY ts ASC"  # oldest-first: each fetch group widens at most once
     )
     resolved = 0
     skipped = 0

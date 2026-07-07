@@ -35,7 +35,11 @@ def make_sizer(
     def _sizer(p: Proposal) -> tuple[float, float]:
         try:
             bal = float(free_balance_provider())
-        except Exception:
+        except Exception as e:
+            # Loud, not silent: a dead provider zeroes "current" sizing for
+            # every decision row (the resolver falls back to alt sizing).
+            from loguru import logger
+            logger.warning(f"[ProjectedSizer] free-balance provider failed ({e}); current sizing = $0")
             bal = 0.0
         return project(
             p, free_balance_usdt=bal, size_pct=size_pct,
