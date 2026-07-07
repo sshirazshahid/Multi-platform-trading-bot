@@ -27,6 +27,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# 2026-07-07: load .env explicitly — this standalone entrypoint never imports
+# config.py, so the owner knobs (F1_UNIVERSE at module level below and
+# F1_EXECUTION_MODE in main) silently fell back to defaults in the scheduled
+# task. Must run BEFORE the module-level F1_UNIVERSE read.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+except Exception:  # dotenv optional: env vars set by the shell still work
+    pass
+
 from core.carry_runner import (  # noqa: E402
     DEFAULT_SLIP_FRAC,
     DEFAULT_STATE_PATH,

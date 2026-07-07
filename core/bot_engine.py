@@ -477,7 +477,15 @@ class BotEngine:
         ex = next(iter(self.active_exchanges.values()))
         try:
             import pandas as pd
-            ctx: dict = {"symbol": symbol}
+            # 2026-07-07: stamp the venue actually supplying the candles.
+            # Without it every shadow Proposal defaulted to venue='binance'
+            # even when priced off bybit/bitget, so the outcome resolver
+            # replayed the WRONG venue's candles (mispriced barrier hits) or
+            # left non-binance symbols PENDING forever.
+            ctx: dict = {
+                "symbol": symbol,
+                "venue": str(getattr(ex, "name", "") or "binance").lower(),
+            }
             for tf, key, lim in (
                 ("5m", "ohlcv_5m", 80),
                 ("15m", "ohlcv_15m", 60),

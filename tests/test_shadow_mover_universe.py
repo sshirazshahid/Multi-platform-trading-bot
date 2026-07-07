@@ -178,7 +178,9 @@ def test_base_wrapper_fetch_tickers_routes_futures():
     assert out == {"BTC/USDT:USDT": {"percentage": 1.0, "quoteVolume": 1e9}}
     assert ex.exchange.last_params == {"type": "swap"}  # perp routing forced
     ex.fetch_tickers(market_type="spot")
-    assert ex.exchange.last_params == {}  # spot routing passes no futures params
+    # 2026-07-07: spot is now EXPLICITLY pinned too — an empty params
+    # inherited whatever defaultType a concurrent futures call left behind.
+    assert ex.exchange.last_params == {"type": "spot"}
 
 
 def test_base_wrapper_fetch_tickers_fails_open():

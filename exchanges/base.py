@@ -251,7 +251,12 @@ class BaseExchange(ABC):
                 if market_type == "futures":
                     params = {"type": "swap", **(self._futures_params() or {})}
                 else:
-                    params = {}
+                    # 2026-07-07: pin the spot path too — subclasses flip the
+                    # client's defaultType to futures inside their locked
+                    # fetch_ohlcv/fetch_ticker paths and never reset it, so an
+                    # empty params here could return swap tickers labeled spot
+                    # (mirror of the fixed futures-path leak).
+                    params = {"type": "spot"}
                 return self.exchange.fetch_tickers(symbols, params=params)
             except Exception as e:
                 if _is_timestamp_error(e):
