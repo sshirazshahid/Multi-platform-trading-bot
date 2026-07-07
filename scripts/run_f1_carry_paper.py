@@ -235,7 +235,10 @@ def main() -> None:
             venue=venue,
             gate_log_path=ROOT / "data" / "carry_gate_log.jsonl",
             warehouse=warehouse,
-            registry_path=ROOT / "data" / "strategy_specs",
+            # 2026-07-07: must be the registry FILE — passing the
+            # data/strategy_specs DIRECTORY made every F1 evidence write a
+            # silent no-op since Jul 2 (promotion evidence never recorded).
+            registry_path=ROOT / "data" / "active_strategies.json",
             heartbeat_path=HEARTBEAT_PATH,
             execution_mode=os.getenv("F1_EXECUTION_MODE", "taker").lower(),
         )

@@ -485,3 +485,61 @@ stock perps) for research, while NEVER routing them to live/paper orders until s
 - [ ] P2 OWNER: stagger experiment knobs (one-at-a-time reversion) for clean attribution (operational)
 - [ ] P3 Prompt-builder section structure -> named truncation attribution (M)
 - [ ] P3 Claude-path candidates.decision_id post-parse UPDATE linkage (S)
+
+---
+
+# Task: Evidence-pipeline + exit-integrity fixes (audit 2026-07-07) — SHIPPED, backlog below
+
+Workflow audit (9 agents + adversarial verify; verify pass partially rate-limited — items marked
+[unverified] were confirmed by the auditor's own execution but not by the independent refuter pass).
+
+## Shipped 2026-07-07 (all with regression tests, suites green)
+- [x] ShadowResolver scheduled task: was exit-1 every hourly run since Jul 5 (Start In=N/A →
+      cwd=System32 → Warehouse relative-path mkdir crash). Recreated with `cmd /c cd /d` wrapper
+      (mirrors F1 task) + `os.chdir(ROOT)` in the script. Backlog drained: 2,175→4,392 resolved,
+      pending 2,042→275 (rest correctly censored inside horizons).
+- [x] resolve_one: horizon_bars=0 legacy rows no longer resolve as premature non-deterministic
+      "time" exits — DEFAULT_HORIZON_BARS=24 applied consistently in fetch cap + censoring guard.
+- [x] resolve_one: ~$0-notional outcomes (fully-deployed paper wallet) fall back to
+      projected_notional_alt ($200 reference) → dollar evidence meaningful again.
+- [x] _write_outcome: INSERT+UPDATE in one explicit transaction (autocommit conn could leave
+      re-resolvable outcome rows). resolve_pending: ORDER BY ts ASC (fetch-cache starvation).
+- [x] Trailing insta-close: stale 65/50-min activation tiers REMOVED (calibrated against 75-min
+      AGE_LIMIT gone since Phase 14; 161/258 trailing exits 30d, 6% WR, −$52 was this) + activation
+      now requires current price past breakeven (restart-persisted-peak safe).
+- [x] order_manager: empty create_order return ({} from not-connected client) = failure for SL
+      (fail-closed emergency path) and TP (local-monitor fallback); no more phantom protection.
+- [x] Paper stop fills capped at trigger level (_cap_stop_fill) — dip-and-recover wicks no longer
+      book 47-85bps better than the stop a live order would have filled at.
+- [x] F1 evidence registry: registry_path was a DIRECTORY → every write since Jul 2 silently
+      no-oped. Now the canonical file; _save_registry atomic + rejects dirs; load_registry preserves
+      corrupt files aside; carry_runner logs (not swallows) booking failures.
+
+## Open backlog (verified in code at 2026-07-07 line numbers; fix next)
+- [ ] order_manager.py:~2551 shared unlocked _last_funding_hour scalar — one venue consumes the
+      8h funding window for all venues in paper; unpersisted across restarts. [CONFIRMED prior audit]
+- [ ] health_watchdog.py:~192 edge-alert latched+persisted BEFORE the email attempt — one SMTP
+      failure permanently silences a safety ALERT episode. [CONFIRMED prior audit]
+- [ ] spot_manager.py:~216 peak reset committed before execution outcome (skipped SCALE_OUT eats
+      the drawdown trigger); :~136 scan_holdings wipes holdings on transient fetch error. [CONFIRMED]
+- [ ] self_healing_supervisor.py:~482 retrain/replay subprocess runs synchronously on the scheduler
+      thread (up to 60-min stall); :~420 kill-then-respawn doesn't wait for lock release (repair can
+      no-op for one cooldown, reports ok=True); :~211 killed_pids recorded even when taskkill failed.
+- [ ] exchanges/base.py fetch_tickers spot path not pinned (params={'type':'spot'}) — latent
+      cross-market leak mirror of the fixed futures path.
+- [ ] bot_engine._shadow_ctx_for_symbol never sets ctx['venue'] → TPProbe rows may claim binance
+      while priced off another venue; resolver then replays wrong candles. [unverified]
+- [ ] resolve_shadow_outcomes: no UNRESOLVABLE aging (delisted symbols retried forever); widening
+      refetches bypass max_group_fetches budget; funding=0 for 8h probe horizons (optimistic bound).
+- [ ] utils/process_lock.py:~43 silent fail-open returns unlocked handle on non-OSError; open()
+      failure conflated with lock-held. Add logging + subprocess-based cross-process test.
+- [ ] promotion_loop ACTIVE_STRATEGIES_PATH + health_watchdog WAREHOUSE_PATH remain cwd-relative —
+      any NEW standalone entrypoint must chdir(ROOT) first (see resolve_shadow_outcomes pattern).
+- [ ] Analytics debt: consumers of trades.realized_pnl that ignore partial_realized_pnl understate
+      WR/PnL (~150 misclassified wins/14d; MCP performance_summary, learning_engine, dashboards).
+- [ ] spot_rotation_slice.py:~105 leading-NaN symbol zeroes EMA50-slope factor for ALL symbols
+      (S2 rotation evidence has a dead documented factor). [unverified, confirmed by execution]
+- [ ] OWNER DECISION pending: SIGNAL_SOURCE=mcp still live in .env — the measured-no-edge
+      directional lane keeps trading PAPER (−$378/30d, gross-negative before costs, score
+      quintiles flat/inverted). Rev5 design (Jul 2) intended =none with carry-first + shadow lanes.
+      Flip requires owner restart; see session report 2026-07-07.

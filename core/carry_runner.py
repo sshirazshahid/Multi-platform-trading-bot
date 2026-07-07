@@ -512,8 +512,9 @@ class CarryRunner:
         if self.warehouse is not None:
             try:
                 self.warehouse.record_carry_cycle(cyc)
-            except Exception:  # noqa: BLE001 - booking must not lose state
-                pass
+            except Exception as e:  # noqa: BLE001 - booking must not lose state
+                from loguru import logger
+                logger.warning(f"[CarryRunner] warehouse cycle booking failed: {e}")
         if self.registry_path is not None:
             try:
                 from core.decision.promotion_loop import register_evidence
@@ -530,8 +531,11 @@ class CarryRunner:
                     promotion_status="lab_paper",
                     path=self.registry_path,
                 )
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                # 2026-07-07: was a silent pass — which hid EVERY registry
+                # write failing since Jul 2 (registry_path was a directory).
+                from loguru import logger
+                logger.warning(f"[CarryRunner] evidence-registry write failed: {e}")
 
 
 # ── report ─────────────────────────────────────────────────────────────

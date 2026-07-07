@@ -140,3 +140,20 @@ construction. When writing a persistence class, add a save-guard that refuses
 to write its production path while PYTEST_CURRENT_TEST is set. After any full
 suite run, spot-check that no files under data/ were modified by tests
 (git status data/ + key state files).
+
+## 2026-07-07 — evidence-pipeline session
+- **Relative data paths are a repo-wide TEST-ISOLATION contract.** Tests chdir to tmp and expect
+  `Warehouse()` etc. to follow. Making WAREHOUSE_PATH absolute "for robustness" sent a test's fake
+  trade INTO THE REAL WAREHOUSE (caught same session, row deleted). Fix cwd problems in the
+  standalone ENTRYPOINT (`os.chdir(ROOT)`), never in core path constants.
+- **Windows scheduled tasks need `cmd /c cd /d <repo> && ...`** — schtasks /TR alone launches with
+  cwd=System32; a task can silently exit 1 on every run for days (check `Last Result` != 0).
+  Add a staleness alert when MAX(resolved_ts) lags with PENDING rows present.
+- **"RESOLVED" is forever: validate sizing/horizon BEFORE writing outcomes.** 2,175 outcomes were
+  baked at ~$0 notional and premature horizons; rows marked RESOLVED are never re-selected, so
+  garbage evidence is permanent. Floor/validate inputs at the writer, not the reader.
+- **Stale calibration outlives its referent.** The 65-min trailing tier served a 75-min AGE_LIMIT
+  removed months earlier and became the single biggest mechanical value-destroyer (-$52/30d).
+  When changing a limit, grep for everything calibrated AGAINST it.
+- **A quiet `except: pass` around evidence writes hid 5 days of no-op.** Evidence/bookkeeping
+  failures must log loudly even when they must not crash the caller.

@@ -512,16 +512,38 @@ def load_registry(path: Path | str = ACTIVE_STRATEGIES_PATH) -> dict:
         data = json.loads(p.read_text(encoding="utf-8"))
         data.setdefault("variants", {})
         return data
-    except Exception:
+    except Exception as e:
+        # 2026-07-07: a corrupt registry must not be silently replaced by an
+        # empty stub on the next save — that wipes every variant AND the
+        # NO_EDGE replay-refusal memory. Preserve the bytes aside and shout.
+        import time as _time
+
+        from loguru import logger
+        try:
+            aside = p.with_suffix(p.suffix + f".corrupt-{int(_time.time())}")
+            p.rename(aside)
+            logger.error(f"[registry] unreadable registry moved aside to {aside.name}: {e}")
+        except Exception:
+            logger.error(f"[registry] unreadable registry at {p} ({e}); NOT overwriting silently")
         return {"variants": {}, "updated_at": None}
 
 
 def _save_registry(reg: dict, path: Path | str) -> None:
     assert_paper_self_improve([str(path)])
     p = Path(path)
+    if p.is_dir():
+        # 2026-07-07: a directory here made every evidence write a silent
+        # no-op (write_text raised, callers swallowed) — fail loudly instead.
+        raise ValueError(
+            f"registry path must be a JSON file, got a directory: {p}")
     p.parent.mkdir(parents=True, exist_ok=True)
     reg["updated_at"] = _utc_now().isoformat()
-    p.write_text(json.dumps(reg, indent=2), encoding="utf-8")
+    # Atomic write: a crash mid-write (or racing writers) must never leave a
+    # torn/empty registry. Same tmp+replace pattern as carry_runner.save_state.
+    import os as _os
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(reg, indent=2), encoding="utf-8")
+    _os.replace(tmp, p)
 
 
 def register_shadow(
