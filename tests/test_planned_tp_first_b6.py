@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import config
 from core.order_manager import OrderManager
 from core.position_tracker import Position
-from core.trailing_stop_manager import TrailingStopManager, _fee_rate
+from core.trailing_stop_manager import TrailingStopManager
 
 
 def _om(monkeypatch):
@@ -117,29 +117,18 @@ def _aged_pos():
         symbol="ETH/USDT")
 
 
-def test_trailing_floor_on_raises_activation_above_fees(monkeypatch):
-    _set_flag(monkeypatch, True)
-    tsm = TrailingStopManager()
-    out = tsm._adaptive_activation(_aged_pos())
-    assert out == max(0.0001, _fee_rate("futures") * 1.5)
-    assert out > 0.0001  # floor is active, not the bare ~0
-
-
-def test_trailing_floor_off_keeps_legacy_value(monkeypatch):
-    _set_flag(monkeypatch, False)
-    tsm = TrailingStopManager()
-    out = tsm._adaptive_activation(_aged_pos())
-    assert out == 0.0001  # byte-identical to today
-
-
-def test_trailing_floor_on_spot_uses_spot_fee(monkeypatch):
-    _set_flag(monkeypatch, True)
-    tsm = TrailingStopManager()
-    pos = types.SimpleNamespace(
-        open_time=time.time() - 66 * 60, atr_pct=0, market_type="spot",
-        symbol="BTC/USDT")
-    out = tsm._adaptive_activation(pos)
-    assert out == max(0.0001, _fee_rate("spot") * 1.5)
+def test_trailing_activation_ignores_age(monkeypatch):
+    """2026-07-07: the 50/65-min age tiers (and the B6 cost floor that
+    mitigated them) were REMOVED — they were calibrated against a 75-min
+    AGE_LIMIT that has been 4h/loss-only since Phase 14, and the ~0 threshold
+    insta-closed aged near-flat positions at market (161 of 258 trailing
+    exits in 30d, 6% WR, -$52). Age must no longer lower activation,
+    regardless of the near_target_exit flag."""
+    from config import RISK
+    for flag in (True, False):
+        _set_flag(monkeypatch, flag)
+        tsm = TrailingStopManager()
+        assert tsm._adaptive_activation(_aged_pos()) == RISK["trailing_activation"]
 
 
 # ── The core B6 claim: planned-TP-first must pre-empt PARTIAL-TP (the clipper) ─

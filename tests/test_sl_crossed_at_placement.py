@@ -271,3 +271,51 @@ def test_reconcile_noop_in_paper(om):
     om._replace_exchange_sl = lambda e, p: calls.__setitem__("n", calls["n"] + 1)
     assert om._reconcile_missing_sl(ex, pos) is True
     assert calls["n"] == 0
+
+
+# ── 2026-07-07: empty create_order return = failure, never success ──────────
+# A not-connected BaseExchange client returns {} WITHOUT raising. The old code
+# unconditionally set pos._exchange_sl/_exchange_tp = True, marking naked
+# positions as exchange-protected and suppressing the local SL fallback.
+
+
+def test_sl_empty_create_order_result_fails_closed(om):
+    ex = _make_exchange("Bybit", last=100.0)
+    ex.create_order.return_value = {}  # not-connected client signature
+    pos = _make_position(om, side="buy", entry=100.0, sl=95.0, tp=110.0)
+    captured = {}
+    om.close_position = lambda ex_, p, reason, **kw: captured.update(reason=reason)
+    om._place_exchange_sl_tp(ex, pos, pos.stop_loss, pos.take_profit,
+                             pos.side, pos.symbol, pos.size, pos.market_type)
+    assert getattr(pos, "_exchange_sl", False) is not True
+    assert getattr(pos, "_sl_failed", False) is True
+    assert captured.get("reason") == "sl_placement_failed"
+
+
+def test_tp_empty_create_order_result_falls_back_to_local(om):
+    ex = _make_exchange("Bybit", last=100.0)
+    ex.create_order.side_effect = [{"id": "sl-ok"}, {}]  # SL ok, TP empty
+    pos = _make_position(om, side="buy", entry=100.0, sl=95.0, tp=110.0)
+    captured = {}
+    om.close_position = lambda ex_, p, reason, **kw: captured.update(reason=reason)
+    om._place_exchange_sl_tp(ex, pos, pos.stop_loss, pos.take_profit,
+                             pos.side, pos.symbol, pos.size, pos.market_type)
+    assert pos._exchange_sl is True
+    assert pos._exchange_tp is False  # local monitoring covers the TP
+    assert "reason" not in captured  # position NOT closed for a failed TP
+
+
+# ── 2026-07-07: paper stop fills can never beat their trigger level ─────────
+
+
+def test_cap_stop_fill_never_beats_trigger():
+    from core.order_manager import OrderManager
+    # Closing a LONG (sell): a recovered book ABOVE the trigger caps DOWN.
+    assert OrderManager._cap_stop_fill(96.0, 95.0, "sell") == 95.0
+    # A genuinely worse fill (gap through the stop) is kept as-is.
+    assert OrderManager._cap_stop_fill(94.5, 95.0, "sell") == 94.5
+    # Closing a SHORT (buy): a recovered book BELOW the trigger caps UP.
+    assert OrderManager._cap_stop_fill(104.0, 105.0, "buy") == 105.0
+    assert OrderManager._cap_stop_fill(105.8, 105.0, "buy") == 105.8
+    # Degenerate inputs pass through untouched.
+    assert OrderManager._cap_stop_fill(96.0, 0.0, "sell") == 96.0

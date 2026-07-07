@@ -38,22 +38,24 @@ def test_age_aware_activation_under_50min_uses_base():
     assert abs(base - expected_base) < 1e-6
 
 
-def test_age_aware_activation_50_to_65min_lowers_to_05pct_or_base():
+def test_age_no_longer_lowers_activation_50_to_65min():
+    """2026-07-07: age tiers REMOVED — they were calibrated against a 75-min
+    AGE_LIMIT gone since Phase 14 and had become a flat-position insta-closer
+    (161/258 trailing exits in 30d, 6% WR, -$52). See
+    tests/test_trailing_insta_close_fix.py for the full regression suite."""
+    from config import RISK
     from core.trailing_stop_manager import TrailingStopManager
     mgr = TrailingStopManager()
     pos = _mk_pos(open_minutes_ago=55)
-    act = mgr._adaptive_activation(pos)
-    # Capped at min(base, 0.005) — so for Phase 15 base 0.012, drops to 0.005
-    assert act <= 0.005
+    assert abs(mgr._adaptive_activation(pos) - RISK.get("trailing_activation", 0.012)) < 1e-6
 
 
-def test_age_aware_activation_over_65min_drops_to_near_zero():
+def test_age_no_longer_lowers_activation_over_65min():
+    from config import RISK
     from core.trailing_stop_manager import TrailingStopManager
     mgr = TrailingStopManager()
     pos = _mk_pos(open_minutes_ago=70)
-    act = mgr._adaptive_activation(pos)
-    # Final 10 minutes — activate at any positive PnL
-    assert act <= 0.001
+    assert abs(mgr._adaptive_activation(pos) - RISK.get("trailing_activation", 0.012)) < 1e-6
 
 
 def test_age_aware_activation_handles_missing_open_time():

@@ -1338,9 +1338,17 @@ class OrderManager:
         try:
             sl_type, sl_params = build_sl_tp_order_params(
                 ex_lower, side, oneway, sl_rounded, is_sl=True)
-            exchange.create_order(
+            _sl_res = exchange.create_order(
                 symbol, sl_type, close_side, size_rounded, None, sl_params,
                 market_type=market_type)
+            if not _sl_res:
+                # 2026-07-07: a not-connected client returns {} WITHOUT
+                # raising — treating that as success marked naked positions
+                # as exchange-protected and suppressed the local SL fallback.
+                # Raise into the fail-closed path below instead.
+                raise RuntimeError(
+                    "create_order returned an empty result for the SL order "
+                    "(client not connected?)")
             pos._exchange_sl = True
             logger.info(
                 f"[Orders] SL order on {exchange.name}: {symbol} "
@@ -1434,9 +1442,15 @@ class OrderManager:
         try:
             tp_type, tp_params = build_sl_tp_order_params(
                 ex_lower, side, oneway, tp_rounded, is_sl=False)
-            exchange.create_order(
+            _tp_res = exchange.create_order(
                 symbol, tp_type, close_side, size_rounded, None, tp_params,
                 market_type=market_type)
+            if not _tp_res:
+                # 2026-07-07: same not-connected {} pattern as the SL above —
+                # raise into the handler below (local monitoring covers TP).
+                raise RuntimeError(
+                    "create_order returned an empty result for the TP order "
+                    "(client not connected?)")
             pos._exchange_tp = True
             logger.info(
                 f"[Orders] TP order on {exchange.name}: {symbol} "
@@ -1451,6 +1465,20 @@ class OrderManager:
             logger.warning(
                 f"[Orders] TP order FAILED on {exchange.name} {symbol}: {e} "
                 f"— local monitoring active (SL is protected)")
+
+    @staticmethod
+    def _cap_stop_fill(sim_px: float, trigger_px: float, close_side: str) -> float:
+        """Bound a simulated STOP fill so it can never be BETTER than the
+        trigger level (2026-07-07). paper_fill_price derives fills from the
+        live book at poll time; on a wick-through-and-recover the book has
+        already bounced, but a live stop-market would have filled at (or
+        beyond) the trigger during the move. Selling to close a long: lower
+        is worse. Buying to close a short: higher is worse."""
+        if trigger_px <= 0 or sim_px <= 0:
+            return sim_px
+        if str(close_side).lower() == "sell":
+            return min(sim_px, trigger_px)
+        return max(sim_px, trigger_px)
 
     def _replace_exchange_sl(self, exchange: BaseExchange, pos: Position) -> None:
         """B7-P2 per-position serialization wrapper (default-OFF). Serializes
@@ -1909,11 +1937,19 @@ class OrderManager:
                 exchange, position.symbol, close_side,
                 position.market_type, base_price=price, phase=phase,
                 size=position.size)
-            if sim_px > 0 and sim_px != price:
-                logger.debug(
-                    f"[SimExec] {position.symbol} CLOSE ({reason}) slip: "
-                    f"{price:.6g} → {sim_px:.6g}")
-                price = sim_px
+            if sim_px > 0:
+                if phase == "stop":
+                    # 2026-07-07: paper_fill_price re-prices at the CURRENT
+                    # book — on a dip-and-recover wick that booked the
+                    # recovered price instead of the trigger a live stop-market
+                    # would have filled at (30d avg: fills 47-85bps BETTER than
+                    # the stop). A stop fill must never beat its trigger level.
+                    sim_px = self._cap_stop_fill(sim_px, price, close_side)
+                if sim_px != price:
+                    logger.debug(
+                        f"[SimExec] {position.symbol} CLOSE ({reason}) slip: "
+                        f"{price:.6g} → {sim_px:.6g}")
+                    price = sim_px
 
         # Route based on the POSITION's origin, not current mode.
         # A paper_trade position was never placed on the exchange — sending

@@ -91,11 +91,15 @@ class TrailingStopManager:
         Reads RISK["trailing_activation"] live on every call so config
         reloads (or runtime edits to RISK) take effect without bot restart.
 
-        Phase 15.3 (2026-05-03): age-aware override. Positions approaching
-        AGE_LIMIT (75min) need to lock profit BEFORE force-close at market.
-        Lowers activation threshold based on position age so positions in
-        the +0.5% range that haven't reached default activation still get
-        trailing engaged before AGE_LIMIT fires.
+        2026-07-07: the Phase 15.3 age-aware overrides (drop to 0.5% at 50min,
+        to ~0 at 65min) were REMOVED. They were calibrated against a 75-min
+        AGE_LIMIT force-close that no longer exists (AGE_LIMIT has been 4h,
+        loss-only, since Phase 14), and the 65-min tier had become an
+        insta-closer: any position that ever ticked above entry activated on a
+        ~0 threshold, the breakeven floor placed the SL above the current
+        price, and the SAME update closed the position at market. 30d
+        warehouse: 161 of 258 trailing exits (6% win rate, -$52) were this
+        mechanism, pre-empting both TP and SL on near-flat positions.
         """
         base = RISK.get("trailing_activation", 0.008)  # default 0.8%
         # Use ATR if available on the position
@@ -103,28 +107,6 @@ class TrailingStopManager:
         if atr_pct and atr_pct > 0:
             adaptive = atr_pct * 1.1
             base = max(base * 0.5, min(adaptive, base * 2.0))
-
-        # Age-aware lowering: as position approaches 75min AGE_LIMIT cap,
-        # lower the activation threshold so any meaningful profit gets locked
-        # before force-close at market.
-        try:
-            import time as _t
-            age_min = (_t.time() - getattr(position, "open_time", _t.time())) / 60.0
-        except Exception:
-            return base
-        if age_min >= 65:
-            # Final 10 minutes before AGE_LIMIT — activate at ANY positive PnL.
-            # B6 (audit 2026-06-21): when near_target_exit is ON, FLOOR activation
-            # above the round-trip cost so trailing can't lock a net-NEGATIVE
-            # "win" at ~0% just before age-out. Flag OFF => returns 0.0001
-            # (byte-identical to today).
-            if RISK.get("near_target_exit_enabled", False):
-                return max(0.0001,
-                           _fee_rate(getattr(position, "market_type", "futures")) * 1.5)
-            return 0.0001
-        if age_min >= 50:
-            # 50-65 min — activate at +0.5% if not already
-            return min(base, 0.005)
         return base
 
     def update(self, position, current_price: float) -> tuple:
@@ -152,7 +134,12 @@ class TrailingStopManager:
                 t["peak_pnl"] = (current_price - ep) / ep
                 dirty = True
             peak_pnl = t["peak_pnl"]
-            if peak_pnl >= activation_threshold and not t["active"]:
+            # Guard (2026-07-07): only activate while the price is actually
+            # past breakeven. Activating on a HISTORICAL peak (persisted peaks
+            # after a restart, or a live threshold edit) with the price below
+            # breakeven lets the be-floor place the SL above the market and
+            # close the position on the very same update.
+            if peak_pnl >= activation_threshold and not t["active"] and current_price > be:
                 t["active"] = True; dirty = True
                 logger.info(
                     f"[Trail] {position.symbol} BUY activated: "
@@ -181,7 +168,9 @@ class TrailingStopManager:
                 t["peak_pnl"] = (ep - current_price) / ep
                 dirty = True
             peak_pnl = t["peak_pnl"]
-            if peak_pnl >= activation_threshold and not t["active"]:
+            # Guard (2026-07-07): mirror of the buy branch — no activation
+            # while the price sits above breakeven (shorts profit downward).
+            if peak_pnl >= activation_threshold and not t["active"] and current_price < be:
                 t["active"] = True; dirty = True
                 logger.info(
                     f"[Trail] {position.symbol} SELL activated: "
