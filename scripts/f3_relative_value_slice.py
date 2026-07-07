@@ -16,12 +16,14 @@ value book:
 A correct NO_GO is success; the deliverable is pipeline correctness (survivorship
 control, dollar-neutrality, beta/cluster caps, honest after-cost gate), NOT alpha.
 
-FEATURE GATING (mirrors S2): only deep-history-backtestable features (price
-momentum, EMA slope, volume trend, realized vol) carry weight. OI-change,
-spread/depth and funding-drag are FORWARD-collect features listed in
-``FORWARD_COLLECT_FEATURES`` and gated OUT (weight 0) so the backtest never
-backfills a signal that did not exist historically. They are wired as optional
-inputs so a live/forward run can turn them on without a code change.
+FEATURE GATING (mirrors S2): deep-history-backtestable features (price
+momentum, EMA slope, volume trend, realized vol) carry weight, and — since
+2026-07 — so does FUNDING-DRAG (weight -0.3), backed by the historical funding
+CSVs in data/funding_oi. OI-change and spread/depth remain FORWARD-collect
+features listed in ``FORWARD_COLLECT_FEATURES`` and gated OUT (weight 0) so the
+backtest never backfills a signal that did not exist historically. Symbols with
+NO funding coverage enter the funding_drag z-score as NaN and are mean-filled
+to NEUTRAL — never as a fake 0.0 rate.
 
 Live is INFEASIBLE at $420: a dollar-neutral multi-name L/S book needs min-notional
 on many simultaneous 2-sided legs, far exceeding the account. Research/PAPER only.
@@ -31,9 +33,11 @@ CLI:  venv/Scripts/python.exe scripts/f3_relative_value_slice.py
 """
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -62,8 +66,9 @@ BETA_REFERENCE = "BTC"
 LIVE_FEASIBILITY = "INFEASIBLE-AT-$420"
 UNIVERSE_METHOD = "point_in_time_with_delisted_terminal_paths"
 
-# Ranking feature weights. Deep-history features carry weight; forward-collect
-# features are pinned to 0.0 (gated out) until enough forward data accrues.
+# Ranking feature weights. Deep-history features carry weight; funding_drag is
+# ACTIVE (historical funding CSVs exist); remaining forward-collect features are
+# pinned to 0.0 (gated out) until enough forward data accrues.
 DEFAULT_FEATURE_WEIGHTS = {
     "rs1": 0.5, "rs3": 1.0, "rs7": 1.0, "rs14": 0.5,
     "ema_slope": 0.5,
@@ -71,9 +76,13 @@ DEFAULT_FEATURE_WEIGHTS = {
     "rvol_penalty": -0.3,          # higher realized vol -> lower score
     "oi_conf": 0.0,               # forward-collect (gated out)
     "spread_depth_penalty": 0.0,  # forward-collect (gated out)
-    "funding_drag": 0.0,          # forward-collect (gated out)
+    "funding_drag": -0.3,         # higher funding cost -> lower long score
 }
-FORWARD_COLLECT_FEATURES = ("oi_conf", "spread_depth_penalty", "funding_drag")
+FORWARD_COLLECT_FEATURES = ("oi_conf", "spread_depth_penalty")
+F3_FUNDING_DRAG_WEIGHT = -0.3
+F3_LONG_FUNDING_MULT = 1.5
+F3_FUNDING_MEAN_WINDOW_D = 30
+F3_SHORT_BACKWARDATION_BPS = 50.0
 
 RS_LOOKBACKS = {"rs1": 1, "rs3": 3, "rs7": 7, "rs14": 14}
 EMA_SPAN = 10
@@ -96,7 +105,7 @@ F3_STRESS_COST_MULT = 2.0
 _CM = CorrelationManager()
 
 
-def load_panel_v(symbols=DEFAULT_UNIVERSE, cache: str = CACHE):
+def load_panel_v(symbols=DEFAULT_UNIVERSE, cache: str = CACHE, *, include_ts: bool = False):
     """Align per-symbol daily closes / opens / volumes on a common ts index.
 
     Like S2's ``load_panel`` but also returns a volumes frame for the volume-trend
@@ -113,10 +122,145 @@ def load_panel_v(symbols=DEFAULT_UNIVERSE, cache: str = CACHE):
         vol_cols[s] = pd.Series(df["volume"].to_numpy(float), index=idx)
     if not close_cols:
         raise FileNotFoundError(f"no daily cache for any of {symbols} at {cache}")
-    closes = pd.DataFrame(close_cols).sort_index().reset_index(drop=True)
-    opens = pd.DataFrame(open_cols).sort_index().reset_index(drop=True)
-    vols = pd.DataFrame(vol_cols).sort_index().reset_index(drop=True)
+    closes_idx = pd.DataFrame(close_cols).sort_index()
+    opens_idx = pd.DataFrame(open_cols).sort_index()
+    vols_idx = pd.DataFrame(vol_cols).sort_index()
+    bar_ts = [float(ts.timestamp()) for ts in closes_idx.index]
+    closes = closes_idx.reset_index(drop=True)
+    opens = opens_idx.reset_index(drop=True)
+    vols = vols_idx.reset_index(drop=True)
+    if include_ts:
+        return closes, opens, vols, bar_ts
     return closes, opens, vols
+
+
+def _csv_ts_seconds(v) -> float:
+    # Funding CSVs written by fetch_binance_funding_oi.py use ccxt ms timestamps.
+    return float(v) / 1000.0
+
+
+def _bar_ts_seconds(v) -> float:
+    v = float(v)
+    return v / 1000.0 if v > 10_000_000_000 else v
+
+
+def load_funding_panel(
+    symbols=DEFAULT_UNIVERSE,
+    *,
+    funding_dir: str | Path = "data/funding_oi",
+    bar_ts: list[float] | None = None,
+    n_bars: int | None = None,
+) -> dict[str, pd.Series] | None:
+    """Load public Binance funding CSVs, aligned as-of to the supplied bar
+    timestamps (candle-OPEN epochs from the ohlcv cache — so each value can be
+    up to ~24h staler than the bar close; conservative, no look-ahead).
+
+    Missing directory/files return ``None`` rather than fabricating values. When
+    ``bar_ts`` is supplied, each output point uses the last settled funding rate
+    with timestamp <= that bar timestamp, preventing look-ahead.
+    """
+    root = Path(funding_dir)
+    if not root.exists():
+        return None
+    out: dict[str, pd.Series] = {}
+    for sym in symbols:
+        path = root / f"{sym.upper()}_funding.csv"
+        if not path.exists():
+            continue
+        try:
+            df = pd.read_csv(path)
+            if "timestamp" not in df or "funding_rate" not in df:
+                continue
+            ts = df["timestamp"].map(_csv_ts_seconds).to_numpy(float)
+            rates = df["funding_rate"].astype(float).to_numpy()
+            order = np.argsort(ts)
+            ts, rates = ts[order], rates[order]
+            if bar_ts is not None:
+                bars = np.array([_bar_ts_seconds(x) for x in bar_ts], dtype=float)
+                idx = np.searchsorted(ts, bars, side="right") - 1
+                vals = np.array([rates[i] if i >= 0 else np.nan for i in idx], dtype=float)
+            else:
+                vals = rates[-int(n_bars):] if n_bars else rates
+            out[sym.upper()] = pd.Series(vals, dtype=float)
+        except Exception:
+            continue
+    return out or None
+
+
+def _panel_value(panel, sym: str, t: int) -> float | None:
+    if panel is None:
+        return None
+    val = None
+    if isinstance(panel, pd.DataFrame):
+        if sym in panel and t < len(panel[sym]):
+            val = panel[sym].iloc[t]
+    elif isinstance(panel, dict):
+        raw = panel.get(sym)
+        if isinstance(raw, pd.Series) and t < len(raw):
+            val = raw.iloc[t]
+        elif isinstance(raw, (list, tuple, np.ndarray)) and t < len(raw):
+            val = raw[t]
+        elif isinstance(raw, (int, float)):
+            val = raw
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return f if np.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _panel_values(panel, symbols: list[str], t: int) -> dict[str, float]:
+    out = {}
+    for sym in symbols:
+        val = _panel_value(panel, sym, t)
+        if val is not None:
+            out[sym] = val
+    return out
+
+
+def funding_mean30_from_panel(
+    funding_panel,
+    symbols: list[str],
+    t: int,
+    *,
+    window: int = F3_FUNDING_MEAN_WINDOW_D,
+) -> dict[str, float]:
+    out = {}
+    for sym in symbols:
+        if funding_panel is None:
+            continue
+        raw = funding_panel.get(sym) if isinstance(funding_panel, dict) else funding_panel[sym]
+        if raw is None:
+            continue
+        series = pd.Series(raw, dtype=float)
+        lo = max(0, t - int(window) + 1)
+        vals = series.iloc[lo:t + 1].dropna()
+        if not vals.empty:
+            out[sym] = float(vals.mean())
+    return out
+
+
+def funding_disqualifiers(
+    symbols: list[str],
+    *,
+    funding_now: dict | None = None,
+    funding_mean30: dict | None = None,
+    basis_bps: dict | None = None,
+    long_mult: float = F3_LONG_FUNDING_MULT,
+    short_backwardation_bps: float = F3_SHORT_BACKWARDATION_BPS,
+) -> dict[str, dict[str, bool]]:
+    """Hard F3 funding/basis exclusions before long/short quantile selection."""
+    out = {}
+    for sym in symbols:
+        now = float((funding_now or {}).get(sym, 0.0))
+        mean = float((funding_mean30 or {}).get(sym, 0.0))
+        basis = (basis_bps or {}).get(sym)
+        no_long = bool(mean > 0 and now > float(long_mult) * mean)
+        no_short = bool(basis is not None and float(basis) < -float(short_backwardation_bps))
+        out[sym] = {"no_long": no_long, "no_short": no_short}
+    return out
 
 
 def cluster_of(symbol: str):
@@ -182,9 +326,11 @@ def composite_rank(
     """Composite cross-sectional score per symbol (higher = more long).
 
     Each deep-history feature is cross-sectionally z-scored and combined with its
-    ``feature_weights`` weight; forward-collect features (OI/spread-depth/funding)
-    are wired but weight-0 by default so passing them does not move the default
-    score. Returns ``(scores, breakdown)`` where breakdown[feat][sym] is the
+    ``feature_weights`` weight. funding_drag is ACTIVE (default weight -0.3);
+    OI/spread-depth remain forward-collect at weight 0. Symbols missing from an
+    optional-input dict are injected as NaN and mean-filled to NEUTRAL — a finite
+    0.0 default would masquerade as real data and systematically boost uncovered
+    symbols. Returns ``(scores, breakdown)`` where breakdown[feat][sym] is the
     weighted contribution.
     """
     w = dict(DEFAULT_FEATURE_WEIGHTS)
@@ -194,11 +340,14 @@ def composite_rank(
         return {}, {}
 
     raw = {s: _symbol_features(closes, vols, s, t, vol_lookback=vol_lookback) for s in uni}
-    # inject optional forward-collect features (default neutral / weight 0)
+    # Inject optional features. Missing symbols become NaN so the mean-fill
+    # below keeps them NEUTRAL in the cross-section; a 0.0 default would be
+    # treated as a real (low) funding rate and boost every uncovered symbol
+    # now that funding_drag carries weight.
     for s in uni:
-        raw[s]["oi_conf"] = float((oi or {}).get(s, 0.0))
-        raw[s]["funding_drag"] = float((funding or {}).get(s, 0.0))
-        raw[s]["spread_depth_penalty"] = float((spread_depth or {}).get(s, 0.0))
+        raw[s]["oi_conf"] = float((oi or {}).get(s, float("nan")))
+        raw[s]["funding_drag"] = float((funding or {}).get(s, float("nan")))
+        raw[s]["spread_depth_penalty"] = float((spread_depth or {}).get(s, float("nan")))
 
     feat_names = list(DEFAULT_FEATURE_WEIGHTS.keys())
     scores = {s: 0.0 for s in uni}
@@ -272,6 +421,7 @@ def ls_weights(
     max_symbol_w: float | None = None,
     max_cluster_w: float | None = None,
     beta_cap: float | None = None,
+    exclusions: dict | None = None,
 ) -> dict:
     """Build a dollar-neutral L/S weight book from composite scores.
 
@@ -286,8 +436,21 @@ def ls_weights(
     order = sorted(syms, key=lambda s: scores[s])  # ascending
     n_long = max(1, int(math.ceil(top_q * len(syms))))
     n_short = max(1, int(math.ceil(bottom_q * len(syms))))
-    long_syms = list(reversed(order[-n_long:]))
-    short_syms = order[:n_short]
+    no_long = {s for s, ex in (exclusions or {}).items() if ex.get("no_long")}
+    no_short = {s for s, ex in (exclusions or {}).items() if ex.get("no_short")}
+    # Exclusions apply WITHIN the quantile windows and are never backfilled
+    # past them: backfilling can pull bottom-ranked names into the long book
+    # (worst case fully inverting the strategy). A shrunk side would also break
+    # the registered dollar-neutral invariant (0.5 gross concentrated in fewer
+    # names vs a full opposite side), so any exclusion inside a window skips
+    # the period entirely — gate-forced flat, honestly recorded.
+    long_window = list(reversed(order))[:n_long]
+    long_syms = [s for s in long_window if s not in no_long]
+    short_window = [s for s in order[:n_short] if s not in set(long_window)]
+    short_syms = [s for s in short_window if s not in no_short]
+    if len(long_syms) < n_long or len(short_syms) < len(short_window) or not short_syms:
+        return {"weights": {}, "long_syms": long_syms, "short_syms": short_syms,
+                "net_beta": 0.0, "gross": 0.0}
 
     lw = _inv_vol_side(long_syms, closes, t, vol_lookback, gross=0.5)
     sw = _inv_vol_side(short_syms, closes, t, vol_lookback, gross=0.5)
@@ -332,6 +495,8 @@ def _symbol_beta(closes, sym, ref, t, win) -> float:
 # ── replay ────────────────────────────────────────────────────────────────
 def simulate_f3(
     closes, opens, vols, *,
+    funding_panel=None,
+    basis_bps=None,
     lookback: int = DEFAULT_LOOKBACK,
     vol_lookback: int = DEFAULT_VOL_LOOKBACK,
     rebalance_every: int = 1,
@@ -356,7 +521,15 @@ def simulate_f3(
         uni = point_in_time_universe(closes, t, lookback=lookback)
         if len(uni) < 2:
             continue
-        scores, _ = composite_rank(closes, vols, t, uni, vol_lookback=vol_lookback)
+        funding_now = _panel_values(funding_panel, uni, t)
+        funding_mean30 = funding_mean30_from_panel(funding_panel, uni, t)
+        basis_now = _panel_values(basis_bps, uni, t)
+        exclusions = funding_disqualifiers(
+            uni, funding_now=funding_now, funding_mean30=funding_mean30,
+            basis_bps=basis_now)
+        scores, _ = composite_rank(
+            closes, vols, t, uni, funding=funding_now,
+            vol_lookback=vol_lookback)
         clusters = {s: cluster_of(s) for s in uni}
         betas = None
         if beta_ref in uni:
@@ -364,7 +537,8 @@ def simulate_f3(
         book = ls_weights(
             scores, top_q=top_q, bottom_q=bottom_q, closes=closes, t=t,
             vol_lookback=vol_lookback, betas=betas, clusters=clusters,
-            max_symbol_w=max_symbol_w, max_cluster_w=max_cluster_w, beta_cap=beta_cap,
+            max_symbol_w=max_symbol_w, max_cluster_w=max_cluster_w,
+            beta_cap=beta_cap, exclusions=exclusions,
         )
         signed = book["weights"]
         ei = t + 1
@@ -402,6 +576,14 @@ def simulate_f3(
             "n_legs": len(legs), "gross_pnl": float(gross_pnl), "cost": float(cost),
             "net_pnl": float(gross_pnl - cost), "net_beta": float(book["net_beta"]),
             "venue": venue, "label_status": "RESOLVED", "legs": legs,
+            "f3_gate": {
+                "funding_coverage_frac": (
+                    len(funding_now) / len(uni) if funding_panel is not None and uni else 0.0
+                ),
+                "basis_gate_active": bool(basis_bps is not None),
+                "no_long_count": sum(1 for x in exclusions.values() if x["no_long"]),
+                "no_short_count": sum(1 for x in exclusions.values() if x["no_short"]),
+            },
         })
     return periods
 
@@ -422,6 +604,17 @@ def build_f3_spec(symbols=DEFAULT_UNIVERSE, venues=("binance",)):
             "features": list(DEFAULT_FEATURE_WEIGHTS.keys()),
             "feature_weights": dict(DEFAULT_FEATURE_WEIGHTS),
             "features_gated_out": list(FORWARD_COLLECT_FEATURES),
+            "hard_disqualifiers": [
+                "no_long when current funding > 1.5x positive 30d mean",
+            ],
+            "inactive_disqualifiers": [
+                # Declared but NOT wired: no historical basis panel exists and
+                # run_f3_slice never passes basis_bps, so the no_short branch is
+                # unreachable in the real pipeline (per-period flag
+                # basis_gate_active=False). Listed separately so the evidence
+                # record never claims an untested gate.
+                "no_short when perp basis < -50 bps vs spot (UNWIRED: no basis panel)",
+            ],
             "top_q": 0.2, "bottom_q": 0.2, "timeframe": "1d",
         },
         exit_rules={"rebalance_every_bars": 1, "hold_to_next_rebalance": True},
@@ -434,6 +627,8 @@ def build_f3_spec(symbols=DEFAULT_UNIVERSE, venues=("binance",)):
             "max_cluster_weight": DEFAULT_MAX_CLUSTER_W,
             "min_rebalances": F3_MIN_REBALANCES,
             "live_feasibility": LIVE_FEASIBILITY,
+            "funding_drag_weight": F3_FUNDING_DRAG_WEIGHT,
+            "short_backwardation_bps": F3_SHORT_BACKWARDATION_BPS,
         },
         validation_status="lab_sim",
         promotion_status="untested",
@@ -452,6 +647,8 @@ def run_f3_slice(
     *,
     symbols=DEFAULT_UNIVERSE,
     venue: str = "binance",
+    funding_dir: str | Path = "data/funding_oi",
+    no_funding: bool = False,
     lookback: int = DEFAULT_LOOKBACK,
     rebalance_every: int = 1,
     top_q: float = 0.2,
@@ -461,9 +658,17 @@ def run_f3_slice(
     cache: str = CACHE,
 ) -> dict:
     """End-to-end build-spec -> simulate -> walk-forward -> accept -> register (F3)."""
-    closes, opens, vols = load_panel_v(symbols, cache)
+    loaded = load_panel_v(symbols, cache, include_ts=True)
+    if len(loaded) == 4:
+        closes, opens, vols, bar_ts = loaded
+    else:
+        closes, opens, vols = loaded
+        bar_ts = None
+    funding_panel = None if no_funding else load_funding_panel(
+        symbols, funding_dir=funding_dir, bar_ts=bar_ts, n_bars=len(closes))
     periods = simulate_f3(
-        closes, opens, vols, lookback=lookback, rebalance_every=rebalance_every,
+        closes, opens, vols, funding_panel=funding_panel,
+        lookback=lookback, rebalance_every=rebalance_every,
         top_q=top_q, bottom_q=bottom_q, venue=venue,
     )
     rets = [p["net_pnl"] for p in periods]
@@ -521,6 +726,11 @@ def run_f3_slice(
         "avg_win": float(wins.mean()) if wins.size else 0.0,
         "avg_loss": float(losses.mean()) if losses.size else 0.0,
         "max_abs_net_beta": float(max((abs(p["net_beta"]) for p in periods), default=0.0)),
+        "funding_coverage_frac": float(np.mean([
+            (p.get("f3_gate") or {}).get("funding_coverage_frac", 0.0)
+            for p in periods
+        ])) if periods else 0.0,
+        "funding_active": bool(funding_panel is not None),
         "accept": bool(verdict["accept"]),
         "live_feasibility": LIVE_FEASIBILITY,
     }
@@ -538,8 +748,8 @@ def run_f3_slice(
         "F3",
         hypothesis=(
             "Multi-feature cross-sectional ranking (1/3/7/14d relative strength, "
-            "EMA slope, volume trend, realized-vol penalty) long top-q / short "
-            "bottom-q, inverse-vol dollar-neutral with beta + cluster caps, is "
+            "EMA slope, volume trend, realized-vol penalty, funding drag) long "
+            "top-q / short bottom-q, inverse-vol dollar-neutral with beta + cluster caps, is "
             "market-neutral capital-preserving on liquid majors."
         ),
         oos_metrics=oos_metrics,
@@ -568,7 +778,11 @@ def run_f3_slice(
 
 
 def main(argv: list[str] | None = None) -> int:
-    rep = run_f3_slice()
+    parser = argparse.ArgumentParser(description="Run F3 relative-value research slice")
+    parser.add_argument("--funding-dir", default="data/funding_oi")
+    parser.add_argument("--no-funding", action="store_true")
+    args = parser.parse_args(argv)
+    rep = run_f3_slice(funding_dir=args.funding_dir, no_funding=args.no_funding)
     v, m, g = rep["verdict"], rep["oos_metrics"], rep["f3_gate"]
     print("=" * 68)
     print(f"F3 relative-value L/S — {','.join(rep['symbols'])} @ {rep['venue']}")
@@ -584,6 +798,8 @@ def main(argv: list[str] | None = None) -> int:
               "concentration_ok", "net_pnl_positive_2x_stress"):
         print(f"  {k}: {g[k]}")
     print(f"evidence status   : {rep['evidence']['promotion_status']}")
+    print(f"funding active    : {m.get('funding_active')}  "
+          f"coverage={m.get('funding_coverage_frac', 0.0):.2f}")
     print(f"live feasibility  : {rep['live_feasibility']}")
     return 0
 

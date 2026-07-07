@@ -28,6 +28,7 @@ from core.feed_health import FORWARD_FEEDS, read_forward_feed_status, unhealthy_
 ROOT = Path(__file__).resolve().parents[1]
 SELF_HEAL_STATE_PATH = Path("data/self_healing_state.json")
 SELF_HEAL_REPORT_DIR = Path("reports/self_healing")
+CONFLUENCE_PAPER_SCRIPT = ROOT / "run_confluence_paper.py"
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,50 @@ def _start_process(script: str, cfg: SelfHealingConfig) -> dict[str, Any]:
         return {"script": script, "started": True, "dry_run": False}
     except Exception as exc:
         return {"script": script, "started": False, "error": str(exc), "dry_run": False}
+
+
+def _pids_for_script(processes: list[dict[str, Any]], script: str) -> list[int]:
+    """PIDs from the snapshot whose command line runs ``script`` (basename match)."""
+    base = os.path.basename(str(script)).lower()
+    out: list[int] = []
+    if not base:
+        return out
+    for p in processes:
+        cl = str(p.get("CommandLine") or "").lower()
+        if base in cl:
+            try:
+                out.append(int(p.get("ProcessId")))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _terminate_pids(pids: list[int], cfg: SelfHealingConfig) -> list[int]:
+    """Best-effort kill of wedged feed processes (singleton-lock holders).
+
+    Since utils.process_lock made the harvesters singletons, respawning while a
+    wedged-but-alive holder keeps the OS lock makes the replacement exit
+    instantly ('already running' -> DEVNULL, exit 0) — the repair would no-op
+    forever while reporting ok=True. The wedged holder must die first.
+    """
+    killed: list[int] = []
+    for pid in pids:
+        if cfg.dry_run:
+            continue
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, timeout=15, check=False,
+                )
+            else:
+                import signal
+
+                os.kill(pid, signal.SIGKILL)
+            killed.append(pid)
+        except Exception:
+            continue
+    return killed
 
 
 def _powershell_process_snapshot() -> list[dict[str, Any]]:
@@ -365,12 +410,24 @@ class SelfHealingSupervisor:
             if now - self.state.last_repair_at.get(key, 0.0) < cfg.repair_cooldown_sec:
                 actions.append({"type": "repair_feed", "target": name, "ok": True, "skipped": "cooldown"})
                 continue
+            # Unhealthy feed with a LIVE process = wedged holder (suspended,
+            # console-paused, stuck DNS). It still owns the singleton lock, so
+            # a bare respawn exits instantly and the repair silently no-ops
+            # forever. Kill the wedged holder(s) first, then respawn.
+            killed: list[int] = []
+            if counts.get(name, 0) >= 1:
+                pids = _pids_for_script(processes, script_by_feed[name])
+                killed = _terminate_pids(pids, cfg)
             result = _start_process(script_by_feed[name], cfg)
             if not cfg.dry_run:
                 self.state.last_repair_at[key] = now
-            actions.append({"type": "repair_feed", "target": name, "ok": bool(result.get("started")), "result": result})
+            action = {"type": "repair_feed", "target": name, "ok": bool(result.get("started")), "result": result}
+            if counts.get(name, 0) >= 1:
+                action["wedged_holder"] = True
+                action["killed_pids"] = killed
+            actions.append(action)
 
-        if counts.get("confluence_paper", 0) < 1:
+        if CONFLUENCE_PAPER_SCRIPT.exists() and counts.get("confluence_paper", 0) < 1:
             key = "confluence_paper"
             if now - self.state.last_repair_at.get(key, 0.0) >= cfg.repair_cooldown_sec:
                 result = _start_process("run_confluence_paper.py", cfg)

@@ -51,13 +51,13 @@ Output: data/research/daily_report.html  (opens in browser)
 from __future__ import annotations
 
 import json
-import math
 import time
-import urllib.request
 import urllib.error
-from datetime import datetime, timedelta
-from pathlib  import Path
-from loguru   import logger
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+from loguru import logger
 
 RESEARCH_DIR = Path("data/research")
 REPORT_HTML  = RESEARCH_DIR / "daily_report.html"
@@ -96,7 +96,7 @@ def _get(url: str, timeout: int = 10) -> dict | list | None:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
     except Exception as e:
-        logger.debug("[Research] fetch {}: {}".format(url[:60], e))
+        logger.debug(f"[Research] fetch {url[:60]}: {e}")
         return None
 
 
@@ -108,9 +108,9 @@ def fetch_market_data() -> dict:
     """Fetch price, market cap, volume, change data for all coins."""
     ids = ",".join(c["id"] for c in UNIVERSE)
     url = ("https://api.coingecko.com/api/v3/coins/markets"
-           "?vs_currency=usd&ids={}&order=market_cap_desc"
+           f"?vs_currency=usd&ids={ids}&order=market_cap_desc"
            "&per_page=50&page=1"
-           "&price_change_percentage=1h,24h,7d,30d".format(ids))
+           "&price_change_percentage=1h,24h,7d,30d")
     raw = _get(url)
     if not raw:
         return {}
@@ -119,16 +119,16 @@ def fetch_market_data() -> dict:
 
 def fetch_coin_detail(coin_id: str) -> dict:
     """Fetch detailed data for one coin (supply, ATH, etc.)."""
-    url = ("https://api.coingecko.com/api/v3/coins/{}?"
+    url = (f"https://api.coingecko.com/api/v3/coins/{coin_id}?"
            "localization=false&tickers=false&market_data=true"
-           "&community_data=false&developer_data=false".format(coin_id))
+           "&community_data=false&developer_data=false")
     return _get(url) or {}
 
 
 def fetch_historical_prices(coin_id: str, days: int = 365) -> list:
     """Fetch daily OHLC for up to 365 days."""
-    url = ("https://api.coingecko.com/api/v3/coins/{}/ohlc"
-           "?vs_currency=usd&days={}".format(coin_id, days))
+    url = (f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
+           f"?vs_currency=usd&days={days}")
     return _get(url) or []
 
 
@@ -204,11 +204,9 @@ def run_screener(market: dict) -> dict:
         price      = data.get("current_price", 0) or 0
         mcap       = data.get("market_cap", 0) or 0
         vol_24h    = data.get("total_volume", 0) or 0
-        chg_1h     = data.get("price_change_percentage_1h_in_currency", 0) or 0
         chg_24h    = data.get("price_change_percentage_24h_in_currency", 0) or 0
         chg_7d     = data.get("price_change_percentage_7d_in_currency", 0) or 0
         chg_30d    = data.get("price_change_percentage_30d_in_currency", 0) or 0
-        ath        = data.get("ath", price) or price
         ath_pct    = data.get("ath_change_percentage", -50) or -50
         mcap_rank  = data.get("market_cap_rank", 99) or 99
 
@@ -319,7 +317,6 @@ def run_valuation(market: dict, coin_id: str = "bitcoin") -> dict:
     mcap    = data.get("market_cap", 0) or 0
     vol     = data.get("total_volume", 0) or 0
     supply  = data.get("circulating_supply", 19000000) or 19000000
-    max_sup = data.get("max_supply") or supply * 1.1
 
     # Revenue proxy: network fees / transaction volume (estimate from vol)
     # We use annualised volume as network "revenue" proxy
@@ -387,7 +384,7 @@ def run_valuation(market: dict, coin_id: str = "bitcoin") -> dict:
     # Sensitivity table: WACC 10% to 35% vs terminal multiple 2x to 10x
     sensitivity = []
     for w in [0.10, 0.15, 0.20, 0.25, 0.30, 0.35]:
-        row = {"wacc": "{}%".format(int(w * 100))}
+        row = {"wacc": f"{int(w * 100)}%"}
         for tm in [2, 4, 6, 8, 10]:
             base_fcf  = network_revenue * 0.70
             tv        = base_fcf * tm
@@ -395,14 +392,14 @@ def run_valuation(market: dict, coin_id: str = "bitcoin") -> dict:
                 base_fcf * (1.25 ** yr) / (1 + w) ** yr
                 for yr in range(1, 6)
             ) + tv / (1 + w) ** 5
-            row["{}x".format(tm)] = round(dcf / max(supply, 1), 0)
+            row[f"{tm}x"] = round(dcf / max(supply, 1), 0)
         sensitivity.append(row)
 
     return {
         "coin":       coin["symbol"],
         "price":      price,
         "mcap_b":     round(mcap / 1e9, 2),
-        "wacc":       "{}%".format(round(wacc * 100, 1)),
+        "wacc":       f"{round(wacc * 100, 1)}%",
         "scenarios":  projections,
         "sensitivity":sensitivity,
         "base_verdict": projections["base"]["verdict"],
@@ -564,8 +561,6 @@ def run_catalyst_preview(market: dict) -> dict:
     Crypto equivalent of earnings preview:
     Upcoming catalysts, historical price behaviour, implied moves.
     """
-    now = datetime.now()
-
     # Key upcoming catalysts (research-based, updated periodically)
     catalysts = [
         {
@@ -616,8 +611,6 @@ def run_catalyst_preview(market: dict) -> dict:
     eth = market.get("ethereum", {})
 
     if btc:
-        price  = btc.get("current_price", 0)
-        ath    = btc.get("ath", price)
         metrics.append({
             "metric":  "BTC ATH Distance",
             "value":   "{:.1f}%".format(btc.get("ath_change_percentage", 0)),
@@ -651,14 +644,13 @@ def run_catalyst_preview(market: dict) -> dict:
         impl    = round(chg_30d / 30 * 7, 1)   # weekly implied from 30d realised vol
         implied_moves.append({
             "coin":          coin["symbol"],
-            "weekly_impl":   "±{}%".format(impl),
-            "monthly_real":  "{}%".format(round(chg_30d, 1)),
+            "weekly_impl":   f"±{impl}%",
+            "monthly_real":  f"{round(chg_30d, 1)}%",
             "regime":        ("High Vol" if chg_30d > 30 else
                               "Normal" if chg_30d > 15 else "Low Vol"),
         })
 
     # Recommended plays
-    fg_val = 50  # default, overridden by caller
     plays = [
         {
             "play":      "Buy Before FOMC (if pause expected)",
@@ -895,7 +887,7 @@ def run_quant_analysis(market: dict, coin_id: str = "bitcoin") -> dict:
         "support":        [support1, support2],
         "resistance":     [resistance1, resistance2],
         "trade_setup":    {"type": setup, "entry": entry, "stop": stop,
-                           "target": target, "rr": "{}:1".format(rr)},
+                           "target": target, "rr": f"{rr}:1"},
     }
 
 
@@ -1236,7 +1228,7 @@ class ResearchEngine:
 
         self._save_json(report)
         self._generate_html(report)
-        logger.info("[Research] Complete. Report: {}".format(REPORT_HTML.resolve()))
+        logger.info(f"[Research] Complete. Report: {REPORT_HTML.resolve()}")
         return report
 
     def _save_json(self, report: dict):
@@ -1244,7 +1236,7 @@ class ResearchEngine:
             REPORT_JSON.write_text(
                 json.dumps(report, indent=2, default=str), encoding="utf-8")
         except Exception as e:
-            logger.debug("[Research] JSON save: {}".format(e))
+            logger.debug(f"[Research] JSON save: {e}")
 
     def _generate_html(self, report: dict):
         """Generate the full institutional research HTML report."""
@@ -1321,7 +1313,7 @@ class ResearchEngine:
         if sens_data:
             cols = [k for k in sens_data[0].keys() if k != "wacc"]
             sens_header = "<tr><th>WACC \\ Exit</th>" + "".join(
-                "<th>{}x</th>".format(c) for c in cols) + "</tr>"
+                f"<th>{c}</th>" for c in cols) + "</tr>"
         sens_rows = ""
         for row in sens_data:
             cols = [k for k in row.keys() if k != "wacc"]
@@ -1331,7 +1323,7 @@ class ResearchEngine:
                 v = row[c]
                 color = "#4ade80" if v > price_now * 1.2 else (
                         "#f87171" if v < price_now * 0.8 else "#fbbf24")
-                cells += "<td style='color:{}'>${:,.0f}</td>".format(color, v)
+                cells += f"<td style='color:{color}'>${v:,.0f}</td>"
             sens_rows += "<tr><td style='font-weight:bold'>{}</td>{}</tr>".format(
                 row["wacc"], cells)
 
@@ -1399,7 +1391,7 @@ class ResearchEngine:
         alloc_rows = ""
         for asset, pct in port.get("allocation", {}).items():
             bar_w = int(pct * 2)
-            alloc_rows += """
+            alloc_rows += f"""
             <tr>
               <td style="font-weight:bold">{asset}</td>
               <td style="font-weight:bold;color:#38bdf8">{pct}%</td>
@@ -1407,7 +1399,7 @@ class ResearchEngine:
                 <div style="background:#38bdf8;height:14px;width:{bar_w}px;
                      border-radius:2px;display:inline-block"></div>
               </td>
-            </tr>""".format(asset=asset, pct=pct, bar_w=bar_w)
+            </tr>"""
 
         pick_rows = ""
         for p in port.get("picks", []):
@@ -1443,11 +1435,11 @@ class ResearchEngine:
 
         fib_rows = ""
         for level, price_fib in fibs.items():
-            fib_rows += """
+            fib_rows += f"""
             <tr>
-              <td style="color:#fbbf24">Fib {}</td>
-              <td>${:,.2f}</td>
-            </tr>""".format(level, price_fib)
+              <td style="color:#fbbf24">Fib {level}</td>
+              <td>${price_fib:,.2f}</td>
+            </tr>"""
 
         # ── YIELD ────────────────────────────────────────────────────
         yield_rows = ""
@@ -1509,7 +1501,7 @@ class ResearchEngine:
         sol_swot = comp.get("swot", {}).get("SOL", {})
 
         def swot_list(items):
-            return "".join("<li>{}</li>".format(i) for i in items)
+            return "".join(f"<li>{i}</li>" for i in items)
 
         html = """<!DOCTYPE html>
 <html lang="en">
@@ -2038,4 +2030,4 @@ class ResearchEngine:
         try:
             REPORT_HTML.write_text(html, encoding="utf-8")
         except Exception as e:
-            logger.error("[Research] HTML write failed: {}".format(e))
+            logger.error(f"[Research] HTML write failed: {e}")

@@ -224,6 +224,50 @@ class BaseExchange(ABC):
                 return {}
         return {}
 
+    def fetch_tickers(self, symbols: Optional[list] = None,
+                      market_type: str = "spot") -> dict:
+        """Batched tickers, correctly routed by market type.
+
+        Mirrors fetch_ohlcv/fetch_ticker: ``market_type='futures'`` passes
+        ``_futures_params()`` so the call hits the perp endpoint and returns
+        unified swap-keyed tickers ('BTC/USDT:USDT'), regardless of the
+        client's steady-state ``defaultType``. Calling the RAW ccxt
+        fetch_tickers() instead routes by defaultType ('spot') and silently
+        returns spot keys that never match swap symbols — the 2026-07-06
+        shadow mover-universe bug. Fail-open: any error yields {}.
+        """
+        if not self._ready():
+            return {}
+        for attempt in range(MAX_RETRIES):
+            try:
+                # fetch_tickers has NO symbol to infer market type from, so
+                # _futures_params() (which is {} for binance — symbol-based
+                # calls route via the unified symbol) is not enough: an empty
+                # params routes to SPOT and returns 0 swap-keyed tickers (the
+                # 2026-07-06 mover bug). ccxt routes by params['type']; 'swap'
+                # = perpetual. Verified live on binance: 'swap' -> 648 swap
+                # tickers vs 0. _futures_params() still merged for venues that
+                # need extra routing hints.
+                if market_type == "futures":
+                    params = {"type": "swap", **(self._futures_params() or {})}
+                else:
+                    params = {}
+                return self.exchange.fetch_tickers(symbols, params=params)
+            except Exception as e:
+                if _is_timestamp_error(e):
+                    self._sync_time()
+                    continue
+                if _is_transient_error(e) and attempt < MAX_RETRIES - 1:
+                    delay = _backoff_delay(attempt)
+                    logger.debug(
+                        f"[{self.name}] fetch_tickers: transient, "
+                        f"retry {attempt+1}/{MAX_RETRIES-1} in {delay:.1f}s")
+                    _time.sleep(delay)
+                    continue
+                logger.warning(f"[{self.name}] fetch_tickers failed: {e}")
+                return {}
+        return {}
+
     def fetch_mark_index(self, symbol: str, market_type: str = "futures") -> dict:
         """Return ``{'mark', 'index', 'ts'}`` for a perp symbol.
 

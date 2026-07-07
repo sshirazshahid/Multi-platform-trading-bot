@@ -46,9 +46,7 @@ def test_self_healing_repairs_missing_feed_process(tmp_path, monkeypatch):
 
     assert report["verdict"] == "OK"
     assert any("harvest_l2.py" in s for s in started)
-    assert "run_confluence_paper.py" in started
     assert any(a["type"] == "repair_feed" for a in report["actions"])
-    assert any(a["type"] == "repair_auxiliary" for a in report["actions"])
 
 
 def test_self_healing_promotes_candidate_only_after_replay_gate(tmp_path, monkeypatch):

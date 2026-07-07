@@ -26,6 +26,11 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.process_lock import acquire_process_lock
+
 HIST = ROOT / "data" / "l2_history.jsonl"
 STATUS = ROOT / "data" / "l2_status.json"
 DEPTH = "https://fapi.binance.com/fapi/v1/depth"
@@ -120,6 +125,13 @@ def _status(connected, buckets, last, polls):
 
 def main():
     once = "--once" in sys.argv
+    _lock = None
+    if not once:
+        _lock = acquire_process_lock("harvest_l2", root=ROOT)
+        if _lock is None:
+            print("[l2] another harvester instance is already running; exiting", flush=True)
+            return
+
     buckets = defaultdict(lambda: defaultdict(list))
     polls = 0
     last_flush = 0.0

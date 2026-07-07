@@ -17,8 +17,13 @@ $py = Join-Path $root 'venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { Write-Host "[start_all] venv python not found: $py"; exit 1 }
 
 # (label, script path relative to repo root) — persistent loops only
-$procs = @(
-  @{ name = 'confluence-paper'; script = 'run_confluence_paper.py' },
+$procs = @()
+if (Test-Path (Join-Path $root 'run_confluence_paper.py')) {
+  $procs += @{ name = 'confluence-paper'; script = 'run_confluence_paper.py' }
+} else {
+  Write-Host "[start_all] confluence-paper skipped (run_confluence_paper.py not present)"
+}
+$procs += @(
   @{ name = 'liq-harvester';    script = 'scripts\harvest_liquidations.py' },
   @{ name = 'skew-harvester';   script = 'scripts\harvest_skew.py' },
   @{ name = 'l2-harvester';     script = 'scripts\harvest_l2.py' },

@@ -199,7 +199,9 @@ def test_s1_cycle_persists_and_reuses_regime_state(monkeypatch, tmp_path):
     assert out["regime"] == REGIME_NORMAL
     state = json.loads(state_file.read_text(encoding="utf-8"))
     assert state["regime"] == REGIME_NORMAL
-    assert state["states"] == {"BTC": "above", "ETH": "above"}
+    assert state["version"] == 2
+    assert state["states"]["BTC"]["state"] == "above"
+    assert state["states"]["ETH"]["state"] == "above"
     assert "ts" in state
 
     # call 2: flat closes sit ON the EMA (inside the zero-width band);
@@ -238,4 +240,5 @@ def test_s1_cycle_cold_start_missing_or_corrupt_state(monkeypatch, tmp_path):
     assert out2["regime"] == REGIME_DEFENSIVE
     # a valid state file was re-persisted after the corrupt read
     state = json.loads(state_file.read_text(encoding="utf-8"))
-    assert state["states"] == {"BTC": "below", "ETH": "below"}
+    assert state["states"]["BTC"]["state"] == "below"
+    assert state["states"]["ETH"]["state"] == "below"

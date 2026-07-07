@@ -115,3 +115,47 @@ def test_forward_feed_audit_flags_missing_process(tmp_path, monkeypatch):
 
     assert checks[0]["status"] == "FAIL"
     assert "liquidations" in checks[0]["metrics"]["unhealthy_feeds"]
+
+
+def test_runtime_audit_treats_missing_confluence_runner_as_optional(tmp_path, monkeypatch):
+    import scripts.trading_system_audit as audit
+
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    monkeypatch.setattr(audit, "_windows_process_audit_supported", lambda: True)
+    monkeypatch.setattr(
+        audit,
+        "_windows_python_processes",
+        lambda: [
+            {
+                "ProcessId": 10,
+                "ParentProcessId": 1,
+                "CommandLine": r"D:\repo\venv\Scripts\python.exe main.py",
+            },
+            {
+                "ProcessId": 20,
+                "ParentProcessId": 1,
+                "CommandLine": r"D:\repo\venv\Scripts\python.exe scripts\harvest_liquidations.py",
+            },
+            {
+                "ProcessId": 30,
+                "ParentProcessId": 1,
+                "CommandLine": r"D:\repo\venv\Scripts\python.exe scripts\harvest_skew.py",
+            },
+            {
+                "ProcessId": 40,
+                "ParentProcessId": 1,
+                "CommandLine": r"D:\repo\venv\Scripts\python.exe scripts\harvest_l2.py",
+            },
+            {
+                "ProcessId": 50,
+                "ParentProcessId": 1,
+                "CommandLine": r"D:\repo\venv\Scripts\python.exe scripts\harvest_tv.py",
+            },
+        ],
+    )
+
+    checks = []
+    audit.audit_processes(checks)
+
+    assert checks[0]["status"] == "PASS"
+    assert checks[0]["metrics"]["optional_runtime_missing"] == ["confluence_paper"]

@@ -377,10 +377,17 @@ class SpotPortfolioManager:
             _S1 = {"enabled": False}
         if not _S1.get("enabled", False):
             return None
-        from core.spot_regime import daily_ema200_regime_hysteresis, rebalance_decision
+        from core.spot_regime import (
+            closed_daily_ohlc,
+            daily_sma200_atr_regime,
+            rebalance_decision,
+        )
         try:
-            regime, states = daily_ema200_regime_hysteresis(
-                daily_closes.get("BTC") or [], daily_closes.get("ETH") or [],
+            now = time.time()
+            btc = self._coerce_s1_ohlc(daily_closes.get("BTC") or [], now, closed_daily_ohlc)
+            eth = self._coerce_s1_ohlc(daily_closes.get("ETH") or [], now, closed_daily_ohlc)
+            regime, states = daily_sma200_atr_regime(
+                btc, eth,
                 prev_states=self._load_s1_regime_states())
             self._persist_s1_regime_state(regime, states)
             decision = rebalance_decision(
@@ -397,23 +404,56 @@ class SpotPortfolioManager:
         return decision
 
     @staticmethod
+    def _coerce_s1_ohlc(rows, now_ts: float, closed_daily_ohlc_fn):
+        if not rows:
+            return []
+        first = rows[0]
+        if isinstance(first, dict):
+            return rows
+        if isinstance(first, (int, float)):
+            return [
+                {"ts": i, "high": float(v), "low": float(v), "close": float(v)}
+                for i, v in enumerate(rows)
+            ]
+        return closed_daily_ohlc_fn(rows, now_ts)
+
+    @staticmethod
     def _load_s1_regime_states():
-        """Persisted S1 hysteresis states dict, or None (missing/corrupt file)."""
+        """Persisted S1 regime states dict, or None (missing/corrupt file)."""
         try:
             raw = json.loads(S1_REGIME_STATE_FILE.read_text(encoding="utf-8"))
             states = raw.get("states")
-            return states if isinstance(states, dict) else None
+            if not isinstance(states, dict):
+                return None
+            out = {}
+            for sym, val in states.items():
+                if isinstance(val, dict) and val.get("state") in ("above", "below"):
+                    out[sym] = {
+                        "state": val.get("state"),
+                        "streak": int(val.get("streak") or 0),
+                        "streak_dir": val.get("streak_dir"),
+                        "last_bar_ts": val.get("last_bar_ts"),
+                    }
+                elif val in ("above", "below"):
+                    out[sym] = {
+                        "state": val,
+                        "streak": 0,
+                        "streak_dir": None,
+                        "last_bar_ts": None,
+                    }
+            return out or None
         except Exception:
             return None
 
     @staticmethod
     def _persist_s1_regime_state(regime: str, states: dict) -> None:
-        """Atomically persist the S1 hysteresis regime state (tmp + replace)."""
+        """Atomically persist the S1 regime state (tmp + replace)."""
         try:
             S1_REGIME_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             tmp = S1_REGIME_STATE_FILE.with_suffix(".json.tmp")
             tmp.write_text(
-                json.dumps({"ts": time.time(), "regime": regime, "states": states}),
+                json.dumps({"ts": time.time(), "regime": regime,
+                            "version": 2, "states": states}),
                 encoding="utf-8")
             tmp.replace(S1_REGIME_STATE_FILE)
         except Exception as e:

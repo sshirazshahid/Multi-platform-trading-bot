@@ -22,11 +22,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.process_lock import acquire_process_lock
+
 HIST = ROOT / "data" / "liquidations_history.jsonl"
 STATUS = ROOT / "data" / "liquidations_status.json"
 WS_URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
@@ -139,6 +145,11 @@ async def _run_once(buckets: _Buckets) -> None:
 
 
 async def main() -> None:
+    _lock = acquire_process_lock("harvest_liquidations", root=ROOT)
+    if _lock is None:
+        print("[liq] another harvester instance is already running; exiting", flush=True)
+        return
+
     HIST.parent.mkdir(parents=True, exist_ok=True)
     buckets = _Buckets()
     backoff = 2.0

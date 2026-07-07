@@ -18,6 +18,7 @@ from core.agents.pattern_agent import PatternAgent
 from core.agents.projected_sizer import make_sizer
 from core.agents.risk_agent import RiskAgent
 from core.agents.scalp_agent import ScalpAgent
+from core.agents.tp_probe_agent import TPProbeAgent
 from core.agents.trend_agent import TrendAgent
 
 
@@ -41,6 +42,10 @@ class ShadowRunner:
         agents = [
             TrendAgent(), ScalpAgent(), MeanReversionAgent(),
             PatternAgent(), LiquidityAgent(),
+            # 2026-07-05 owner /goal probe: measures the geometric ~78% TP-hit
+            # ceiling on the mover universe, scored after costs by the
+            # resolver. Hit-rate is only readable NEXT TO resolved net_pnl.
+            TPProbeAgent(),
         ]
         self._coord = AgentCoordinator(
             agents=agents,

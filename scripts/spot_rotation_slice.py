@@ -4,7 +4,7 @@ Long-only spot rotation gated by the Phase-5 regime:
 
     rank liquid spot symbols by z-scored 30/14/7d relative return + EMA50 slope
     + volume confirmation - realized-vol penalty - spread penalty -> hold the
-    strongest 2-4 ONLY when the daily-EMA200 regime is NORMAL (partly USDT when
+    strongest 2-4 under the daily SMA200/ATR BTC+ETH regime (partly USDT when
     REDUCED, fully USDT when DEFENSIVE) -> rebalance on schedule with a
     cost-aware skip -> decide at closed bar t, fill at t+1 OPEN -> after-cost
     net return per period -> walk-forward OOS -> accept() verdict ->
@@ -39,6 +39,7 @@ from core.spot_regime import (  # noqa: E402
     REGIME_NORMAL,
     REGIME_REDUCED,
     daily_ema200_regime_hysteresis,
+    daily_sma200_atr_regime,
 )
 from core.walk_forward import WalkForward  # noqa: E402
 from scripts.s2_basket_slice import point_in_time_universe  # noqa: E402
@@ -57,8 +58,12 @@ DEFAULT_TOP_N = 3                 # hold strongest 2-4
 MIN_TOP_N, MAX_TOP_N = 2, 4
 DEFAULT_REBALANCE_EVERY = 7       # bars between scheduled rebalances
 MIN_TURNOVER_FRAC = 0.05          # cost-aware skip floor
-ADMISSION_RETURN_WINDOW = 30      # raw abs-return admission horizon (reuses 30d)
+ADMISSION_RETURN_WINDOW = 28      # raw abs-return admission horizon
 MIN_ADMITTED = 2                  # fewer admitted symbols -> 100% USDT
+S2_MIN_DOLLAR_VOLUME_USD = 50_000_000.0
+S2_DOLLAR_VOLUME_LOOKBACK = 30
+S2_MAX_SPREAD_BPS = 20.0
+S2_TREND_SMA_PERIOD = 50
 # Regime -> total coin exposure (rest is USDT). Long-only by construction.
 REGIME_EXPOSURE = {REGIME_NORMAL: 1.0, REGIME_REDUCED: 0.5, REGIME_DEFENSIVE: 0.0}
 LOOKBACK = max(max(RETURN_WINDOWS), EMA_SLOPE_PERIOD + EMA_SLOPE_LOOKBACK, VOL_LOOKBACK)
@@ -66,8 +71,8 @@ LOOKBACK = max(max(RETURN_WINDOWS), EMA_SLOPE_PERIOD + EMA_SLOPE_LOOKBACK, VOL_L
 
 # ── panel loading ──────────────────────────────────────────────────────
 def load_panel(symbols=DEFAULT_UNIVERSE, cache: str = CACHE):
-    """(closes, opens, volumes) DataFrames aligned on a common daily ts index."""
-    close_c, open_c, vol_c = {}, {}, {}
+    """(closes, opens, highs, lows, volumes) aligned on a common daily ts index."""
+    close_c, open_c, high_c, low_c, vol_c = {}, {}, {}, {}, {}
     for s in symbols:
         p = os.path.join(cache, f"{s}-USDT_1d.parquet")
         if not os.path.exists(p):
@@ -76,13 +81,17 @@ def load_panel(symbols=DEFAULT_UNIVERSE, cache: str = CACHE):
         idx = pd.to_datetime(df["ts"], unit="s")
         close_c[s] = pd.Series(df["close"].to_numpy(float), index=idx)
         open_c[s] = pd.Series(df["open"].to_numpy(float), index=idx)
+        high_c[s] = pd.Series(df["high"].to_numpy(float), index=idx)
+        low_c[s] = pd.Series(df["low"].to_numpy(float), index=idx)
         vol_c[s] = pd.Series(df["volume"].to_numpy(float), index=idx)
     if not close_c:
         raise FileNotFoundError(f"no daily cache for any of {symbols} at {cache}")
     closes = pd.DataFrame(close_c).sort_index().reset_index(drop=True)
     opens = pd.DataFrame(open_c).sort_index().reset_index(drop=True)
+    highs = pd.DataFrame(high_c).sort_index().reset_index(drop=True)
+    lows = pd.DataFrame(low_c).sort_index().reset_index(drop=True)
     volumes = pd.DataFrame(vol_c).sort_index().reset_index(drop=True)
-    return closes, opens, volumes
+    return closes, opens, highs, lows, volumes
 
 
 # ── ranking ────────────────────────────────────────────────────────────
@@ -170,11 +179,22 @@ def admit_universe(
     universe: list,
     *,
     window: int = ADMISSION_RETURN_WINDOW,
+    volumes: pd.DataFrame | None = None,
+    spread_bps: dict | None = None,
+    min_dollar_volume_usd: float = S2_MIN_DOLLAR_VOLUME_USD,
+    dollar_volume_lookback: int = S2_DOLLAR_VOLUME_LOOKBACK,
+    max_spread_bps: float = S2_MAX_SPREAD_BPS,
+    trend_sma_period: int = S2_TREND_SMA_PERIOD,
 ) -> list:
-    """Symbols whose RAW absolute return over the last ``window`` bars ending
-    at ``t`` is > 0. NaN at either endpoint excludes the symbol. Deterministic
-    (sorted)."""
-    if t - window < 0:
+    """Admission gate for S2 rotation.
+
+    A symbol must have positive raw return over ``window``, median trailing
+    dollar volume >= ``min_dollar_volume_usd``, spread <= ``max_spread_bps``,
+    and close above SMA50. When ``volumes`` is omitted, legacy callers get the
+    old return-only behavior; replay passes volumes and therefore binds all
+    gates.
+    """
+    if t - window < 0 or t - trend_sma_period + 1 < 0:
         return []
     admitted = []
     for s in sorted(universe):
@@ -182,8 +202,24 @@ def admit_universe(
         past = float(closes[s].iloc[t - window])
         if math.isnan(now) or math.isnan(past):
             continue
-        if now / past - 1.0 > 0.0:
-            admitted.append(s)
+        if now / past - 1.0 <= 0.0:
+            continue
+        if volumes is not None:
+            v = float(volumes[s].iloc[t])
+            if math.isnan(v):
+                continue
+            lo = max(0, t - int(dollar_volume_lookback) + 1)
+            dollar = closes[s].iloc[lo:t + 1] * volumes[s].iloc[lo:t + 1]
+            median_dollar = float(dollar.median(skipna=True))
+            if math.isnan(median_dollar) or median_dollar < float(min_dollar_volume_usd):
+                continue
+        bps = float((spread_bps or {}).get(s, DEFAULT_SPREAD_BPS))
+        if math.isnan(bps) or bps > float(max_spread_bps):
+            continue
+        sma50 = float(closes[s].iloc[t - trend_sma_period + 1:t + 1].mean())
+        if math.isnan(sma50) or now <= sma50:
+            continue
+        admitted.append(s)
     return admitted
 
 
@@ -248,12 +284,18 @@ def should_rebalance(
 
 
 # ── backtest ───────────────────────────────────────────────────────────
-def compute_regimes(closes: pd.DataFrame, *, ema_period: int = 200) -> list:
+def compute_regimes(
+    closes: pd.DataFrame,
+    highs: pd.DataFrame | None = None,
+    lows: pd.DataFrame | None = None,
+    *,
+    ema_period: int = 200,
+    regime_mode: str = "sma_atr_3close",
+) -> list:
     """Per-bar regime from closed daily closes (DEFENSIVE until enough history).
 
-    Uses the hysteresis regime variant, threading the BTC/ETH band states
-    through the sequential replay (reset on missing-history/NaN bars) so the
-    replay is deterministic and whipsaw-damped.
+    Default path uses Rev5.2 SMA200 +/- ATR14 with 3-close confirmation when
+    highs/lows are supplied. ``legacy_ema_hysteresis`` retains the Rev5.1 path.
     """
     n = len(closes)
     out = []
@@ -270,8 +312,30 @@ def compute_regimes(closes: pd.DataFrame, *, ema_period: int = 200) -> list:
             out.append(REGIME_DEFENSIVE)
             prev_states = None
             continue
-        regime, prev_states = daily_ema200_regime_hysteresis(
-            list(b), list(e), ema_period=ema_period, prev_states=prev_states)
+        if regime_mode == "sma_atr_3close" and highs is not None and lows is not None:
+            try:
+                btc_rows = [
+                    {"ts": i, "high": float(highs["BTC"].iloc[i]),
+                     "low": float(lows["BTC"].iloc[i]), "close": float(closes["BTC"].iloc[i])}
+                    for i in range(t + 1)
+                ]
+                eth_rows = [
+                    {"ts": i, "high": float(highs["ETH"].iloc[i]),
+                     "low": float(lows["ETH"].iloc[i]), "close": float(closes["ETH"].iloc[i])}
+                    for i in range(t + 1)
+                ]
+                if any(
+                    not np.isfinite(x["high"]) or not np.isfinite(x["low"])
+                    for x in btc_rows + eth_rows
+                ):
+                    raise ValueError("non-finite high/low")
+                regime, prev_states = daily_sma200_atr_regime(
+                    btc_rows, eth_rows, prev_states=prev_states)
+            except ValueError:
+                regime, prev_states = REGIME_DEFENSIVE, None
+        else:
+            regime, prev_states = daily_ema200_regime_hysteresis(
+                list(b), list(e), ema_period=ema_period, prev_states=prev_states)
         out.append(regime)
     return out
 
@@ -312,7 +376,9 @@ def simulate_rotation(
         if admission_window is None:
             ranked = uni
         else:
-            admitted = admit_universe(closes, t, uni, window=admission_window)
+            admitted = admit_universe(
+                closes, t, uni, window=admission_window,
+                volumes=volumes, spread_bps=spread_bps)
             ranked = admitted if len(admitted) >= MIN_ADMITTED else []
         scores = rank_scores(closes, volumes, t, ranked, spread_bps) if ranked else {}
         targets = select_targets(scores, regime, top_n=top_n)
@@ -357,6 +423,7 @@ def simulate_rotation(
         }
         if admitted is not None:
             period["n_admitted"] = len(admitted)
+            period["n_universe"] = len(uni)
         periods.append(period)
     return periods
 
@@ -377,8 +444,11 @@ def build_spot_s2_spec():
             "type": "relative_strength_rotation",
             "rank": "z(ret30/14/7)+z(ema50_slope)+z(volume_confirm)-z(realized_vol)-spread",
             "hold_top_n": [MIN_TOP_N, MAX_TOP_N],
-            "regime_gate": "daily_ema200_btc_eth (NORMAL only; REDUCED half; DEFENSIVE USDT)",
-            "admission": "raw 30d abs return > 0; <2 admitted -> 100% USDT",
+            "regime_gate": "daily_sma200_atr14_3close_btc_eth",
+            "admission": (
+                "raw 28d abs return > 0; median 30d dollar volume >= $50M; "
+                "spread <= 20 bps; close > SMA50; <2 admitted -> 100% USDT"
+            ),
         },
         exit_rules={
             "scheduled_rebalance_bars": DEFAULT_REBALANCE_EVERY,
@@ -406,8 +476,8 @@ def run_spot_rotation_slice(
     """Load -> simulate -> walk-forward -> accept() -> register evidence + spec."""
     from core.strategy_spec import SPEC_DIR, save_spec
 
-    closes, opens, volumes = load_panel(symbols, cache)
-    regimes = compute_regimes(closes)
+    closes, opens, highs, lows, volumes = load_panel(symbols, cache)
+    regimes = compute_regimes(closes, highs, lows)
     periods = simulate_rotation(
         closes, opens, volumes, regimes,
         top_n=top_n, rebalance_every=rebalance_every, venue=venue,

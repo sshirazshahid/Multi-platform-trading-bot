@@ -17,6 +17,9 @@ import pandas as pd
 from scripts.spot_rotation_slice import (
     ADMISSION_RETURN_WINDOW,
     MIN_ADMITTED,
+    S2_MAX_SPREAD_BPS,
+    S2_MIN_DOLLAR_VOLUME_USD,
+    S2_TREND_SMA_PERIOD,
     admit_universe,
     rank_scores,
     select_targets,
@@ -35,7 +38,7 @@ def _synthetic_panel(n=120, syms=("A", "B", "C", "D", "E", "F")):
         c = pd.Series(np.abs(path) + 1.0)
         opens[s] = c.shift(1).fillna(c.iloc[0])
         closes[s] = c
-        volumes[s] = pd.Series(np.full(n, 1000.0 + 100 * k))
+        volumes[s] = pd.Series(np.full(n, 1_000_000.0 + 100_000 * k))
     return pd.DataFrame(closes), pd.DataFrame(opens), pd.DataFrame(volumes)
 
 
@@ -156,7 +159,7 @@ def test_spot_rotation_slice_end_to_end(tmp_path):
 
 
 # ── W3: absolute-return admission gate ───────────────────────────────────────
-def _panel_from(series_map: dict, vol: float = 1000.0):
+def _panel_from(series_map: dict, vol: float = 1_000_000.0):
     """(closes, opens, volumes) panel from explicit per-symbol close paths."""
     closes = pd.DataFrame({s: pd.Series(v, dtype=float) for s, v in series_map.items()})
     opens = pd.DataFrame({s: closes[s].shift(1).fillna(closes[s].iloc[0])
@@ -225,8 +228,11 @@ def _legacy_simulate(closes, opens, volumes, regimes, *, top_n=3,
 
 
 def test_admission_constants():
-    assert ADMISSION_RETURN_WINDOW == 30
+    assert ADMISSION_RETURN_WINDOW == 28
     assert MIN_ADMITTED == 2
+    assert S2_MIN_DOLLAR_VOLUME_USD == 50_000_000.0
+    assert S2_MAX_SPREAD_BPS == 20.0
+    assert S2_TREND_SMA_PERIOD == 50
 
 
 def test_admit_universe_positive_only_sorted_nan_excluded():
@@ -234,7 +240,7 @@ def test_admit_universe_positive_only_sorted_nan_excluded():
     up = 100 + 0.2 * np.arange(n)
     down = 200 - 0.5 * np.arange(n)
     gap = up.copy()
-    gap[70] = np.nan  # NaN at t-30 endpoint for t=100
+    gap[72] = np.nan  # NaN at t-28 endpoint for t=100
     closes = pd.DataFrame({"ZUP": pd.Series(up), "ADN": pd.Series(down),
                            "BGAP": pd.Series(gap), "CUP": pd.Series(up.copy())})
     admitted = admit_universe(closes, 100, list(closes.columns))
@@ -244,6 +250,38 @@ def test_admit_universe_positive_only_sorted_nan_excluded():
     gap2[100] = np.nan
     closes2 = pd.DataFrame({"ZUP": pd.Series(up), "BGAP": pd.Series(gap2)})
     assert admit_universe(closes2, 100, list(closes2.columns)) == ["ZUP"]
+
+
+def test_admit_universe_excludes_low_median_dollar_volume():
+    n = 120
+    up = pd.Series(100 + 0.2 * np.arange(n), dtype=float)
+    closes = pd.DataFrame({"LIQ": up, "THIN": up.copy()})
+    volumes = pd.DataFrame({
+        "LIQ": pd.Series(np.full(n, 1_000_000.0)),
+        "THIN": pd.Series(np.full(n, 1_000.0)),
+    })
+    assert admit_universe(closes, 100, ["LIQ", "THIN"], volumes=volumes) == ["LIQ"]
+
+
+def test_admit_universe_excludes_wide_spread():
+    n = 120
+    up = pd.Series(100 + 0.2 * np.arange(n), dtype=float)
+    closes = pd.DataFrame({"OK": up, "WIDE": up.copy()})
+    volumes = pd.DataFrame({s: pd.Series(np.full(n, 1_000_000.0)) for s in closes.columns})
+    admitted = admit_universe(
+        closes, 100, ["OK", "WIDE"], volumes=volumes, spread_bps={"WIDE": 25.0}
+    )
+    assert admitted == ["OK"]
+
+
+def test_admit_universe_excludes_close_below_sma50():
+    n = 120
+    trend = np.array([100.0] * 70 + [130.0] * 30 + [90.0] * 20)
+    good = 100 + 0.2 * np.arange(n)
+    closes = pd.DataFrame({"GOOD": pd.Series(good), "FADE": pd.Series(trend)})
+    volumes = pd.DataFrame({s: pd.Series(np.full(n, 1_000_000.0)) for s in closes.columns})
+    admitted = admit_universe(closes, 100, ["GOOD", "FADE"], volumes=volumes)
+    assert admitted == ["GOOD"]
 
 
 def test_negative_30d_leader_never_held(monkeypatch):
@@ -328,4 +366,5 @@ def test_spec_documents_admission_gate():
 
     spec = build_spot_s2_spec()
     assert "admission" in spec.entry_rules
-    assert "30d" in spec.entry_rules["admission"]
+    assert "28d" in spec.entry_rules["admission"]
+    assert "$50M" in spec.entry_rules["admission"]

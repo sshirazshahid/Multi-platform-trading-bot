@@ -541,6 +541,20 @@ F1_LEVERAGE_MAX = 2.0                  # 2x hard cap thereafter
 # Rev 5 universe: BTC/ETH on binance (same-venue hedge) unless explicitly opted in.
 F1_DEFAULT_SYMBOLS = ("BTC/USDT", "ETH/USDT")
 F1_DEFAULT_VENUES = ("binance",)
+# 2026-07-05 owner-approved PRE-REGISTERED paper-universe expansion — see
+# research/prereg_carry_universe_expansion_2026_07_05.md and the replay
+# evidence in research/carry_universe_scan_2026_07_05.py (~7.8 qualifying
+# entries/yr across the 15 vs 0.45 for BTC+ETH; 46/49 replay cycles won).
+# The FULL named set is frozen before activation — including BTC and SUI,
+# which showed 0 qualifying entries in 6.8y — precisely so later evaluation
+# cannot be accused of post-hoc symbol selection. The Rev-5 latch above is
+# UNCHANGED; consumers opt in explicitly (build_f1_spec requires
+# allow_extended_universe=True for this set).
+F1_EXPANDED_UNIVERSE_2026_07_05 = (
+    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "LINK/USDT",
+    "TRX/USDT", "SUI/USDT", "ATOM/USDT", "DOGE/USDT", "ALGO/USDT",
+    "ZEC/USDT", "ADA/USDT", "XRP/USDT", "LTC/USDT", "GRT/USDT",
+)
 
 
 def f1_net_expected_edge_bps(

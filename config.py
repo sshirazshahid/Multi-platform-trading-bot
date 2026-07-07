@@ -286,6 +286,14 @@ SHADOW_MODE = {
     "kill_wr_floor": float(os.getenv("SHADOW_KILL_WR_FLOOR", "0.30")),
     "kill_min_decisions": int(os.getenv("SHADOW_KILL_MIN_DECISIONS", "100")),
     "kill_max_halts_7d": int(os.getenv("SHADOW_KILL_MAX_HALTS_7D", "3")),
+    # 2026-07-06 mover universe: the shadow ensemble watches the day's biggest
+    # |24h %| movers among the liquidity-screened futures pairs (owner ask:
+    # continuously test scalping the daily movers) instead of the first-listed
+    # pairs. Log-only lane; SHADOW_MOVER_UNIVERSE=false restores legacy.
+    "mover_universe": os.getenv("SHADOW_MOVER_UNIVERSE", "true").lower() == "true",
+    "mover_cap": int(os.getenv("SHADOW_MOVER_CAP", "10")),
+    "mover_refresh_s": int(os.getenv("SHADOW_MOVER_REFRESH_S", "900")),
+    "mover_min_qv_usd": float(os.getenv("SHADOW_MOVER_MIN_QV_USD", "5000000")),
 }
 
 MODEL_GATE = {

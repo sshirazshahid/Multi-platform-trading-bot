@@ -214,6 +214,14 @@ RUNTIME_SCRIPTS = {
 }
 
 
+def _optional_runtime_missing() -> list[str]:
+    missing: list[str] = []
+    confluence = ROOT / RUNTIME_SCRIPTS["confluence_paper"]
+    if not confluence.exists():
+        missing.append("confluence_paper")
+    return missing
+
+
 def _script_key(command_line: str | None) -> str | None:
     cl = str(command_line or "").lower().replace("/", "\\")
     for key, leaf in RUNTIME_SCRIPTS.items():
@@ -280,6 +288,9 @@ def audit_processes(checks: list[dict[str, Any]]) -> None:
     logical, raw = _logical_script_counts(processes)
     harvester_keys = ("liquidations", "skew", "l2", "tv")
     missing_harvesters = [k for k in harvester_keys if logical.get(k, 0) < 1]
+    optional_missing = _optional_runtime_missing()
+    required_aux = [k for k in ("confluence_paper",) if k not in optional_missing]
+    missing_aux = [k for k in required_aux if logical.get(k, 0) < 1]
     duplicate_scripts = [k for k, n in logical.items() if n > 1]
     status = "PASS"
     detail = "runtime process layout is sane"
@@ -289,7 +300,7 @@ def audit_processes(checks: list[dict[str, Any]]) -> None:
     elif duplicate_scripts:
         status = "FAIL"
         detail = "duplicate trading processes detected"
-    elif logical.get("confluence_paper", 0) < 1 or missing_harvesters:
+    elif missing_aux or missing_harvesters:
         status = "WARN"
         detail = "one or more auxiliary runtime processes are missing"
     add_check(
@@ -300,6 +311,8 @@ def audit_processes(checks: list[dict[str, Any]]) -> None:
         logical_counts=logical,
         raw_counts=raw,
         missing_harvesters=missing_harvesters,
+        missing_auxiliaries=missing_aux,
+        optional_runtime_missing=optional_missing,
         duplicate_scripts=duplicate_scripts,
         python_processes=len(processes),
     )

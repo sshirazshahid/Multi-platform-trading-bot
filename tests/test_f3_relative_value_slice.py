@@ -75,6 +75,103 @@ def test_composite_rank_oi_gated_out_by_default():
     assert with_oi == base
 
 
+def test_funding_drag_is_active_and_penalizes_high_funding():
+    closes, _, vols = _synthetic_panel()
+    t = 70
+    uni = f3.point_in_time_universe(closes, t, lookback=14)
+    base, _ = f3.composite_rank(closes, vols, t, uni)
+    assert f3.DEFAULT_FEATURE_WEIGHTS["funding_drag"] < 0
+    assert "funding_drag" not in f3.FORWARD_COLLECT_FEATURES
+
+    funding = {s: 0.0 for s in uni}
+    funding["E"] = 0.01
+    with_funding, breakdown = f3.composite_rank(closes, vols, t, uni, funding=funding)
+    assert with_funding["E"] < base["E"]
+    assert breakdown["funding_drag"]["E"] < 0
+
+
+def test_composite_rank_missing_funding_is_neutral():
+    # Regression (2026-07-05): symbols ABSENT from the funding dict used to be
+    # injected as a literal 0.0 rate — below the cross-sectional mean whenever
+    # covered majors had positive funding — which systematically BOOSTED every
+    # uncovered symbol's long score once funding_drag carried weight. Missing
+    # data must contribute exactly nothing.
+    closes, _, vols = _synthetic_panel()
+    t = 70
+    uni = f3.point_in_time_universe(closes, t, lookback=14)
+    covered = sorted(uni)[:2]
+    funding = {covered[0]: 0.008, covered[1]: 0.002}  # positive, like real majors
+    _, breakdown = f3.composite_rank(closes, vols, t, uni, funding=funding)
+    for s in uni:
+        if s not in funding:
+            assert abs(breakdown["funding_drag"][s]) < 1e-12, (
+                f"uncovered symbol {s} must get a NEUTRAL funding contribution"
+            )
+    # covered symbols still spread around the mean (the feature stays active)
+    assert breakdown["funding_drag"][covered[0]] < 0 < breakdown["funding_drag"][covered[1]]
+
+
+def test_funding_disqualifiers_long_and_short():
+    now = {"A": 0.0030, "B": 0.0001, "C": -0.0005}
+    mean30 = {"A": 0.0010, "B": 0.0002, "C": -0.0001}
+    basis = {"A": 10.0, "B": -55.0, "C": -40.0}
+    ex = f3.funding_disqualifiers(["A", "B", "C"], funding_now=now,
+                                  funding_mean30=mean30, basis_bps=basis)
+    assert ex["A"]["no_long"] is True
+    assert ex["A"]["no_short"] is False
+    assert ex["B"]["no_short"] is True
+    # Non-positive mean makes the multiple ill-defined, so the long gate is inactive.
+    assert ex["C"]["no_long"] is False
+
+
+def test_ls_weights_exclusion_in_window_skips_period():
+    # A is the only long-window member (top_q=0.25 of 4 -> n_long=1). Excluding
+    # it must SKIP the period (empty book) — never backfill B past the quantile.
+    scores = {"A": 3.0, "B": 2.0, "C": -3.0, "D": -2.0}
+    exclusions = {
+        "A": {"no_long": True, "no_short": False},
+        "C": {"no_long": False, "no_short": True},
+    }
+    w = f3.ls_weights(scores, top_q=0.25, bottom_q=0.25, exclusions=exclusions)
+    assert w["weights"] == {}
+    assert "A" not in w["long_syms"]
+    assert "C" not in w["short_syms"]
+
+
+def test_ls_weights_never_inverts_book_on_exclusions():
+    # Regression (2026-07-05): pre-fix, excluding the best name backfilled the
+    # WORST-ranked name into the long book at full gross — the exact anti-signal
+    # position, created by a risk gate. Now the period is skipped instead.
+    w = f3.ls_weights(
+        {"A": -1.0, "B": 1.0}, top_q=0.2, bottom_q=0.2,
+        exclusions={"B": {"no_long": True}},
+    )
+    assert w["weights"] == {}
+    assert "A" not in w["long_syms"]
+
+
+def test_ls_weights_without_exclusions_selects_quantiles():
+    scores = {"A": 3.0, "B": 2.0, "C": -3.0, "D": -2.0}
+    w = f3.ls_weights(scores, top_q=0.25, bottom_q=0.25)
+    assert w["long_syms"] == ["A"]
+    assert w["short_syms"] == ["C"]
+
+
+def test_load_funding_panel_asof_no_lookahead(tmp_path):
+    d = tmp_path / "funding_oi"
+    d.mkdir()
+    (d / "BTC_funding.csv").write_text(
+        "timestamp,datetime,funding_rate\n"
+        "1000,1970-01-01T00:00:01Z,0.001\n"
+        "3000,1970-01-01T00:00:03Z,0.003\n",
+        encoding="utf-8",
+    )
+    panel = f3.load_funding_panel(["BTC"], funding_dir=d, bar_ts=[2.0, 4.0])
+    assert panel is not None
+    assert list(panel["BTC"]) == [0.001, 0.003]
+    assert f3.load_funding_panel(["ETH"], funding_dir=d, bar_ts=[2.0]) is None
+
+
 # ── dollar-neutral construction ──────────────────────────────────────────
 def test_ls_weights_are_dollar_neutral():
     scores = {"A": -2.0, "B": -1.0, "C": 0.0, "D": 1.0, "E": 2.0}

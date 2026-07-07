@@ -31,6 +31,11 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.process_lock import acquire_process_lock
+
 HIST = ROOT / "data" / "tv_history.jsonl"
 STATUS = ROOT / "data" / "tv_status.json"
 GLOBAL_URL = "https://api.coingecko.com/api/v3/global"
@@ -168,6 +173,13 @@ def _status(connected: bool, buckets: dict, last: float, polls: int) -> None:
 
 def main() -> None:
     once = "--once" in sys.argv
+    _lock = None
+    if not once:
+        _lock = acquire_process_lock("harvest_tv", root=ROOT)
+        if _lock is None:
+            print("[tv] another harvester instance is already running; exiting", flush=True)
+            return
+
     buckets: dict = defaultdict(list)
     polls = 0
     backoff = 5.0
