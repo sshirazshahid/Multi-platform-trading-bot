@@ -1645,77 +1645,82 @@ class OrderManager:
         return False
 
     def _reconcile_missing_tp(self, exchange: BaseExchange, pos: Position) -> bool:
-        """Re-establish a missing exchange-side TP on a live futures position.
+        """Verify venue-side SL/TP coverage for a live futures position.
 
-        Gap (audit 2026-06-21 B7): once ``_exchange_handles_sltp`` is True the
-        polled TP check (and the B6 planned-first block) are suppressed — the
-        exchange is expected to own the TP. But the venue can drop the planned-TP
-        conditional (e.g. a venue-side cancel on a partial fill) while
-        ``_exchange_tp`` stays True, orphaning the planned TP so the winner only
-        exits via trailing/age. (The companion placement-failure case is handled
-        at entry: a failed TP create_order now clears ``_exchange_tp`` so the
-        polled/B6 path covers it.) This re-asserts the already-planned
-        ``pos.take_profit`` at most once/minute/position when ``_exchange_tp``
-        claims True but no profit-side conditional is actually resting on the venue.
+        Two shapes, ONE throttled open-orders fetch (once/minute/position),
+        classified by ``_classify_resting_conditionals`` (C1 single source
+        of truth):
 
-        Live/futures-only; a no-op in PAPER and on spot. Returns True when a TP is
-        (or regains being) present, or when reconciliation does not apply.
+        1. SL coverage (C4, tpbot retrofit 2026-07-08): ``_exchange_sl``
+           claims the venue holds the stop, but NO loss-side conditional
+           conclusively rests there — previously the one UNDETECTABLE naked
+           shape (venue-side cancel/expiry with healthy flags; the old code
+           explicitly no-op'd on "TP present, SL absent"). Repair through
+           ``_replace_exchange_sl``: its per-position RLock serializes
+           against trailing advances, its wrong-side pre-flight refuses
+           doomed re-places, and the level is ``pos.stop_loss`` — the
+           bot-authoritative stop that only ever tightens, so WIDEN is
+           structurally impossible from this path. If the SL is absent
+           because it just FILLED (position closing), the ghost sync books
+           the close and post-close cancel-all + daily orphan cleanup
+           remove the re-placed conditional.
+
+        2. TP orphan (audit 2026-06-21 B7, semantics unchanged):
+           ``_exchange_tp`` claims True but no profit-side conditional rests
+           while an SL does — DOWNGRADE to local polled enforcement; never
+           cancel a WORKING SL to restore a TP.
+
+        Empty open-orders list is INCONCLUSIVE (exchanges/base.py returns []
+        on error AND when not-ready) — no-op, never churn. Live/futures
+        only. Returns True when nothing (further) needs doing this pass.
         """
         if self.dry_run or getattr(pos, "market_type", None) != "futures":
             return True
-        if not getattr(pos, "_exchange_tp", False):
-            return True  # exchange not meant to own the TP -> polled path covers it
-        if not pos.take_profit or float(pos.take_profit) <= 0:
-            return True
-        if not pos.entry_price or float(pos.entry_price) <= 0:
-            return True  # can't classify profit/loss side without a valid entry
+        valid_entry = bool(pos.entry_price) and float(pos.entry_price) > 0
+        sl_checkable = (bool(getattr(pos, "_exchange_sl", False))
+                        and bool(pos.stop_loss) and float(pos.stop_loss) > 0
+                        and valid_entry)
+        tp_checkable = (bool(getattr(pos, "_exchange_tp", False))
+                        and bool(pos.take_profit) and float(pos.take_profit) > 0
+                        and valid_entry)
+        if not (sl_checkable or tp_checkable):
+            return True  # venue not meant to own either leg -> polled path covers
         import time as _t
         if _t.time() - getattr(pos, "_tp_retry_ts", 0.0) < 60:
             return True  # throttle: at most once/minute/position
         pos._tp_retry_ts = _t.time()
 
-        # fetch_open_orders NEVER raises (exchanges/base.py:378-387 returns [] on
-        # error AND when not-ready), so an EMPTY list is INCONCLUSIVE — never treat
-        # it as proof the TP is gone, or a transient API failure would churn a
-        # cancel-all + re-place every cycle. Only act on a NON-EMPTY list that has
-        # a loss-side SL conditional but NO profit-side TP conditional.
-        open_orders = exchange.fetch_open_orders(pos.symbol, pos.market_type)
-        if not open_orders:
-            return True  # inconclusive (error or genuinely empty) -> no-op
-        ep = float(pos.entry_price)
-        side = (pos.side or "").lower()
-        tp_present = sl_present = False
-        for o in open_orders:
-            info = o.get("info", {}) or {}
-            trig = (o.get("triggerPrice") or o.get("stopPrice")
-                    or info.get("triggerPrice") or info.get("stopPrice"))
-            try:
-                trig = float(trig) if trig is not None else None
-            except (TypeError, ValueError):
-                trig = None
-            if not trig or trig <= 0:
-                continue
-            profit_side = (trig > ep) if side == "buy" else (trig < ep)
-            if profit_side:
-                tp_present = True
-            else:
-                sl_present = True
-        if tp_present or not sl_present:
-            # TP already resting, OR no SL-side conditional either (inconclusive
-            # shape) — nothing to safely act on.
-            return True
+        sl_present, tp_present, conclusive = self._classify_resting_conditionals(
+            exchange, pos)
+        if not conclusive:
+            return True  # error/not-ready/empty -> never treat as "leg gone"
 
-        # Orphaned exchange TP (SL resting, no profit-side conditional). Do NOT
-        # cancel the WORKING SL to re-place both (that primitive,
-        # _replace_exchange_sl, cancel_all_orders first => a brief naked-SL window
-        # if the SL re-place then fails). Instead DOWNGRADE to local polled
-        # enforcement: clear _exchange_tp so _exchange_handles_sltp evaluates False
-        # and the polled SL/TP price-trigger + B6 planned-first path watch the
-        # planned TP from here. Same safe fallback as a failed TP placement at
-        # entry; never touches the SL. (Trade-off: polled TP loses wick accuracy
-        # vs an exchange conditional — acceptable for a rare orphan, and strictly
-        # safer than risking the working SL. This is the audit's "re-validate
-        # _exchange_tp before suppressing the polled check" option.)
+        # (1) C4 — venue-side SL vanished with healthy flags. Priority action:
+        # _replace_exchange_sl re-establishes BOTH legs at the authoritative
+        # levels (and clears the flags itself on failure so polled monitoring
+        # takes over), so the TP branch below is intentionally skipped this
+        # pass rather than double-mutating flags mid-repair.
+        if sl_checkable and not sl_present:
+            logger.warning(
+                f"[Orders] SL coverage reconcile: exchange SL MISSING for "
+                f"{pos.symbol} {pos.id[:8]} (flags healthy, no loss-side "
+                f"conditional resting) — re-placing at authoritative SL "
+                f"{float(pos.stop_loss):.6g}")
+            try:
+                self._replace_exchange_sl(exchange, pos)
+            except Exception as e:
+                logger.error(
+                    f"[Orders] SL coverage re-place failed for {pos.symbol}: "
+                    f"{str(e)[:120]}")
+            return bool(getattr(pos, "_exchange_sl", False))
+
+        # (2) B7 — orphaned exchange TP (SL resting, no profit-side
+        # conditional). Do NOT cancel the WORKING SL to re-place both (brief
+        # naked window if the SL re-place then fails). DOWNGRADE to polled:
+        # clear _exchange_tp so _exchange_handles_sltp evaluates False and the
+        # polled price-trigger + B6 planned-first path watch the planned TP.
+        if not tp_checkable or tp_present or not sl_present:
+            return True
         logger.warning(
             f"[Orders] TP reconcile: exchange TP missing for {pos.symbol} "
             f"{pos.id[:8]} (SL present, no profit-side conditional) — downgrading "
