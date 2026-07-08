@@ -581,3 +581,17 @@ The trading bot itself does NOT use Ruflo — Ruflo is purely for me (Claude Cod
 
 ### gstack
 use the /browse skill from gstack for all web browsing, never use mcp__claude-in-chrome__* tools, and lists the available skills: /office-hours, /plan-ceo-review, /plan-eng-review, /plan-design-review, /design-consultation, /design-shotgun, /design-html, /review, /ship, /land-and-deploy, /canary, /benchmark, /browse, /connect-chrome, /qa, /qa-only, /design-review, /setup-browser-cookies, /setup-deploy, /setup-gbrain, /retro, /investigate, /document-release, /document-generate, /codex, /cso, /autoplan, /plan-devex-review, /devex-review, /careful, /freeze, /guard, /unfreeze, /gstack-upgrade, /learn. Then ask the user if they also want to add gstack to the current project so teammates get it.
+---
+
+## 하네스: Strategy Evidence Pipeline
+
+**Goal:** Every trading-strategy request flows through evidence gates — ledger check → after-cost screen → adversarial audit → log-only shadow probe → frozen promotion gate. Nothing reaches live decisions on narrative alone.
+
+**Trigger:** For any request to research, screen, apply, or implement trading strategies/patterns (including "update the program" with strategies, or re-running/refining previous strategy work), use the `strategy-evidence-pipeline` skill. Questions about already-refuted families are answered directly from the `refuted-families-ledger` skill — conversationally, without launching workflows.
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-07-08 | 초기 구성: 4 agents (strategy-scout, edge-screener, honesty-auditor, shadow-integrator) + 4 skills (ledger, screening, shadow-probe, orchestrator) | 전체 | /harness 요청; 2026-07-08 deep-research 후속 |
+| 2026-07-08 | Live spawn tests (Phase 6-3/6-4) deferred | 검증 | API session limit; structural validation only this pass |
+| 2026-07-08 | CLAUDE.md restored from 94fb521 after accidental overwrite by CLAUDE-FABLE-5.md rename (plugin-install window); replaced content preserved in claude_md_replaced_backup_2026-07-08.md | CLAUDE.md | working-copy corruption recovery |

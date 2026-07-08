@@ -167,3 +167,7 @@ ntrader/.pytest_cache/
 /nul
 /gstack/
 /tradingview-mcp/
+
+# System-prompt dumps / corruption backups must never reach the PUBLIC repo (2026-07-08 incident)
+CLAUDE-FABLE-5.md
+claude_md_replaced_backup_*.md
