@@ -142,12 +142,49 @@ def resample_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
     return df_4h
 
 
-def score_bar(bar_1h, bar_4h) -> dict:
+# C11 (tpbot retrofit 2026-07-08): one warehouse-backed DistFitSL fit per
+# (symbol, side) per run. Fitted quantiles are data-driven (85th-pctl MAE /
+# mean-MFE R-target), not ATR-scaled, so caching is sound; the 'fallback'
+# source IS ATR-scaled per bar, so it is deliberately NOT adopted — those
+# cells keep the legacy formula below (byte-identical to pre-C11).
+_FIT_CACHE: dict = {}
+
+
+def _production_fit(symbol: str, side: str):
+    """(sl_pct, tp_pct) from the LIVE bot's primary TP layer, or None.
+
+    ⚠ Honesty: DistFitSL fits on the warehouse AS OF NOW — replaying a
+    historical window under today's fit is 'current TP policy replay', NOT
+    an out-of-sample backtest. PAIR_OVERRIDES / S-D zones / STAR extenders
+    are operator/live-context refinement layers and deliberately stay out.
+    """
+    key = (symbol, side)
+    if key in _FIT_CACHE:
+        return _FIT_CACHE[key]
+    val = None
+    try:
+        from core.dist_fit_sl import DistFitSL
+        fit = DistFitSL().compute(symbol, side, 2.0)
+        if (fit is not None and getattr(fit, "source", "") == "fitted"
+                and float(fit.sl_pct) > 0 and float(fit.tp_pct) > 0):
+            val = (float(fit.sl_pct), float(fit.tp_pct))
+    except Exception:
+        val = None
+    _FIT_CACHE[key] = val
+    return val
+
+
+def score_bar(bar_1h, bar_4h, symbol: str = None) -> dict:
     """Apply v3.1 scoring logic to a single bar. Returns score dict or None.
 
     v3.1 relaxation: 4 REQUIRED (was 5), EMA slope moved to bonus,
     ADX >= 20 (was 25), RSI [38-68] longs / [32-62] shorts,
     regime filter ADX < 15 / BB < 1.0%, volume 1.2x, confidence base 0.66.
+
+    C11: when ``symbol`` is given, SL/TP route through the production
+    DistFitSL fit (the logic the live bot runs) instead of the local
+    tp = sl * 2.0 hard-code that had drifted from mcp_brain; the old
+    formula remains the exact fallback for unfitted cells and legacy calls.
     """
     result = {"score": 0, "side": None, "layers_ok": 0, "bonus_count": 0,
               "sl_pct": 0, "tp_pct": 0, "confidence": 0, "reason": ""}
@@ -262,12 +299,17 @@ def score_bar(bar_1h, bar_4h) -> dict:
 
     layers_ok = req_pass + bonus
 
-    # SL/TP
+    # SL/TP — C11: prefer the production DistFitSL fit (see _production_fit);
+    # legacy formula (mcp_brain's exception fallback) for everything else.
     atr_pct = bar_1h.get("atr_pct", 2.0)
     if pd.isna(atr_pct):
         atr_pct = 2.0
-    sl_pct = max(1.5, min(3.5, atr_pct * 1.5))
-    tp_pct = sl_pct * 2.0
+    fit = _production_fit(symbol, side) if symbol else None
+    if fit is not None:
+        sl_pct, tp_pct = fit
+    else:
+        sl_pct = max(1.5, min(3.5, atr_pct * 1.5))
+        tp_pct = sl_pct * 2.0
 
     confidence = min(0.92, 0.66 + bonus * 0.04)
 
@@ -398,7 +440,7 @@ def run_backtest(df_1h: pd.DataFrame, symbol: str, leverage: int = 5,
 
         else:
             # Try to enter
-            result = score_bar(bar_1h, bar_4h)
+            result = score_bar(bar_1h, bar_4h, symbol=symbol)
             if result["score"] >= 66 and result["layers_ok"] >= 6:
                 side = result["side"]
                 sl_pct = result["sl_pct"]
