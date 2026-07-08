@@ -122,6 +122,7 @@ def _is_skip_pair_error(e: Exception) -> bool:
 def build_sl_tp_order_params(
     ex_name: str, side: str, oneway: bool,
     trigger_price: float, is_sl: bool,
+    mark_trigger: bool = None,
 ) -> tuple[str, dict]:
     """Return (order_type, params) for an SL or TP conditional order.
 
@@ -135,12 +136,28 @@ def build_sl_tp_order_params(
       Bybit v5      → triggerPrice + stopLossPrice/takeProfitPrice +
                       explicit triggerDirection (ccxt only auto-infers
                       triggerDirection in the stopLossPrice-only branch)
+
+    ``mark_trigger`` (C3, tpbot retrofit 2026-07-08): trigger on MARK price
+    instead of the venue's last-price default — immune to single rogue
+    last-price prints and synced with the liquidation engine. None reads
+    config.SLTP_TRIGGER_MARK_PRICE (default ON). Per-venue params verified
+    against ccxt 4.5.54 request builders: Binance workingType passthrough,
+    Bybit request['triggerBy'/'slTriggerBy'/'tpTriggerBy'], Bitget
+    request['triggerType'] (whose ccxt default is already mark_price — the
+    explicit param pins it against ccxt upgrades). All three survive the
+    client one-way retries, which strip only positionSide/holdSide/tradeSide.
+    Flag OFF is byte-identical to the pre-C3 shapes.
     """
+    if mark_trigger is None:
+        import config as _cfg
+        mark_trigger = bool(getattr(_cfg, "SLTP_TRIGGER_MARK_PRICE", True))
     ex_lower = ex_name.lower()
 
     if ex_lower == "binance":
         order_type = "STOP_MARKET" if is_sl else "TAKE_PROFIT_MARKET"
         params = {"stopPrice": trigger_price, "reduceOnly": True}
+        if mark_trigger:
+            params["workingType"] = "MARK_PRICE"
         if not oneway:
             params["positionSide"] = "LONG" if side == "buy" else "SHORT"
         return order_type, params
@@ -148,6 +165,8 @@ def build_sl_tp_order_params(
     if ex_lower == "bitget":
         params = {"stopLossPrice": trigger_price} if is_sl \
             else {"takeProfitPrice": trigger_price}
+        if mark_trigger:
+            params["triggerType"] = "mark_price"
         if oneway:
             params["reduceOnly"] = True
         else:
@@ -160,9 +179,15 @@ def build_sl_tp_order_params(
     if is_sl:
         params["stopLossPrice"] = trigger_price
         params["triggerDirection"] = "below" if side == "buy" else "above"
+        if mark_trigger:
+            params["triggerBy"] = "MarkPrice"
+            params["slTriggerBy"] = "MarkPrice"
     else:
         params["takeProfitPrice"] = trigger_price
         params["triggerDirection"] = "above" if side == "buy" else "below"
+        if mark_trigger:
+            params["triggerBy"] = "MarkPrice"
+            params["tpTriggerBy"] = "MarkPrice"
     if oneway:
         params["reduceOnly"] = True
     else:

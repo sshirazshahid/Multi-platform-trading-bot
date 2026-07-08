@@ -444,6 +444,7 @@ Automated pipeline: `scripts/run_skill_improvement_loop.py` (round-robin selecti
 - **knowledge_model hour-score PnL field is `net_pnl`, not `total_pnl`**: hour scores in `data/knowledge_model.json` record PnL as `net_pnl`/`avg_pnl` (plus `total_fees`) — see `core/knowledge_model.py:257-267`. PnL recording works; tooling still reading the old `total_pnl` name sees a missing field, not broken tracking.
 - **Spot positions get no exchange-side SL/TP**: Only futures positions receive exchange-side stop-loss orders. Spot relies on local monitoring only.
 - **Failed SL placement triggers EMERGENCY alert**: If the exchange rejects an SL order, the position is flagged `_sl_failed=True` and the notifier sends an alert. The position has no exchange-side protection.
+- **SL/TP conditionals trigger on MARK price by default** (C3, 2026-07-08): `SLTP_TRIGGER_MARK_PRICE=true` sets Binance `workingType=MARK_PRICE`, Bybit `triggerBy`/`slTriggerBy`/`tpTriggerBy=MarkPrice`, Bitget `triggerType=mark_price` in `build_sl_tp_order_params`. Bitget was ALREADY mark-price via the ccxt 4.5.54 default; Binance/Bybit changed from last-price. ⚠ Honest divergence: the PAPER sim (`sim_execution.check_wick_trigger`) still triggers on 1m last-price candles — paper and live SL trigger feeds differ until the sim models mark price. Revert with `SLTP_TRIGGER_MARK_PRICE=false` (flag-off params are byte-identical to pre-C3).
 
 ## Key Conventions
 

@@ -228,6 +228,24 @@ MAKER_ONLY = {
 }
 
 # ==============================================================
+# SL/TP TRIGGER PRICE BASIS (C3, tpbot retrofit 2026-07-08)
+# ==============================================================
+# When True, exchange-side SL/TP conditionals trigger on MARK price instead
+# of the venue's default LAST price (Binance workingType=MARK_PRICE, Bybit
+# triggerBy/slTriggerBy/tpTriggerBy=MarkPrice, Bitget triggerType=mark_price).
+# Mark-price triggering ignores single rogue last-price prints (no
+# wick-stopouts from one bad trade) and stays synced with the venue's
+# liquidation engine. NOTE: ccxt 4.5.54 already defaults Bitget tpsl orders
+# to mark_price — this flag makes the basis explicit on ALL venues.
+# ⚠ WR-relevant semantics change (flagged per the WR-floor rule): fewer
+# last-price wick stop-outs is expected neutral-to-positive, but the trigger
+# feed changes in CONTROLLED_LIVE. Revert with SLTP_TRIGGER_MARK_PRICE=false.
+# PAPER is unaffected (sim triggers on 1m last-price candles either way —
+# see the honest divergence note in CLAUDE.md gotchas).
+SLTP_TRIGGER_MARK_PRICE = (
+    os.getenv("SLTP_TRIGGER_MARK_PRICE", "true").lower() == "true")
+
+# ==============================================================
 # SCALP MODE — 15-60 minute VWAP-centric entries (2026-05-27)
 # ==============================================================
 # Evidence: 454-trade dataset shows 15-60m holds = 63.8% WR (+$4.41)

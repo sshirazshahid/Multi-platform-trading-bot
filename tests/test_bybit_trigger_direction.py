@@ -219,7 +219,11 @@ def test_binance_builder_uses_stop_market():
     order_type, params = build_sl_tp_order_params(
         "binance", side="buy", oneway=True, trigger_price=95.0, is_sl=True)
     assert order_type == "STOP_MARKET"
-    assert params == {"stopPrice": 95.0, "reduceOnly": True}
+    # C3 (2026-07-08): SLTP_TRIGGER_MARK_PRICE defaults ON, adding
+    # workingType — flag-off byte-identity is pinned in
+    # test_mark_price_trigger.py::test_binance_flag_off_is_byte_identical_legacy
+    assert params == {"stopPrice": 95.0, "reduceOnly": True,
+                      "workingType": "MARK_PRICE"}
     order_type, params = build_sl_tp_order_params(
         "binance", side="buy", oneway=True, trigger_price=110.0, is_sl=False)
     assert order_type == "TAKE_PROFIT_MARKET"
