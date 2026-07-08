@@ -49,8 +49,8 @@ def om() -> OrderManager:
 def _make_exchange(name: str, last: float) -> MagicMock:
     ex = MagicMock()
     ex.name = name
-    ex.round_price.side_effect = lambda sym, p: p
-    ex.round_quantity.side_effect = lambda sym, q: q
+    ex.round_price.side_effect = lambda sym, p, market_type=None: p
+    ex.round_quantity.side_effect = lambda sym, q, market_type=None: q
     ex.fetch_ticker.return_value = {"last": last, "close": last}
     return ex
 

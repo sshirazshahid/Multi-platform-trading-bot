@@ -419,10 +419,13 @@ class BybitClient(BaseExchange):
         has used since the 2026-05-02 orphan incident. Plain
         fetch_open_orders (and the base stop=True idiom) do NOT return them
         on Bybit. Normalizes to the classifier's shape: id + triggerPrice at
-        the top level, raw row under info. [] on error/not-ready/spot —
-        INCONCLUSIVE, per the fetch_open_orders contract."""
-        if market_type != "futures" or not self._ok():
+        the top level, raw row under info. Contract (review fix 2026-07-09):
+        None on error/not-ready = INCONCLUSIVE; [] only from a successful
+        empty response. Spot returns [] (no conditional ledger applies)."""
+        if market_type != "futures":
             return []
+        if not self._ok():
+            return None
         try:
             native = symbol.replace("/", "").replace(":USDT", "")
             if not native.endswith("USDT"):
@@ -443,7 +446,7 @@ class BybitClient(BaseExchange):
             return out
         except Exception as e:
             logger.debug(f"[Bybit] fetch_open_conditionals {symbol}: {str(e)[:120]}")
-            return []
+            return None
 
     # ── cancel_all_orders override — handles conditional stop orders ──
 

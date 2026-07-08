@@ -322,14 +322,18 @@ class OrderManager:
             if now - float(getattr(pos, "_ext_persist_ts", 0.0) or 0.0) < 5.0:
                 return  # throttled — dirty flag makes a later tick catch up
             pos._ext_persist_ts = now
-            pos._ext_dirty = False
             from core.warehouse import get_warehouse
-            get_warehouse().update_trade_extremes(
+            ok = get_warehouse().update_trade_extremes(
                 exchange=str(getattr(pos, "exchange", "") or ""),
                 symbol=str(getattr(pos, "symbol", "") or ""),
                 side=str(getattr(pos, "side", "") or ""),
                 ts_entry=float(getattr(pos, "open_time", 0) or 0),
                 mfe=mfe, mae=mae)
+            # Review fix 2026-07-09 (LOW): clear the dirty flag only on a
+            # successful write (update_trade_extremes returns bool, never
+            # raises) — clearing it beforehand cancelled the documented
+            # catch-up after a failed/locked write, losing final extremes.
+            pos._ext_dirty = not ok
         except Exception as e:
             logger.debug(f"[Extremes] update skipped: {e}")
 
@@ -402,8 +406,30 @@ class OrderManager:
                         f"{getattr(pos, 'symbol', '?')}")
                     result["skipped"] += 1
                     continue
-                self.close_position(ex, pos, reason=reason)
-                result["closed"] += 1
+                res = self.close_position(ex, pos, reason=reason)
+                if res is not None:
+                    result["closed"] += 1
+                    continue
+                # Review fix 2026-07-09 (MEDIUM, confirmed twice):
+                # close_position signals failure by RETURNING None (lock
+                # timeout, no close price, venue close unconfirmed) — it does
+                # not raise, so counting unconditionally reported a flat book
+                # during the exact outages this primitive exists for. None is
+                # also the benign no-op for a position that closed in a race;
+                # the tracker decides which one it was.
+                still_open = True
+                try:
+                    still_open = any(
+                        getattr(p, "id", None) == pos.id
+                        for p in (self.tracker.get_open() or []))
+                except Exception:
+                    still_open = True  # can't verify -> fail-closed: failed
+                if still_open:
+                    result["failed"].append(
+                        (getattr(pos, "symbol", "?"),
+                         "close unconfirmed (returned None; still open)"))
+                else:
+                    result["closed"] += 1
             except Exception as e:
                 logger.error(
                     f"[Orders] flatten_all: close failed for "
@@ -1085,7 +1111,7 @@ class OrderManager:
 
         # Round quantity to exchange precision (Bitget: 0.1)
         try:
-            rounded_size = exchange.round_quantity(symbol, size)
+            rounded_size = exchange.round_quantity(symbol, size, market_type)
             if rounded_size != size:
                 notional_check = rounded_size * fill_price
                 if notional_check < 5.0:
@@ -1472,9 +1498,9 @@ class OrderManager:
         oneway = ex_lower in self._oneway_mode
 
         # Round prices to exchange precision (fixes Bitget 40808 "checkBDScale" error)
-        sl_rounded = exchange.round_price(symbol, sl)
-        tp_rounded = exchange.round_price(symbol, tp)
-        size_rounded = exchange.round_quantity(symbol, size)
+        sl_rounded = exchange.round_price(symbol, sl, market_type)
+        tp_rounded = exchange.round_price(symbol, tp, market_type)
+        size_rounded = exchange.round_quantity(symbol, size, market_type)
 
         # 2026-05-21 pre-flight: mark has already crossed SL → exchange would
         # reject (Bybit 110092 / Bitget 45122). The SL would have triggered
@@ -1928,22 +1954,51 @@ class OrderManager:
         # misses SL/TP conditionals on all three venues (Binance algo book,
         # Bybit StopOrder ledger, Bitget plan orders) — without this merge the
         # B7/C4 reconcilers and C1 verifiers only ever saw regular orders and
-        # were fail-safe no-ops in live. isinstance guard: test fakes and
-        # nonconforming clients may return non-lists — ignore, never crash.
+        # were fail-safe no-ops in live.
+        # Review fix 2026-07-09 (MEDIUM): a FAILED conditional-book fetch now
+        # returns None (contract change in fetch_open_conditionals) and is
+        # INCONCLUSIVE — treating it as empty while any regular order rested
+        # (e.g. an owner's manual limit) made C4 cancel a WORKING live SL on a
+        # loop for as long as the venue error persisted. Non-list junk (test
+        # fakes without the method) keeps the legacy regular-book-only path.
         try:
             extra = exchange.fetch_open_conditionals(pos.symbol, pos.market_type)
-            if isinstance(extra, list) and extra:
-                seen_ids = {o.get("id") for o in open_orders
-                            if isinstance(o, dict) and o.get("id")}
-                for o in extra:
-                    if isinstance(o, dict) and (
-                            not o.get("id") or o.get("id") not in seen_ids):
-                        open_orders.append(o)
         except Exception:
-            pass  # conditional book unavailable -> classify on what we have
+            extra = None
+        if extra is None:
+            return False, False, False  # conditional book unreachable -> inconclusive
+        if isinstance(extra, list) and extra:
+            seen_ids = {o.get("id") for o in open_orders
+                        if isinstance(o, dict) and o.get("id")}
+            for o in extra:
+                if isinstance(o, dict) and (
+                        not o.get("id") or o.get("id") not in seen_ids):
+                    open_orders.append(o)
         if not open_orders:
             return False, False, False  # inconclusive — error or genuinely empty
         side = (pos.side or "").lower()
+        # Review fix 2026-07-09 (HIGH): classify against the bot-authoritative
+        # levels FIRST. The entry-side heuristic alone misread a breakeven or
+        # trailed SL (trigger above entry on longs — routine after
+        # _early_breakeven_move / trailing activation) as a TP, so the C4
+        # coverage branch declared the SL missing and cancel-all/re-placed
+        # every trailing winner once a minute — a naked window each pass.
+        # The entry-side heuristic remains only for triggers matching neither
+        # level (e.g. stale drifted orders), preserving pre-C4 behavior there.
+        sl_level = tp_level = 0.0
+        try:
+            sl_level = float(getattr(pos, "stop_loss", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            tp_level = float(getattr(pos, "take_profit", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+        _TOL = 0.002  # 0.2% — covers tick rounding between pos level and trigger
+
+        def _near(trig_px: float, level: float) -> bool:
+            return level > 0 and abs(trig_px - level) <= level * _TOL
+
         tp_present = sl_present = False
         for o in open_orders:
             info = o.get("info", {}) or {}
@@ -1955,8 +2010,11 @@ class OrderManager:
                 trig = None
             if not trig or trig <= 0:
                 continue
-            profit_side = (trig > ep) if side == "buy" else (trig < ep)
-            if profit_side:
+            if _near(trig, sl_level):
+                sl_present = True
+            elif _near(trig, tp_level):
+                tp_present = True
+            elif (trig > ep) if side == "buy" else (trig < ep):
                 tp_present = True
             else:
                 sl_present = True
@@ -2009,7 +2067,9 @@ class OrderManager:
         # Best-effort: fakes/stubs without lot metadata keep the raw fraction
         # (paper realism unchanged); a fraction that floors to zero is refused.
         try:
-            _rq = float(exchange.round_quantity(position.symbol, partial_size))
+            _rq = float(exchange.round_quantity(
+                position.symbol, partial_size,
+                getattr(position, "market_type", None)))
             partial_size = _rq if _rq > 0 else 0.0
         except Exception:
             pass

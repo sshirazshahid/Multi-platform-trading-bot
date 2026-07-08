@@ -24,6 +24,7 @@ step-constrained contracts (e.g. Bitget 0.1-step).
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,6 +32,20 @@ import pytest
 from core.order_manager import OrderManager
 from core.position_tracker import Position
 from exchanges.base import BaseExchange
+
+
+@pytest.fixture(autouse=True)
+def _isolate_warehouse(tmp_path, monkeypatch):
+    """Partial-close tests reach the warehouse via C6's _record_lifecycle —
+    without tmp isolation the module-level singleton (and its thread-local
+    connection) would pin the PRODUCTION data/ dir for every later test in
+    the same process (order-dependent pollution, found 2026-07-09)."""
+    monkeypatch.chdir(tmp_path)
+    Path("data").mkdir(exist_ok=True)
+    import core.warehouse
+    core.warehouse._default = None
+    yield
+    core.warehouse._default = None
 
 
 class _StubExchange(BaseExchange):
@@ -184,7 +199,7 @@ def _pos(size=1.0):
 def _step_ex(step=0.1):
     ex = MagicMock()
     ex.name = "Bitget"
-    ex.round_quantity.side_effect = lambda s, q: round(math.floor(round(q / step, 9)) * step, 8)
+    ex.round_quantity.side_effect = lambda s, q, market_type=None: round(math.floor(round(q / step, 9)) * step, 8)
     ex.create_order.return_value = {"id": "pc1"}
     return ex
 
@@ -232,3 +247,76 @@ def test_partial_close_survives_exchange_without_round_quantity():
     ok = om.partial_close_position(ex, pos, close_pct=0.30, reason="partial_tp", price=100.0)
     assert ok is True
     assert pos.size == pytest.approx(0.7)
+
+
+# ── review 2026-07-09: production-path regression tests ──────────────────────
+# The original suite's _step_ex stub implemented the epsilon guard the
+# production code LACKED, and 0.25 was a lucky float constant (25.0 divides
+# exactly). These run the REAL round_quantity/_market_row on float-trap
+# values and the dual spot/swap market rows the review proved diverge.
+
+
+def _dual_row_ex():
+    b = _StubExchange.__new__(_StubExchange)
+    b.exchange = MagicMock()
+    b.exchange.markets = {
+        "SOL/USDT": {"precision": {"amount": 0.0001, "price": 0.01}},
+        "SOL/USDT:USDT": {"precision": {"amount": 0.1, "price": 0.1}},
+    }
+    b.exchange.load_markets.return_value = b.exchange.markets
+    b.exchange.price_to_precision.side_effect = lambda s, p: str(p)
+    b.exchange.create_order.return_value = {"id": "o1"}
+    b._ready = lambda: True
+    return b
+
+
+@pytest.mark.parametrize(
+    "qty,step,expected",
+    [
+        (0.3, 0.1, 0.3),  # 0.3/0.1 = 2.999... -> a bare floor shaved to 0.2
+        (2.3, 0.1, 2.3),
+        (0.29, 0.01, 0.29),  # 28.999...
+        (7.0, 0.0001, 7.0),  # 69999.999...
+        (0.25, 0.01, 0.25),  # the old suite's lucky constant still holds
+        (0.2999999, 0.1, 0.2),  # genuinely off-grid still floors DOWN
+        (0.35, 0.1, 0.3),
+    ],
+)
+def test_round_quantity_epsilon_guard_production_path(qty, step, expected):
+    b = _StubExchange.__new__(_StubExchange)
+    b.exchange = MagicMock()
+    b.exchange.markets = {"X/USDT": {"precision": {"amount": step}}}
+    b.exchange.load_markets.return_value = b.exchange.markets
+    b._ready = lambda: True
+    got = b.round_quantity("X/USDT", qty)
+    assert got == pytest.approx(expected, abs=1e-9)
+    # idempotency: a rounded value must be a fixed point
+    assert b.round_quantity("X/USDT", got) == pytest.approx(expected, abs=1e-9)
+
+
+def test_futures_amount_quantizes_at_swap_step():
+    b = _dual_row_ex()
+    # futures resolves the swap row (step 0.1); spot keeps 0.0001
+    assert b.round_quantity("SOL/USDT", 0.35, "futures") == pytest.approx(0.3)
+    assert b.round_quantity("SOL/USDT", 0.35) == pytest.approx(0.35)
+
+
+def test_futures_create_order_binds_swap_row():
+    b = _dual_row_ex()
+    b.create_order("SOL/USDT", "market", "sell", 0.35, market_type="futures")
+    assert b.exchange.create_order.call_args[0][3] == pytest.approx(0.3)
+
+
+def test_futures_price_uses_swap_symbol_for_ccxt():
+    b = _dual_row_ex()
+    b.round_price("SOL/USDT", 100.16, "futures")
+    assert b.exchange.price_to_precision.call_args[0][0] == "SOL/USDT:USDT"
+
+
+def test_futures_close_full_size_is_fixed_point():
+    # The CRITICAL review scenario: closing a 0.3-contract swap position must
+    # send 0.3 — the pre-fix code sent 0.2 and left a naked 0.1 remainder.
+    b = _dual_row_ex()
+    b.create_order("SOL/USDT", "market", "sell", 0.3,
+                   params={"reduceOnly": True}, market_type="futures")
+    assert b.exchange.create_order.call_args[0][3] == pytest.approx(0.3)

@@ -150,3 +150,28 @@ def test_write_outcome_persists_counterfactual(wh):
     assert row["ltp_touched"] == 1
     assert row["ltp_filled"] == 0
     assert row["ltp_exit_reason"] in ("stop_loss", "time")
+
+
+# ── review 2026-07-09: truncated windows must be censored, not 'time' ────────
+def test_truncated_window_is_censored_not_time():
+    # Touched, never through, scan ends far short of horizon: with the full
+    # window the limit might have filled OR hit the SL — freezing 'time'
+    # systematically understated the adverse rate.
+    scan = [_bar(105.0, 101), _bar(104, 99)]
+    touched, filled, reason = limit_tp_counterfactual(scan, SL, TP, True, horizon=8)
+    assert (touched, filled, reason) == (1, 0, "censored")
+
+
+def test_full_horizon_window_still_times_out():
+    scan = [_bar(103, 99)] * 8
+    touched, filled, reason = limit_tp_counterfactual(scan, SL, TP, True, horizon=8)
+    assert reason == "time"
+
+
+def test_resolve_one_early_tp_exit_censors_counterfactual():
+    # Primary exits TP at bar 1 with only 2 of 8 horizon bars accrued.
+    candles = [_bar(105.0, 101), _bar(104, 99)]
+    out = resolve_one(_row(), candles)
+    assert out is not None
+    assert out["exit_reason"] == "take_profit"
+    assert out["ltp_exit_reason"] == "censored"

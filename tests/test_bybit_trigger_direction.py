@@ -63,8 +63,8 @@ def _make_exchange(name: str) -> MagicMock:
     """
     ex = MagicMock()
     ex.name = name
-    ex.round_price.side_effect = lambda sym, p: p
-    ex.round_quantity.side_effect = lambda sym, q: q
+    ex.round_price.side_effect = lambda sym, p, market_type=None: p
+    ex.round_quantity.side_effect = lambda sym, q, market_type=None: q
     ex.fetch_ticker.return_value = {"last": 100.0, "close": 100.0}
     return ex
 
@@ -267,8 +267,8 @@ def test_sl_failure_persists_warehouse_close(om, monkeypatch):
     ex = MagicMock()
     ex.name = "Bitget"
     ex._is_oneway = True
-    ex.round_price.side_effect = lambda sym, p: p
-    ex.round_quantity.side_effect = lambda sym, q: q
+    ex.round_price.side_effect = lambda sym, p, market_type=None: p
+    ex.round_quantity.side_effect = lambda sym, q, market_type=None: q
     ex.fetch_ticker.return_value = {"last": 100.0, "close": 100.0}
     ex.get_min_order_size.return_value = 0.001
     ex.set_leverage.return_value = True

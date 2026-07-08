@@ -144,7 +144,7 @@ def resolve_one(
     # scan window — measurement only, the primary resolution above is
     # untouched. See limit_tp_counterfactual for the fill model.
     ltp_touched, ltp_filled, ltp_reason = limit_tp_counterfactual(
-        scan, sl, tp, is_buy)
+        scan, sl, tp, is_buy, horizon=horizon)
 
     slip_bps = sl_slip_bps if exit_reason == "stop_loss" else exit_slip_bps
     exit_slip = exit_level * slip_bps / 10_000.0
@@ -190,6 +190,7 @@ def limit_tp_counterfactual(
     tp: float,
     is_buy: bool,
     through_frac: float = LIMIT_TP_TRADE_THROUGH_FRAC,
+    horizon: int = 0,
 ) -> tuple:
     """Counterfactual (C10): the TP is a RESTING reduce-only LIMIT (maker)
     instead of the live market-trigger conditional.
@@ -228,6 +229,15 @@ def limit_tp_counterfactual(
             return touched, 0, "stop_loss"
         if filled:
             return touched, 1, "take_profit_limit"
+    # Review fix 2026-07-09 (MEDIUM): when the PRIMARY resolves on an early
+    # barrier hit, the scan is truncated far short of the horizon — a
+    # touched-but-unfilled limit that is still open at scan end has NOT
+    # honestly timed out; with the full horizon it might have filled or hit
+    # the SL (the adverse case this metric exists to expose). Label those
+    # windows 'censored'; touched-vs-filled readers must EXCLUDE censored
+    # rows or the adverse rate is systematically understated.
+    if horizon and len(scan) < horizon:
+        return touched, 0, "censored"
     return touched, 0, "time"
 
 

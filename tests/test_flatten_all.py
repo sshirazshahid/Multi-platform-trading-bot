@@ -117,3 +117,29 @@ def test_no_automatic_trigger_wired_in_bot_engine():
         "flatten_all must not be auto-wired into bot_engine — the owner's "
         "no-auto-halt directive stands; it is a callable primitive only"
     )
+
+
+# ── review 2026-07-09: close_position signals failure by RETURNING None ──────
+def test_none_return_still_open_counts_failed():
+    """Venue outage: every close returns None and the book stays open — the
+    old code reported {closed: N, failed: []}. The tracker is the arbiter."""
+    positions = [_pos("p1")]
+    om = _om(positions)
+    om.close_position = MagicMock(return_value=None)
+    om.tracker.get_open.return_value = positions  # still open after the call
+    result = om.flatten_all(reason="x")
+    assert result["closed"] == 0
+    assert len(result["failed"]) == 1
+    assert "unconfirmed" in result["failed"][0][1]
+
+
+def test_none_return_position_gone_counts_closed():
+    """None is also the benign already-closed race no-op — when the tracker
+    confirms the position is gone, it counts as closed, not failed."""
+    positions = [_pos("p1")]
+    om = _om(positions)
+    om.close_position = MagicMock(return_value=None)
+    om.tracker.get_open.side_effect = [positions, []]  # iteration, then verify
+    result = om.flatten_all(reason="x")
+    assert result["closed"] == 1
+    assert result["failed"] == []

@@ -196,3 +196,40 @@ def test_fetch_rows_selects_real_columns():
     assert "mfe" in src[i : i + 800] and "mae" in src[i : i + 800], (
         "_fetch_rows must SELECT the real extreme columns for the fit"
     )
+
+
+# ── review 2026-07-09 regressions ─────────────────────────────────────────────
+def test_update_trade_extremes_is_monotone_across_restart(wh):
+    """A watchdog restart resets in-memory peaks; the first post-restart tick
+    must not clobber larger persisted extremes with near-zero ones."""
+    tid = _seed(wh, "EXR/USDT", 2600.0)
+    assert wh.update_trade_extremes(
+        exchange="Bybit", symbol="EXR/USDT", side="buy", ts_entry=2600.0,
+        mfe=0.02, mae=0.015)
+    assert wh.update_trade_extremes(
+        exchange="Bybit", symbol="EXR/USDT", side="buy", ts_entry=2600.0,
+        mfe=0.001, mae=0.0)
+    row = wh.query("SELECT mfe, mae FROM trades WHERE id=?", (tid,))[0]
+    assert row["mfe"] == pytest.approx(0.02)
+    assert row["mae"] == pytest.approx(0.015)
+
+
+def test_ext_dirty_survives_failed_write(monkeypatch):
+    """The dirty flag must clear only on a SUCCESSFUL write, or a failed
+    (locked/transient) write silently cancels the documented catch-up."""
+    from unittest.mock import MagicMock
+
+    import core.warehouse as cw
+    om = _om_with_wh()
+    pos = _mpos("buy")
+    failing = MagicMock()
+    failing.update_trade_extremes.return_value = False
+    monkeypatch.setattr(cw, "get_warehouse", lambda: failing)
+    om._update_trade_extremes(pos, 103.0)  # new extreme, write fails
+    assert pos._ext_dirty is True          # catch-up still pending
+    ok = MagicMock()
+    ok.update_trade_extremes.return_value = True
+    monkeypatch.setattr(cw, "get_warehouse", lambda: ok)
+    pos._ext_persist_ts -= 10.0
+    om._update_trade_extremes(pos, 101.0)  # no new peak; dirty catch-up fires
+    assert pos._ext_dirty is False

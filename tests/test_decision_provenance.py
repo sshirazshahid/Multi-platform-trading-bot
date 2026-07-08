@@ -419,7 +419,7 @@ def test_spot_fallback_forwards_decision_and_provenance_kwargs():
     ex.name = "binance"
     ex.fetch_ticker.return_value = {"last": 100.0, "bid": 99.9, "ask": 100.1}
     ex.get_min_order_size.return_value = 0.0
-    ex.round_quantity.side_effect = lambda s, q: q
+    ex.round_quantity.side_effect = lambda s, q, market_type=None: q
     ex.set_leverage.return_value = 2
 
     om.open_position = MagicMock(return_value="SPOT_POS")  # intercept recursion

@@ -534,8 +534,14 @@ class Warehouse:
                 exchange=exchange, symbol=symbol, ts_entry=ts_entry, side=side)
             if tid is None:
                 return False
+            # Review fix 2026-07-09 (MEDIUM): monotone write — a watchdog
+            # restart resets the in-memory peaks, and a blind overwrite let
+            # the first post-restart tick clobber larger persisted extremes
+            # with near-zero ones (which DistFitSL would then prefer over
+            # its proxies — the exact bias C7 was built to remove).
             self._conn().execute(
-                "UPDATE trades SET mfe=?, mae=? WHERE id=?",
+                "UPDATE trades SET mfe=MAX(COALESCE(mfe,0),?), "
+                "mae=MAX(COALESCE(mae,0),?) WHERE id=?",
                 (float(mfe), float(mae), tid))
             self._conn().commit()
             return True

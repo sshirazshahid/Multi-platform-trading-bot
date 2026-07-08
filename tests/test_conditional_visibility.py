@@ -87,16 +87,18 @@ def test_base_fetch_open_conditionals_uses_stop_param():
     assert params.get("acknowledged") is True
 
 
-def test_base_fetch_open_conditionals_error_returns_empty():
+def test_base_fetch_open_conditionals_error_returns_none():
+    # Review fix 2026-07-09: error must be INCONCLUSIVE (None), never "empty" —
+    # treating errors as empty made C4 cancel working stops during outages.
     b = _base_stub()
     b.exchange.fetch_open_orders.side_effect = RuntimeError("down")
-    assert b.fetch_open_conditionals("ETH/USDT", "futures") == []
+    assert b.fetch_open_conditionals("ETH/USDT", "futures") is None
 
 
-def test_base_fetch_open_conditionals_not_ready_returns_empty():
+def test_base_fetch_open_conditionals_not_ready_returns_none():
     b = _base_stub()
     b._ready = lambda: False
-    assert b.fetch_open_conditionals("ETH/USDT", "futures") == []
+    assert b.fetch_open_conditionals("ETH/USDT", "futures") is None
     b.exchange.fetch_open_orders.assert_not_called()
 
 
@@ -133,7 +135,7 @@ def test_bybit_fetch_open_conditionals_spot_and_error_are_empty():
     b._ok = lambda: True
     assert b.fetch_open_conditionals("ETH/USDT", "spot") == []
     b.exchange.privateGetV5OrderRealtime.side_effect = RuntimeError("x")
-    assert b.fetch_open_conditionals("ETH/USDT:USDT", "futures") == []
+    assert b.fetch_open_conditionals("ETH/USDT:USDT", "futures") is None
 
 
 # ── Bitget override: plan orders via the ccxt trigger param ─────────────────
@@ -216,8 +218,8 @@ def test_classifier_both_books_empty_stays_inconclusive():
 def _sltp_exchange():
     ex = MagicMock()
     ex.name = "Binance"
-    ex.round_price.side_effect = lambda s, p: p
-    ex.round_quantity.side_effect = lambda s, q: q
+    ex.round_price.side_effect = lambda s, p, market_type=None: p
+    ex.round_quantity.side_effect = lambda s, q, market_type=None: q
     ex.create_order.return_value = {"id": "ok1"}
     return ex
 
@@ -258,3 +260,16 @@ def test_no_hint_falls_back_to_ticker_fetch():
     om._place_exchange_sl_tp(ex, pos, 92.0, 110.0, "buy", "ETH/USDT", 1.0, "futures")
     ex.fetch_ticker.assert_called_once()
     assert ex.create_order.call_count == 2
+
+
+def test_classifier_conditional_book_error_none_is_inconclusive():
+    # Review fix 2026-07-09: a failed conditional-book fetch (None) with a
+    # regular order resting must be INCONCLUSIVE — never "SL missing".
+    om = _om()
+    pos = _pos()
+    ex = MagicMock()
+    ex.name = "Bybit"
+    ex.fetch_open_orders.return_value = [{"id": "manual-limit", "price": 101.0}]
+    ex.fetch_open_conditionals.return_value = None  # venue error contract
+    _sl, _tp, conclusive = om._classify_resting_conditionals(ex, pos)
+    assert conclusive is False

@@ -342,21 +342,24 @@ class BitgetClient(BaseExchange):
         """Bitget plan/tpsl orders (C5, tpbot retrofit 2026-07-08): resting
         conditionals live behind the ccxt trigger branch (params stop=True),
         invisible to plain fetch_open_orders. Same defaultType-lock switch
-        idiom as fetch_open_orders above. [] on error/not-ready/spot —
-        INCONCLUSIVE per the fetch_open_orders contract."""
-        if market_type != "futures" or not self._ok():
+        idiom as fetch_open_orders above. Contract (review fix 2026-07-09):
+        None on error/not-ready = INCONCLUSIVE; [] only from a successful
+        empty response (spot: [] — no conditional ledger applies)."""
+        if market_type != "futures":
             return []
+        if not self._ok():
+            return None
         with self._defaultType_lock:
             self.switch_to_futures()
             try:
                 out = self.exchange.fetch_open_orders(
                     symbol, params={"stop": True, "acknowledged": True,
                                     "productType": "USDT-FUTURES"})
-                return out if isinstance(out, list) else []
+                return out if isinstance(out, list) else None
             except Exception as e:
                 logger.debug(
                     f"[Bitget] fetch_open_conditionals {symbol}: {str(e)[:120]}")
-                return []
+                return None
             finally:
                 self.switch_to_spot()
 

@@ -214,6 +214,8 @@ def test_fill_wired_in_open_position():
 def test_partial_tp_and_sl_move_wired_in_partial_close():
     src = _om_src()
     i = src.index("def partial_close_position")
-    block = src[i : i + 7000]
+    # 7000->9000 when the 2026-07-09 review fixes (market_type threading)
+    # grew the function head; guarded behavior unchanged.
+    block = src[i : i + 9000]
     assert '"PARTIAL_TP"' in block
     assert '"SL_MOVE"' in block, "the breakeven move must write an SL_MOVE lifecycle row"

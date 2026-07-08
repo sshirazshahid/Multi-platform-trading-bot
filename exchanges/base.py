@@ -393,7 +393,8 @@ class BaseExchange(ABC):
     _TRIGGER_PRICE_PARAMS = ("stopPrice", "triggerPrice", "stopLossPrice",
                              "takeProfitPrice", "activationPrice")
 
-    def _quantize_price(self, symbol: str, value, fallback=None):
+    def _quantize_price(self, symbol: str, value, fallback=None,
+                        market_type: str = None):
         """Tick-round ``value`` when it parses to a positive number; return
         ``fallback`` untouched otherwise (never crash the order boundary on a
         shape we don't understand — the venue is the final arbiter)."""
@@ -404,11 +405,11 @@ class BaseExchange(ABC):
         if v <= 0:
             return fallback
         try:
-            return self.round_price(symbol, v)
+            return self.round_price(symbol, v, market_type)
         except Exception:
             return fallback
 
-    def _quantize_amount(self, symbol: str, amount):
+    def _quantize_amount(self, symbol: str, amount, market_type: str = None):
         """Floor ``amount`` to the venue lot step when numeric.
 
         Raises ValueError when a positive amount floors to ZERO — sending
@@ -423,7 +424,7 @@ class BaseExchange(ABC):
         if a <= 0:
             return amount  # caller bug — surfaces at the venue exactly as before
         try:
-            r = self.round_quantity(symbol, a)
+            r = self.round_quantity(symbol, a, market_type)
         except Exception:
             return amount
         if r <= 0:
@@ -448,13 +449,15 @@ class BaseExchange(ABC):
         # them and relied on ccxt/venue tolerance (see Bitget 40808 incident,
         # order_manager.py SL/TP placement comment). Idempotent for callers
         # that already pre-round.
-        amount = self._quantize_amount(symbol, amount)
+        amount = self._quantize_amount(symbol, amount, market_type)
         if price is not None:
-            price = self._quantize_price(symbol, price, fallback=price)
+            price = self._quantize_price(symbol, price, fallback=price,
+                                         market_type=market_type)
         for _k in self._TRIGGER_PRICE_PARAMS:
             if _k in _params:
                 _params[_k] = self._quantize_price(
-                    symbol, _params[_k], fallback=_params[_k])
+                    symbol, _params[_k], fallback=_params[_k],
+                    market_type=market_type)
         import uuid as _uuid
         _params.setdefault("clientOrderId", _uuid.uuid4().hex[:24])
         last_err = None
@@ -599,12 +602,17 @@ class BaseExchange(ABC):
 
         Default implementation mirrors the proven Binance algo-book idiom
         (stop=True + acknowledged=True). Bybit/Bitget override with their
-        venue-specific queries. Returns [] on error AND when not-ready —
-        same INCONCLUSIVE contract as fetch_open_orders; consumers must
-        never read [] as proof nothing rests.
+        venue-specific queries.
+
+        Contract (review fix 2026-07-09): returns None on error AND when
+        not-ready — the conditional book is where SL/TP conditionals
+        actually live, so a failed fetch must be distinguishable from a
+        genuinely empty book ([]). Consumers treat None as INCONCLUSIVE
+        (no reconcile action); treating errors as empty made the coverage
+        reconciler cancel working stops during venue errors.
         """
         if not self._ready():
-            return []
+            return None
         try:
             params = self._futures_params() if market_type == "futures" else {}
             params = dict(params)
@@ -613,10 +621,10 @@ class BaseExchange(ABC):
             # stop-order endpoint (Area 2, 2026-05-20 idiom).
             params["acknowledged"] = True
             out = self.exchange.fetch_open_orders(symbol, params=params)
-            return out if isinstance(out, list) else []
+            return out if isinstance(out, list) else None
         except Exception as e:
             logger.debug(f"[{self.name}] fetch_open_conditionals: {str(e)[:120]}")
-            return []
+            return None
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
         """Set leverage for symbol on this exchange.
@@ -679,14 +687,33 @@ class BaseExchange(ABC):
         except Exception:
             return 0.0001
 
-    def get_amount_precision(self, symbol: str) -> float:
+    def _market_row(self, symbol: str, market_type: str = None) -> dict:
+        """Resolve the ccxt market row, preferring the linear-swap row
+        ('SYM/USDT:USDT') for futures.
+
+        Review fix 2026-07-09 (HIGH): plain 'SYM/USDT' keys the SPOT row in
+        ccxt even under a futures defaultType, so futures orders were being
+        quantized at the spot step/tick (Bitget SOL: spot step 0.0001 vs
+        swap 0.1) — the C2 chokepoint guarantees never bound at the real
+        futures grid. Falls back to the exact-symbol row when no swap row
+        exists (or the symbol already carries the settle suffix)."""
+        try:
+            markets = self.exchange.markets or self.exchange.load_markets()
+        except Exception:
+            return {}
+        if market_type == "futures" and ":" not in symbol:
+            row = markets.get(f"{symbol}:USDT")
+            if row:
+                return row
+        return markets.get(symbol, {}) or {}
+
+    def get_amount_precision(self, symbol: str, market_type: str = None) -> float:
         """Return the step size for quantity rounding.
-        E.g., Bitget SOL = 0.1 (fractional contracts)."""
+        E.g., Bitget SOL swap = 0.1 (fractional contracts)."""
         if not self._ready():
             return 0.0001
         try:
-            markets = self.exchange.markets or self.exchange.load_markets()
-            market = markets.get(symbol, {})
+            market = self._market_row(symbol, market_type)
             prec = market.get("precision", {})
             amount_prec = prec.get("amount")
             if amount_prec is not None:
@@ -701,34 +728,54 @@ class BaseExchange(ABC):
         except Exception:
             return 0.0001
 
-    def round_quantity(self, symbol: str, quantity: float) -> float:
-        """Round quantity to exchange precision. Rounds DOWN to avoid over-exposure."""
+    def round_quantity(self, symbol: str, quantity: float,
+                       market_type: str = None) -> float:
+        """Round quantity to exchange precision. Rounds DOWN to avoid
+        over-exposure.
+
+        Review fix 2026-07-09 (CRITICAL): the floor is epsilon-guarded —
+        0.3/0.1 is 2.9999999999999996 in floats, so a bare math.floor
+        shaved EXACT step multiples a full step down (a 0.3-contract close
+        became 0.2, leaving a naked 0.1 remainder on the venue).
+        round(x, 9) snaps float noise back to the grid before flooring;
+        genuinely off-grid amounts still floor down, never up."""
         import math
-        step = self.get_amount_precision(symbol)
+        step = self.get_amount_precision(symbol, market_type)
         if step <= 0:
             step = 0.0001
-        rounded = math.floor(quantity / step) * step
+        rounded = math.floor(round(quantity / step, 9)) * step
         return round(rounded, 8)
 
-    def round_price(self, symbol: str, price: float) -> float:
-        """Round a price to exchange precision (for SL/TP trigger prices)."""
+    def round_price(self, symbol: str, price: float,
+                    market_type: str = None) -> float:
+        """Round a price to exchange precision (for SL/TP trigger prices).
+        Futures prices resolve the swap row's tick (see _market_row)."""
         if not self._ready():
             return round(price, 6)
         try:
-            return float(self.exchange.price_to_precision(symbol, price))
+            px_symbol = symbol
+            if market_type == "futures" and ":" not in symbol:
+                try:
+                    markets = self.exchange.markets or {}
+                    if f"{symbol}:USDT" in markets:
+                        px_symbol = f"{symbol}:USDT"
+                except Exception:
+                    pass
+            return float(self.exchange.price_to_precision(px_symbol, price))
         except Exception:
             pass
         # Fallback: read precision from market info
         try:
-            markets = self.exchange.markets or self.exchange.load_markets()
-            market = markets.get(symbol, {})
+            market = self._market_row(symbol, market_type)
             prec = market.get("precision", {}).get("price")
             if prec is not None:
                 if isinstance(prec, int):
                     return round(price, prec)
                 elif isinstance(prec, float) and prec > 0:
                     import math
-                    return round(math.floor(price / prec) * prec, 10)
+                    # Same epsilon guard as round_quantity: exact tick
+                    # multiples must be fixed points.
+                    return round(math.floor(round(price / prec, 9)) * prec, 10)
         except Exception:
             pass
         return round(price, 6)

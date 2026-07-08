@@ -185,3 +185,38 @@ def test_sl_repair_takes_priority_over_tp_downgrade():
     # TP flag NOT blindly downgraded in the same pass — the re-place path
     # re-establishes both legs and maintains its own flags.
     assert pos._exchange_tp is True
+
+
+# ── review 2026-07-09 regressions: the breakeven/trailed-SL churn loop ───────
+def test_breakeven_sl_above_entry_not_treated_as_missing():
+    """After _early_breakeven_move / trailing, the venue SL trigger sits ABOVE
+    entry on longs. The old entry-side heuristic read it as a TP -> C4
+    cancel-all/re-place loop every 60s on every winner. Level-matching must
+    classify it as the SL."""
+    om = _om()
+    pos = _pos(sl_owned=True, sl=100.8, tp=110.0)  # breakeven+fees, entry 100
+    ex = _ex([_cond(100.8), _cond(110.0)])
+    om._reconcile_missing_tp(ex, pos)
+    om._replace_exchange_sl.assert_not_called()
+
+
+def test_trailed_sl_deep_in_profit_not_treated_as_missing():
+    om = _om()
+    pos = _pos(sl_owned=True, sl=105.0, tp=110.0)  # trailed to +5%
+    ex = _ex([_cond(105.0)])
+    om._reconcile_missing_tp(ex, pos)
+    om._replace_exchange_sl.assert_not_called()
+
+
+def test_conditional_book_error_is_inconclusive_no_replace():
+    """Venue error on the conditional ledger (None) + a resting manual limit
+    order must NOT be read as 'SL missing' — the old code cancel-replaced a
+    WORKING live SL in a loop for as long as the error persisted."""
+    om = _om()
+    pos = _pos(sl_owned=True)
+    ex = MagicMock()
+    ex.name = "Bybit"
+    ex.fetch_open_orders.return_value = [{"id": "manual", "price": 101.0}]
+    ex.fetch_open_conditionals.return_value = None
+    om._reconcile_missing_tp(ex, pos)
+    om._replace_exchange_sl.assert_not_called()
