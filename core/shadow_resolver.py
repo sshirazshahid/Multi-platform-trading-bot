@@ -140,6 +140,12 @@ def resolve_one(
             return None
         exit_level = last_close  # time barrier: mark out at last closed price
 
+    # C10 (tpbot retrofit 2026-07-08): limit-TP counterfactual over the SAME
+    # scan window — measurement only, the primary resolution above is
+    # untouched. See limit_tp_counterfactual for the fill model.
+    ltp_touched, ltp_filled, ltp_reason = limit_tp_counterfactual(
+        scan, sl, tp, is_buy)
+
     slip_bps = sl_slip_bps if exit_reason == "stop_loss" else exit_slip_bps
     exit_slip = exit_level * slip_bps / 10_000.0
     exit_filled = exit_level - exit_slip if is_buy else exit_level + exit_slip
@@ -164,7 +170,65 @@ def resolve_one(
         "mae": mae * size,
         "bars_held": bars_held,
         "r_multiple": r_mult,
+        "ltp_touched": ltp_touched,
+        "ltp_filled": ltp_filled,
+        "ltp_exit_reason": ltp_reason,
     }
+
+
+# C10: trade-through fraction standing in for ">= 1 tick beyond the level" —
+# the resolver has no per-symbol tick metadata, so ~1bp is the documented,
+# conservative proxy. A REAL resting limit also needs queue position; this
+# model grants the fill on any trade-through, i.e. it still slightly
+# OVERSTATES maker-TP fill rates. Read touched-vs-filled with that in mind.
+LIMIT_TP_TRADE_THROUGH_FRAC = 1e-4
+
+
+def limit_tp_counterfactual(
+    scan: list,
+    sl: float,
+    tp: float,
+    is_buy: bool,
+    through_frac: float = LIMIT_TP_TRADE_THROUGH_FRAC,
+) -> tuple:
+    """Counterfactual (C10): the TP is a RESTING reduce-only LIMIT (maker)
+    instead of the live market-trigger conditional.
+
+    Whole-path simulation over the same closed-bar scan the primary
+    resolver used: touch != fill — the limit fills only when price trades
+    THROUGH the level by ``through_frac``; a touched-but-unfilled TP leaves
+    the position open, so a later SL hit books stop_loss (the adverse case
+    this metric exists to expose). Same-bar SL+fill resolves SL-first
+    (the primary resolver's pessimistic AFML tie-break). Measurement only:
+    never touches the live order path.
+
+    Returns (touched 0/1, filled 0/1, exit_reason).
+    """
+    if not tp or tp <= 0:
+        return 0, 0, "no_tp"
+    thr = tp * (1.0 + through_frac) if is_buy else tp * (1.0 - through_frac)
+    touched = 0
+    for c in scan:
+        try:
+            high = float(c[2])
+            low = float(c[3])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if is_buy:
+            if high >= tp:
+                touched = 1
+            hit_sl = sl > 0 and low <= sl
+            filled = high >= thr
+        else:
+            if low <= tp:
+                touched = 1
+            hit_sl = sl > 0 and high >= sl
+            filled = low <= thr
+        if hit_sl:  # SL-first pessimistic tie-break, same as the resolver
+            return touched, 0, "stop_loss"
+        if filled:
+            return touched, 1, "take_profit_limit"
+    return touched, 0, "time"
 
 
 def _write_outcome(warehouse, proposal_id: str, outcome: dict, now: int) -> None:
@@ -178,13 +242,17 @@ def _write_outcome(warehouse, proposal_id: str, outcome: dict, now: int) -> None
         conn.execute(
             "INSERT OR REPLACE INTO shadow_outcomes "
             "(proposal_id, exit_px, exit_reason, gross_pnl, net_pnl, fees, slippage, "
-            " funding, mfe, mae, bars_held, r_multiple, resolved_ts, label_status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED')",
+            " funding, mfe, mae, bars_held, r_multiple, resolved_ts, label_status, "
+            " ltp_touched, ltp_filled, ltp_exit_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED', ?, ?, ?)",
             (
                 proposal_id, outcome["exit_px"], outcome["exit_reason"],
                 outcome["gross_pnl"], outcome["net_pnl"], outcome["fees"],
                 outcome["slippage"], outcome["funding"], outcome["mfe"],
                 outcome["mae"], outcome["bars_held"], outcome["r_multiple"], now,
+                # C10 counterfactual (None-safe for outcomes from older callers)
+                outcome.get("ltp_touched"), outcome.get("ltp_filled"),
+                outcome.get("ltp_exit_reason"),
             ),
         )
         conn.execute(

@@ -283,6 +283,18 @@ class Warehouse:
                 conn.execute("ALTER TABLE trades ADD COLUMN mae REAL")
             except sqlite3.OperationalError:
                 pass
+            # C10 (tpbot retrofit 2026-07-08): limit-TP counterfactual
+            # measurement on shadow outcomes (touched-vs-filled honesty gate
+            # for any future maker-TP experiment). NULL on legacy rows.
+            for _ddl in (
+                "ALTER TABLE shadow_outcomes ADD COLUMN ltp_touched INTEGER",
+                "ALTER TABLE shadow_outcomes ADD COLUMN ltp_filled INTEGER",
+                "ALTER TABLE shadow_outcomes ADD COLUMN ltp_exit_reason TEXT",
+            ):
+                try:
+                    conn.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass
             # Phase (audit 2026-06-04): entry-time stop price so r_multiple is
             # re-derivable and never contaminated by a trailed/breakeven-moved
             # stop. NULL on legacy rows and on reconcile/stale closes (no entry
