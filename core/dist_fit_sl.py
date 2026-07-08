@@ -36,8 +36,11 @@ approximate:
                                                   (price reached at least the
                                                   exit level)
 
-When a future change writes intra-trade extremes onto trades rows, swap the
-two helpers below for the real columns and remove the docstring caveat.
+C7 (tpbot retrofit 2026-07-08): that future change landed — the 10s monitor
+now persists real intra-trade extremes onto trades.mfe/mae and
+_row_mae_mfe PREFERS them; the proxies above remain only as the fallback
+for legacy/NULL rows (and for wicks between 10s polls, which sampling
+still misses).
 """
 from __future__ import annotations
 
@@ -98,7 +101,24 @@ def _quantile(xs: list[float], q: float) -> float:
 
 
 def _row_mae_mfe(row: dict) -> tuple[float, float]:
-    """Per-row MAE/MFE proxies in fractional units of entry price."""
+    """Per-row (MAE, MFE) in fractional units of entry price.
+
+    C7 (tpbot retrofit 2026-07-08): prefers the REAL intra-trade extremes
+    now persisted on trades rows (positive fractions, written by the 10s
+    monitor) — the upgrade this module's docstring always called for.
+    Legacy/NULL rows fall back to the documented exit-price proxies, so
+    the fit degrades gracefully and improves as real rows accumulate.
+    """
+    try:
+        r_mae = row.get("mae")
+        r_mfe = row.get("mfe")
+        if r_mae is not None and r_mfe is not None:
+            r_mae_f = float(r_mae)
+            r_mfe_f = float(r_mfe)
+            if r_mae_f > 0.0 or r_mfe_f > 0.0:
+                return max(r_mae_f, 0.0), max(r_mfe_f, 0.0)
+    except (TypeError, ValueError):
+        pass  # malformed extremes -> proxy fallback
     entry = float(row.get("entry_px") or 0.0)
     exit_ = float(row.get("exit_px") or 0.0)
     pnl = float(row.get("realized_pnl") or 0.0)
@@ -126,8 +146,11 @@ class DistFitSL:
 
     def _fetch_rows(self, symbol: str, since_ts: float) -> list[dict]:
         try:
+            # C7: mfe/mae are the REAL intra-trade extremes when the 10s
+            # monitor observed the trade (NULL on legacy rows -> proxies).
             return self._warehouse().query(
-                "SELECT entry_px, exit_px, realized_pnl, exit_reason "
+                "SELECT entry_px, exit_px, realized_pnl, exit_reason, "
+                "mfe, mae "
                 "FROM trades WHERE status='CLOSED' AND symbol=? "
                 "AND ts_entry >= ? "
                 "AND entry_px > 0 AND exit_px > 0",

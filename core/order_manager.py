@@ -286,6 +286,53 @@ class OrderManager:
                 return v
         return None
 
+    def _update_trade_extremes(self, pos, price: float) -> None:
+        """Running per-position MFE/MAE from the 10s monitor (C7).
+
+        Fractions of entry price, unleveraged, positive magnitudes (the
+        shadow_outcomes convention). In-memory peaks on the position;
+        the warehouse row is updated only when a NEW extreme appears and at
+        most once per 5s per position — trending moves never hammer SQLite.
+        DistFitSL fits on these instead of exit-price proxies. Poll-sampled,
+        so wick extremes between ticks are missed — still strictly less
+        biased than the proxies. Never raises. Restart caveat: in-memory
+        peaks reset; the warehouse keeps the best-known values.
+        """
+        try:
+            entry = float(getattr(pos, "entry_price", 0) or 0)
+            px = float(price or 0)
+            if entry <= 0 or px <= 0:
+                return
+            sign = 1.0 if str(getattr(pos, "side", "")).lower() == "buy" else -1.0
+            frac = sign * (px - entry) / entry
+            mfe = max(float(getattr(pos, "_mfe_frac", 0.0) or 0.0),
+                      max(frac, 0.0))
+            mae = max(float(getattr(pos, "_mae_frac", 0.0) or 0.0),
+                      max(-frac, 0.0))
+            improved = (mfe > float(getattr(pos, "_mfe_frac", -1.0) or 0.0)
+                        or mae > float(getattr(pos, "_mae_frac", -1.0) or 0.0))
+            pos._mfe_frac = mfe
+            pos._mae_frac = mae
+            if improved:
+                pos._ext_dirty = True  # unpersisted extreme pending
+            if not bool(getattr(pos, "_ext_dirty", False)):
+                return
+            import time as _t
+            now = _t.time()
+            if now - float(getattr(pos, "_ext_persist_ts", 0.0) or 0.0) < 5.0:
+                return  # throttled — dirty flag makes a later tick catch up
+            pos._ext_persist_ts = now
+            pos._ext_dirty = False
+            from core.warehouse import get_warehouse
+            get_warehouse().update_trade_extremes(
+                exchange=str(getattr(pos, "exchange", "") or ""),
+                symbol=str(getattr(pos, "symbol", "") or ""),
+                side=str(getattr(pos, "side", "") or ""),
+                ts_entry=float(getattr(pos, "open_time", 0) or 0),
+                mfe=mfe, mae=mae)
+        except Exception as e:
+            logger.debug(f"[Extremes] update skipped: {e}")
+
     def _record_lifecycle(self, pos, event_type: str,
                           payload: dict = None) -> None:
         """Best-effort mid-trade audit row (C6, tpbot retrofit 2026-07-08).
@@ -2929,6 +2976,11 @@ class OrderManager:
             if not price:
                 continue
             price = float(price)
+
+            # ── C7 (2026-07-08): running intra-trade extremes ──
+            # Feeds trades.mfe/mae so DistFitSL fits real excursions
+            # instead of exit-price proxies.
+            self._update_trade_extremes(pos, price)
 
             # ── SL reconciliation (2026-06-20) ──
             # Restore exchange-side SL if a prior placement failed and left the

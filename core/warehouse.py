@@ -270,6 +270,19 @@ class Warehouse:
                 conn.execute("ALTER TABLE trades ADD COLUMN fill_type TEXT")
             except sqlite3.OperationalError:
                 pass
+            # C7 (tpbot retrofit 2026-07-08): REAL intra-trade extremes —
+            # positive fractions of entry price, unleveraged (the
+            # shadow_outcomes convention). NULL on legacy rows and until the
+            # 10s monitor observes the first tick. DistFitSL prefers these
+            # over its documented exit-price proxies.
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN mfe REAL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN mae REAL")
+            except sqlite3.OperationalError:
+                pass
             # Phase (audit 2026-06-04): entry-time stop price so r_multiple is
             # re-derivable and never contaminated by a trailed/breakeven-moved
             # stop. NULL on legacy rows and on reconcile/stale closes (no entry
@@ -488,6 +501,35 @@ class Warehouse:
         except sqlite3.Error as e:
             logger.warning(f"[Warehouse] record_trade_open error: {e}")
             return -1
+
+    def update_trade_extremes(
+        self,
+        *,
+        exchange: str,
+        symbol: str,
+        side: str,
+        ts_entry: float,
+        mfe: float,
+        mae: float,
+    ) -> bool:
+        """Persist running intra-trade extremes on the OPEN row (C7).
+
+        ``mfe``/``mae`` are positive fractions of entry price (unleveraged).
+        Resolved by the same idempotency key as the close path; missing row
+        -> False no-op. Best-effort: never raises."""
+        try:
+            tid = self.trade_id_by_key(
+                exchange=exchange, symbol=symbol, ts_entry=ts_entry, side=side)
+            if tid is None:
+                return False
+            self._conn().execute(
+                "UPDATE trades SET mfe=?, mae=? WHERE id=?",
+                (float(mfe), float(mae), tid))
+            self._conn().commit()
+            return True
+        except Exception as e:
+            logger.debug(f"[Warehouse] update_trade_extremes skipped: {e}")
+            return False
 
     def record_lifecycle_event(
         self,
