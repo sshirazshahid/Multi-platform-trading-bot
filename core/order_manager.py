@@ -1698,6 +1698,91 @@ class OrderManager:
         pos._exchange_tp = False
         return True
 
+    # ── SL/TP liveness verifiers (C1, tpbot retrofit 2026-07-08) ─────────
+    # position_tracker._patch0_instrument_ghost has called these on every
+    # profitable ghost since 2026-05-19, but they were never implemented —
+    # the AttributeError was silently swallowed, so the ghost-reroute gate
+    # (Patch #1) collected would_reroute=unknown telemetry the whole time.
+
+    def _classify_resting_conditionals(self, exchange: BaseExchange,
+                                       pos: Position) -> tuple:
+        """Classify resting conditional orders on the venue for ``pos``.
+
+        Same side convention as ``_reconcile_missing_tp``: a trigger above
+        entry is profit-side for buys and loss-side for sells (mirrored).
+
+        Returns ``(sl_present, tp_present, conclusive)``. ``conclusive`` is
+        False when the venue answer cannot be trusted: empty open-orders
+        list (exchanges/base.py returns [] on error AND when not-ready) or
+        an unusable entry price. Callers must fail closed on inconclusive.
+        """
+        try:
+            ep = float(pos.entry_price or 0)
+        except (TypeError, ValueError):
+            ep = 0.0
+        if ep <= 0:
+            return False, False, False
+        try:
+            open_orders = exchange.fetch_open_orders(pos.symbol, pos.market_type)
+        except Exception as e:  # nonconforming client; base.py normally returns []
+            logger.warning(
+                f"[Orders] conditional classify: fetch_open_orders raised for "
+                f"{pos.symbol} on {getattr(exchange, 'name', '?')}: {str(e)[:120]}")
+            return False, False, False
+        if not open_orders:
+            return False, False, False  # inconclusive — error or genuinely empty
+        side = (pos.side or "").lower()
+        tp_present = sl_present = False
+        for o in open_orders:
+            info = o.get("info", {}) or {}
+            trig = (o.get("triggerPrice") or o.get("stopPrice")
+                    or info.get("triggerPrice") or info.get("stopPrice"))
+            try:
+                trig = float(trig) if trig is not None else None
+            except (TypeError, ValueError):
+                trig = None
+            if not trig or trig <= 0:
+                continue
+            profit_side = (trig > ep) if side == "buy" else (trig < ep)
+            if profit_side:
+                tp_present = True
+            else:
+                sl_present = True
+        return sl_present, tp_present, True
+
+    def verify_exchange_sl_alive(self, exchange: BaseExchange,
+                                 pos: Position) -> bool:
+        """True only when a loss-side conditional is VERIFIED resting on the
+        venue for ``pos``. Fail-closed: PAPER (no venue orders exist), spot
+        (no exchange-side protection by design), fetch failures and the
+        inconclusive empty-list shape all return False — consumers (the
+        ghost-reroute instrumentation) must never credit unverified
+        protection. Read-only: never places or cancels anything."""
+        if self.dry_run or getattr(pos, "market_type", None) != "futures":
+            return False
+        sl_present, _tp, conclusive = self._classify_resting_conditionals(
+            exchange, pos)
+        venue = str(getattr(exchange, "name", "?")).lower()
+        logger.debug(
+            f"[Orders] verify_sl_alive {pos.symbol}@{venue}: "
+            f"sl={sl_present} conclusive={conclusive}")
+        return bool(conclusive and sl_present)
+
+    def verify_exchange_tp_alive(self, exchange: BaseExchange,
+                                 pos: Position) -> bool:
+        """True only when a profit-side conditional is VERIFIED resting on
+        the venue for ``pos``. Same fail-closed semantics as
+        ``verify_exchange_sl_alive``. Read-only."""
+        if self.dry_run or getattr(pos, "market_type", None) != "futures":
+            return False
+        _sl, tp_present, conclusive = self._classify_resting_conditionals(
+            exchange, pos)
+        venue = str(getattr(exchange, "name", "?")).lower()
+        logger.debug(
+            f"[Orders] verify_tp_alive {pos.symbol}@{venue}: "
+            f"tp={tp_present} conclusive={conclusive}")
+        return bool(conclusive and tp_present)
+
     # ── Close position ────────────────────────────────────────────────
 
     def partial_close_position(self, exchange: BaseExchange, position: Position,

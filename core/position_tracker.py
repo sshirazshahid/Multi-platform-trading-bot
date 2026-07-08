@@ -382,6 +382,18 @@ def _patch0_instrument_ghost(tracker, pos, order_manager,
             f"sl_alive={sl_alive} tp_alive={tp_alive} "
             f"would_reroute={would_reroute} reason={ghost_class_reason}"
         )
+    except AttributeError as e:
+        # C1 (2026-07-08): this branch existed as a silent WARNING while
+        # verify_exchange_sl_alive/tp_alive were phantom methods for ~7 weeks
+        # — every profitable ghost logged a swallowed AttributeError instead
+        # of gate data. Keep the close path unbreakable (never raise), but a
+        # missing verifier is a REGRESSION, not an operational hiccup: log at
+        # ERROR with the exception type so it trips log-based health checks.
+        logger.error(
+            f"GHOST_REROUTE_INSTRUMENT: AttributeError computing hypothetical "
+            f"for {getattr(pos, 'symbol', '?')} — verifier method missing? "
+            f"(phantom-method regression): {str(e)[:120]}"
+        )
     except Exception as e:
         logger.warning(
             f"GHOST_REROUTE_INSTRUMENT: failed to compute hypothetical "
