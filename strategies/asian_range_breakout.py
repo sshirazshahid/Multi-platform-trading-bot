@@ -35,7 +35,11 @@ def _with_ts(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy carrying a unix-seconds ``ts`` column derived from the
     datetime index (session_range expects it). Causal: pure index arithmetic."""
     out = df.copy()
-    out["ts"] = (out.index.astype("int64") // 1_000_000_000).astype("int64")
+    # pandas 3.0 preserves non-nanosecond index resolutions (e.g. datetime64[s]
+    # from to_datetime(unit="s")), so normalise to ns before the //1e9 division.
+    out["ts"] = (out.index.astype("datetime64[ns]").astype("int64") // 1_000_000_000).astype(
+        "int64"
+    )
     return out
 
 
