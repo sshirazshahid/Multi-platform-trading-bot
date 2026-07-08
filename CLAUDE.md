@@ -595,3 +595,4 @@ use the /browse skill from gstack for all web browsing, never use mcp__claude-in
 | 2026-07-08 | 초기 구성: 4 agents (strategy-scout, edge-screener, honesty-auditor, shadow-integrator) + 4 skills (ledger, screening, shadow-probe, orchestrator) | 전체 | /harness 요청; 2026-07-08 deep-research 후속 |
 | 2026-07-08 | Live spawn tests (Phase 6-3/6-4) deferred | 검증 | API session limit; structural validation only this pass |
 | 2026-07-08 | CLAUDE.md restored from 94fb521 after accidental overwrite by CLAUDE-FABLE-5.md rename (plugin-install window); replaced content preserved in claude_md_replaced_backup_2026-07-08.md | CLAUDE.md | working-copy corruption recovery |
+| 2026-07-09 | Maiden run: dispersion + listing-short screens → both INSUFFICIENT_DATA (audit-confirmed); artifacts in _workspace/strategy_pipeline/, screens in research/ | 파이프라인 | 3-venue funding overlap = 5d BTC/ETH only; 0/103 listings funding-covered — funding-history backfill queued |
