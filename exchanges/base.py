@@ -388,6 +388,50 @@ class BaseExchange(ABC):
 
     # ── Orders ──────────────────────────────────────────────────────
 
+    # Trigger-price params that ride through ccxt `params` and must be
+    # tick-quantized like any other price (C2, tpbot retrofit 2026-07-08).
+    _TRIGGER_PRICE_PARAMS = ("stopPrice", "triggerPrice", "stopLossPrice",
+                             "takeProfitPrice", "activationPrice")
+
+    def _quantize_price(self, symbol: str, value, fallback=None):
+        """Tick-round ``value`` when it parses to a positive number; return
+        ``fallback`` untouched otherwise (never crash the order boundary on a
+        shape we don't understand — the venue is the final arbiter)."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if v <= 0:
+            return fallback
+        try:
+            return self.round_price(symbol, v)
+        except Exception:
+            return fallback
+
+    def _quantize_amount(self, symbol: str, amount):
+        """Floor ``amount`` to the venue lot step when numeric.
+
+        Raises ValueError when a positive amount floors to ZERO — sending
+        dust yields a cryptic venue rejection (or a silent partial semantics
+        change); failing loudly here is the fail-closed behavior. Non-numeric
+        shapes pass through untouched.
+        """
+        try:
+            a = float(amount)
+        except (TypeError, ValueError):
+            return amount
+        if a <= 0:
+            return amount  # caller bug — surfaces at the venue exactly as before
+        try:
+            r = self.round_quantity(symbol, a)
+        except Exception:
+            return amount
+        if r <= 0:
+            raise ValueError(
+                f"[{self.name}] {symbol}: amount {a} floors to 0 at the venue "
+                f"lot step — refusing to send dust")
+        return r
+
     def create_order(self, symbol: str, order_type: str, side: str,
                      amount: float, price: float = None,
                      params: dict = None, market_type: str = "spot"):
@@ -397,6 +441,20 @@ class BaseExchange(ABC):
         _params = self._futures_params() if market_type == "futures" else {}
         if params:
             _params.update(params)
+        # C2 (tpbot retrofit 2026-07-08): quantize at the ONE boundary every
+        # order crosses. round_price/round_quantity existed since 2026-04 but
+        # were enforced by convention at call sites — 6+ live paths (partial
+        # close, smart-executor limit price, spot sells, fund-ops) bypassed
+        # them and relied on ccxt/venue tolerance (see Bitget 40808 incident,
+        # order_manager.py SL/TP placement comment). Idempotent for callers
+        # that already pre-round.
+        amount = self._quantize_amount(symbol, amount)
+        if price is not None:
+            price = self._quantize_price(symbol, price, fallback=price)
+        for _k in self._TRIGGER_PRICE_PARAMS:
+            if _k in _params:
+                _params[_k] = self._quantize_price(
+                    symbol, _params[_k], fallback=_params[_k])
         import uuid as _uuid
         _params.setdefault("clientOrderId", _uuid.uuid4().hex[:24])
         last_err = None

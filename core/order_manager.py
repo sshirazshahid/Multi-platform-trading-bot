@@ -1789,7 +1789,19 @@ class OrderManager:
                               close_pct: float, reason: str, price: float):
         """Close a fraction of a position and move SL to breakeven on remainder."""
         partial_size = position.size * close_pct
-        if partial_size * price < 5.0:
+        # C2 (tpbot retrofit 2026-07-08): quantize to the venue lot step BEFORE
+        # the notional check, the order AND the tracker decrement. An unrounded
+        # fraction sent to a step-constrained contract (Bitget 0.1-step) fills
+        # at the venue-floored size while the tracker decrements the raw
+        # fraction — position.size drifts from the venue on every partial.
+        # Best-effort: fakes/stubs without lot metadata keep the raw fraction
+        # (paper realism unchanged); a fraction that floors to zero is refused.
+        try:
+            _rq = float(exchange.round_quantity(position.symbol, partial_size))
+            partial_size = _rq if _rq > 0 else 0.0
+        except Exception:
+            pass
+        if partial_size <= 0 or partial_size * price < 5.0:
             return False
 
         close_side = "sell" if position.side == "buy" else "buy"

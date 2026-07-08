@@ -54,7 +54,9 @@ def test_partial_close_books_the_paper_wallet():
     """partial_close_position() must call wallet.on_close for the taken fraction."""
     src = Path("core/order_manager.py").read_text(encoding="utf-8")
     i = src.index("def partial_close_position")
-    block = src[i:i + 4500]
+    # Window covers the whole function; widened 4500->6000 when the C2
+    # lot-step quantization preamble (2026-07-08) grew the function head.
+    block = src[i:i + 6000]
     assert "self.wallet.on_close(" in block, (
         "partial_close_position must book the taken fraction in the paper wallet "
         "(else partial TPs leak margin+profit from the paper balance)")
