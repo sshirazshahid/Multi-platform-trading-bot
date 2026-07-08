@@ -286,6 +286,29 @@ class OrderManager:
                 return v
         return None
 
+    def _record_lifecycle(self, pos, event_type: str,
+                          payload: dict = None) -> None:
+        """Best-effort mid-trade audit row (C6, tpbot retrofit 2026-07-08).
+
+        Writes ORDER_PLACED/FILL/PARTIAL_TP/SL_MOVE rows into
+        warehouse.trade_events so the signal->order->fill->TP->close chain
+        is auditable after the fact (the Jun-4 attribution-corruption class).
+        Never raises and never blocks a trading path — a lost audit row is
+        strictly better than a disturbed order flow.
+        """
+        try:
+            from core.warehouse import get_warehouse
+            get_warehouse().record_lifecycle_event(
+                exchange=str(getattr(pos, "exchange", "") or ""),
+                symbol=str(getattr(pos, "symbol", "") or ""),
+                side=str(getattr(pos, "side", "") or ""),
+                ts_entry=float(getattr(pos, "open_time", 0) or 0),
+                event_type=event_type,
+                payload=payload or {},
+            )
+        except Exception as e:
+            logger.debug(f"[Warehouse] lifecycle {event_type} skipped: {e}")
+
     def flatten_all(self, reason: str, exchange_name: str = None,
                     market_type: str = None) -> dict:
         """Close every open tracked position (C9, tpbot retrofit 2026-07-08).
@@ -1297,6 +1320,13 @@ class OrderManager:
                 f"[Warehouse] record_trade_open FAILED "
                 f"(row will be untrackable at close): {_we}")
 
+        # C6 (2026-07-08): entry-execution audit row — fill price/type were
+        # previously only on the trades row; the FILL event pins the
+        # execution detail into the lifecycle chain.
+        self._record_lifecycle(pos, "FILL", {
+            "price": float(fill_price) if fill_price else None,
+            "size": float(pos.size), "fill_type": _fill_type})
+
         # Place SL/TP orders on the exchange for real protection.
         # 2026-04-16 (post-audit): use pos.size (the tracker's canonical size,
         # which reflects any rounding applied at entry), not the pre-round
@@ -1458,6 +1488,9 @@ class OrderManager:
             logger.info(
                 f"[Orders] SL order on {exchange.name}: {symbol} "
                 f"@ {sl_rounded} (type={sl_type})")
+            self._record_lifecycle(pos, "ORDER_PLACED", {
+                "leg": "sl", "trigger": float(sl_rounded),
+                "order_type": str(sl_type), "size": float(size_rounded)})
         except Exception as e:
             # 2026-05-21: catch the rare race past the pre-flight — mark moved
             # between fetch_ticker and create_order. Bybit 110092 and Bitget
@@ -1560,6 +1593,9 @@ class OrderManager:
             logger.info(
                 f"[Orders] TP order on {exchange.name}: {symbol} "
                 f"@ {tp_rounded} (type={tp_type})")
+            self._record_lifecycle(pos, "ORDER_PLACED", {
+                "leg": "tp", "trigger": float(tp_rounded),
+                "order_type": str(tp_type), "size": float(size_rounded)})
         except Exception as e:
             # Clear the flag so _exchange_handles_sltp evaluates False and the
             # polled SL/TP price-trigger + B6 planned-first path cover the dropped
@@ -2027,11 +2063,21 @@ class OrderManager:
         except Exception as _rp:
             logger.debug(f"[Risk] partial record_trade_pnl skipped: {_rp}")
 
+        # C6 (2026-07-08): partial-take audit row (previously only a trades
+        # column — invisible in the event chain).
+        self._record_lifecycle(position, "PARTIAL_TP", {
+            "size": float(partial_size), "price": float(price),
+            "net_pnl": float(p_gross - p_exit_fee), "reason": str(reason)})
+
         try:
             from config import PARTIAL_TP
             if PARTIAL_TP.get("move_sl_to_breakeven", True):
+                _sl_before = float(position.stop_loss or 0)
                 position.stop_loss = position.entry_price
                 logger.info(f"[Orders] SL moved to breakeven {position.entry_price:.4f}")
+                self._record_lifecycle(position, "SL_MOVE", {
+                    "from": _sl_before, "to": float(position.entry_price),
+                    "trigger": "partial_tp_breakeven"})
         except ImportError:
             position.stop_loss = position.entry_price
 

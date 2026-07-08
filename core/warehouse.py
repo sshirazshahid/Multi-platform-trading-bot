@@ -489,6 +489,50 @@ class Warehouse:
             logger.warning(f"[Warehouse] record_trade_open error: {e}")
             return -1
 
+    def record_lifecycle_event(
+        self,
+        *,
+        exchange: str,
+        symbol: str,
+        side: str,
+        ts_entry: float,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        event_ts: float | None = None,
+    ) -> bool:
+        """Append a mid-trade lifecycle row (C6, tpbot retrofit 2026-07-08).
+
+        Until C6, trade_events held only OPEN/CLOSE endpoints — the
+        signal->order->fill->TP->close chain had no intermediate audit rows
+        (the Jun-4 TP-attribution-corruption class was unauditable after the
+        fact). Event types written by the order manager: ORDER_PLACED (an
+        SL/TP conditional landed on the venue), FILL (entry execution
+        detail), PARTIAL_TP (partial take fired), SL_MOVE (breakeven/trail
+        advancement).
+
+        Resolves the OPEN trade row via ``trade_id_by_key`` — the same
+        idempotency key the close path uses. Returns False (no-op) when the
+        row cannot be found; dedup rides the existing
+        UNIQUE(trade_id, event_type, event_ts) via INSERT OR IGNORE.
+        Best-effort by contract: never raises.
+        """
+        try:
+            tid = self.trade_id_by_key(
+                exchange=exchange, symbol=symbol, ts_entry=ts_entry, side=side)
+            if tid is None:
+                return False
+            self._record_trade_event(
+                trade_id=tid,
+                event_type=str(event_type),
+                event_ts=float(event_ts) if event_ts is not None else time.time(),
+                payload=payload,
+            )
+            self._conn().commit()
+            return True
+        except Exception as e:
+            logger.debug(f"[Warehouse] record_lifecycle_event skipped: {e}")
+            return False
+
     def _record_trade_event(
         self,
         *,
