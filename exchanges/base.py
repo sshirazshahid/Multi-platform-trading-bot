@@ -586,6 +586,38 @@ class BaseExchange(ABC):
             logger.error(f"[{self.name}] fetch_open_orders: {e}")
             return []
 
+    def fetch_open_conditionals(self, symbol: str,
+                                market_type: str = "futures") -> list:
+        """Conditional/trigger orders (SL/TP/algo) resting for ``symbol``.
+
+        C5 (tpbot retrofit 2026-07-08): plain fetch_open_orders misses
+        conditionals on ALL three venues (Binance algo book — see the
+        2026-04-20 note in cancel_all_orders; Bybit StopOrder ledger — the
+        2026-05-02 orphan incident; Bitget plan orders). The CANCEL path
+        got per-venue fixes long ago; this is the missing FETCH twin used
+        by the SL/TP reconcilers and liveness verifiers.
+
+        Default implementation mirrors the proven Binance algo-book idiom
+        (stop=True + acknowledged=True). Bybit/Bitget override with their
+        venue-specific queries. Returns [] on error AND when not-ready —
+        same INCONCLUSIVE contract as fetch_open_orders; consumers must
+        never read [] as proof nothing rests.
+        """
+        if not self._ready():
+            return []
+        try:
+            params = self._futures_params() if market_type == "futures" else {}
+            params = dict(params)
+            params["stop"] = True
+            # Silences ccxt's "you've been warned" notice for the
+            # stop-order endpoint (Area 2, 2026-05-20 idiom).
+            params["acknowledged"] = True
+            out = self.exchange.fetch_open_orders(symbol, params=params)
+            return out if isinstance(out, list) else []
+        except Exception as e:
+            logger.debug(f"[{self.name}] fetch_open_conditionals: {str(e)[:120]}")
+            return []
+
     def set_leverage(self, symbol: str, leverage: int) -> int:
         """Set leverage for symbol on this exchange.
 

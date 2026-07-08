@@ -1244,7 +1244,11 @@ class OrderManager:
         # `size` variable. Otherwise SL/TP are placed for the wrong quantity
         # and the exchange rejects them on partial fills.
         if not self.dry_run and market_type == "futures":
-            self._place_exchange_sl_tp(exchange, pos, sl, tp, side, symbol, pos.size, market_type)
+            # C5: pass the just-verified fill price so the crossed-SL
+            # pre-flight skips its ticker round-trip (fill->protection gap).
+            self._place_exchange_sl_tp(exchange, pos, sl, tp, side, symbol,
+                                       pos.size, market_type,
+                                       mark_hint=fill_price)
 
         self.compliance.log_trade(
             exchange.name, symbol, side, size, fill_price,
@@ -1295,8 +1299,17 @@ class OrderManager:
             logger.warning(f"[Orders] trade_opened notifier failed: {_ne}")
         return pos
 
-    def _place_exchange_sl_tp(self, exchange, pos, sl, tp, side, symbol, size, market_type):
+    def _place_exchange_sl_tp(self, exchange, pos, sl, tp, side, symbol, size,
+                              market_type, mark_hint: float = None):
         """Attempt to place SL/TP conditional orders on the exchange.
+
+        ``mark_hint`` (C5, tpbot retrofit 2026-07-08): the just-verified fill
+        price from open_position. When provided, the crossed-SL pre-flight
+        evaluates against it instead of spending a fetch_ticker HTTP
+        round-trip — one less serial hop in the fill→protection gap. The
+        guard itself is unchanged (a crossed SL still closes normally), and
+        callers without a fresh price (trailing re-place, reconcilers) omit
+        the hint and keep the ticker fetch.
 
         2026-04-20 FIX (-4120 root cause): Binance USD-M rejects
         type="market" + stopLossPrice/takeProfitPrice params on /fapi/v1/order
@@ -1331,11 +1344,19 @@ class OrderManager:
         # reject (Bybit 110092 / Bitget 45122). The SL would have triggered
         # anyway; close normally rather than fail-closed-EMERGENCY.
         sl_already_crossed = False
+        last = 0.0
         try:
-            tkr = exchange.fetch_ticker(symbol, market_type)
-            last = float((tkr or {}).get("last") or (tkr or {}).get("close") or 0)
-        except Exception:
+            if mark_hint is not None and float(mark_hint) > 0:
+                # C5: fresh verified fill price — skip the ticker round-trip.
+                last = float(mark_hint)
+        except (TypeError, ValueError):
             last = 0.0
+        if last <= 0:
+            try:
+                tkr = exchange.fetch_ticker(symbol, market_type)
+                last = float((tkr or {}).get("last") or (tkr or {}).get("close") or 0)
+            except Exception:
+                last = 0.0
         if last > 0:
             side_l = (side or "").lower()
             if side_l == "buy" and sl_rounded >= last:
@@ -1759,6 +1780,25 @@ class OrderManager:
                 f"[Orders] conditional classify: fetch_open_orders raised for "
                 f"{pos.symbol} on {getattr(exchange, 'name', '?')}: {str(e)[:120]}")
             return False, False, False
+        if not isinstance(open_orders, list):
+            open_orders = []
+        # C5 (2026-07-08): merge the CONDITIONAL book. Plain fetch_open_orders
+        # misses SL/TP conditionals on all three venues (Binance algo book,
+        # Bybit StopOrder ledger, Bitget plan orders) — without this merge the
+        # B7/C4 reconcilers and C1 verifiers only ever saw regular orders and
+        # were fail-safe no-ops in live. isinstance guard: test fakes and
+        # nonconforming clients may return non-lists — ignore, never crash.
+        try:
+            extra = exchange.fetch_open_conditionals(pos.symbol, pos.market_type)
+            if isinstance(extra, list) and extra:
+                seen_ids = {o.get("id") for o in open_orders
+                            if isinstance(o, dict) and o.get("id")}
+                for o in extra:
+                    if isinstance(o, dict) and (
+                            not o.get("id") or o.get("id") not in seen_ids):
+                        open_orders.append(o)
+        except Exception:
+            pass  # conditional book unavailable -> classify on what we have
         if not open_orders:
             return False, False, False  # inconclusive — error or genuinely empty
         side = (pos.side or "").lower()

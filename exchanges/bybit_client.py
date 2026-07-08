@@ -410,6 +410,41 @@ class BybitClient(BaseExchange):
             finally:
                 self.switch_to_spot()
 
+    # ── fetch_open_conditionals override (C5, tpbot retrofit 2026-07-08) ──
+
+    def fetch_open_conditionals(self, symbol: str,
+                                market_type: str = "futures") -> list:
+        """Bybit V5 conditional stop orders live in a separate ledger queried
+        by orderFilter='StopOrder' — the same query cancel_all_orders below
+        has used since the 2026-05-02 orphan incident. Plain
+        fetch_open_orders (and the base stop=True idiom) do NOT return them
+        on Bybit. Normalizes to the classifier's shape: id + triggerPrice at
+        the top level, raw row under info. [] on error/not-ready/spot —
+        INCONCLUSIVE, per the fetch_open_orders contract."""
+        if market_type != "futures" or not self._ok():
+            return []
+        try:
+            native = symbol.replace("/", "").replace(":USDT", "")
+            if not native.endswith("USDT"):
+                native = native + "USDT"
+            resp = self.exchange.privateGetV5OrderRealtime({
+                "category": "linear",
+                "orderFilter": "StopOrder",
+                "symbol": native,
+            })
+            rows = (resp or {}).get("result", {}).get("list", []) or []
+            out = []
+            for o in rows:
+                out.append({
+                    "id": o.get("orderId"),
+                    "triggerPrice": o.get("triggerPrice"),
+                    "info": o,
+                })
+            return out
+        except Exception as e:
+            logger.debug(f"[Bybit] fetch_open_conditionals {symbol}: {str(e)[:120]}")
+            return []
+
     # ── cancel_all_orders override — handles conditional stop orders ──
 
     def cancel_all_orders(self, symbol: str, market_type: str = "spot"):

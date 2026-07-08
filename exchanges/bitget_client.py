@@ -337,6 +337,29 @@ class BitgetClient(BaseExchange):
             finally:
                 self.switch_to_spot()
 
+    def fetch_open_conditionals(self, symbol: str,
+                                market_type: str = "futures") -> list:
+        """Bitget plan/tpsl orders (C5, tpbot retrofit 2026-07-08): resting
+        conditionals live behind the ccxt trigger branch (params stop=True),
+        invisible to plain fetch_open_orders. Same defaultType-lock switch
+        idiom as fetch_open_orders above. [] on error/not-ready/spot —
+        INCONCLUSIVE per the fetch_open_orders contract."""
+        if market_type != "futures" or not self._ok():
+            return []
+        with self._defaultType_lock:
+            self.switch_to_futures()
+            try:
+                out = self.exchange.fetch_open_orders(
+                    symbol, params={"stop": True, "acknowledged": True,
+                                    "productType": "USDT-FUTURES"})
+                return out if isinstance(out, list) else []
+            except Exception as e:
+                logger.debug(
+                    f"[Bitget] fetch_open_conditionals {symbol}: {str(e)[:120]}")
+                return []
+            finally:
+                self.switch_to_spot()
+
     # ── create_order (with One-Way mode: reduceOnly) ───────────────────
 
     def create_order(self, symbol: str, order_type: str, side: str,
