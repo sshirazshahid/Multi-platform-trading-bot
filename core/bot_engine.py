@@ -3531,6 +3531,12 @@ class BotEngine:
             "active_exchanges": list(self.active_exchanges.keys()),
             "halted_exchanges": list(self._exchange_halted),
             "api_latency_ms": {k: round(v, 0) for k, v in self._api_latency.items()},
+            # C8 (2026-07-08): per-venue clock offset (ms, NTP-style sample);
+            # null = venue lacks fetch_time or the sample failed this cycle.
+            "clock_drift_ms": {
+                k: (round(v, 1) if isinstance(v, (int, float)) else None)
+                for k, v in getattr(self, "_clock_drift_ms", {}).items()
+            },
             "is_halted": self.risk.is_halted,
             "halt_reason": self.risk.halt_reason if self.risk.is_halted else None,
             "daily_pnl": getattr(self.risk, "_daily_pnl", 0),
@@ -3585,6 +3591,32 @@ class BotEngine:
                 if price:
                     self._consecutive_api_fails.get(ex_name, 0)
                     self._consecutive_api_fails[ex_name] = 0
+                    # C8 (2026-07-08): sample venue clock drift each healthy
+                    # cycle. None = venue lacks fetch_time / call failed —
+                    # never a health failure. Sustained drift (2 consecutive
+                    # samples over threshold) warns, mirroring the
+                    # high-latency counter pattern; the health_watchdog
+                    # additionally edge-alerts off the stored map.
+                    if not hasattr(self, "_clock_drift_ms"):
+                        self._clock_drift_ms = {}
+                    _drift = sample_clock_drift_ms(exchange)
+                    self._clock_drift_ms[ex_name] = _drift
+                    _drift_key = f"{ex_name}_clock_drift"
+                    try:
+                        from config import CLOCK_DRIFT_ALERT_MS as _drift_thr
+                    except ImportError:
+                        _drift_thr = 500
+                    if _drift is not None and abs(_drift) > _drift_thr:
+                        _dcnt = self._consecutive_api_fails.get(_drift_key, 0) + 1
+                        self._consecutive_api_fails[_drift_key] = _dcnt
+                        if _dcnt >= 2:
+                            logger.warning(
+                                f"[Health] {ex_name} CLOCK DRIFT "
+                                f"{_drift:+.0f}ms (>{_drift_thr}ms) for "
+                                f"{_dcnt} consecutive samples — signed "
+                                f"requests at risk; check NTP/w32tm sync")
+                    else:
+                        self._consecutive_api_fails.pop(_drift_key, None)
                     # Auto-resume if previously halted
                     if ex_name in self._exchange_halted:
                         self._exchange_halted.discard(ex_name)
@@ -5639,3 +5671,33 @@ class BotEngine:
             "Blacklisted",
             str(list(self.order_mgr.blacklist.get_all().keys())) or "None")
         console.print(table)
+
+
+# ── Clock-drift sampling (C8, tpbot retrofit 2026-07-08) ─────────────────────
+def sample_clock_drift_ms(exchange) -> float | None:
+    """One-shot NTP-style clock offset sample vs a venue, in milliseconds.
+
+    offset = server_time - (t0 + t1) / 2 — the request midpoint compensates
+    network latency to first order. Positive = the venue clock is AHEAD of
+    this machine (local clock behind). The repo's own deployment notes call
+    Windows clock drift "the #1 silent killer" of signed requests, yet until
+    C8 drift was only detected AFTER a -1021/10002 rejection.
+
+    Returns None when the raw ccxt client is missing, lacks fetch_time, or
+    the call fails/returns 0 — a missing sample is NOT a health failure and
+    must never be conflated with drift.
+    """
+    import time as _t
+    try:
+        raw = getattr(exchange, "exchange", None)
+        if raw is None or not hasattr(raw, "fetch_time"):
+            return None
+        t0 = _t.time() * 1000.0
+        server_ms = raw.fetch_time()
+        t1 = _t.time() * 1000.0
+        server_ms = float(server_ms or 0)
+        if server_ms <= 0:
+            return None
+        return server_ms - ((t0 + t1) / 2.0)
+    except Exception:
+        return None

@@ -245,6 +245,13 @@ MAKER_ONLY = {
 SLTP_TRIGGER_MARK_PRICE = (
     os.getenv("SLTP_TRIGGER_MARK_PRICE", "true").lower() == "true")
 
+# C8 (tpbot retrofit 2026-07-08): venue clock-drift alert threshold (ms).
+# The 60s health cycle samples an NTP-style offset per venue; sustained
+# drift beyond this warns in-engine and edge-alerts via health_watchdog.
+# Exchanges reject signed requests when drift approaches recvWindow — the
+# repo's deployment notes call Windows drift "the #1 silent killer".
+CLOCK_DRIFT_ALERT_MS = int(os.getenv("CLOCK_DRIFT_ALERT_MS", "500"))
+
 # ==============================================================
 # SCALP MODE — 15-60 minute VWAP-centric entries (2026-05-27)
 # ==============================================================

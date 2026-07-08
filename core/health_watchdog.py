@@ -103,6 +103,10 @@ COOLDOWN_SEC = {
     "stuck_open_positions":  60 * 60,
     "audit_not_ready":       6 * 60 * 60,
     "forward_feeds_stale":   30 * 60,
+    # C8 (2026-07-08): per-venue keys are clock_drift_<venue>; this base
+    # entry documents the family default (edge-triggered, so the cooldown
+    # only matters across restarts of a still-true episode).
+    "clock_drift":           60 * 60,
 }
 
 # A forward feed must stay unhealthy this long before we alert — absorbs the
@@ -175,6 +179,7 @@ class HealthWatchdog:
             self._check_stuck_open_positions,
             self._check_forward_feeds,
             self._check_latest_audit,
+            self._check_clock_drift,
         ):
             try:
                 check()
@@ -223,6 +228,34 @@ class HealthWatchdog:
         if key in self._state.last_alert:
             return  # already alerted for this episode
         self._alert(key, level, message, context)
+
+    def _check_clock_drift(self) -> None:
+        """C8 (2026-07-08, watchdog check #15): venue clock drift.
+
+        Reads the per-venue NTP-style offset map the engine's 60s health
+        cycle maintains (engine._clock_drift_ms; None = no sample — never
+        treated as drift). Edge-triggered per venue at
+        config.CLOCK_DRIFT_ALERT_MS (default 500ms): one alert per episode,
+        re-arms when the venue clock recovers. Alert-only, like every other
+        check — the operator decides what to do (w32tm /resync etc.)."""
+        drift_map = getattr(self._engine, "_clock_drift_ms", None)
+        if not isinstance(drift_map, dict):
+            return
+        try:
+            from config import CLOCK_DRIFT_ALERT_MS as _thr
+        except ImportError:
+            _thr = 500
+        for ex_name, drift in drift_map.items():
+            is_bad = isinstance(drift, (int, float)) and abs(drift) > _thr
+            self._edge_alert(
+                f"clock_drift_{ex_name}", is_bad, "WARN",
+                (f"{ex_name} clock drift {drift:+.0f}ms exceeds {_thr}ms — "
+                 f"signed requests at risk; check NTP/w32tm sync"
+                 if is_bad else ""),
+                {"exchange": ex_name,
+                 "drift_ms": round(drift, 1) if is_bad else None,
+                 "threshold_ms": _thr} if is_bad else None,
+            )
 
     def _check_heartbeat(self) -> None:
         if not HEARTBEAT_PATH.exists():
