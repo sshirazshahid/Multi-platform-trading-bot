@@ -286,6 +286,65 @@ class OrderManager:
                 return v
         return None
 
+    def flatten_all(self, reason: str, exchange_name: str = None,
+                    market_type: str = None) -> dict:
+        """Close every open tracked position (C9, tpbot retrofit 2026-07-08).
+
+        The close-all primitive that never existed: breakers and the operator
+        previously had nothing to CALL to flatten the book. This is a
+        callable primitive ONLY — per the owner's no-auto-halt directive it
+        is deliberately NOT wired to any automatic trigger (pinned by
+        tests/test_flatten_all.py source-scan), and adding one is a policy
+        decision for the owner, not a code default.
+
+        Every close routes through ``close_position`` — the single close
+        authority — so warehouse/wallet/risk/journal/notifier hooks fire
+        exactly as for any other exit. Optional filters: ``exchange_name``
+        (case-insensitive) and ``market_type`` ('futures'/'spot').
+
+        Never raises. Returns {"closed": int, "failed": [(symbol, err)],
+        "skipped": int} — skipped counts positions whose venue client could
+        not be resolved from the registry (close attempt impossible).
+        """
+        result = {"closed": 0, "failed": [], "skipped": 0}
+        try:
+            open_positions = list(self.tracker.get_open() or [])
+        except Exception as e:
+            logger.error(f"[Orders] flatten_all: tracker.get_open failed: {e}")
+            result["failed"].append(("<tracker>", str(e)[:200]))
+            return result
+        want_ex = str(exchange_name).lower() if exchange_name else None
+        logger.warning(
+            f"[Orders] FLATTEN_ALL invoked (reason={reason}, "
+            f"exchange={want_ex or 'ALL'}, market={market_type or 'ALL'}, "
+            f"open={len(open_positions)})")
+        for pos in open_positions:
+            try:
+                if want_ex and str(getattr(pos, "exchange", "")).lower() != want_ex:
+                    continue
+                if market_type and getattr(pos, "market_type", None) != market_type:
+                    continue
+                ex = self._exchange_for(getattr(pos, "exchange", None))
+                if ex is None:
+                    logger.error(
+                        f"[Orders] flatten_all: no client for exchange "
+                        f"{getattr(pos, 'exchange', '?')} — skipping "
+                        f"{getattr(pos, 'symbol', '?')}")
+                    result["skipped"] += 1
+                    continue
+                self.close_position(ex, pos, reason=reason)
+                result["closed"] += 1
+            except Exception as e:
+                logger.error(
+                    f"[Orders] flatten_all: close failed for "
+                    f"{getattr(pos, 'symbol', '?')}: {str(e)[:200]}")
+                result["failed"].append(
+                    (getattr(pos, "symbol", "?"), str(e)[:200]))
+        logger.warning(
+            f"[Orders] FLATTEN_ALL done: closed={result['closed']} "
+            f"failed={len(result['failed'])} skipped={result['skipped']}")
+        return result
+
     # ── SL widened persistence ─────────────────────────────────────────
 
     def _load_order_mode_state(self) -> dict:
