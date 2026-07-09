@@ -561,8 +561,10 @@ Exec/safety cluster = **bf0b3e9**; data-integrity cluster = **8bead2a**. Entry g
 - [x] promotion_loop + health_watchdog cwd-relative paths → anchored to repo ROOT (parents[N]). **8bead2a**
 - [x] Analytics debt: learning_engine + MCP performance_summary + dashboard WR/PnL now whole-trade (REPORT-ONLY; recent_expectancy entry-gate default left runner-only by design). **8bead2a**
 - [x] spot_rotation_slice._zscore NaN-robust — one leading-NaN symbol no longer zeroes the EMA50-slope factor for all. **8bead2a**
-- [ ] OWNER DECISION (not mine to make): SIGNAL_SOURCE=mcp still live in .env — see below.
-- [ ] OWNER DECISION pending: SIGNAL_SOURCE=mcp still live in .env — the measured-no-edge
-      directional lane keeps trading PAPER (−$378/30d, gross-negative before costs, score
-      quintiles flat/inverted). Rev5 design (Jul 2) intended =none with carry-first + shadow lanes.
-      Flip requires owner restart; see session report 2026-07-07.
+- [x] OWNER DECISION RESOLVED 2026-07-09: owner wants aggressive PAPER trading → SIGNAL_SOURCE
+      flipped none→**mcp** in .env + bot restarted 23:11. Directional lane live again (opened APT
+      in the first cycle). HONEST CAVEAT: mcp is measured −EV (−$378/30d, 28.4% WR, score
+      quintiles flat/inverted) — this restores ACTIVITY (research-lab volume), NOT profit; bigger
+      sizing bleeds paper faster. Do NOT revert to none without owner say-so (this was their call).
+      Residual aggression-limiter: stacked EV-downsizers shrink expensive coins (BTC) below
+      min-notional → skipped; loosening = owner decision (accelerates −EV paper bleed).
