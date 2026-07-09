@@ -1,3 +1,35 @@
+# Task: GOAL — autonomous FUTURES bot at 65-70% accuracy (owner directive 2026-07-09)
+
+Owner: "Goal set: Create an autonomous crypto trading bot with 65-70% accuracy in FUTURES."
+Honest framing (binding): accuracy must be DEMONSTRATED on resolved forward futures trades
+through the frozen promotion gate — WR manufactured by exit geometry is explicitly not the goal
+(TP-probe: 78% hit-rate, −EV). Directional lane measures 28.6% WR/30d — the contrast line.
+
+## Buildable scope — ALL SHIPPED 2026-07-09 (commits 4e64c0b…649cb64, suite 2,659 green)
+- [x] Deps/plugins/tools "upgrade all" (pandas 3.0.3, ccxt 4.5.64 + 1-line pandas-3.0 fix; 27 plugins)
+- [x] Funding-history backfill (137 venue-symbol CSVs) → rev2 screens (both NO_GO, audited)
+- [x] Rev3 screens: capital-scaled listing-short **CONFIRMED_GO** (first ever; unlevered, log-only,
+      concurrent-MTM maxDD 0.10-0.14 < 0.25 at 1×; 3× would breach → leverage stays banned);
+      dispersion CONFIRMED_NO_GO (OOS-WR 0.378) → ledger row
+- [x] ListingShortProbeAgent live in shadow lane (restart 16:12; per-bar MTM, concurrent DD,
+      day-1 realism, frozen score tanh(pump/0.50)+10·funding — makes AUC gate computable)
+- [x] F1 carry active (93.9% historical; gates correctly refusing sub-cost spreads)
+- [x] Daily self-measurement: TradingBot-GoalProgress task 07:00 → journal + data/goal_progress.json
+
+## Remaining term — NOT buildable; accrues autonomously (do NOT re-attempt in-session)
+- [ ] TIME-GATED: ≥30 resolved probe decisions at ≥65% forward WR (market supplies listings;
+      probe logs them; ~1-2 Binance listings/week → months). Watch: journal daily line,
+      trading_bot_shadow_vs_live.
+- [ ] OWNER-GATED: promotion sign-off when frozen gate passes (DSR≥0.10, PBO≤0.5, OOS-WR≥0.55,
+      AUC≥0.60). Deploying before evidence = staking capital on 28.6% measured accuracy — refused.
+
+## Review
+The goal is fully operationalized: bot autonomous on 3 venues, both 65%+-evidenced lanes active
+and logging, promotion path frozen, progress self-reported daily. No engineering action can
+compress market time; next decision point is the owner's at the gate.
+
+---
+
 # Task: Close-in-profit overhaul (audit 2026-06-21) — Phase A in progress
 
 Full audit: `reports/profit_close_audit_2026-06-21.md` (agent-architecture-audit, 30 agents,
