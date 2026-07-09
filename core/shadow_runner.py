@@ -34,11 +34,17 @@ class ShadowRunner:
         blacklist: Optional[set] = None,
         allowed_hours: Optional[set] = None,
         enabled_flag: Callable[[], bool] = lambda: True,
+        extra_probes: Optional[list] = None,
     ):
         self._wh = warehouse
         self._ctx_provider = ctx_provider
         self._symbols_provider = symbols_provider
         self._enabled = enabled_flag
+        # Log-only probes that run market-WIDE once per tick (not per symbol) —
+        # e.g. the ListingShortProbeAgent, which diffs the perp universe for new
+        # listings rather than scoring a per-symbol ctx. Each must expose tick()
+        # and, like every shadow component, place NO orders.
+        self._extra_probes = list(extra_probes or [])
         agents = [
             TrendAgent(), ScalpAgent(), MeanReversionAgent(),
             PatternAgent(), LiquidityAgent(),
@@ -77,6 +83,13 @@ class ShadowRunner:
                 emitted += len(rows)
             except Exception as e:
                 logger.debug(f"[Shadow] {sym} tick error: {e}")
+        # Market-wide log-only probes (listing-short, etc.). A probe error never
+        # disturbs the per-symbol lane.
+        for probe in self._extra_probes:
+            try:
+                probe.tick()
+            except Exception as e:
+                logger.debug(f"[Shadow] probe {getattr(probe, 'name', '?')} error: {e}")
         with self._lock:
             self._tick_count += 1
             self._proposal_count += emitted

@@ -360,6 +360,7 @@ class BotEngine:
                 ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
             except Exception:
                 bl, ah = set(), None
+            extra_probes = self._build_listing_probe(wh)
             self._shadow_runner = ShadowRunner(
                 warehouse=wh,
                 ctx_provider=self._shadow_ctx_for_symbol,
@@ -367,11 +368,108 @@ class BotEngine:
                 symbols_provider=self._shadow_symbols,
                 blacklist=bl, allowed_hours=ah,
                 enabled_flag=self._shadow_enabled_flag,
+                extra_probes=extra_probes,
             )
             logger.info("[Engine] ShadowRunner initialized (multi-agent, log-only)")
         except Exception as e:
             logger.error(f"[Engine] ShadowRunner init failed: {e}")
             self._shadow_runner = None
+
+    def _build_listing_probe(self, wh) -> list:
+        """Construct the log-only ListingShortProbeAgent with READ-ONLY market
+        providers. Fail-open: any error yields no probe (the shadow lane runs
+        without it). The probe never receives an order path."""
+        try:
+            from config import LISTING_SHORT_PROBE
+            if not LISTING_SHORT_PROBE.get("enabled"):
+                return []
+            from core.agents.listing_short_probe_agent import ListingShortProbeAgent
+            probe = ListingShortProbeAgent(
+                warehouse=wh,
+                markets_provider=self._listing_markets,
+                market_data_provider=self._listing_market_data,
+                ohlcv_provider=self._listing_ohlcv,
+                account_balance_provider=self._shadow_free_balance,
+                venue=str(LISTING_SHORT_PROBE.get("venue", "binance")),
+            )
+            self._listing_probe = probe
+            logger.info("[Engine] ListingShortProbeAgent registered (log-only shadow probe)")
+            return [probe]
+        except Exception as e:
+            logger.warning(f"[Engine] listing-short probe init skipped: {e}")
+            return []
+
+    def _listing_venue_client(self):
+        """The exchange client that supplies listing-probe market data (binance
+        USDT-M perps). READ-ONLY use only."""
+        try:
+            from config import LISTING_SHORT_PROBE
+            venue = str(LISTING_SHORT_PROBE.get("venue", "binance"))
+        except Exception:
+            venue = "binance"
+        return (self.active_exchanges or {}).get(venue)
+
+    def _listing_markets(self) -> list:
+        """Current tradeable Binance USDT-M perp unified symbols. Read-only."""
+        try:
+            ex = self._listing_venue_client()
+            client = getattr(ex, "exchange", None)
+            markets = getattr(client, "markets", None) or {}
+            out = []
+            for sym, m in markets.items():
+                if (m.get("swap") and m.get("active", True)
+                        and m.get("quote") == "USDT" and m.get("settle") == "USDT"):
+                    out.append(sym)
+            return out
+        except Exception as e:
+            logger.debug(f"[ListingProbe] markets fetch failed: {e}")
+            return []
+
+    def _listing_market_data(self, symbol: str) -> dict:
+        """Best bid/ask/last/quoteVolume + current funding rate for a perp.
+        Read-only; fail-open to {} so a missing symbol simply skips."""
+        out: dict = {}
+        try:
+            ex = self._listing_venue_client()
+            if ex is None:
+                return out
+            t = ex.fetch_ticker(symbol, market_type="futures") or {}
+            out.update({
+                "bid": t.get("bid"), "ask": t.get("ask"), "last": t.get("last"),
+                "quoteVolume": (t.get("quoteVolume")
+                                or (t.get("info", {}) or {}).get("quoteVolume")),
+                "active": True,
+            })
+            client = getattr(ex, "exchange", None)
+            if client is not None and hasattr(client, "fetch_funding_rate"):
+                fr = client.fetch_funding_rate(symbol) or {}
+                out["funding_rate"] = fr.get("fundingRate")
+        except Exception as e:
+            logger.debug(f"[ListingProbe] market_data {symbol} failed: {e}")
+        return out
+
+    def _listing_ohlcv(self, symbol: str, timeframe: str, since_ms: int) -> list:
+        """Forward 1h candles for a listing since ``since_ms``. Read-only."""
+        try:
+            ex = self._listing_venue_client()
+            if ex is None:
+                return []
+            client = getattr(ex, "exchange", None)
+            if client is not None:
+                return client.fetch_ohlcv(
+                    symbol, timeframe, since=int(since_ms), limit=1000,
+                    params=self._futures_ohlcv_params(ex)) or []
+            return ex.fetch_ohlcv(symbol, timeframe, limit=1000, market_type="futures") or []
+        except Exception as e:
+            logger.debug(f"[ListingProbe] ohlcv {symbol} failed: {e}")
+            return []
+
+    @staticmethod
+    def _futures_ohlcv_params(ex) -> dict:
+        try:
+            return ex._futures_params() if hasattr(ex, "_futures_params") else {}
+        except Exception:
+            return {}
 
     def _shadow_enabled_flag(self) -> bool:
         try:

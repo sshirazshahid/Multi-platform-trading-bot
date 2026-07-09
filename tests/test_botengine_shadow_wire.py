@@ -20,8 +20,22 @@ def test_shadow_helper_methods_exist():
         "_shadow_symbols",
         "_shadow_ctx_for_symbol",
         "_shadow_loop",
+        # listing-short log-only probe wiring (read-only providers)
+        "_build_listing_probe",
+        "_listing_markets",
+        "_listing_market_data",
+        "_listing_ohlcv",
     ):
         assert hasattr(BotEngine, name), f"BotEngine missing {name}"
+
+
+def test_build_listing_probe_disabled_returns_empty(monkeypatch):
+    """With the probe flag off, no probe is registered (shadow lane unchanged)."""
+    import config
+    from core.bot_engine import BotEngine
+    monkeypatch.setitem(config.LISTING_SHORT_PROBE, "enabled", False)
+    inst = BotEngine.__new__(BotEngine)
+    assert inst._build_listing_probe(wh=None) == []
 
 
 def test_shadow_loop_respects_stop_event():

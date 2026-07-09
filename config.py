@@ -321,6 +321,19 @@ SHADOW_MODE = {
     "mover_min_qv_usd": float(os.getenv("SHADOW_MOVER_MIN_QV_USD", "5000000")),
 }
 
+# ── Listing-short shadow probe (pipeline rev3 CONFIRMED_GO, 2026-07-09) ──────
+# LOG-ONLY forward soak of the capital-scaled post-listing perp short. Detects
+# new Binance USDT-M perp listings, proposes 3%-notional shorts (7d + 30d,
+# 4-concurrent cap) into the shadow lane, and logs the per-bar MTM path,
+# concurrent account-MTM drawdown, day-1 execution realism, and a discriminating
+# score — the binding conditions from 03_rev3_audit_findings.md. It places NO
+# orders and only runs inside the (already log-only) shadow lane, so it changes
+# ZERO live behaviour. Off restores the pre-probe shadow lane exactly.
+LISTING_SHORT_PROBE = {
+    "enabled": os.getenv("SHADOW_LISTING_PROBE_ENABLED", "true").lower() == "true",
+    "venue": os.getenv("SHADOW_LISTING_PROBE_VENUE", "binance"),
+}
+
 MODEL_GATE = {
     "enabled": os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model
