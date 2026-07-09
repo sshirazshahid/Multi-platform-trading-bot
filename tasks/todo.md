@@ -547,30 +547,21 @@ Workflow audit (9 agents + adversarial verify; verify pass partially rate-limite
       no-oped. Now the canonical file; _save_registry atomic + rejects dirs; load_registry preserves
       corrupt files aside; carry_runner logs (not swallows) booking failures.
 
-## Open backlog (verified in code at 2026-07-07 line numbers; fix next)
-- [ ] order_manager.py:~2551 shared unlocked _last_funding_hour scalar — one venue consumes the
-      8h funding window for all venues in paper; unpersisted across restarts. [CONFIRMED prior audit]
-- [ ] health_watchdog.py:~192 edge-alert latched+persisted BEFORE the email attempt — one SMTP
-      failure permanently silences a safety ALERT episode. [CONFIRMED prior audit]
-- [ ] spot_manager.py:~216 peak reset committed before execution outcome (skipped SCALE_OUT eats
-      the drawdown trigger); :~136 scan_holdings wipes holdings on transient fetch error. [CONFIRMED]
-- [ ] self_healing_supervisor.py:~482 retrain/replay subprocess runs synchronously on the scheduler
-      thread (up to 60-min stall); :~420 kill-then-respawn doesn't wait for lock release (repair can
-      no-op for one cooldown, reports ok=True); :~211 killed_pids recorded even when taskkill failed.
-- [ ] exchanges/base.py fetch_tickers spot path not pinned (params={'type':'spot'}) — latent
-      cross-market leak mirror of the fixed futures path.
-- [ ] bot_engine._shadow_ctx_for_symbol never sets ctx['venue'] → TPProbe rows may claim binance
-      while priced off another venue; resolver then replays wrong candles. [unverified]
-- [ ] resolve_shadow_outcomes: no UNRESOLVABLE aging (delisted symbols retried forever); widening
-      refetches bypass max_group_fetches budget; funding=0 for 8h probe horizons (optimistic bound).
-- [ ] utils/process_lock.py:~43 silent fail-open returns unlocked handle on non-OSError; open()
-      failure conflated with lock-held. Add logging + subprocess-based cross-process test.
-- [ ] promotion_loop ACTIVE_STRATEGIES_PATH + health_watchdog WAREHOUSE_PATH remain cwd-relative —
-      any NEW standalone entrypoint must chdir(ROOT) first (see resolve_shadow_outcomes pattern).
-- [ ] Analytics debt: consumers of trades.realized_pnl that ignore partial_realized_pnl understate
-      WR/PnL (~150 misclassified wins/14d; MCP performance_summary, learning_engine, dashboards).
-- [ ] spot_rotation_slice.py:~105 leading-NaN symbol zeroes EMA50-slope factor for ALL symbols
-      (S2 rotation evidence has a dead documented factor). [unverified, confirmed by execution]
+## Backlog RESOLVED 2026-07-09 (/deep-research "identify and fix"; suite 1902→2690 green)
+Two clusters, both TDD + independently reviewed + full-suite-verified before commit.
+Exec/safety cluster = **bf0b3e9**; data-integrity cluster = **8bead2a**. Entry gate untouched.
+- [x] order_manager _last_funding_hour shared scalar → per-venue dict (venues 2/3 got free paper funding). **bf0b3e9**
+- [x] health_watchdog edge-alert latched before email → latch only after successful send. **bf0b3e9**
+- [x] spot_manager peak reset before execution → reset_peak() after confirmed order; scan_holdings fail-holds. **bf0b3e9**
+- [x] self_healing_supervisor sync ~60-min stall of SL/TP monitor → single-flight async daemon; honest kill/lock-release; atomic _save_state. **bf0b3e9**
+- [x] exchanges/base fetch_tickers spot pin — ALREADY FIXED in current code; added the missing regression test. **bf0b3e9**
+- [x] bot_engine _shadow_ctx_for_symbol venue — ALREADY FIXED; added the missing test. **bf0b3e9**
+- [x] resolve_shadow_outcomes UNRESOLVABLE aging + widening-refetch budget + realized funding (never fabricated). **8bead2a**
+- [x] utils/process_lock silent fail-open → loud logging + open-fail vs lock-held vs primitive-unavailable distinction + cross-process test. **bf0b3e9**
+- [x] promotion_loop + health_watchdog cwd-relative paths → anchored to repo ROOT (parents[N]). **8bead2a**
+- [x] Analytics debt: learning_engine + MCP performance_summary + dashboard WR/PnL now whole-trade (REPORT-ONLY; recent_expectancy entry-gate default left runner-only by design). **8bead2a**
+- [x] spot_rotation_slice._zscore NaN-robust — one leading-NaN symbol no longer zeroes the EMA50-slope factor for all. **8bead2a**
+- [ ] OWNER DECISION (not mine to make): SIGNAL_SOURCE=mcp still live in .env — see below.
 - [ ] OWNER DECISION pending: SIGNAL_SOURCE=mcp still live in .env — the measured-no-edge
       directional lane keeps trading PAPER (−$378/30d, gross-negative before costs, score
       quintiles flat/inverted). Rev5 design (Jul 2) intended =none with carry-first + shadow lanes.
