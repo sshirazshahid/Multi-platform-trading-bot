@@ -27,6 +27,7 @@ Delta-neutral cross-venue funding-rate carry (**F1**): 15 coins, maker-first exe
 | Grid / DCA | grid backtest-only; live DCA hard-OFF | standing |
 | OI-divergence | NO_EDGE → gates disabled | 2026-05-30 |
 | Long-only TSMOM | halves drawdown, no profit edge; implemented default-OFF | 2026-06-15 |
+| Post-listing perp short — equal-notional unhedged full-stake sizing ONLY | Signal itself NOT refuted (WR 0.75–0.81, DSR≈1, PBO 0.09, beats control, OOS-WR 0.82–0.88 on 88 funding-charged Binance listings) but fails the capital-preservation MC maxDD p95 ≤0.25 gate at all horizons (2.3–3.3 per-stake tails when listing clusters pump); audit-confirmed 2026-07-09. A capital-scaled position-capped variant is a QUEUED new candidate — not covered by this row | 2026-07-09 |
 
 ## Reopen Bar
 Peer-reviewed or equivalently rigorous 2025+ evidence with genuine out-of-sample validation, FDR/DSR-grade multiplicity control, and after-cost accounting on liquid crypto at retail venues. Quote it verbatim. Meeting the bar earns a SCREEN (via `strategy-evidence-pipeline`) — never a build.

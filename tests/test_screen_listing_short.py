@@ -14,11 +14,15 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import research.screen_listing_short as ls  # noqa: E402
 from research.screen_listing_short import (  # noqa: E402
     find_backfill_clusters,
     funding_pnl_short,
+    funding_sum_in_window,
+    load_funding_history,
     price_at,
     short_net_return,
+    window_funding_covered,
 )
 
 
@@ -93,3 +97,58 @@ def test_price_at_returns_first_bar_at_or_after_target():
 def test_price_at_returns_none_past_end():
     df = pd.DataFrame({"ts": [1000, 2000], "close": [10.0, 20.0]})
     assert price_at(df, 5000) == (None, None)
+
+
+# ── rev2: funding_history reader + window coverage (synthetic tmp fixtures) ───
+def _write_funding(d, venue, base, ts, rates):
+    p = d / f"{venue}_{base}.csv"
+    pd.DataFrame({"ts": ts, "funding_rate": rates, "venue": venue,
+                  "symbol": f"{base}/USDT:USDT"}).to_csv(p, index=False)
+
+
+def test_load_funding_history_reads_ts_rate(tmp_path, monkeypatch):
+    monkeypatch.setattr(ls, "FUNDING_HISTORY_DIR", str(tmp_path))
+    _write_funding(tmp_path, "binance", "ASTER", [100, 108, 116], [-0.001, -0.0005, 0.0002])
+    s = load_funding_history("ASTER", "binance")
+    assert list(s.index) == [100, 108, 116]
+    assert s.loc[116] == pytest.approx(0.0002)
+
+
+def test_load_funding_history_absent_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(ls, "FUNDING_HISTORY_DIR", str(tmp_path))
+    assert load_funding_history("NOPE", "binance").empty
+
+
+def test_funding_sum_in_window_half_open_interval():
+    import pandas as pd
+    s = pd.Series([0.001, 0.002, 0.004, 0.008], index=[100, 200, 300, 400])
+    # [entry=200, exit=400) -> settlements at 200 and 300 only
+    assert funding_sum_in_window(s, 200, 400) == pytest.approx(0.002 + 0.004)
+
+
+def test_funding_sum_negative_dominant_is_a_short_cost():
+    import pandas as pd
+    s = pd.Series([-0.002, -0.003, 0.001], index=[100, 200, 300])
+    # short receives +sum; a negative-dominant window is a NET COST to the short
+    assert funding_sum_in_window(s, 100, 400) == pytest.approx(-0.004)
+
+
+def test_window_funding_covered_true_when_spanning():
+    import pandas as pd
+    ts = list(range(1000, 1000 + 8 * 3600 * 12, 8 * 3600))  # 12 settlements
+    s = pd.Series([0.0001] * len(ts), index=ts)
+    entry, exit_ = ts[1], ts[-2]
+    assert window_funding_covered(s, entry, exit_) is True
+
+
+def test_window_funding_covered_false_when_gap_at_end():
+    import pandas as pd
+    ts = [1000, 1000 + 8 * 3600, 1000 + 16 * 3600]
+    s = pd.Series([0.0001] * 3, index=ts)
+    # exit far beyond last funding ts -> not covered (would require guessing)
+    assert window_funding_covered(s, 1000, 1000 + 40 * 24 * 3600) is False
+
+
+def test_window_funding_covered_false_when_empty():
+    import pandas as pd
+    assert window_funding_covered(pd.Series(dtype=float), 100, 200) is False

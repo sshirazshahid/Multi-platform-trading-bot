@@ -6,13 +6,17 @@ Pure functions only — no file or network I/O is exercised here.
 import numpy as np
 import pytest
 
+import research.screen_funding_dispersion as disp
 from research.screen_funding_dispersion import (
     annualize_apr,
     breakeven_settlements,
+    coins_with_cross_venue_coverage,
+    load_venue_funding,
     net_return_frac,
     roundtrip_cost_frac,
-    signed_carry,
     sign_persistence,
+    signed_carry,
+    walk_forward_oos_spread,
 )
 
 
@@ -82,3 +86,85 @@ def test_sign_persistence_alternating_is_zero():
 def test_sign_persistence_half():
     # signs: + + - -> transitions: (+,+)=same, (+,-)=diff -> 1/2
     assert sign_persistence(np.array([0.001, 0.001, -0.001])) == pytest.approx(0.5)
+
+
+# ── rev2: funding_history reader path (synthetic fixtures in tmp dirs) ────────
+def _write_history(d, venue, coin, ts, rates):
+    import pandas as pd
+    p = d / f"{venue}_{coin}.csv"
+    pd.DataFrame({"ts": ts, "funding_rate": rates, "venue": venue,
+                  "symbol": f"{coin}/USDT:USDT"}).to_csv(p, index=False)
+
+
+def _write_carry(d, venue, coin, next_ts, rates):
+    import pandas as pd
+    p = d / f"{venue}_{coin}.csv"
+    pd.DataFrame({"ts": next_ts, "rate": rates, "interval_hours": 8.0,
+                  "next_funding_ts": next_ts}).to_csv(p, index=False)
+
+
+def test_load_venue_funding_prefers_funding_history(tmp_path, monkeypatch):
+    hist = tmp_path / "history"; hist.mkdir()
+    carry = tmp_path / "carry"; carry.mkdir()
+    monkeypatch.setattr(disp, "_HISTORY_DIR", str(hist))
+    monkeypatch.setattr(disp, "_CARRY_DIR", str(carry))
+    _write_history(hist, "binance", "BTC", [100, 108, 116], [0.0001, 0.0002, -0.0001])
+    _write_carry(carry, "binance", "BTC", [100, 108], [9.9, 9.9])  # should be ignored
+    s = load_venue_funding("BTC", "binance")
+    assert list(s.index) == [100, 108, 116]
+    np.testing.assert_allclose(s.values, [0.0001, 0.0002, -0.0001])
+
+
+def test_load_venue_funding_falls_back_to_carry_when_no_history(tmp_path, monkeypatch):
+    hist = tmp_path / "history"; hist.mkdir()  # empty
+    carry = tmp_path / "carry"; carry.mkdir()
+    monkeypatch.setattr(disp, "_HISTORY_DIR", str(hist))
+    monkeypatch.setattr(disp, "_CARRY_DIR", str(carry))
+    _write_carry(carry, "bybit", "ETH", [200, 208], [0.00005, 0.00006])
+    s = load_venue_funding("ETH", "bybit")
+    assert list(s.index) == [200, 208]
+    np.testing.assert_allclose(s.values, [0.00005, 0.00006])
+
+
+def test_coverage_prefers_history_and_lists_cross_venue_coin(tmp_path, monkeypatch):
+    hist = tmp_path / "history"; hist.mkdir()
+    carry = tmp_path / "carry"; carry.mkdir()
+    monkeypatch.setattr(disp, "_HISTORY_DIR", str(hist))
+    monkeypatch.setattr(disp, "_CARRY_DIR", str(carry))
+    ts = list(range(1000, 1000 + 8 * 10, 8))
+    _write_history(hist, "binance", "SOL", ts, [0.0001] * len(ts))
+    _write_history(hist, "bybit", "SOL", ts, [0.00005] * len(ts))
+    # ADA only on one venue in history -> not cross-venue
+    _write_history(hist, "binance", "ADA", ts, [0.0001] * len(ts))
+    assert coins_with_cross_venue_coverage() == ["SOL"]
+
+
+# ── rev2: walk-forward OOS carry (no lookahead + cost charged) ────────────────
+def test_walk_forward_oos_direction_from_train_not_test():
+    # neg regime then pos regime; train sign is negative through the later folds,
+    # so the pos-regime test settlements are shorted the WRONG way -> negative.
+    # A lookahead impl (peeking at the test-fold sign) would profit there instead.
+    spread = np.concatenate([np.full(60, -0.001), np.full(40, +0.001)])
+    oos = walk_forward_oos_spread(spread, rt_cost=0.0, n_splits=4, embargo=0)
+    assert oos.size == 80  # test folds cover indices 20..99
+    assert int((oos > 0).sum()) == 40  # neg-regime test settlements (correct side)
+    assert int((oos < 0).sum()) == 40  # pos-regime test settlements (ate the flip)
+
+
+def test_walk_forward_oos_persistent_spread_clears_cost_with_large_folds():
+    spread = np.full(400, 0.0003)  # persistent +3bps/settlement
+    oos = walk_forward_oos_spread(spread, rt_cost=0.0042, n_splits=4)
+    # test folds ~80 settlements -> amortized cost ~0.525bps << 3bps -> net positive
+    assert float(np.mean(oos)) > 0
+    assert float(np.mean(oos > 0)) == pytest.approx(1.0)
+
+
+def test_walk_forward_oos_cost_dominates_small_folds():
+    spread = np.full(40, 0.0001)  # persistent +1bp/settlement, tiny folds
+    oos = walk_forward_oos_spread(spread, rt_cost=0.0042, n_splits=4)
+    # test folds ~8 settlements -> amortized cost ~5.25bps >> 1bp -> net negative
+    assert float(np.mean(oos)) < 0
+
+
+def test_walk_forward_oos_empty_when_too_short():
+    assert walk_forward_oos_spread(np.array([0.0001, 0.0002]), 0.0042).size == 0

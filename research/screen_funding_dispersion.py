@@ -17,10 +17,15 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+
+# allow `core.*` imports (walk_forward / stat_tests / monte_carlo) when run as a
+# script from research/ — the gate battery needs them.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- Cost model constants mirrored from config.FEE / config.SLIPPAGE (authoritative) ---
 # futures fees per fill (fraction of notional)
@@ -34,6 +39,12 @@ VENUES = ("binance", "bybit", "bitget")
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 _CARRY_DIR = os.path.join(_DATA_DIR, "funding_carry")
+_HISTORY_DIR = os.path.join(_DATA_DIR, "funding_history")  # rev2 backfilled realized funding
+
+# Frozen gate thresholds (core/promotion_gate.py, core/decision/monte_carlo.py).
+MIN_DSR = 0.10
+MAX_PBO = 0.50
+MIN_OOS_WR = 0.55
 
 
 # ----------------------------------------------------------------------------
@@ -82,7 +93,20 @@ def sign_persistence(series: np.ndarray) -> float:
 # Data loading (local only)
 # ----------------------------------------------------------------------------
 def load_venue_funding(coin: str, venue: str) -> pd.Series:
-    """Rate series indexed by settlement timestamp (next_funding_ts grid)."""
+    """Rate series indexed by settlement timestamp (seconds).
+
+    Prefers the rev2 backfilled realized history in
+    ``data/funding_history/{venue}_{coin}.csv`` (cols ts, funding_rate). Falls
+    back to the forward-harvested ``data/funding_carry/{venue}_{coin}.csv`` (cols
+    next_funding_ts, rate) so the pre-backfill behaviour and tests are unchanged."""
+    hist = os.path.join(_HISTORY_DIR, f"{venue}_{coin}.csv")
+    if os.path.exists(hist):
+        d = pd.read_csv(hist)
+        if len(d) and "ts" in d.columns and "funding_rate" in d.columns:
+            d["settle"] = d["ts"].astype("int64")
+            return (
+                d.drop_duplicates("settle").set_index("settle")["funding_rate"].astype(float).sort_index()
+            )
     path = os.path.join(_CARRY_DIR, f"{venue}_{coin}.csv")
     if not os.path.exists(path):
         return pd.Series(dtype=float)
@@ -100,11 +124,22 @@ def align_cross_venue(coin: str, venues=VENUES) -> pd.DataFrame:
     return pd.DataFrame(cols).dropna().sort_index()
 
 
+def _coverage_dir() -> str:
+    """Directory whose {venue}_{coin}.csv inventory defines the universe: prefer
+    the backfilled funding_history when present, else the forward funding_carry."""
+    if os.path.isdir(_HISTORY_DIR) and any(
+        fn.endswith(".csv") for fn in os.listdir(_HISTORY_DIR)
+    ):
+        return _HISTORY_DIR
+    return _CARRY_DIR
+
+
 def coins_with_cross_venue_coverage() -> list[str]:
-    if not os.path.isdir(_CARRY_DIR):
+    cov = _coverage_dir()
+    if not os.path.isdir(cov):
         return []
     coins = set()
-    for fn in os.listdir(_CARRY_DIR):
+    for fn in os.listdir(cov):
         if fn.endswith(".csv") and "_" in fn:
             coins.add(fn.split("_", 1)[1].rsplit(".", 1)[0])
     out = []
@@ -112,6 +147,37 @@ def coins_with_cross_venue_coverage() -> list[str]:
         if not align_cross_venue(c).empty:
             out.append(c)
     return out
+
+
+# ----------------------------------------------------------------------------
+# Walk-forward OOS carry (the frozen gate battery's return series)
+# ----------------------------------------------------------------------------
+def walk_forward_oos_spread(
+    spread: np.ndarray, rt_cost: float, n_splits: int = 4, embargo: int = 1
+) -> np.ndarray:
+    """Pooled out-of-sample per-settlement net carry of the delta-neutral pair.
+
+    The DIRECTION (which venue to short) is chosen on each TRAIN fold as the sign
+    of the mean differential, then applied UNSEEN to the TEST fold — no lookahead.
+    The full 4-leg round-trip ``rt_cost`` is charged once per fold, amortized
+    across that fold's settlements. Uses core.walk_forward (embargo+purge)."""
+    from core.walk_forward import WalkForward
+
+    spread = np.asarray(spread, dtype=float)
+    n = spread.size
+    if n < n_splits + 1:
+        return np.array([], dtype=float)
+    wf = WalkForward(n_splits=n_splits, embargo_bars=embargo, anchored=True)
+    chunks = []
+    for tr, te in wf.split(n):
+        if len(tr) == 0 or len(te) == 0:
+            continue
+        d = np.sign(float(np.mean(spread[tr])))
+        if d == 0.0:
+            d = 1.0
+        per_settle_cost = rt_cost / len(te)
+        chunks.append(d * spread[te] - per_settle_cost)
+    return np.concatenate(chunks) if chunks else np.array([], dtype=float)
 
 
 # ----------------------------------------------------------------------------
@@ -150,6 +216,8 @@ class ScreenReport:
     pairs: list[PairResult] = field(default_factory=list)
     verdict: str = ""
     reason: str = ""
+    gates: dict = field(default_factory=dict)
+    oos: dict = field(default_factory=dict)
 
 
 def screen_pair(coin: str, df: pd.DataFrame, long_v: str, short_v: str) -> PairResult:
@@ -215,26 +283,135 @@ def run_screen() -> ScreenReport:
     if not coins:
         rep.verdict = "INSUFFICIENT_DATA"
         rep.reason = "No coin has funding on >=2 venues locally."
-    elif not enough_n:
+    elif not (enough_n and enough_coins):
         worst = min(n_by_coin.values()) if n_by_coin else 0
         rep.verdict = "INSUFFICIENT_DATA"
         rep.reason = (
             f"Cross-venue overlap below pre-registered floor of {MIN_SETTLEMENTS_PER_COIN} "
-            f"aligned settlements/coin: have {n_by_coin} over {days_by_coin} days on coins "
-            f"{coins}. Frozen gates (walk-forward+embargo+purge, Monte Carlo block bootstrap, "
+            f"aligned settlements/coin on >={MIN_COINS} coins: have {n_by_coin} over "
+            f"{days_by_coin} days on coins {coins}. Frozen gates (walk-forward+embargo+purge, "
+            f"Monte Carlo block bootstrap, "
             f"DSR/PBO) are NOT EVALUABLE at n={worst}; they fail closed. "
             f"Supporting (not decisive): every venue-pair is net-negative after cost even on "
             f"best-case maker fees and an in-sample direction pick."
         )
     else:
-        any_positive = any(p.net_taker_bps > 0 for p in pairs)
-        rep.verdict = "GO" if any_positive else "NO_GO"
-        rep.reason = (
-            "After-cost net carry positive on honest taker model — advance to gate battery."
-            if any_positive
-            else "After-cost net carry <= 0 across all venue-pairs on the honest taker model."
-        )
+        # Floor cleared → run the FROZEN gate battery on walk-forward OOS carry.
+        # The in-sample amortized net (net_taker_bps) is the pre-registered
+        # "after-cost net carry" condition, but with an in-sample direction pick
+        # over a long static hold it is inflated by the amortization/lookahead
+        # trap; the walk-forward OOS gates below are what actually decide GO/NO_GO.
+        _run_gate_battery(rep)
     return rep
+
+
+def _run_gate_battery(rep: ScreenReport) -> None:
+    """Populate rep.gates / rep.oos and set the GO/NO_GO verdict from the frozen
+    gates on walk-forward OOS carry. Direction chosen on train, evaluated on test;
+    the full 4-leg round-trip charged per fold. NaN on any gate fails closed."""
+    from core.decision.monte_carlo import monte_carlo_trade_sequence
+    from core.promotion_gate import _kurt, _skew
+    from core.stat_tests import deflated_sharpe, pbo, sharpe
+
+    n_trials = len(rep.pairs)  # every (coin, venue-pair) direction strategy tried
+    per_pair = []
+    for p in rep.pairs:
+        df = align_cross_venue(p.coin)
+        if df.empty:
+            continue
+        spread = (df[p.short_venue] - df[p.long_venue]).values  # short-higher convention
+        rt = roundtrip_cost_frac(FEE[p.long_venue]["taker"], FEE[p.short_venue]["taker"], SLIPPAGE_PER_FILL)
+        oos = walk_forward_oos_spread(spread, rt)
+        if oos.size < 2:
+            continue
+        per_pair.append({
+            "key": f"{p.coin}:{p.long_venue}L/{p.short_venue}S",
+            "oos": oos,
+            "oos_mean_bps": round(float(np.mean(oos)) * 1e4, 4),
+            "oos_wr": round(float(np.mean(oos > 0)), 4),
+            "oos_sharpe": round(float(sharpe(oos)), 4),
+            "n_oos": int(oos.size),
+        })
+
+    if not per_pair:
+        rep.verdict = "INSUFFICIENT_DATA"
+        rep.reason = "Floor cleared but no pair produced a walk-forward OOS series (fold geometry)."
+        rep.gates = {"fail_closed": True}
+        return
+
+    # Best OOS pair (selection under multiplicity → DSR penalizes via n_trials).
+    best = max(per_pair, key=lambda d: d["oos_mean_bps"])
+    best_oos = best["oos"]
+    sr = sharpe(best_oos)
+    dsr = float(deflated_sharpe(
+        sr_observed=sr, n_trials=max(1, n_trials), n_obs=int(best_oos.size),
+        skew=float(_skew(best_oos)), kurt=float(_kurt(best_oos)),
+        sr_var=1.0 / max(2, int(best_oos.size)),
+    ))
+    oos_wr = float(np.mean(best_oos > 0))
+    mc = monte_carlo_trade_sequence(best_oos)
+    mc_pass = bool(mc.passes(min_p_positive=0.95, max_dd_p95=0.25, min_trades=30))
+
+    # PBO across the pair strategies (columns), truncated to a common length.
+    pbo_val = float("nan")
+    if len(per_pair) >= 2:
+        tmin = min(d["oos"].size for d in per_pair)
+        parts = 16 if tmin >= 16 else (tmin - (tmin % 2))
+        if parts >= 4:
+            mat = np.column_stack([d["oos"][:tmin] for d in per_pair])
+            try:
+                pbo_val = float(pbo(mat, n_partitions=parts))
+            except Exception:
+                pbo_val = float("nan")
+
+    after_cost_net_positive = any(p.net_taker_bps > 0 for p in rep.pairs)
+    checks = {
+        "after_cost_net_carry>0 (in-sample, amortized)": bool(after_cost_net_positive),
+        "oos_mean>0": bool(best["oos_mean_bps"] > 0),
+        "DSR>=0.10": bool(np.isfinite(dsr) and dsr >= MIN_DSR),
+        "PBO<=0.50": bool(np.isfinite(pbo_val) and pbo_val <= MAX_PBO),
+        "OOS_WR>=0.55": bool(oos_wr >= MIN_OOS_WR),
+        "MC_capital_preservation": mc_pass,
+    }
+    rep.gates = {
+        "DSR": round(dsr, 4),
+        "PBO": None if not np.isfinite(pbo_val) else round(pbo_val, 4),
+        "OOS_WR": round(oos_wr, 4),
+        "monte_carlo": {
+            "n_trades": mc.n_trades,
+            "p_total_positive": round(mc.p_total_positive, 4),
+            "max_drawdown_p95": round(mc.max_drawdown_p95, 6),
+            "passes": mc_pass,
+        },
+        "n_trials_penalty": n_trials,
+        "checks": checks,
+        "fail_closed_on_nan": True,
+    }
+    rep.oos = {
+        "best_pair": best["key"],
+        "best_oos_mean_bps": best["oos_mean_bps"],
+        "best_oos_wr": best["oos_wr"],
+        "best_oos_sharpe": best["oos_sharpe"],
+        "n_oos_best": best["n_oos"],
+        "per_pair": [{k: d[k] for k in ("key", "oos_mean_bps", "oos_wr", "oos_sharpe", "n_oos")}
+                     for d in per_pair],
+    }
+
+    if all(checks.values()):
+        rep.verdict = "GO"
+        rep.reason = (
+            f"All frozen gates pass on walk-forward OOS: best pair {best['key']} "
+            f"OOS mean {best['oos_mean_bps']}bps, DSR {dsr:.3f}, PBO {pbo_val:.3f}, "
+            f"OOS-WR {oos_wr:.3f}, MC P(>0) {mc.p_total_positive:.3f}."
+        )
+    else:
+        failed = [k for k, v in checks.items() if not v]
+        rep.verdict = "NO_GO"
+        rep.reason = (
+            f"Walk-forward OOS gates fail: {failed}. Best pair {best['key']} "
+            f"OOS mean {best['oos_mean_bps']}bps (in-sample amortized net looked "
+            f"positive only via the direction-lookahead/amortization trap)."
+        )
 
 
 def _to_json(rep: ScreenReport) -> dict:
@@ -264,7 +441,7 @@ def _to_json(rep: ScreenReport) -> dict:
                 p.net_taker_bps <= 0 and p.net_maker_bps <= 0 for p in rep.pairs
             ),
         },
-        "gates": {
+        "gates": rep.gates if rep.gates else {
             "DSR": "NOT_EVALUABLE (n<floor)",
             "PBO": "NOT_EVALUABLE (n<floor)",
             "OOS_WR": "NOT_EVALUABLE (n<floor)",
@@ -272,6 +449,7 @@ def _to_json(rep: ScreenReport) -> dict:
             "monte_carlo": "NOT_EVALUABLE (n<floor)",
             "fail_closed": True,
         },
+        "oos_walk_forward": rep.oos,
         "verdict": rep.verdict,
         "reason": rep.reason,
         "harvest_to_extend": (
