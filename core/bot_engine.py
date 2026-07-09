@@ -213,7 +213,12 @@ class BotEngine:
             from config import SELF_HEALING
             if SELF_HEALING.get("enabled", True):
                 from core.self_healing_supervisor import SelfHealingSupervisor
-                self.self_healer = SelfHealingSupervisor(SELF_HEALING)
+                # async_heavy: run retrain/replay off the shared scheduler
+                # thread so a ~60-min subprocess can't stall the portfolio
+                # cycle / position monitor / watchdog (audit 2026-07-07). A
+                # user-set SELF_HEALING["async_heavy"] still wins.
+                self.self_healer = SelfHealingSupervisor(
+                    {"async_heavy": True, **SELF_HEALING})
                 logger.info("[Engine] SelfHealingSupervisor enabled")
             else:
                 self.self_healer = None
@@ -4208,6 +4213,15 @@ class BotEngine:
             order_id = (order or {}).get("id", "?")
             logger.info(
                 f"[SpotMgr] {kind} placed {ex_name}:{coin} | order_id={order_id}")
+            # Reset the drawdown peak ONLY here — after the trim is confirmed
+            # placed (audit 2026-07-07). A SELL fully exits so its peak is moot;
+            # SCALE_OUT keeps half the position and must re-baseline the peak so
+            # the next drawdown rule fires on a NEW decline, not the same one.
+            if kind == "SCALE_OUT" and order:
+                try:
+                    self.spot_manager.reset_peak(coin, ex_name)
+                except Exception as _rpe:
+                    logger.debug(f"[SpotMgr] reset_peak skipped: {_rpe}")
         except Exception as e:
             logger.error(
                 f"[SpotMgr] execution failed for {action.get('exchange')}:"

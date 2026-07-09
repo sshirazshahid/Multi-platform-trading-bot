@@ -236,10 +236,13 @@ class OrderManager:
         self._recent_client_ids: set = set()
         self._recent_client_ids_max = 500
 
-        # DRY_RUN funding accrual: last UTC hour we charged funding on.
+        # DRY_RUN funding accrual: last settled 8h window PER EXCHANGE.
         # Real exchanges settle funding at 00/08/16 UTC; we settle when the
         # current UTC hour first matches one of those after the last tick.
-        self._last_funding_hour = -1
+        # Keyed by exchange name: accrue_paper_funding runs once per venue, so a
+        # shared scalar let the FIRST venue each window consume it for ALL —
+        # only that venue accrued funding (audit 2026-07-07).
+        self._last_funding_hour: dict = {}
 
         # Close failure counter: {position_id: fail_count}
         # After 3 failures, force-close in tracker to break infinite loops
@@ -2961,11 +2964,14 @@ class OrderManager:
         hour = now.hour
         if hour not in (0, 8, 16):
             return
-        # Settled this window already?
+        # Settled this window already? Tracked per-venue: each exchange gets its
+        # own 8h window so one venue settling first no longer suppresses the
+        # others (audit 2026-07-07).
         window_key = hour + now.day * 100 + now.month * 10000
-        if self._last_funding_hour == window_key:
+        venue = exchange.name
+        if self._last_funding_hour.get(venue) == window_key:
             return
-        self._last_funding_hour = window_key
+        self._last_funding_hour[venue] = window_key
 
         positions = [p for p in self.tracker.get_open(exchange=exchange.name)
                      if p.market_type == "futures"]

@@ -194,15 +194,20 @@ class HealthWatchdog:
         cooldown = COOLDOWN_SEC.get(key, 30 * 60)
         if (now - self._state.last_alert.get(key, 0)) < cooldown:
             return
-        self._state.last_alert[key] = now
-        self._persist_cooldowns()
         title = f"[Watchdog/{level.upper()}] {key}"
         logger.warning(f"{title} — {message}")
         if self._notifier is not None:
             try:
                 self._notifier.alert(message, title=title, context=context or {})
             except Exception as e:
+                # Do NOT latch on a failed send (audit 2026-07-07): leaving
+                # last_alert unset means the next tick retries this safety
+                # alert instead of muting the whole episode on one SMTP hiccup.
+                # The cooldown below applies only on the success path.
                 logger.debug(f"[Watchdog] notifier failed: {e}")
+                return
+        self._state.last_alert[key] = now
+        self._persist_cooldowns()
 
     def _edge_alert(self, key: str, is_bad: bool, level: str, message: str,
                     context: Optional[dict] = None, *, grace_sec: float = 0.0) -> None:

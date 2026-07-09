@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,11 @@ class SelfHealingConfig:
     min_avg_ret: float = 0.0
     min_positive_folds: int = 2
     adaptive_ttl_hours: int = 24
+    # Run the heavy retrain/replay phase on a background daemon thread so the
+    # caller (the bot's shared `schedule` thread) never blocks for the full
+    # subprocess timeout. Default False keeps the standalone self_heal.py script
+    # + existing tests synchronous; bot_engine opts in (audit 2026-07-07).
+    async_heavy: bool = False
     python_executable: str = sys.executable
     state_path: Path = SELF_HEAL_STATE_PATH
     report_dir: Path = SELF_HEAL_REPORT_DIR
@@ -87,6 +93,7 @@ def config_from_mapping(raw: dict[str, Any] | None = None) -> SelfHealingConfig:
         min_avg_ret=float(raw.get("min_avg_ret", 0.0)),
         min_positive_folds=int(raw.get("min_positive_folds", 2)),
         adaptive_ttl_hours=int(raw.get("adaptive_ttl_hours", 24)),
+        async_heavy=bool(raw.get("async_heavy", False)),
         python_executable=str(raw.get("python_executable") or sys.executable),
         state_path=Path(raw.get("state_path", SELF_HEAL_STATE_PATH)),
         report_dir=Path(raw.get("report_dir", SELF_HEAL_REPORT_DIR)),
@@ -114,9 +121,36 @@ def _load_state(path: Path) -> SelfHealingState:
     )
 
 
+_STATE_WRITE_LOCK = threading.Lock()
+
+
 def _save_state(path: Path, state: SelfHealingState) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2, default=str), encoding="utf-8")
+    payload = json.dumps(asdict(state), indent=2, default=str)
+    # Concurrency (audit 2026-07-07): the async_heavy worker can call this at
+    # the same time as the main tick thread. A bare write_text truncates then
+    # writes, so the other writer (or a cross-process _load_state) could see a
+    # torn JSON file. Serialize in-process writers with a lock, then swap via a
+    # per-writer temp + os.replace (atomic on POSIX and Windows). os.replace can
+    # raise PermissionError on Windows when the destination is momentarily open
+    # by a reader, so retry briefly and fall back to a direct write.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with _STATE_WRITE_LOCK:
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            for _ in range(5):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    time.sleep(0.02)
+            else:
+                path.write_text(payload, encoding="utf-8")  # last-resort in-place
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _run_command(
@@ -200,10 +234,15 @@ def _terminate_pids(pids: list[int], cfg: SelfHealingConfig) -> list[int]:
             continue
         try:
             if os.name == "nt":
-                subprocess.run(
+                res = subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],
                     capture_output=True, timeout=15, check=False,
                 )
+                # taskkill runs with check=False, so a failure (process gone,
+                # access denied → returncode != 0) used to still record a
+                # phantom kill (audit 2026-07-07). Only record confirmed kills.
+                if res.returncode != 0:
+                    continue
             else:
                 import signal
 
@@ -212,6 +251,38 @@ def _terminate_pids(pids: list[int], cfg: SelfHealingConfig) -> list[int]:
         except Exception:
             continue
     return killed
+
+
+def _wait_for_lock_release(
+    lock_name: str,
+    cfg: SelfHealingConfig,
+    *,
+    root: Path = ROOT,
+    attempts: int = 15,
+    delay_sec: float = 0.2,
+) -> bool:
+    """Poll for a wedged holder's singleton lock to free up after a kill.
+
+    ``taskkill /F`` returns BEFORE the OS tears the process down, so the
+    ``utils.process_lock`` file can still be held for a beat. Respawning then
+    makes the replacement exit instantly ('already running'), so the repair
+    silently no-ops for a whole cooldown while reporting ok=True (audit
+    2026-07-07). We probe by acquiring the lock ourselves (non-blocking) and
+    releasing it immediately; success means the holder let go and the respawn
+    can take it. Returns False if it stayed held within the budget so the
+    caller can report the repair honestly instead of claiming a phantom win.
+    """
+    if cfg.dry_run:
+        return True
+    from utils.process_lock import acquire_process_lock
+
+    for _ in range(max(1, attempts)):
+        handle = acquire_process_lock(lock_name, root=root)
+        if handle is not None:
+            handle.close()  # release so the real respawn can acquire it
+            return True
+        time.sleep(delay_sec)
+    return False
 
 
 def _powershell_process_snapshot() -> list[dict[str, Any]]:
@@ -353,6 +424,8 @@ class SelfHealingSupervisor:
     def __init__(self, config: SelfHealingConfig | dict[str, Any] | None = None):
         self.config = config if isinstance(config, SelfHealingConfig) else config_from_mapping(config)
         self.state = _load_state(self.config.state_path)
+        # Single-flight guard for the async heavy phase (audit 2026-07-07).
+        self._heavy_thread: threading.Thread | None = None
 
     def tick(self, *, force: bool = False) -> dict[str, Any]:
         cfg = self.config
@@ -377,20 +450,73 @@ class SelfHealingSupervisor:
         report["audit"] = audit
         if cfg.repair_enabled:
             report["actions"].extend(self._repair_runtime())
-        if cfg.retrain_enabled:
-            action = self._maybe_retrain()
-            if action:
-                report["actions"].append(action)
-        if cfg.adapt_enabled:
-            action = self._maybe_adapt_strategy()
-            if action:
-                report["actions"].append(action)
+        if cfg.async_heavy and (cfg.retrain_enabled or cfg.adapt_enabled):
+            # The retrain (~60 min) and replay (4x3 min) subprocesses must not
+            # block the caller: tick() runs on the bot's shared `schedule`
+            # thread that also drives the portfolio cycle, position monitor and
+            # watchdog. Dispatch the heavy phase to a single-flight daemon
+            # thread and return immediately (audit 2026-07-07).
+            dispatched = self._dispatch_heavy_async()
+            report["actions"].append(
+                {"type": "heavy_async", "ok": True, "dispatched": dispatched})
+        else:
+            if cfg.retrain_enabled:
+                action = self._maybe_retrain()
+                if action:
+                    report["actions"].append(action)
+            if cfg.adapt_enabled:
+                action = self._maybe_adapt_strategy()
+                if action:
+                    report["actions"].append(action)
 
         report["verdict"] = "OK" if all(a.get("ok", True) for a in report["actions"]) else "ACTION_FAILED"
         if not cfg.dry_run:
             _save_state(cfg.state_path, self.state)
         self._write_report(report)
         return report
+
+    def _dispatch_heavy_async(self) -> bool:
+        """Start the retrain+adapt phase on a daemon thread, at most one at a
+        time. Returns True when a fresh worker was launched, False when a prior
+        heavy run is still in progress (skipped this tick)."""
+        t = self._heavy_thread
+        if t is not None and t.is_alive():
+            return False
+        self._heavy_thread = threading.Thread(
+            target=self._heavy_worker, daemon=True, name="self-heal-heavy")
+        self._heavy_thread.start()
+        return True
+
+    def _heavy_worker(self) -> None:
+        """Background retrain+adapt run. Owns its own cooldown-state persistence
+        and writes a distinct report file so it never clobbers the main tick's
+        report. A crash here stays contained — it must never take down the bot."""
+        cfg = self.config
+        report: dict[str, Any] = {
+            "generated_at": _utc_now().isoformat(),
+            "source": "self_healing_heavy_async",
+            "dry_run": cfg.dry_run,
+            "actions": [],
+        }
+        try:
+            if cfg.retrain_enabled:
+                action = self._maybe_retrain()
+                if action:
+                    report["actions"].append(action)
+            if cfg.adapt_enabled:
+                action = self._maybe_adapt_strategy()
+                if action:
+                    report["actions"].append(action)
+            if not cfg.dry_run:
+                _save_state(cfg.state_path, self.state)
+        except Exception as exc:
+            report["error"] = str(exc)
+        try:
+            cfg.report_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.report_dir / "self_healing_heavy_latest.json").write_text(
+                json.dumps(report, indent=2, default=str), encoding="utf-8")
+        except Exception:
+            pass
 
     def _repair_runtime(self) -> list[dict[str, Any]]:
         cfg = self.config
@@ -415,16 +541,27 @@ class SelfHealingSupervisor:
             # a bare respawn exits instantly and the repair silently no-ops
             # forever. Kill the wedged holder(s) first, then respawn.
             killed: list[int] = []
+            lock_released = True
             if counts.get(name, 0) >= 1:
                 pids = _pids_for_script(processes, script_by_feed[name])
                 killed = _terminate_pids(pids, cfg)
+                # Wait for the killed holder's singleton lock to release before
+                # respawning; a bare respawn against a still-held lock no-ops
+                # (audit 2026-07-07). lock name == script stem (harvest_<feed>).
+                lock_released = _wait_for_lock_release(
+                    Path(script_by_feed[name]).stem, cfg)
             result = _start_process(script_by_feed[name], cfg)
             if not cfg.dry_run:
                 self.state.last_repair_at[key] = now
-            action = {"type": "repair_feed", "target": name, "ok": bool(result.get("started")), "result": result}
+            # Honest ok: the respawn only succeeds if it was started AND the
+            # wedged lock actually freed (else the replacement exits instantly).
+            action = {"type": "repair_feed", "target": name,
+                      "ok": bool(result.get("started")) and lock_released,
+                      "result": result}
             if counts.get(name, 0) >= 1:
                 action["wedged_holder"] = True
                 action["killed_pids"] = killed
+                action["lock_released"] = lock_released
             actions.append(action)
 
         if CONFLUENCE_PAPER_SCRIPT.exists() and counts.get("confluence_paper", 0) < 1:

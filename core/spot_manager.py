@@ -133,9 +133,29 @@ class SpotPortfolioManager:
                     results[ex_name] = holdings
             except Exception as e:
                 logger.debug(f"[SpotMgr] {ex_name} scan error: {e}")
+                # Fail-hold (audit 2026-07-07): a transient fetch error must not
+                # wipe this venue's known holdings (a wholesale overwrite below
+                # would drop them, losing peak_price / drawdown state). Keep the
+                # prior snapshot; only a SUCCESSFUL fetch rebuilds a venue.
+                prior = self._holdings.get(ex_name)
+                if prior:
+                    results[ex_name] = prior
         self._holdings = results
         self._save_state()
         return results
+
+    def reset_peak(self, coin: str, exchange_name: str) -> bool:
+        """Reset a holding's drawdown peak to its current price after a
+        CONFIRMED SCALE_OUT execution. Kept OUT of evaluate_holding so a
+        skipped/failed/recommendation-only trim never silently eats the
+        drawdown trigger — the sell must actually happen first (audit
+        2026-07-07). Returns True when a peak was reset."""
+        h = self._holdings.get(exchange_name, {}).get(coin)
+        if h is None:
+            return False
+        h.peak_price = h.current_price
+        self._save_state()
+        return True
 
     def _fetch_cost_basis(self, exchange, ex_name: str, coin: str,
                           symbol: str) -> float:
@@ -212,10 +232,11 @@ class SpotPortfolioManager:
                     "value_usdt": value_usdt,
                 }
             if drawdown >= half_pct:
-                # Reset peak so subsequent rules trigger only on a NEW
-                # drawdown, not the same continuing one.
-                h.peak_price = h.current_price
-                self._save_state()
+                # Peak reset is DEFERRED to reset_peak() after a confirmed
+                # execution (audit 2026-07-07): resetting here — at evaluation
+                # time — let a skipped/failed/recommendation-only SCALE_OUT
+                # silently eat the drawdown trigger (peak snapped to price so
+                # the next rule never fired, yet nothing was sold).
                 return {
                     "action": "SCALE_OUT", "confidence": 0.85,
                     "reason": (
@@ -246,8 +267,8 @@ class SpotPortfolioManager:
                         p_ens = float(score.get("p_win_ensemble") or 0.0)
                         model_v = score.get("model_version")
                         if model_v and p_ens < p_floor:
-                            h.peak_price = h.current_price
-                            self._save_state()
+                            # Peak reset deferred to reset_peak() after a
+                            # confirmed execution (audit 2026-07-07).
                             return {
                                 "action": "SCALE_OUT", "confidence": 0.78,
                                 "reason": (

@@ -90,3 +90,24 @@ def test_shadow_symbols_returns_capped_list():
     }
     syms = inst._shadow_symbols()
     assert len(syms) <= 5
+
+
+def test_shadow_ctx_stamps_actual_venue():
+    """The TPProbe context must carry the venue that actually supplied the
+    candles (not a default 'binance'), or the resolver replays wrong candles."""
+    from core.bot_engine import BotEngine
+
+    bars = [[i * 60_000, 1.0, 1.1, 0.9, 1.0, 10.0] for i in range(80)]
+
+    class _Ex:
+        name = "Bybit"
+
+        def fetch_ohlcv(self, symbol, timeframe="1h", limit=100):
+            return bars
+
+    inst = BotEngine.__new__(BotEngine)
+    inst.active_exchanges = {"bybit": _Ex()}
+    ctx = inst._shadow_ctx_for_symbol("SOL/USDT:USDT")
+    assert ctx is not None
+    assert ctx["venue"] == "bybit"  # actual venue, lowercased
+    assert ctx["symbol"] == "SOL/USDT:USDT"
