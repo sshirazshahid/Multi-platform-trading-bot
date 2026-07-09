@@ -1037,14 +1037,19 @@ def load_warehouse_stats() -> dict:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
 
-        # Per-symbol expectancy + PF (closed trades only, current mode)
+        # Per-symbol expectancy + PF (closed trades only, current mode).
+        # Whole-trade PnL = realized_pnl + banked partial-TP leg, so partial-taken
+        # winners are classified/summed correctly (item 2, 2026-07-07 backlog).
         rows = conn.execute(
             """SELECT symbol,
                       COUNT(*) AS n,
-                      SUM(realized_pnl) AS net,
-                      SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END) AS gw,
-                      SUM(CASE WHEN realized_pnl < 0 THEN -realized_pnl ELSE 0 END) AS gl,
-                      SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+                      SUM(realized_pnl + COALESCE(partial_realized_pnl,0)) AS net,
+                      SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) > 0
+                               THEN realized_pnl + COALESCE(partial_realized_pnl,0) ELSE 0 END) AS gw,
+                      SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) < 0
+                               THEN -(realized_pnl + COALESCE(partial_realized_pnl,0)) ELSE 0 END) AS gl,
+                      SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) > 0
+                               THEN 1 ELSE 0 END) AS wins
                  FROM trades
                 WHERE status='CLOSED' AND mode = ?
                 GROUP BY symbol
@@ -1053,12 +1058,13 @@ def load_warehouse_stats() -> dict:
         ).fetchall()
         out["per_symbol"] = [dict(r) for r in rows]
 
-        # Per-strategy-family net PnL + count (current mode)
+        # Per-strategy-family whole-trade net PnL + count (current mode)
         fam = conn.execute(
             """SELECT COALESCE(strategy_family,'unknown') AS fam,
                       COUNT(*) AS n,
-                      SUM(realized_pnl) AS net,
-                      SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+                      SUM(realized_pnl + COALESCE(partial_realized_pnl,0)) AS net,
+                      SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) > 0
+                               THEN 1 ELSE 0 END) AS wins
                  FROM trades
                 WHERE status='CLOSED' AND mode = ?
                 GROUP BY fam

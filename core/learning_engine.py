@@ -50,6 +50,15 @@ REPORT_HTML_FILE = Path("data/learning_report.html")
 MIN_SAMPLE_SIZE  = 15
 
 
+def _whole_pnl(t: dict) -> float:
+    """Whole-trade realised PnL: runner-leg ``pnl`` + any partial-TP leg already
+    banked (``realized_partial_pnl``). The runner-only ``pnl`` under-reports every
+    trade that took a partial, biasing reported WR / PnL downward (item 2,
+    2026-07-07 backlog). REPORT-ONLY — mirrors dashboard._whole_pnl; the
+    persistent KnowledgeModel and every live gate are left untouched."""
+    return (t.get("pnl", 0) or 0) + (t.get("realized_partial_pnl") or 0)
+
+
 class LearningEngine:
 
     def __init__(self):
@@ -203,7 +212,7 @@ class LearningEngine:
                 raw_s = t.get("strategy", "unknown") or "unknown"
                 s     = raw_s.split("|")[0]
                 sym   = t.get("symbol",   "unknown")
-                pnl   = t.get("pnl", 0) or 0
+                pnl   = _whole_pnl(t)  # whole-trade: runner leg + banked partial-TP
                 fee   = t.get("total_fees", 0) or 0
                 r     = t.get("close_reason", "unknown")
                 ot    = t.get("open_time", 0)
@@ -249,11 +258,11 @@ class LearningEngine:
 
         sorted_all = sorted(all_trades, key=lambda x: x.get("close_time", 0))
         recent_20  = sorted_all[-20:]
-        r_wins = sum(1 for t in recent_20 if (t.get("pnl") or 0) > 0)
-        r_pnl  = sum(t.get("pnl") or 0 for t in recent_20)
+        r_wins = sum(1 for t in recent_20 if _whole_pnl(t) > 0)
+        r_pnl  = sum(_whole_pnl(t) for t in recent_20)
         r_fees = sum(t.get("total_fees") or 0 for t in recent_20)
-        ov_wins = sum(1 for t in all_trades if (t.get("pnl") or 0) > 0)
-        ov_pnl  = sum(t.get("pnl") or 0 for t in all_trades)
+        ov_wins = sum(1 for t in all_trades if _whole_pnl(t) > 0)
+        ov_pnl  = sum(_whole_pnl(t) for t in all_trades)
         ov_fees = sum(t.get("total_fees") or 0 for t in all_trades)
 
         suggestions = []
@@ -310,7 +319,7 @@ class LearningEngine:
         # 2026-06-01: gate the live-readiness nudge on ACTUAL paper profitability.
         # Previously it fired on trade COUNT alone (dry>0, live==0), so it told a
         # financially-dependent owner to "switch to LIVE" even on a losing account.
-        dry_net = sum((t.get("pnl", 0) or 0) for t in dry_trades)
+        dry_net = sum(_whole_pnl(t) for t in dry_trades)
         if km["dry_run_trades"] > 0 and km["live_trades"] == 0:
             if dry_net > 0 and len(dry_trades) >= MIN_SAMPLE_SIZE:
                 suggestions.append(

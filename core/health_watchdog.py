@@ -62,7 +62,12 @@ CARRY_SAMPLE_MILESTONES = (1, 10, 30, 60)
 REVIEW_FLAG_PATH      = Path("data/review_required.json")
 POST_MORTEM_PATH      = Path("data/post_mortem.json")
 DECISIONS_PATH        = Path("data/mcp_decisions.jsonl")
-WAREHOUSE_PATH        = Path("data/warehouse.sqlite")
+# Anchored to the repo root (parents[1] == repo root from core/) so a standalone
+# entrypoint that constructs HealthWatchdog from another cwd reads the canonical
+# warehouse — cwd-relative broke ShadowResolver from System32 on 2026-07-05. (The
+# other data/ constants here are consumed only by the in-process bot, which runs
+# from ROOT; left cwd-relative to keep this diff surgical.)
+WAREHOUSE_PATH        = Path(__file__).resolve().parents[1] / "data" / "warehouse.sqlite"
 
 # Phase 48 (2026-05-10): bumped 5min → 10min. Bot's portfolio cycle runs
 # every 5min and a single Claude API call can take 60-90s; with order

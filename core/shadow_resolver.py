@@ -35,6 +35,47 @@ SL_SLIP_BPS = 10.0  # fast-move stop fills are worse
 # the runner's fetch cap and resolve_one, so they always agree.
 DEFAULT_HORIZON_BARS = 24
 
+# Timeframe -> seconds, for the aging guard below (mirrors the runner's parser;
+# core stays decoupled from scripts/).
+_TF_UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def _tf_seconds(tf: str) -> int:
+    """Parse a ccxt-style timeframe ('15m', '1h', '1d') into seconds."""
+    tf = str(tf).strip().lower()
+    try:
+        return int(tf[:-1]) * _TF_UNITS[tf[-1]]
+    except (KeyError, ValueError, IndexError):
+        return 3600  # conservative default: 1h
+
+
+# UNRESOLVABLE aging (2026-07-07 backlog): a PENDING decision whose forward-candle
+# window should have fully closed long ago but still can't be resolved (symbol
+# delisted / data gap / candles that never return) was otherwise re-fetched on
+# EVERY run forever. Once wall-clock age exceeds this multiple of the horizon
+# window the missing bars are never coming, so the row is marked UNRESOLVABLE (a
+# terminal label_status resolve_pending's PENDING-only SELECT then skips). 2x
+# leaves a full extra horizon of slack past the point a live symbol would already
+# have resolved. Rows deferred purely for the per-run fetch budget are NEVER aged
+# out (they had no fetch attempt this run).
+UNRESOLVABLE_HORIZON_MULT = 2.0
+
+
+def _aged_out(row: dict, now_ts: int) -> bool:
+    """True once a PENDING row is old enough that its forward window can never
+    fill — the terminal-labeling trigger. Time-only; needs no schema change."""
+    try:
+        entry_ts = int(row.get("ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    if entry_ts <= 0:
+        return False
+    horizon = int(row.get("horizon_bars") or 0)
+    if horizon <= 0:
+        horizon = DEFAULT_HORIZON_BARS
+    window = horizon * _tf_seconds(str(row.get("timeframe") or ""))
+    return window > 0 and (now_ts - entry_ts) >= window * UNRESOLVABLE_HORIZON_MULT
+
 # Dollar outcomes are meaningless when projected sizing rounds to ~$0 (a
 # fully-deployed paper wallet sized 2,175 outcomes at ~$0.002 notional on
 # 2026-07-05..07, making net_pnl/fees/mfe/mae micro-dollar noise). Below this
@@ -55,6 +96,7 @@ def resolve_one(
     exit_slip_bps: float = EXIT_SLIP_BPS,
     sl_slip_bps: float = SL_SLIP_BPS,
     funding: float = 0.0,
+    funding_rate_sum: float = 0.0,
 ) -> Optional[dict]:
     """Resolve a single shadow decision against forward CLOSED candles.
 
@@ -154,7 +196,19 @@ def resolve_one(
     gross = move * size
     fees = (entry_filled + exit_filled) * size * fee_bps_per_side / 10_000.0
     slippage_cost = (open_slip + exit_slip) * size
-    net = gross - fees + funding
+    # Realized funding (2026-07-07 backlog 1c). `funding_rate_sum` is the sum of
+    # per-settlement funding RATES over the hold (e.g. the listing probe's
+    # shadow_listing_probe.realized_funding_rate_sum); convert it to dollars on
+    # the SAME resolved notional the gross uses. A SHORT (sell) RECEIVES funding
+    # when the rate is positive; a LONG pays it. Rows WITHOUT a realized figure
+    # keep funding at 0 — an explicit, documented OPTIMISTIC bound for 8h+ probe
+    # horizons; we do NOT fabricate a funding estimate (project doctrine: never
+    # guess funding). The explicit `funding` dollar kwarg still adds on top.
+    funding_total = float(funding)
+    if funding_rate_sum:
+        side_sign = -1.0 if is_buy else 1.0
+        funding_total += side_sign * float(funding_rate_sum) * notional
+    net = gross - fees + funding_total
     risk = abs(entry_filled - sl) * size
     r_mult = net / risk if risk > 0 else 0.0
 
@@ -165,7 +219,7 @@ def resolve_one(
         "net_pnl": net,
         "fees": fees,
         "slippage": slippage_cost,
-        "funding": funding,
+        "funding": funding_total,
         "mfe": mfe * size,
         "mae": mae * size,
         "bars_held": bars_held,
@@ -275,11 +329,27 @@ def _write_outcome(warehouse, proposal_id: str, outcome: dict, now: int) -> None
         raise
 
 
+def _mark_unresolvable(warehouse, proposal_id: str) -> None:
+    """Flag a PENDING decision terminal (UNRESOLVABLE) — its forward candles
+    never materialised (delisted/vanished symbol, data gap). resolve_pending's
+    PENDING-only SELECT then stops re-fetching it. NO shadow_outcomes row is
+    written (there is no honest after-cost outcome) and the decision row is
+    preserved — never deleted. Same terminal label the warehouse migration
+    already assigns to barrier-less legacy rows (warehouse.py)."""
+    # Warehouse connections run in autocommit (isolation_level=None), so this
+    # single UPDATE commits on its own.
+    warehouse._conn().execute(
+        "UPDATE shadow_decisions SET label_status='UNRESOLVABLE' WHERE proposal_id=?",
+        (proposal_id,),
+    )
+
+
 def resolve_pending(
     warehouse,
     fetch_candles: Callable[[dict], Sequence],
     *,
     now: Optional[int] = None,
+    funding_rate_provider: Optional[Callable[[dict], float]] = None,
     **cost_kwargs,
 ) -> dict:
     """Resolve every PENDING shadow_decisions row with non-null barriers.
@@ -287,7 +357,17 @@ def resolve_pending(
     `fetch_candles(row_dict) -> candles` must return forward CLOSED candles
     after the decision's entry; callers are responsible for dropping the
     forming bar (e.g. via core.sim_execution.last_closed_bar) so the replay
-    never repaints. Rows whose candles are unavailable are left PENDING.
+    never repaints. Rows whose candles are unavailable are left PENDING — UNLESS
+    they are aged past their horizon (delisted/vanished), which marks them
+    UNRESOLVABLE so they stop being re-fetched forever (2026-07-07 backlog 1a).
+
+    A `fetch_candles` that exposes a truthy ``budget_deferred`` attribute after a
+    call signals its empty return was a per-run fetch-budget cap (not a missing
+    symbol); such rows are never aged out — they simply retry next run.
+
+    `funding_rate_provider(row_dict) -> float` (optional) supplies a realized
+    per-settlement funding-rate SUM per row, folded into the resolved net
+    (backlog 1c). Absent/None -> funding stays 0 (documented optimistic bound).
     """
     now_ts = int(time.time()) if now is None else int(now)
     rows = warehouse.query(
@@ -297,6 +377,7 @@ def resolve_pending(
     )
     resolved = 0
     skipped = 0
+    unresolvable = 0
     for row in rows:
         proposal_id = row.get("proposal_id")
         if not proposal_id:
@@ -304,12 +385,33 @@ def resolve_pending(
             continue
         candles = fetch_candles(dict(row))
         if not candles:
-            skipped += 1
+            # No candles this run: budget-deferred (retry) vs delisted/vanished
+            # (age out). Never terminate a row the runner merely deferred.
+            deferred = bool(getattr(fetch_candles, "budget_deferred", False))
+            if not deferred and _aged_out(row, now_ts):
+                _mark_unresolvable(warehouse, proposal_id)
+                unresolvable += 1
+            else:
+                skipped += 1
             continue
-        outcome = resolve_one(dict(row), candles, **cost_kwargs)
+        frs = 0.0
+        if funding_rate_provider is not None:
+            try:
+                frs = float(funding_rate_provider(dict(row)) or 0.0)
+            except Exception:
+                frs = 0.0
+        outcome = resolve_one(dict(row), candles, funding_rate_sum=frs, **cost_kwargs)
         if outcome is None:
-            skipped += 1
+            # Got candles but can't resolve (censored: horizon window not full, or
+            # a permanently-bad row). Terminal only once aged past the horizon —
+            # the bars that would resolve it are never arriving.
+            if _aged_out(row, now_ts):
+                _mark_unresolvable(warehouse, proposal_id)
+                unresolvable += 1
+            else:
+                skipped += 1
             continue
         _write_outcome(warehouse, proposal_id, outcome, now_ts)
         resolved += 1
-    return {"resolved": resolved, "skipped": skipped, "n_pending": len(rows)}
+    return {"resolved": resolved, "skipped": skipped,
+            "unresolvable": unresolvable, "n_pending": len(rows)}

@@ -96,10 +96,23 @@ def load_panel(symbols=DEFAULT_UNIVERSE, cache: str = CACHE):
 
 # ── ranking ────────────────────────────────────────────────────────────
 def _zscore(values: np.ndarray) -> np.ndarray:
-    sd = values.std(ddof=0)
+    # NaN-robust standardization: a single leading-NaN / insufficient-history
+    # symbol (e.g. a late-listed coin whose full-history EMA50 window still holds
+    # leading NaNs) must be handled per-symbol, NOT zero the whole factor for
+    # everyone. Standardize over the FINITE entries only and leave any non-finite
+    # entry neutral (0.0 == the standardized mean). Byte-identical on all-finite
+    # input.
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    if not finite.any():
+        return np.zeros_like(values)
+    sub = values[finite]
+    sd = sub.std(ddof=0)
     if sd <= 0 or not np.isfinite(sd):
         return np.zeros_like(values)
-    return (values - values.mean()) / sd
+    out = np.zeros_like(values)
+    out[finite] = (sub - sub.mean()) / sd
+    return out
 
 
 def _ema(seg: np.ndarray, period: int) -> float:

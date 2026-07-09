@@ -72,6 +72,10 @@ def build_fetch_candles(fetch_ohlcv, *, now_ms=None, max_group_fetches=DEFAULT_M
 
     def fetch_candles(row: dict) -> list:
         nonlocal fetches
+        # Reset each call; resolve_pending reads this after an empty return to
+        # tell a budget-deferred row (retry next run) from a delisted one (age
+        # out). See core.shadow_resolver.resolve_pending.
+        fetch_candles.budget_deferred = False
         try:
             entry_ms = int(row["ts"]) * 1000
             venue = str(row["venue"])
@@ -93,7 +97,11 @@ def build_fetch_candles(fetch_ohlcv, *, now_ms=None, max_group_fetches=DEFAULT_M
 
         cached = cache.get(key)
         if cached is None or entry_ms < cached[0]:
-            if cached is None and fetches >= max_group_fetches:
+            # Budget covers NEW-group fetches AND widening refetches (an earlier
+            # entry in an already-cached group) alike — otherwise one symbol's
+            # widening could bypass the cap and starve the rest (backlog 1b).
+            if fetches >= max_group_fetches:
+                fetch_candles.budget_deferred = True
                 return []  # budget spent; row stays PENDING for next run
             try:
                 candles = list(fetch_ohlcv(venue, symbol, tf, entry_ms))
@@ -108,7 +116,34 @@ def build_fetch_candles(fetch_ohlcv, *, now_ms=None, max_group_fetches=DEFAULT_M
             out = out[: horizon + 2]
         return out
 
+    fetch_candles.budget_deferred = False
     return fetch_candles
+
+
+def _build_listing_funding_provider(warehouse):
+    """funding_rate_provider for resolve_pending: realized per-settlement funding
+    RATE sum for a shadow_decisions row, sourced from the listing-short probe's
+    shadow_listing_probe.realized_funding_rate_sum (the only probe that books
+    real per-8h funding). Any row without a probe record (or if the table does
+    not exist yet) returns 0.0 — the resolver then keeps funding at 0, a
+    documented optimistic bound; funding is never fabricated."""
+    def provider(row: dict) -> float:
+        pid = row.get("proposal_id")
+        if not pid:
+            return 0.0
+        try:
+            rows = warehouse.query(
+                "SELECT realized_funding_rate_sum AS frs FROM shadow_listing_probe "
+                "WHERE proposal_id=? AND decision='ENTER'",
+                (pid,),
+            )
+        except Exception:
+            return 0.0  # table absent (probe never ran) -> no realized funding
+        if not rows:
+            return 0.0
+        return float(rows[0].get("frs") or 0.0)
+
+    return provider
 
 
 def _make_ccxt_fetcher():
@@ -169,10 +204,13 @@ def main(argv=None) -> int:
     fetch_candles = build_fetch_candles(
         _make_ccxt_fetcher(), max_group_fetches=args.max_group_fetches
     )
-    summary = resolve_pending(wh, fetch_candles)
+    summary = resolve_pending(
+        wh, fetch_candles, funding_rate_provider=_build_listing_funding_provider(wh)
+    )
     print(
         f"[resolve_shadow] resolved={summary['resolved']} "
-        f"skipped={summary['skipped']} of n_pending={summary['n_pending']}"
+        f"skipped={summary['skipped']} unresolvable={summary.get('unresolvable', 0)} "
+        f"of n_pending={summary['n_pending']}"
     )
     return 0
 

@@ -35,7 +35,12 @@ from core.stat_tests import bootstrap_ci, deflated_sharpe
 from core.stat_tests import pbo as cscv_pbo
 from core.stat_tests import sharpe as _sharpe
 
-ACTIVE_STRATEGIES_PATH = Path("data/active_strategies.json")
+# Anchored to the repo root (parents[2] == repo root from core/decision/) so a
+# standalone entrypoint launched from another cwd (e.g. a slice runner started
+# from System32 via Task Scheduler — the class that broke ShadowResolver on
+# 2026-07-05) reads/writes the canonical registry, not a stray data/ under the
+# launch dir. Mirrors the os.chdir(ROOT) fix in scripts/resolve_shadow_outcomes.py.
+ACTIVE_STRATEGIES_PATH = Path(__file__).resolve().parents[2] / "data" / "active_strategies.json"
 _PBO_PARTITIONS = 16
 
 # Strategy-class-aware minimum resolved-sample floors. Scalp/exec generate far

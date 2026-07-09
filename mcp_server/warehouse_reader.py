@@ -120,8 +120,17 @@ def performance_summary(
             where.append("strategy_family = ?")
             params.append(strategy)
         clause = " AND ".join(where)
-        rows = _rows(conn, f"SELECT realized_pnl FROM trades WHERE {clause}", tuple(params))
-        pnls = [float(r["realized_pnl"]) for r in rows]
+        # Whole-trade PnL folds any already-banked partial-TP leg into the runner
+        # realized_pnl so partial-taken winners are not misclassified as losers
+        # (item 2, 2026-07-07 backlog). REPORT-ONLY — the live entry gate reads
+        # warehouse.recent_expectancy, not this. partial_realized_pnl is absent on
+        # older/foreign DBs (this layer opens arbitrary warehouses mode=ro), so
+        # fall back to realized_pnl alone when the column is missing.
+        cols = {c["name"] for c in _rows(conn, "PRAGMA table_info(trades)")}
+        pnl_expr = ("realized_pnl + COALESCE(partial_realized_pnl, 0)"
+                    if "partial_realized_pnl" in cols else "realized_pnl")
+        rows = _rows(conn, f"SELECT {pnl_expr} AS pnl FROM trades WHERE {clause}", tuple(params))
+        pnls = [float(r["pnl"]) for r in rows]
         n = len(pnls)
         wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p < 0]
