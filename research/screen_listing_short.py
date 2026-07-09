@@ -56,6 +56,17 @@ MC_MIN_TRADES = 30  # core/decision/monte_carlo.MonteCarloResult.passes floor
 MIN_EVALUABLE_N = MC_MIN_TRADES
 # authoritative costs pulled from config at runtime in run_screen()
 
+# ── rev3: capital-scaled / position-capped constants (pre-registered) ─────────
+STAKE_FRAC = 0.03               # 3% of account capital per listing short (CLAUDE.md §2)
+MAX_CONCURRENT_EXPOSURE = 0.12  # 12% total concurrent listing exposure cap (CLAUDE.md §2)
+MAX_CONCURRENT = int(round(MAX_CONCURRENT_EXPOSURE / STAKE_FRAC))  # -> 4 concurrent positions
+# rev2 audit B1: tokenized equity/commodity perps behave unlike crypto-hype decay.
+EQUITY_COMMODITY_BASES = {"AAPL", "AMZN", "CL", "COIN", "COPPER", "MSFT", "MSTR", "TSLA",
+                          "XAG", "XAU"}
+# DSR multiplicity: the family's SECOND registration (sequential testing) ->
+# 3 horizons x 2 registrations. Stricter than rev2's n_trials=3, never looser.
+N_TRIALS_REV3 = 2 * len(HORIZONS_D)
+
 
 # ── Pure functions (unit-tested) ────────────────────────────────────────────
 def find_backfill_clusters(first_ts_by_symbol: dict, min_shared: int = CLUSTER_MIN_SHARED) -> set:
@@ -105,6 +116,38 @@ def funding_sum_in_window(series: pd.Series, entry_ts: int, exit_ts: int) -> flo
         return 0.0
     mask = (series.index >= int(entry_ts)) & (series.index < int(exit_ts))
     return float(series[mask].sum())
+
+
+def is_crypto_base(base: str) -> bool:
+    """True iff ``base`` is a crypto ticker: ASCII and not a tokenized
+    equity/commodity perp. Excludes the rev2-audit equity/commodity set and any
+    non-ASCII scrape-junk base (e.g. '币安人生')."""
+    return bool(base) and base.isascii() and base.upper() not in EQUITY_COMMODITY_BASES
+
+
+def apply_concurrency_cap(entries_exits, max_concurrent: int):
+    """Accept positions in ENTRY-timestamp order under a max-concurrent cap.
+
+    ``entries_exits`` is a list of (idx, entry_ts, exit_ts). Positions are opened
+    in entry order; a position is released once its exit_ts <= a later candidate's
+    entry_ts. A candidate that would exceed ``max_concurrent`` still-open positions
+    is SKIPPED (capped out) — the skip is purely chronological, independent of the
+    trade's return (no cherry-picking).
+
+    Returns (accepted_idx_in_entry_order, capped_idx, peak_concurrent)."""
+    order = sorted(entries_exits, key=lambda t: (t[1], t[2], t[0]))
+    open_exits: list[int] = []
+    accepted, capped = [], []
+    peak = 0
+    for idx, e, x in order:
+        open_exits = [ox for ox in open_exits if ox > e]  # release closed positions
+        if len(open_exits) < max_concurrent:
+            open_exits.append(x)
+            accepted.append(idx)
+            peak = max(peak, len(open_exits))
+        else:
+            capped.append(idx)
+    return accepted, capped, peak
 
 
 def window_funding_covered(series: pd.Series, entry_ts: int, exit_ts: int) -> bool:
@@ -517,6 +560,213 @@ def _decide(charged: dict, pbo_value: float) -> tuple[str, str, dict]:
             + " | ".join(nogo_reasons), detail)
 
 
+# ── rev3: capital-scaled / position-capped, crypto-only, account equity curve ─
+def run_screen_rev3() -> dict:
+    """rev3 screen: crypto-only universe, 3%-per-listing sizing under a 12%
+    concurrent-exposure cap, returns and MC drawdown on the ACCOUNT equity curve
+    (start capital = 1.0). All other gates/costs frozen from rev1/rev2; DSR
+    n_trials=6 (family's 2nd registration). Reuses the backfilled funding CSVs."""
+    import config
+
+    fee = float(config.FEE["futures_taker"])
+    slip_open = float(config.SLIPPAGE["pct_open"])
+    slip_close = float(config.SLIPPAGE["pct_close"])
+    slip = (slip_open + slip_close) / 2.0
+
+    firstlast, genuine_all = compute_genuine_listings()
+    # crypto-only filter (rev2 audit B1)
+    genuine = {s: ts for s, ts in genuine_all.items() if is_crypto_base(_base(s))}
+    excluded_noncrypto = sorted({_base(s) for s in genuine_all if not is_crypto_base(_base(s))})
+
+    fc_set, _derivs_set = funding_coverage_sets()
+
+    # control basket: liquid majors with _1h OHLCV
+    control_df = {}
+    for coin in fc_set:
+        p = os.path.join(OHLCV_DIR, f"{coin}-USDT_1h.parquet")
+        if os.path.exists(p):
+            control_df[f"{coin}-USDT"] = pd.read_parquet(p, columns=["ts", "close"])
+
+    def control_return(entry_ts, exit_ts):
+        rets = []
+        for cdf in control_df.values():
+            p0, _ = price_at(cdf, entry_ts)
+            p1, _ = price_at(cdf, exit_ts)
+            if p0 and p1 and p0 > 0:
+                rets.append((p1 - p0) / p0)
+        return float(np.mean(rets)) if rets else None
+
+    charged = {}
+    for H in HORIZONS_D:
+        # 1) build every funding-charged, crypto-only candidate for this horizon
+        cand = []  # (sym, entry_ts, exit_ts, short_net, listing_ret, ctrl_ret, funding_sum)
+        excl_no_price = excl_no_funding = 0
+        for sym, first_ts in genuine.items():
+            base = _base(sym)
+            fser = load_funding_history(base, "binance")
+            df = pd.read_parquet(firstlast[sym][2], columns=["ts", "close"])
+            entry_ts = first_ts + DAY
+            exit_ts = entry_ts + H * DAY
+            p0, a0 = price_at(df, entry_ts)
+            p1, a1 = price_at(df, exit_ts)
+            if not (p0 and p1 and p0 > 0) or (a1 - exit_ts > 12 * 3600):
+                excl_no_price += 1
+                continue
+            if not window_funding_covered(fser, a0, a1):
+                excl_no_funding += 1
+                continue
+            fsum = funding_sum_in_window(fser, a0, a1)
+            snet = short_net_return(p0, p1, fsum, fee, slip)
+            cr = control_return(a0, a1)
+            cand.append((sym, a0, a1, snet, (p1 - p0) / p0, cr, fsum))
+
+        # 2) concurrency cap in entry order (no cherry-picking)
+        ee = [(i, c[1], c[2]) for i, c in enumerate(cand)]
+        accepted_idx, capped_idx, peak = apply_concurrency_cap(ee, MAX_CONCURRENT)
+        accepted = [cand[i] for i in accepted_idx]  # entry-ordered
+
+        # 3) ACCOUNT-scaled returns (fraction of capital), in entry order
+        acct_rets = np.array([STAKE_FRAC * a[3] for a in accepted], dtype=float)
+        raw_rets = np.array([a[3] for a in accepted], dtype=float)
+        fsums = np.array([a[6] for a in accepted], dtype=float)
+        underperf = np.array([a[5] - a[4] for a in accepted if a[5] is not None], dtype=float)
+        n = int(acct_rets.size)
+        entry = {
+            "n_candidates_crypto": len(cand),
+            "n_accepted": n,
+            "n_capped_out": len(capped_idx),
+            "peak_concurrent": peak,
+            "exposure_utilization_pct": round(100.0 * peak / MAX_CONCURRENT, 1),
+            "excluded_no_price_window": excl_no_price,
+            "excluded_no_funding_window": excl_no_funding,
+        }
+        if n:
+            entry.update({
+                "acct_mean": float(np.mean(acct_rets)),
+                "acct_total_return": float(np.sum(acct_rets)),
+                "raw_short_net_mean": float(np.mean(raw_rets)),
+                "win_rate": float(np.mean(acct_rets > 0)),
+                "funding_sum_mean": float(np.mean(fsums)),
+                "funding_negative_rate": float(np.mean(fsums < 0)),
+                "underperf_vs_ctrl_mean": float(np.mean(underperf)) if underperf.size else None,
+                "beats_control": bool(underperf.size and np.mean(underperf) > 0),
+                "dsr_prob": _dsr_prob(acct_rets, n_trials=N_TRIALS_REV3),
+                "monte_carlo": _monte_carlo(acct_rets),
+                "oos_wr_walk_forward": _oos_wr_walk_forward(
+                    acct_rets, [(a[1], a[2]) for a in accepted]
+                ),
+                "_acct_by_sym": {a[0]: STAKE_FRAC * a[3] for a in accepted},
+            })
+        charged[f"{H}d"] = entry
+
+    # PBO across horizons on common accepted listings (account-scaled; scale-invariant)
+    common = None
+    for H in HORIZONS_D:
+        m = charged[f"{H}d"].get("_acct_by_sym", {})
+        s = set(m)
+        common = s if common is None else (common & s)
+    common = sorted(common or [])
+    if len(common) >= 4:
+        matrix = np.array(
+            [[charged[f"{H}d"]["_acct_by_sym"][sym] for H in HORIZONS_D] for sym in common],
+            dtype=float,
+        )
+        pbo_value = _pbo_across_horizons(matrix)
+    else:
+        pbo_value = float("nan")
+    for H in HORIZONS_D:
+        charged[f"{H}d"].pop("_acct_by_sym", None)
+
+    verdict, reason, gate_detail = _decide_rev3(charged, pbo_value)
+
+    return {
+        "candidate": "B_rev3 — post-listing perp short (capital-scaled, position-capped)",
+        "sizing": {"stake_frac": STAKE_FRAC, "max_concurrent_exposure": MAX_CONCURRENT_EXPOSURE,
+                   "max_concurrent_positions": MAX_CONCURRENT},
+        "costs": {"fee_per_side": fee, "slip_per_side": slip,
+                  "roundtrip_cost": 2 * (fee + slip)},
+        "universe": {
+            "genuine_listings_all": len(genuine_all),
+            "genuine_listings_crypto_only": len(genuine),
+            "excluded_equity_commodity_junk_bases": excluded_noncrypto,
+        },
+        "n_trials_dsr": N_TRIALS_REV3,
+        "multiplicity_note": "family's 2nd registration (sequential); n_trials=2x3 horizons=6",
+        "funding_charged_account_scaled": charged,
+        "pbo_across_horizons": pbo_value,
+        "gate_detail": gate_detail,
+        "verdict": verdict,
+        "reason": reason,
+        "thresholds": {"MIN_DSR": MIN_DSR, "MAX_PBO": MAX_PBO, "MIN_OOS_WR": MIN_OOS_WR,
+                       "MC_MIN_TRADES": MC_MIN_TRADES, "maxDD_p95<=": 0.25, "MC_P>0>=": 0.95},
+    }
+
+
+def _decide_rev3(charged: dict, pbo_value: float) -> tuple[str, str, dict]:
+    """Frozen decision tree on the account-scaled, position-capped sample.
+
+    GO   : a horizon has ALL eight gates evaluable AND passing.
+    NO_GO: an evaluable horizon fails any gate (mean<=0, WR/OOS-WR<0.55, DSR<0.10,
+           PBO>0.50, does not beat control, or MC capital-preservation fails).
+    INSUFFICIENT_DATA: no horizon reaches >=30 accepted positions (MC floor).
+    NaN on any required gate fails closed."""
+    horizons = list(charged.keys())
+    ns = {h: charged[h]["n_accepted"] for h in horizons}
+    max_n = max(ns.values()) if ns else 0
+    if max_n == 0:
+        return ("INSUFFICIENT_DATA",
+                "Zero accepted positions across all horizons after crypto-only + "
+                "concurrency-cap filters.", {"n_by_horizon": ns})
+
+    evaluable = {h: ns[h] >= MIN_EVALUABLE_N for h in horizons}
+    detail = {"n_accepted_by_horizon": ns, "evaluable_by_horizon": evaluable,
+              "pbo_across_horizons": pbo_value}
+    if not any(evaluable.values()):
+        return ("INSUFFICIENT_DATA",
+                f"Accepted-position count below the frozen MC min_trades floor "
+                f"({MIN_EVALUABLE_N}) on every horizon (n={ns}); MC/DSR/PBO/OOS-WR not "
+                f"evaluable -> fail closed.", detail)
+
+    go_reasons, nogo_reasons = [], []
+    for h in horizons:
+        if not evaluable[h]:
+            continue
+        c = charged[h]
+        mc = c.get("monte_carlo", {})
+        oos_wr = c.get("oos_wr_walk_forward")
+        checks = {
+            "acct_mean>0": (c.get("acct_mean") is not None and c["acct_mean"] > 0),
+            "wr>=MIN_OOS_WR": (c.get("win_rate") is not None and c["win_rate"] >= MIN_OOS_WR),
+            "beats_control": bool(c.get("beats_control")),
+            "dsr>=MIN_DSR": (c.get("dsr_prob") is not None and np.isfinite(c["dsr_prob"])
+                             and c["dsr_prob"] >= MIN_DSR),
+            "pbo<=MAX_PBO": (np.isfinite(pbo_value) and pbo_value <= MAX_PBO),
+            "oos_wr>=MIN_OOS_WR": (oos_wr is not None and np.isfinite(oos_wr)
+                                   and oos_wr >= MIN_OOS_WR),
+            "mc_P>0>=0.95": (mc.get("p_total_positive") is not None
+                             and mc["p_total_positive"] >= 0.95),
+            "mc_maxDD_p95<=0.25": (mc.get("max_drawdown_p95") is not None
+                                   and mc["max_drawdown_p95"] <= 0.25),
+        }
+        detail[h] = checks
+        if all(checks.values()):
+            go_reasons.append(h)
+        else:
+            failed = [k for k, v in checks.items() if not v]
+            nogo_reasons.append(f"{h}: failed {failed}")
+
+    if go_reasons:
+        return ("GO",
+                f"All eight frozen gates pass on the account-scaled, position-capped "
+                f"sample at {go_reasons}.", detail)
+    return ("NO_GO",
+            "No horizon clears all eight frozen gates on the account-scaled, "
+            "position-capped sample. " + " | ".join(nogo_reasons), detail)
+
+
 if __name__ == "__main__":
-    out = run_screen()
+    if "--rev3" in sys.argv:
+        out = run_screen_rev3()
+    else:
+        out = run_screen()
     print(json.dumps(out, indent=2, default=str))

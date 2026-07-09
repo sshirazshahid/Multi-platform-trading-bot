@@ -8,6 +8,7 @@ import pytest
 
 import research.screen_funding_dispersion as disp
 from research.screen_funding_dispersion import (
+    _amortize_holds,
     annualize_apr,
     breakeven_settlements,
     coins_with_cross_venue_coverage,
@@ -17,6 +18,7 @@ from research.screen_funding_dispersion import (
     sign_persistence,
     signed_carry,
     walk_forward_oos_spread,
+    walk_forward_oos_spread_hold,
 )
 
 
@@ -168,3 +170,51 @@ def test_walk_forward_oos_cost_dominates_small_folds():
 
 def test_walk_forward_oos_empty_when_too_short():
     assert walk_forward_oos_spread(np.array([0.0001, 0.0002]), 0.0042).size == 0
+
+
+# ── rev3: hold-until-sign-flip cost model (fixes audit A1) ────────────────────
+def test_amortize_one_roundtrip_per_held_position():
+    # constant direction -> ONE position -> total cost == one round-trip
+    cost = _amortize_holds(np.array([1.0, 1.0, 1.0, 1.0]), rt_cost=0.004)
+    assert cost.sum() == pytest.approx(0.004, abs=1e-12)
+    np.testing.assert_allclose(cost, [0.001, 0.001, 0.001, 0.001])
+
+
+def test_amortize_charges_a_roundtrip_on_each_direction_flip():
+    # two contiguous runs (+ then -) -> TWO positions -> total == 2 round-trips,
+    # each amortized evenly within its own run.
+    cost = _amortize_holds(np.array([1.0, 1.0, -1.0, -1.0, 1.0]), rt_cost=0.004)
+    assert cost.sum() == pytest.approx(0.012, abs=1e-12)  # 3 runs -> 3 round-trips
+    np.testing.assert_allclose(cost, [0.002, 0.002, 0.002, 0.002, 0.004])
+
+
+def test_amortize_empty_is_empty():
+    assert _amortize_holds(np.array([]), 0.004).size == 0
+
+
+def test_hold_model_charges_exactly_one_roundtrip_when_direction_constant():
+    # persistent +3bps spread -> train dir is +1 in every fold -> ONE held position
+    # -> total OOS cost == exactly ONE round-trip regardless of fold count.
+    spread = np.full(400, 0.0003)
+    for n_splits in (4, 8):
+        oos = walk_forward_oos_spread_hold(spread, rt_cost=0.0042, n_splits=n_splits)
+        gross = 0.0003 * oos.size  # direction is +1 so carry == +spread each settle
+        total_cost = gross - float(oos.sum())
+        assert total_cost == pytest.approx(0.0042, abs=1e-9)  # one round-trip, both fold counts
+        assert float(oos.mean()) > 0  # amortized cost << carry -> net positive
+
+
+def test_hold_model_direction_from_train_not_test_no_lookahead():
+    # neg regime then pos regime; every train fold picks dir=-1 (anchored, early
+    # negatives dominate) and applies it UNSEEN. With zero cost the pos-regime test
+    # settlements are shorted the WRONG way -> negative, exactly like the per-fold
+    # impl. A lookahead impl would profit there instead.
+    spread = np.concatenate([np.full(60, -0.001), np.full(40, +0.001)])
+    oos = walk_forward_oos_spread_hold(spread, rt_cost=0.0, n_splits=4, embargo=0)
+    assert oos.size == 80
+    assert int((oos > 0).sum()) == 40  # neg-regime test settlements (correct side)
+    assert int((oos < 0).sum()) == 40  # pos-regime test settlements (ate the flip)
+
+
+def test_hold_model_empty_when_too_short():
+    assert walk_forward_oos_spread_hold(np.array([0.0001, 0.0002]), 0.0042).size == 0

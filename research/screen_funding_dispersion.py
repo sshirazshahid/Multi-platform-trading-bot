@@ -134,17 +134,20 @@ def _coverage_dir() -> str:
     return _CARRY_DIR
 
 
-def coins_with_cross_venue_coverage() -> list[str]:
+def coins_with_cross_venue_coverage(venues=VENUES) -> list[str]:
     cov = _coverage_dir()
     if not os.path.isdir(cov):
         return []
     coins = set()
     for fn in os.listdir(cov):
         if fn.endswith(".csv") and "_" in fn:
+            v = fn.split("_", 1)[0]
+            if v not in venues:
+                continue
             coins.add(fn.split("_", 1)[1].rsplit(".", 1)[0])
     out = []
     for c in sorted(coins):
-        if not align_cross_venue(c).empty:
+        if not align_cross_venue(c, venues).empty:
             out.append(c)
     return out
 
@@ -178,6 +181,64 @@ def walk_forward_oos_spread(
         per_settle_cost = rt_cost / len(te)
         chunks.append(d * spread[te] - per_settle_cost)
     return np.concatenate(chunks) if chunks else np.array([], dtype=float)
+
+
+# ── rev3: hold-until-sign-flip cost model (fixes audit finding A1) ────────────
+def _amortize_holds(applied_dir: np.ndarray, rt_cost: float) -> np.ndarray:
+    """Per-settlement cost array for a HOLD-UNTIL-SIGN-FLIP book.
+
+    ``applied_dir`` is the direction actually held at each settlement, in time
+    order. Contiguous same-direction runs are ONE held position each; a single
+    4-leg round-trip ``rt_cost`` is charged per position, amortized EVENLY over
+    that position's settlements. Total charged = (#positions) × rt_cost — this is
+    decoupled from the CV fold count, which is the whole point of the fix."""
+    applied_dir = np.asarray(applied_dir, dtype=float)
+    cost = np.zeros(applied_dir.size, dtype=float)
+    if applied_dir.size == 0:
+        return cost
+    start = 0
+    for i in range(1, applied_dir.size + 1):
+        if i == applied_dir.size or applied_dir[i] != applied_dir[start]:
+            run_len = i - start
+            cost[start:i] = rt_cost / run_len
+            start = i
+    return cost
+
+
+def walk_forward_oos_spread_hold(
+    spread: np.ndarray, rt_cost: float, n_splits: int = 4, embargo: int = 1
+) -> np.ndarray:
+    """Pooled OOS per-settlement net carry under the audited-correct HOLD model.
+
+    Direction chosen on each TRAIN fold (sign of the train mean) and applied
+    UNSEEN to that fold's TEST settlements — no look-ahead, identical selection
+    rule to ``walk_forward_oos_spread``. The ONLY difference is the cost model:
+    the concatenated OOS timeline is partitioned into contiguous same-direction
+    runs (= held positions) and ONE 4-leg round-trip is charged per position,
+    amortized over its settlements (see ``_amortize_holds``). When the
+    train-chosen direction never flips, exactly ONE round-trip is charged over the
+    whole OOS window — not ``n_splits`` of them (audit finding A1)."""
+    from core.walk_forward import WalkForward
+
+    spread = np.asarray(spread, dtype=float)
+    n = spread.size
+    if n < n_splits + 1:
+        return np.array([], dtype=float)
+    wf = WalkForward(n_splits=n_splits, embargo_bars=embargo, anchored=True)
+    carries, dirs = [], []
+    for tr, te in wf.split(n):
+        if len(tr) == 0 or len(te) == 0:
+            continue
+        d = np.sign(float(np.mean(spread[tr])))
+        if d == 0.0:
+            d = 1.0
+        carries.append(d * spread[te])
+        dirs.append(np.full(len(te), d, dtype=float))
+    if not carries:
+        return np.array([], dtype=float)
+    carry = np.concatenate(carries)
+    applied_dir = np.concatenate(dirs)
+    return carry - _amortize_holds(applied_dir, rt_cost)
 
 
 # ----------------------------------------------------------------------------
@@ -414,6 +475,165 @@ def _run_gate_battery(rep: ScreenReport) -> None:
         )
 
 
+# ── rev3: binance∩bybit multi-year, hold-until-sign-flip screen ──────────────
+VENUES_BB = ("binance", "bybit")
+
+
+def run_screen_rev3(venues=VENUES_BB) -> ScreenReport:
+    """rev3 screen: binance∩bybit only (Bitget dropped), one venue-pair per coin,
+    frozen gates on the hold-until-sign-flip OOS carry. Cost decoupled from the CV
+    fold count (audit A1 fix). n_trials = number of coin-pair strategies tested."""
+    coins = coins_with_cross_venue_coverage(venues)
+    n_by_coin, days_by_coin, pairs = {}, {}, []
+    for coin in coins:
+        df = align_cross_venue(coin, venues)
+        n_by_coin[coin] = len(df)
+        days_by_coin[coin] = (
+            round((df.index.max() - df.index.min()) / 86400.0, 2) if len(df) > 1 else 0.0
+        )
+        cols = list(df.columns)
+        for a, b in itertools.combinations(cols, 2):  # exactly 1 pair for 2 venues
+            if df[a].mean() >= df[b].mean():
+                short_v, long_v = a, b
+            else:
+                short_v, long_v = b, a
+            pairs.append(screen_pair(coin, df, long_v, short_v))
+
+    rep = ScreenReport(
+        coins_covered=coins,
+        n_by_coin=n_by_coin,
+        days_by_coin=days_by_coin,
+        total_variants=len(pairs),  # taker-only OOS series; one per coin-pair
+        pairs=pairs,
+    )
+
+    enough_coins = len(coins) >= MIN_COINS
+    enough_n = bool(coins) and all(
+        n_by_coin.get(c, 0) >= MIN_SETTLEMENTS_PER_COIN for c in coins
+    )
+    if not coins:
+        rep.verdict = "INSUFFICIENT_DATA"
+        rep.reason = "No coin has funding on both binance and bybit locally."
+    elif not (enough_n and enough_coins):
+        worst = min(n_by_coin.values()) if n_by_coin else 0
+        rep.verdict = "INSUFFICIENT_DATA"
+        rep.reason = (
+            f"binance∩bybit overlap below the pre-registered floor of "
+            f"{MIN_SETTLEMENTS_PER_COIN} aligned settlements/coin on >={MIN_COINS} coins "
+            f"(worst n={worst}). Frozen gates fail closed."
+        )
+    else:
+        _run_gate_battery_rev3(rep, venues)
+    return rep
+
+
+def _run_gate_battery_rev3(rep: ScreenReport, venues) -> None:
+    """Frozen gate battery on the HOLD-model OOS carry (rev3). Exactly the six
+    registered gates: OOS mean>0, DSR>=0.10 (n_trials=#coin-pairs), PBO<=0.50,
+    OOS-WR>=0.55, MC P(>0)>=0.95, MC maxDD p95<=0.25. NaN fails closed."""
+    from core.decision.monte_carlo import monte_carlo_trade_sequence
+    from core.promotion_gate import _kurt, _skew
+    from core.stat_tests import deflated_sharpe, pbo, sharpe
+
+    n_trials = len(rep.pairs)  # one coin-pair strategy per coin (binance∩bybit)
+    per_pair = []
+    for p in rep.pairs:
+        df = align_cross_venue(p.coin, venues)
+        if df.empty:
+            continue
+        spread = (df[p.short_venue] - df[p.long_venue]).values
+        rt = roundtrip_cost_frac(
+            FEE[p.long_venue]["taker"], FEE[p.short_venue]["taker"], SLIPPAGE_PER_FILL
+        )
+        oos = walk_forward_oos_spread_hold(spread, rt)
+        if oos.size < 2:
+            continue
+        per_pair.append({
+            "key": f"{p.coin}:{p.long_venue}L/{p.short_venue}S",
+            "oos": oos,
+            "oos_mean_bps": round(float(np.mean(oos)) * 1e4, 4),
+            "oos_wr": round(float(np.mean(oos > 0)), 4),
+            "oos_sharpe": round(float(sharpe(oos)), 4),
+            "n_oos": int(oos.size),
+        })
+
+    if not per_pair:
+        rep.verdict = "INSUFFICIENT_DATA"
+        rep.reason = "Floor cleared but no pair produced a hold-model OOS series."
+        rep.gates = {"fail_closed": True}
+        return
+
+    best = max(per_pair, key=lambda d: d["oos_mean_bps"])
+    best_oos = best["oos"]
+    sr = sharpe(best_oos)
+    dsr = float(deflated_sharpe(
+        sr_observed=sr, n_trials=max(1, n_trials), n_obs=int(best_oos.size),
+        skew=float(_skew(best_oos)), kurt=float(_kurt(best_oos)),
+        sr_var=1.0 / max(2, int(best_oos.size)),
+    ))
+    oos_wr = float(np.mean(best_oos > 0))
+    mc = monte_carlo_trade_sequence(best_oos)
+    mc_pass = bool(mc.passes(min_p_positive=0.95, max_dd_p95=0.25, min_trades=30))
+
+    pbo_val = float("nan")
+    if len(per_pair) >= 2:
+        tmin = min(d["oos"].size for d in per_pair)
+        parts = 16 if tmin >= 16 else (tmin - (tmin % 2))
+        if parts >= 4:
+            mat = np.column_stack([d["oos"][:tmin] for d in per_pair])
+            try:
+                pbo_val = float(pbo(mat, n_partitions=parts))
+            except Exception:
+                pbo_val = float("nan")
+
+    checks = {
+        "oos_mean>0": bool(best["oos_mean_bps"] > 0),
+        "DSR>=0.10": bool(np.isfinite(dsr) and dsr >= MIN_DSR),
+        "PBO<=0.50": bool(np.isfinite(pbo_val) and pbo_val <= MAX_PBO),
+        "OOS_WR>=0.55": bool(oos_wr >= MIN_OOS_WR),
+        "MC_P(>0)>=0.95": bool(mc.p_total_positive >= 0.95),
+        "MC_maxDD_p95<=0.25": bool(mc.max_drawdown_p95 <= 0.25),
+    }
+    rep.gates = {
+        "DSR": round(dsr, 4),
+        "PBO": None if not np.isfinite(pbo_val) else round(pbo_val, 4),
+        "OOS_WR": round(oos_wr, 4),
+        "monte_carlo": {
+            "n_trades": mc.n_trades,
+            "p_total_positive": round(mc.p_total_positive, 4),
+            "max_drawdown_p95": round(mc.max_drawdown_p95, 6),
+            "passes": mc_pass,
+        },
+        "n_trials_penalty": n_trials,
+        "checks": checks,
+        "fail_closed_on_nan": True,
+    }
+    rep.oos = {
+        "best_pair": best["key"],
+        "best_oos_mean_bps": best["oos_mean_bps"],
+        "best_oos_wr": best["oos_wr"],
+        "best_oos_sharpe": best["oos_sharpe"],
+        "n_oos_best": best["n_oos"],
+        "per_pair": [{k: d[k] for k in ("key", "oos_mean_bps", "oos_wr", "oos_sharpe", "n_oos")}
+                     for d in per_pair],
+    }
+    if all(checks.values()):
+        rep.verdict = "GO"
+        rep.reason = (
+            f"All six frozen gates pass on hold-model OOS: best pair {best['key']} "
+            f"OOS mean {best['oos_mean_bps']}bps, DSR {dsr:.3f}, PBO {pbo_val:.3f}, "
+            f"OOS-WR {oos_wr:.3f}, MC P(>0) {mc.p_total_positive:.3f}, "
+            f"maxDD p95 {mc.max_drawdown_p95:.4f}."
+        )
+    else:
+        failed = [k for k, v in checks.items() if not v]
+        rep.verdict = "NO_GO"
+        rep.reason = (
+            f"Hold-model OOS gates fail: {failed}. Best pair {best['key']} "
+            f"OOS mean {best['oos_mean_bps']}bps, DSR {dsr:.3f}, OOS-WR {oos_wr:.3f}."
+        )
+
+
 def _to_json(rep: ScreenReport) -> dict:
     best = None
     if rep.pairs:
@@ -490,5 +710,49 @@ def main() -> None:
     print("JSON_VERDICT_END")
 
 
+def _to_json_rev3(rep: ScreenReport) -> dict:
+    return {
+        "candidate": "A_cross_venue_funding_dispersion_rev3_binance_bybit_hold",
+        "hypothesis": "Delta-neutral binance/bybit funding differential, held until the "
+                      "train-chosen direction flips, clears the after-cost hurdle out-of-sample",
+        "universe": "binance∩bybit only (Bitget dropped); one venue-pair per coin",
+        "n": rep.n_by_coin,
+        "sample_days": rep.days_by_coin,
+        "coins_cross_venue": rep.coins_covered,
+        "n_coin_pair_strategies": len(rep.pairs),
+        "n_trials_dsr": len(rep.pairs),
+        "after_cost_metrics": {
+            "cost_model": "hold-until-sign-flip: ONE 42bps 4-leg round-trip per held "
+                          "position, amortized over its settlements (decoupled from n_splits)",
+            "best_pair_oos": rep.oos.get("best_pair") if rep.oos else None,
+            "best_pair_oos_mean_bps": rep.oos.get("best_oos_mean_bps") if rep.oos else None,
+            "best_pair_oos_wr": rep.oos.get("best_oos_wr") if rep.oos else None,
+        },
+        "gates": rep.gates,
+        "oos_walk_forward": rep.oos,
+        "verdict": rep.verdict,
+        "reason": rep.reason,
+    }
+
+
+def main_rev3() -> None:
+    rep = run_screen_rev3()
+    print("=== Cross-venue funding-dispersion screen (rev3: binance∩bybit, hold-until-flip) ===")
+    print(f"coins with binance∩bybit coverage: {rep.coins_covered}")
+    print(f"aligned settlements/coin: {rep.n_by_coin}")
+    print(f"days/coin: {rep.days_by_coin}")
+    print(f"coin-pair strategies (n_trials): {len(rep.pairs)}")
+    print()
+    print(f"VERDICT: {rep.verdict}")
+    print(f"REASON: {rep.reason}")
+    print()
+    print("JSON_VERDICT_START")
+    print(json.dumps(_to_json_rev3(rep), indent=2))
+    print("JSON_VERDICT_END")
+
+
 if __name__ == "__main__":
-    main()
+    if "--rev3" in sys.argv:
+        main_rev3()
+    else:
+        main()

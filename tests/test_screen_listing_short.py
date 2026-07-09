@@ -16,9 +16,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import research.screen_listing_short as ls  # noqa: E402
 from research.screen_listing_short import (  # noqa: E402
+    apply_concurrency_cap,
     find_backfill_clusters,
     funding_pnl_short,
     funding_sum_in_window,
+    is_crypto_base,
     load_funding_history,
     price_at,
     short_net_return,
@@ -152,3 +154,45 @@ def test_window_funding_covered_false_when_gap_at_end():
 def test_window_funding_covered_false_when_empty():
     import pandas as pd
     assert window_funding_covered(pd.Series(dtype=float), 100, 200) is False
+
+
+# ── rev3: crypto-only filter + concurrency cap (pure functions) ───────────────
+def test_is_crypto_base_keeps_crypto():
+    assert is_crypto_base("BTC")
+    assert is_crypto_base("ASTER")
+    assert is_crypto_base("SOMI")
+
+
+def test_is_crypto_base_excludes_equity_commodity_and_junk():
+    for b in ("AAPL", "AMZN", "CL", "COIN", "COPPER", "MSFT", "MSTR", "TSLA", "XAG", "XAU"):
+        assert not is_crypto_base(b), b
+    assert not is_crypto_base("币安人生")  # non-ASCII scrape junk
+    assert not is_crypto_base("")
+
+
+def test_concurrency_cap_skips_beyond_cap_in_entry_order():
+    # 5 positions all still open together; cap=4 -> the LAST entrant is skipped.
+    ee = [(0, 100, 200), (1, 110, 200), (2, 120, 200), (3, 130, 200), (4, 140, 200)]
+    acc, capped, peak = apply_concurrency_cap(ee, max_concurrent=4)
+    assert peak == 4
+    assert acc == [0, 1, 2, 3]
+    assert capped == [4]
+
+
+def test_concurrency_cap_releases_closed_positions():
+    # sequential, non-overlapping -> all accepted, peak concurrency 1.
+    ee = [(0, 100, 150), (1, 160, 200), (2, 210, 260)]
+    acc, capped, peak = apply_concurrency_cap(ee, max_concurrent=4)
+    assert acc == [0, 1, 2]
+    assert capped == []
+    assert peak == 1
+
+
+def test_concurrency_cap_no_cherry_picking_is_purely_chronological():
+    # provide out-of-order input; acceptance follows ENTRY time, not list order
+    # or return. The latest-entering overlapping position is the one skipped.
+    ee = [(4, 104, 300), (0, 100, 300), (3, 103, 300), (1, 101, 300), (2, 102, 300)]
+    acc, capped, peak = apply_concurrency_cap(ee, max_concurrent=4)
+    assert acc == [0, 1, 2, 3]  # entry-time order
+    assert capped == [4]        # the last to enter, skipped regardless of outcome
+    assert peak == 4
