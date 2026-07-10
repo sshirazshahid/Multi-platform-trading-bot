@@ -66,8 +66,11 @@ def test_note_sl_hit_records_timestamp(tmp_path, monkeypatch):
     from core.risk_manager import RiskManager
     r = RiskManager()
     r.note_sl_hit("BTC/USDT:USDT", "buy")
-    assert "BTC/USDT:USDT|buy" in r._recent_sl_by_pair_side
-    assert len(r._recent_sl_by_pair_side["BTC/USDT:USDT|buy"]) == 1
+    # 2026-07-10: keys are canonicalized (settle suffix stripped) — the old
+    # suffixed key never matched _execute_open's bare-symbol lookup, which
+    # left both cooldown layers dead for futures re-entries.
+    assert "BTC/USDT|buy" in r._recent_sl_by_pair_side
+    assert len(r._recent_sl_by_pair_side["BTC/USDT|buy"]) == 1
 
 
 def test_note_sl_hit_prunes_old_entries(tmp_path, monkeypatch):

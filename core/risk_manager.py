@@ -337,6 +337,17 @@ class RiskManager:
     POST_SL_GUARD_LOOKBACK_HRS = 24      # window for the SL-count
     POST_SL_GUARD_LOCK_HRS     = 6       # escalated lock duration
 
+    @staticmethod
+    def _pair_side_key(symbol: str, side: str) -> str:
+        """Canonical Phase-29 ledger key: settle suffix stripped.
+
+        Found live 2026-07-10: note_sl_hit received the tracker symbol
+        (``ARB/USDT:USDT``) while _execute_open checked the action symbol
+        (``ARB/USDT``) — keys never matched, so BOTH cooldown layers were
+        dead for futures re-entries (ARB re-entered 14/5/3min after
+        consecutive SLs with 8 hits in the ledger)."""
+        return f"{str(symbol).split(':')[0]}|{side}"
+
     def note_sl_hit(self, symbol: str, side: str) -> None:
         """Record that a position closed via stop_loss. Called from
         order_manager._finalize_close on `reason == "stop_loss"` only.
@@ -347,7 +358,7 @@ class RiskManager:
         # record_trade_pnl (which saves under the same lock) — unlocked
         # mutate+save raced the encoder (2026-06-11 review).
         with self._lock:
-            key = f"{symbol}|{side}"
+            key = self._pair_side_key(symbol, side)
             now = _time.time()
             lst = self._recent_sl_by_pair_side.get(key, [])
             # Prune entries older than guard lookback (default 24h)
@@ -366,14 +377,22 @@ class RiskManager:
         """
         if not symbol or not side:
             return False, ""
-        key = f"{symbol}|{side}"
-        lst = self._recent_sl_by_pair_side.get(key)
+        key = self._pair_side_key(symbol, side)
+        # Merge hits recorded under the canonical key AND any legacy
+        # suffixed variant (pre-2026-07-10 state files + in-flight
+        # processes) so existing ledger entries keep protecting.
+        base = key.split("|")[0]
+        lst = list(self._recent_sl_by_pair_side.get(key) or [])
+        for k, v in list(self._recent_sl_by_pair_side.items()):
+            if k != key and k.split("|")[-1] == side and \
+                    k.split("|")[0].split(":")[0] == base:
+                lst.extend(v)
         if not lst:
             return False, ""
         now = _time.time()
-        # Prune in-place for accurate window — caller guard
+        # Prune for accurate window — caller guard
         cutoff = now - self.POST_SL_GUARD_LOOKBACK_HRS * 3600
-        lst = [t for t in lst if t >= cutoff]
+        lst = sorted(t for t in set(lst) if t >= cutoff)
         self._recent_sl_by_pair_side[key] = lst
         if not lst:
             return False, ""
