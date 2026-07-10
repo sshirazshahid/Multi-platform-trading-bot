@@ -166,6 +166,7 @@ class SimExecutionModel:
     def check_wick_trigger(
         self, exchange, symbol: str, market_type: str, side: str,
         sl: float, tp: float, now: Optional[float] = None,
+        entry_ts: Optional[float] = None,
     ) -> Tuple[Optional[str], Optional[float]]:
         """
         Did the last 1m candle's high/low cross SL or TP?
@@ -198,6 +199,17 @@ class SimExecutionModel:
             # Timestamps unusable → fall back to the second-to-last bar if we
             # have one (the forming bar is conventionally last), else the last.
             c = candles[-2] if len(candles) >= 2 else candles[-1]
+        # 2026-07-10 (trade 2539): a bar that OPENED before the position's
+        # entry contains pre-entry wicks a live SL/TP conditional (placed at
+        # entry) could never have seen — it fired a phantom take_profit that
+        # filled BELOW entry. Only bars opened at/after entry may trigger;
+        # the polled last-price checks still cover the first minutes.
+        if entry_ts:
+            try:
+                if float(c[0]) < float(entry_ts) * 1000.0:
+                    return (None, None)
+            except (IndexError, TypeError, ValueError):
+                return (None, None)
         try:
             high = float(c[2])
             low  = float(c[3])

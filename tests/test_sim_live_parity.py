@@ -89,6 +89,37 @@ def test_both_wicked_returns_stop_loss_first_short():
     assert res == "stop_loss" and px == 105.0
 
 
+# ── wick trigger must ignore bars that pre-date the position (trade 2539) ──
+
+
+class _FakeTimedCandleExchange:
+    def __init__(self, candles):
+        self._c = candles
+
+    def fetch_ohlcv(self, symbol, timeframe, limit=3, market_type=None):
+        return self._c
+
+
+def test_wick_ignores_candle_that_opened_before_entry():
+    """Trade-2539 regression: a closed 1m bar whose range predates the entry
+    must not fire TP — it produced a 'take_profit' fill BELOW entry."""
+    t0 = 1_000_000.0
+    ex = _FakeTimedCandleExchange([[t0 * 1000, 100, 110.0, 99.0, 100, 0]])
+    res, px = _model().check_wick_trigger(
+        ex, "X", "futures", "buy", sl=95.0, tp=105.0, now=t0 + 120, entry_ts=t0 + 90
+    )  # entry AFTER that bar closed
+    assert (res, px) == (None, None)
+
+
+def test_wick_still_fires_on_post_entry_candle():
+    t0 = 1_000_000.0
+    ex = _FakeTimedCandleExchange([[(t0 + 60) * 1000, 100, 110.0, 99.0, 100, 0]])
+    res, px = _model().check_wick_trigger(
+        ex, "X", "futures", "buy", sl=95.0, tp=105.0, now=t0 + 180, entry_ts=t0 + 30
+    )  # bar opened after entry
+    assert res == "take_profit" and px == 105.0
+
+
 # ── funding direction: long pays positive rate, short receives ──
 
 

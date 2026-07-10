@@ -3080,7 +3080,8 @@ class OrderManager:
             if self.dry_run:
                 wick_reason, wick_px = self.sim.check_wick_trigger(
                     exchange, pos.symbol, market_type, pos.side,
-                    pos.stop_loss, pos.take_profit)
+                    pos.stop_loss, pos.take_profit,
+                    entry_ts=getattr(pos, "open_time", None))
                 if wick_reason == "stop_loss":
                     logger.warning(
                         f"[Orders] WICK STOP: {pos.symbol} {pos.side.upper()} "
