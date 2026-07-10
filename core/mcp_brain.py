@@ -163,6 +163,29 @@ def _safe_feat(v) -> float:
         return 0.0
 
 
+def _apply_accuracy_target(sl_pct: float, tp_pct: float) -> float:
+    """ACCURACY_TARGET_MODE (owner goal 2026-07-10): return the TP% for a
+    trade whose SL% is ``sl_pct``. When the mode is ON, the TP distance is
+    compressed to ``tp_frac_of_sl`` x SL distance (default 0.5), floored at
+    ``min_tp_pct`` so the target always clears round-trip costs — a no-edge
+    signal then realizes ~60-65% WR (theoretical hit rate SL/(SL+TP) ~ 67%).
+    OFF (default) returns ``tp_pct`` unchanged, byte-identical to pre-mode.
+    HONESTY: accuracy-by-geometry, NOT profit edge — the promotion gate still
+    requires after-cost expectancy. SL is never modified here (risk authority
+    stays with the ATR/DistFit path)."""
+    try:
+        from config import ACCURACY_TARGET_MODE as _acc
+        if not _acc.get("enabled"):
+            return tp_pct
+        if not sl_pct or sl_pct <= 0:
+            return tp_pct  # no geometry to invert — fail open to original TP
+        frac = float(_acc.get("tp_frac_of_sl", 0.5))
+        floor = float(_acc.get("min_tp_pct", 0.5))
+        return max(floor, sl_pct * frac)
+    except Exception:
+        return tp_pct
+
+
 def _http_get(url: str, timeout: int = FETCH_TIMEOUT, headers: dict = None):
     """Simple HTTP GET returning parsed JSON or empty dict/list on failure."""
     try:
@@ -2287,6 +2310,11 @@ class MCPBrain:
             else:
                 _claude_tp_clamped = _raw_tp
                 _claude_sl_clamped = _raw_sl
+            # ACCURACY_TARGET_MODE (owner goal 2026-07-10): the accuracy band
+            # must govern Claude-proposed opens too, or the throttled lane
+            # would keep the old ~2:1 geometry. Flag-off = unchanged.
+            _claude_tp_clamped = _apply_accuracy_target(
+                _claude_sl_clamped, _claude_tp_clamped)
 
             # ── Provenance bundle (2026-06-12): parse-time ingestion bounds.
             # Pre-clamp raws recorded; leverage/size clamped to config bounds
@@ -3347,6 +3375,12 @@ class MCPBrain:
                 tp_pct *= 1.25
         except Exception:
             pass
+
+        # ── ACCURACY_TARGET_MODE final TP override (owner goal 2026-07-10) ──
+        # Applied LAST so it wins over pair overrides / STAR / zone R:R —
+        # the 60-65% WR band is set by geometry: TP = frac x SL. Flag-off
+        # returns tp_pct unchanged (byte-identical). SL untouched.
+        tp_pct = _apply_accuracy_target(sl_pct, tp_pct)
 
         # Confidence: base 0.66 for 4 required, +0.08 per bonus, cap 0.95
         # (2026-04-17: stepped from 0.04 → 0.08 at user request; saturates at 4 bonuses)

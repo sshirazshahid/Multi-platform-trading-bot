@@ -334,6 +334,22 @@ LISTING_SHORT_PROBE = {
     "venue": os.getenv("SHADOW_LISTING_PROBE_VENUE", "binance"),
 }
 
+# ── ACCURACY TARGET MODE (owner goal 2026-07-10: 60-65% WR futures band) ─────
+# Inverts the exit geometry at BOTH TP authorities in mcp_brain: TP distance
+# becomes tp_frac_of_sl x SL distance (default 0.5 -> theoretical hit rate
+# SL/(SL+TP) ~ 67%, realized ~60-65% after costs/slippage), instead of the
+# default 2:1 R:R whose no-edge realized WR is ~30%.
+# HONESTY: this meets the ACCURACY target by construction — it does NOT create
+# profit edge; expectancy stays ~ -costs on a no-edge signal. PAPER research
+# posture. The CONTROLLED_LIVE promotion gate is untouched and still requires
+# after-cost expectancy. SL authority (ATR/DistFit floors) is NOT modified —
+# only the TP leg compresses; min_tp_pct keeps TP above round-trip costs.
+ACCURACY_TARGET_MODE = {
+    "enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
+    "tp_frac_of_sl": float(os.getenv("ACCURACY_TP_FRAC_OF_SL", "0.5")),
+    "min_tp_pct": float(os.getenv("ACCURACY_MIN_TP_PCT", "0.5")),
+}
+
 MODEL_GATE = {
     "enabled": os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model

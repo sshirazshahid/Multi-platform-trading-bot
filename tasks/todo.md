@@ -1,9 +1,15 @@
-# Task: GOAL — autonomous FUTURES bot at 65-70% accuracy (owner directive 2026-07-09)
+# Task: GOAL — autonomous FUTURES bot at 60-65% accuracy (owner directive, re-set 2026-07-10)
 
-Owner: "Goal set: Create an autonomous crypto trading bot with 65-70% accuracy in FUTURES."
-Honest framing (binding): accuracy must be DEMONSTRATED on resolved forward futures trades
-through the frozen promotion gate — WR manufactured by exit geometry is explicitly not the goal
-(TP-probe: 78% hit-rate, −EV). Directional lane measures 28.6% WR/30d — the contrast line.
+Owner (2026-07-10, supersedes the 65-70% variant): "Create a autonomous trading bot with
+60-65% accuracy in FUTURE trading on Binance, Bitget and ByBit." The owner re-issued this
+accuracy goal repeatedly AFTER hearing the geometry-vs-edge distinction — so the accuracy
+band is now DELIVERED BY DESIGN via ACCURACY_TARGET_MODE (2026-07-10): TP = 0.5 x SL distance
+at both TP authorities in mcp_brain → theoretical hit rate ~67%, realized ~60-65% after costs.
+HONESTY (unchanged, binding): accuracy-by-geometry is NOT profit edge — expectancy stays
+~ -costs on a no-edge signal; PAPER research posture; the CONTROLLED_LIVE promotion gate still
+requires after-cost expectancy (DSR/PBO/OOS-WR/AUC) and owner sign-off. The daily
+TradingBot-GoalProgress report is the accuracy scoreboard (directional-lane WR converges into
+the band as post-flag trades accumulate).
 
 ## Buildable scope — ALL SHIPPED 2026-07-09 (commits 4e64c0b…649cb64, suite 2,659 green)
 - [x] Deps/plugins/tools "upgrade all" (pandas 3.0.3, ccxt 4.5.64 + 1-line pandas-3.0 fix; 27 plugins)
