@@ -1762,6 +1762,61 @@ class BotEngine:
                 f"(notional=${notional:.2f} × lev={leverage}x × sl={sl_pct*100:.2f}%)")
         return ok
 
+    def _min_notional_floor(self, symbol: str, step: float, price: float,
+                            leverage: int, market_type: str,
+                            notional: float, base_notional: float,
+                            mtype_bal: float, sl_pct: float) -> float:
+        """MIN-NOTIONAL FLOOR (2026-07-10, owner UNBLOCK directive).
+
+        When the EV-opinion size-multiplier stack (Phase 17 rolling-50,
+        Phase 18 calibrator, Phase 27 per-symbol EV, ...) crushes size
+        below the exchange lot minimum, return the floored margin (the
+        exchange minimum for this symbol) instead of dust-skipping —
+        but ONLY when ALL hold:
+          (a) the pre-multiplier base notional could afford the floor
+              (undo opinion-downsizing only; never override balance/
+              margin reality),
+          (b) the hard loss clamp passes at the floored size,
+          (c) the §2 portfolio-exposure cap passes at the floored size
+              (fail-CLOSED on error, same as the main rail).
+        Returns 0.0 when the floor must NOT apply (caller keeps the
+        original skip + 30min cooldown). Default OFF via
+        config.MIN_NOTIONAL_FLOOR — flag off is byte-identical.
+        """
+        try:
+            from config import MIN_NOTIONAL_FLOOR as _MNF
+        except ImportError:
+            return 0.0
+        if not _MNF.get("enabled", False):
+            return 0.0
+        lev = leverage if market_type == "futures" else 1
+        floor_notional = step * price / max(lev, 1)
+        # (a) opinion-downsizing only — base sizing must afford the floor
+        if base_notional < floor_notional:
+            return 0.0
+        # (b) hard loss clamp at the floored size
+        if not self._within_loss_clamp(
+                mtype_bal, floor_notional, max(lev, 1), sl_pct / 100.0):
+            return 0.0
+        # (c) §2 exposure cap at the floored gross notional — fail-CLOSED
+        try:
+            from config import MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP
+            from core.risk_manager import exposure_breached as _exp_breached
+            _equity = _deployable_total(self._balances)
+            if _exp_breached(self.tracker.get_open(), step * price,
+                             _equity, _MAX_EXP):
+                return 0.0
+        except Exception as _fe:
+            logger.warning(
+                f"[Claude] min-notional floor exposure check FAILED, "
+                f"keeping skip: {_fe}")
+            return 0.0
+        logger.info(
+            f"[Claude] {symbol} min-notional floor: "
+            f"${notional:.2f}->${floor_notional:.2f} "
+            f"(opinion-downsized below exchange min; UNBLOCK directive)")
+        return floor_notional
+
     def _recent_side_wr(self, side: str, limit: int = 30) -> tuple:
         """Rolling win-rate of the last `limit` CLOSED trades on a given side.
 
@@ -3105,6 +3160,12 @@ class BotEngine:
             logger.info(
                 f"[Claude] {symbol} size ×{_lr_size_multiplier:.2f} "
                 f"(LR model p_win)")
+        # MIN-NOTIONAL FLOOR (2026-07-10): snapshot what the BASE sizing
+        # affords BEFORE the EV-opinion multiplier stack below (Phase 17
+        # rolling-50, Phase 18 calibrator, Phase 27 per-symbol EV). Used at
+        # the exchange-min pre-check to undo opinion-downsizing only —
+        # never to exceed what balance/margin reality allowed.
+        _pre_ev_notional = size_fraction * mtype_bal
         # 2026-05-03 (Phase 17 fix): Phase 16 adaptive sizing was wired
         # into RiskManager.calculate_position_size, which the live Claude
         # portfolio path NEVER calls — Ruflo reviewer flagged this as
@@ -3377,6 +3438,18 @@ class BotEngine:
         # Skip early instead of wasting API calls on doomed orders.
         try:
             step = exchange.get_amount_precision(trade_symbol)
+            if step > 0 and size < step:
+                # MIN-NOTIONAL FLOOR (2026-07-10, UNBLOCK directive): try to
+                # floor back UP to the exchange minimum BEFORE dust-skipping.
+                # The helper re-runs the loss clamp + §2 exposure cap at the
+                # floored size and refuses unless the pre-multiplier base
+                # sizing could afford it. Flag off -> 0.0 -> skip unchanged.
+                _floor_notional = self._min_notional_floor(
+                    symbol, step, price, leverage, market_type,
+                    notional, _pre_ev_notional, mtype_bal, sl_pct)
+                if _floor_notional > 0:
+                    notional = _floor_notional
+                    size = step
             if step > 0 and size < step:
                 min_notional = step * price / max(leverage, 1)
                 # Phase 23 (2026-05-04): set 30min cooldown to stop

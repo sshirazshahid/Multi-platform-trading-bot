@@ -350,6 +350,20 @@ ACCURACY_TARGET_MODE = {
     "min_tp_pct": float(os.getenv("ACCURACY_MIN_TP_PCT", "0.5")),
 }
 
+# ── MIN-NOTIONAL FLOOR (owner UNBLOCK directive 2026-07-10) ──────────────────
+# "The trading bot should perform ANY trades ... which it analyzes to be
+# profitable." The last de-facto edge-opinion block: the stacked EV size
+# multipliers (Phase 17 rolling-50, Phase 18 calibrator, Phase 27 per-symbol
+# EV) shrink size below the exchange lot minimum and _execute_open dust-skips
+# (+30min cooldown). When enabled, bot_engine floors such entries back UP to
+# the exchange minimum — ONLY when the pre-multiplier base sizing could afford
+# it (undoing opinion-downsizing, never overriding balance/margin reality) AND
+# the floored size passes the same loss-clamp + §2 exposure-cap rails as any
+# other size. Default OFF (public repo); the owner opts in via .env.
+MIN_NOTIONAL_FLOOR = {
+    "enabled": os.getenv("MIN_NOTIONAL_FLOOR_ENABLED", "false").lower() == "true",
+}
+
 MODEL_GATE = {
     "enabled": os.getenv("MODEL_GATE_ENABLED", "true").lower() == "true",
     # 2026-04-28: defaulted to TRUE per UNBLOCK_ALL directive — model
