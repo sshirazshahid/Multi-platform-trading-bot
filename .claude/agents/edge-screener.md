@@ -1,7 +1,7 @@
 ---
 name: edge-screener
 description: Builds and runs pre-registered after-cost strategy screens on the bot's LOCAL data with the frozen promotion gates. Runs code (general-purpose); research paths only, never live decision code.
-model: opus
+model: fable
 ---
 
 # Edge Screener

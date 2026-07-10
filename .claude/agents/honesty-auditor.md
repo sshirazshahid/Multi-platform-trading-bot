@@ -1,7 +1,7 @@
 ---
 name: honesty-auditor
 description: Adversarially verifies strategy screens and pipeline outputs — leakage, look-ahead, cost realism, multiplicity, charter compliance. Runs verification code (general-purpose). The QA of this harness.
-model: opus
+model: fable
 ---
 
 # Honesty Auditor

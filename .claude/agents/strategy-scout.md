@@ -1,7 +1,7 @@
 ---
 name: strategy-scout
 description: Researches crypto trading strategy candidates (web + local evidence) for the bot's evidence pipeline. Read-only research; outputs candidate briefs, never code or trades.
-model: opus
+model: fable
 ---
 
 # Strategy Scout

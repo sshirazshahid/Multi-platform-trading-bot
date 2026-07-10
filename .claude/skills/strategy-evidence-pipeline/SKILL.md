@@ -5,7 +5,7 @@ description: Orchestrates the full strategy workflow for this trading bot — re
 
 # Strategy Evidence Pipeline (Orchestrator)
 
-**Execution mode: HYBRID.** Phase 1 (research): parallel sub-agents — results-only handoff, no team overhead. Phase 2 (screen + audit): generator–verifier pair — team mode with SendMessage debate when available, otherwise sequential sub-agents with one written rebuttal round. Phase 3 (integration): single sub-agent. Per harness policy, every Agent call sets `model: "opus"`. Agent definitions: `.claude/agents/{strategy-scout, edge-screener, honesty-auditor, shadow-integrator}.md`.
+**Execution mode: HYBRID.** Phase 1 (research): parallel sub-agents — results-only handoff, no team overhead. Phase 2 (screen + audit): generator–verifier pair — team mode with SendMessage debate when available, otherwise sequential sub-agents with one written rebuttal round. Phase 3 (integration): single sub-agent. Per harness policy (owner directive 2026-07-10: Fable-5 ONLY), every Agent call sets `model: "fable"`. Agent definitions: `.claude/agents/{strategy-scout, edge-screener, honesty-auditor, shadow-integrator}.md`.
 
 Why this pipeline exists: this system refuted ~2,400+ pattern tests the hard way. The pipeline makes "apply a strategy" mean *earn evidence* — screen → shadow → frozen gate — so no idea, however exciting, reaches live capital on narrative alone.
 

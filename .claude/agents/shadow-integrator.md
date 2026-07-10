@@ -1,7 +1,7 @@
 ---
 name: shadow-integrator
 description: Wires CONFIRMED-GO strategy candidates into the bot as LOG-ONLY shadow probe agents (TDD, general-purpose). The only agent that modifies the program — and only its shadow lane, never live decision paths.
-model: opus
+model: fable
 ---
 
 # Shadow Integrator
