@@ -223,3 +223,18 @@ class TestFeedScannerCacheFallback:
         assert result["BTC"]["sentiment_score"] == 0.0
         assert result["BTC"]["has_veto_news"] is False
         assert result["__market__"]["sentiment_score"] == 0.0
+
+
+# ── 2026-07-10 wiring audit: the actionable-signals dead wire ─────────────────
+def test_news_signals_consumed_by_prompt_builder():
+    """bot_engine stuffs news_context["news_signals"] (and logs 'News
+    signals: N actionable') — the mcp_brain prompt builder must READ that
+    key or the entire actionable-signal computation influences nothing
+    (the dead wire found by the 2026-07-10 integration audit)."""
+    from pathlib import Path
+
+    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    assert 'nc.get("news_signals"' in src, (
+        "prompt builder must consume news_context['news_signals']"
+    )
+    assert "NEWS SIGNALS:" in src

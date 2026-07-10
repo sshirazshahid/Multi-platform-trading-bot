@@ -90,8 +90,10 @@ def directional_summary(conn: sqlite3.Connection, days: int = 30) -> dict:
     try:
         since = time.time() - days * 86400
         res = conn.execute(
-            "SELECT COUNT(*) AS n, SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,"
-            "       SUM(realized_pnl) AS pnl"
+            "SELECT COUNT(*) AS n,"
+            "       SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0"
+            "                THEN 1 ELSE 0 END) AS wins,"
+            "       SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl"
             "  FROM trades WHERE ts_exit IS NOT NULL AND ts_exit >= ?",
             (since,),
         ).fetchone()
@@ -149,8 +151,10 @@ def current_boot_summary(conn: sqlite3.Connection, since_epoch=None,
     }
     try:
         res = conn.execute(
-            "SELECT COUNT(*) AS n, SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,"
-            "       SUM(realized_pnl) AS pnl"
+            "SELECT COUNT(*) AS n,"
+            "       SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0"
+            "                THEN 1 ELSE 0 END) AS wins,"
+            "       SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl"
             "  FROM trades WHERE ts_exit IS NOT NULL AND ts_entry >= ?",
             (since,),
         ).fetchone()

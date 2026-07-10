@@ -574,3 +574,11 @@ Exec/safety cluster = **bf0b3e9**; data-integrity cluster = **8bead2a**. Entry g
       sizing bleeds paper faster. Do NOT revert to none without owner say-so (this was their call).
       Residual aggression-limiter: stacked EV-downsizers shrink expensive coins (BTC) below
       min-notional → skipped; loosening = owner decision (accelerates −EV paper bleed).
+
+## Fix ticket (2026-07-10 integration audit, seam C): journal phantom re-closes
+- [ ] journal/2026-07-10.md contains ~29 CLOSE lines with NO matching trades row —
+      byte-identical spot-style closes (BTC/ETH/SOL take_profit, AAVE sl_placement_failed)
+      re-journaled on EVERY restart. DB is consistent; the journal over-counts. Suspect: a
+      reconcile/startup path re-fires the close hook for phantom spot rows whose warehouse
+      write dedupes but whose journal write does not. Fix: dedupe journal CLOSE by trade
+      identity, or gate the journal write on the warehouse close actually recording.

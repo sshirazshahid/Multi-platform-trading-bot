@@ -2121,6 +2121,20 @@ class MCPBrain:
                     parts = [f"{c}={s:+.2f}" for c, s in sorted(
                         strong.items(), key=lambda x: abs(x[1]), reverse=True)[:6]]
                     sections.append("COIN SENT: " + " | ".join(parts))
+            # Actionable per-coin news signals (2026-07-10 wiring audit: the
+            # scanner computed these and bot_engine logged "News signals: N
+            # actionable" into news_context["news_signals"], but this builder
+            # never read the key — a dead wire. Render compactly so Claude
+            # sees the 3+-headline clusters; strongest first, cap 5.)
+            n_sigs = nc.get("news_signals", [])
+            if n_sigs:
+                sig_parts = [
+                    f"{s.get('coin', '?')}:{s.get('signal', '?')}"
+                    f"({float(s.get('strength', 0) or 0):+.2f})"
+                    for s in sorted(
+                        n_sigs, key=lambda x: abs(float(x.get("strength", 0) or 0)),
+                        reverse=True)[:5]]
+                sections.append("NEWS SIGNALS: " + " | ".join(sig_parts))
 
         # ── Per-coin data (top 15 for prompt speed) ──
         # Phase 42 (2026-05-10): pre-filter BLACKLIST_HARD + AutoMutator

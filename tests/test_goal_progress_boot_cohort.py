@@ -21,9 +21,13 @@ from scripts.report_goal_progress import (
 def _conn_with_trades(rows):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    # partial_realized_pnl: the report uses whole-trade PnL (2026-07-10
+    # alignment with the dashboard cohort lane); rows may be 3- or 4-tuples.
     conn.execute(
-        "CREATE TABLE trades (ts_entry REAL, ts_exit REAL, realized_pnl REAL)")
-    conn.executemany("INSERT INTO trades VALUES (?,?,?)", rows)
+        "CREATE TABLE trades (ts_entry REAL, ts_exit REAL, realized_pnl REAL,"
+        " partial_realized_pnl REAL DEFAULT 0)")
+    rows4 = [r if len(r) == 4 else (*r, 0.0) for r in rows]
+    conn.executemany("INSERT INTO trades VALUES (?,?,?,?)", rows4)
     return conn
 
 
