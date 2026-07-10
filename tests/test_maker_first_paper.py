@@ -352,3 +352,30 @@ def test_measurement_log_present():
     src = Path("core/order_manager.py").read_text(encoding="utf-8")
     assert "filled as MAKER" in src
     assert "chase abandoned" in src
+
+
+# ── 2026-07-11: ccxt binanceusdm tickers carry bid/ask=None ──────────────────
+# The silent no-book fall-through fired on EVERY entry — the feature was a
+# no-op on day one (zero MakerFirst log lines, no state file, 3 taker fills).
+# When the ticker lacks bid/ask, the intercept must pull the order-book top.
+def test_intercept_uses_book_top_when_ticker_lacks_bid_ask(mf_on, tmp_path):
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker={"last": 100.0, "bid": None, "ask": None})
+    ex.fetch_order_book = lambda symbol, limit=5, market_type=None: {
+        "bids": [[99.9, 5.0]], "asks": [[100.1, 5.0]]}
+    pos = _open(om, ex, side="buy")
+    assert pos is None, "intent must register (pending), not fill as taker"
+    assert om.last_open_reject == "maker_first_pending"
+    key = f"{ex.name}:{SYM}"
+    assert key in om._pending_maker
+    assert om._pending_maker[key]["limit_px"] == 99.9  # book-top bid
+
+
+def test_no_book_at_all_falls_through_to_taker(mf_on, tmp_path):
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker={"last": 100.0, "bid": None, "ask": None})
+    # no fetch_order_book on the double -> AttributeError inside the guarded
+    # fetch -> honest taker fall-through (now LOUD, never silent).
+    pos = _open(om, ex, side="buy")
+    assert pos is not None, "no honest maker price -> normal taker entry"
+    assert f"{ex.name}:{SYM}" not in om._pending_maker

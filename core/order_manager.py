@@ -1162,6 +1162,17 @@ class OrderManager:
                 return None
             _mf_bid = _safe_ticker_px(ticker, "bid")
             _mf_ask = _safe_ticker_px(ticker, "ask")
+            # 2026-07-11: ccxt binanceusdm futures tickers carry bid/ask=None,
+            # which made the silent fall-through below fire on EVERY entry —
+            # the feature was a no-op on day one. Pull the book top instead.
+            if not (_mf_bid > 0 and _mf_ask > 0):
+                try:
+                    _mf_ob = exchange.fetch_order_book(symbol, 5, market_type)
+                    if _mf_ob.get("bids") and _mf_ob.get("asks"):
+                        _mf_bid = float(_mf_ob["bids"][0][0] or 0)
+                        _mf_ask = float(_mf_ob["asks"][0][0] or 0)
+                except Exception as _mfe:
+                    logger.debug(f"[MakerFirst] book fetch failed: {_mfe}")
             _mf_ref = float(price) if (price and float(price) > 0) else fill_price
             if _mf_bid > 0 and _mf_ask > 0 and _mf_ref > 0:
                 _mf_limit = _mf_bid if side == "buy" else _mf_ask
@@ -1188,7 +1199,11 @@ class OrderManager:
                 self.last_open_reject = "maker_first_pending"
                 return None
             # No usable book — a maker price cannot be justified honestly;
-            # fall through to the normal taker fill.
+            # fall through to the normal taker fill. LOUD: this silent branch
+            # hid the bid/ask=None no-op for a whole session (2026-07-11).
+            logger.warning(
+                f"[MakerFirst] {symbol}: no usable book "
+                f"(bid={_mf_bid} ask={_mf_ask}) — falling through to taker")
 
         # ── DRY_RUN realism: apply slippage + spread (2026-04-11) ──
         # In LIVE, SmartExecutor crosses the book and pays real slippage.
