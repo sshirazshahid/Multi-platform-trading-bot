@@ -347,6 +347,14 @@ LISTING_SHORT_PROBE = {
 ACCURACY_TARGET_MODE = {
     "enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
     "tp_frac_of_sl": float(os.getenv("ACCURACY_TP_FRAC_OF_SL", "0.5")),
+    # Per-side frac overrides (2026-07-10 geometry sweep, 8,878 entries +
+    # adversarial audit): at frac 0.50 longs realized 67.0% WR vs shorts
+    # 56.2% — a single global frac cannot put both sides mid-band; shorts
+    # need a smaller frac. The sweep's side-splits put buy~0.45 / sell~0.35
+    # inside the 63-67% owner band. 0 / unset -> None -> fall back to the
+    # global tp_frac_of_sl above. min_tp_pct floor applies to both sides.
+    "tp_frac_buy": float(os.getenv("ACCURACY_TP_FRAC_BUY", "0")) or None,
+    "tp_frac_sell": float(os.getenv("ACCURACY_TP_FRAC_SELL", "0")) or None,
     "min_tp_pct": float(os.getenv("ACCURACY_MIN_TP_PCT", "0.5")),
     # Band time-exit horizon (2026-07-10 leak fix): the band's 63-67% WR was
     # audited on pure first-touch SL/TP with a 72h horizon, but the Phase-14

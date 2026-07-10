@@ -2966,7 +2966,7 @@ class BotEngine:
         if tp_pct > 0 and not _tsmom_bypass_rr:
             from core.mcp_brain import _apply_accuracy_target
             _tp_before_acc = tp_pct
-            tp_pct = _apply_accuracy_target(sl_pct, tp_pct)
+            tp_pct = _apply_accuracy_target(sl_pct, tp_pct, side=side)
             _acc_mode_on = tp_pct != _tp_before_acc
             if _acc_mode_on:
                 logger.info(

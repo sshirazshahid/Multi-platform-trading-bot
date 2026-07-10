@@ -163,12 +163,17 @@ def _safe_feat(v) -> float:
         return 0.0
 
 
-def _apply_accuracy_target(sl_pct: float, tp_pct: float) -> float:
+def _apply_accuracy_target(sl_pct: float, tp_pct: float, side: str = None) -> float:
     """ACCURACY_TARGET_MODE (owner goal 2026-07-10): return the TP% for a
     trade whose SL% is ``sl_pct``. When the mode is ON, the TP distance is
     compressed to ``tp_frac_of_sl`` x SL distance (default 0.5), floored at
     ``min_tp_pct`` so the target always clears round-trip costs — a no-edge
     signal then realizes ~60-65% WR (theoretical hit rate SL/(SL+TP) ~ 67%).
+    PER-SIDE fracs (2026-07-10 geometry sweep, 8,878 entries + audit): at a
+    global frac 0.50 longs ran 67.0% WR vs shorts 56.2% — one frac cannot put
+    both sides mid-band. When ``side`` maps to buy/long and ``tp_frac_buy``
+    is set (or sell/short and ``tp_frac_sell``), that frac wins; unset (None)
+    falls back to the global ``tp_frac_of_sl``.
     OFF (default) returns ``tp_pct`` unchanged, byte-identical to pre-mode.
     HONESTY: accuracy-by-geometry, NOT profit edge — the promotion gate still
     requires after-cost expectancy. SL is never modified here (risk authority
@@ -180,6 +185,11 @@ def _apply_accuracy_target(sl_pct: float, tp_pct: float) -> float:
         if not sl_pct or sl_pct <= 0:
             return tp_pct  # no geometry to invert — fail open to original TP
         frac = float(_acc.get("tp_frac_of_sl", 0.5))
+        _side = str(side).lower() if side else ""
+        if _side in ("buy", "long") and _acc.get("tp_frac_buy"):
+            frac = float(_acc["tp_frac_buy"])
+        elif _side in ("sell", "short") and _acc.get("tp_frac_sell"):
+            frac = float(_acc["tp_frac_sell"])
         floor = float(_acc.get("min_tp_pct", 0.5))
         return max(floor, sl_pct * frac)
     except Exception:
@@ -2314,7 +2324,7 @@ class MCPBrain:
             # must govern Claude-proposed opens too, or the throttled lane
             # would keep the old ~2:1 geometry. Flag-off = unchanged.
             _claude_tp_clamped = _apply_accuracy_target(
-                _claude_sl_clamped, _claude_tp_clamped)
+                _claude_sl_clamped, _claude_tp_clamped, side=a.get("side"))
 
             # ── Provenance bundle (2026-06-12): parse-time ingestion bounds.
             # Pre-clamp raws recorded; leverage/size clamped to config bounds
@@ -3380,7 +3390,7 @@ class MCPBrain:
         # Applied LAST so it wins over pair overrides / STAR / zone R:R —
         # the 60-65% WR band is set by geometry: TP = frac x SL. Flag-off
         # returns tp_pct unchanged (byte-identical). SL untouched.
-        tp_pct = _apply_accuracy_target(sl_pct, tp_pct)
+        tp_pct = _apply_accuracy_target(sl_pct, tp_pct, side=side)
 
         # Confidence: base 0.66 for 4 required, +0.08 per bonus, cap 0.95
         # (2026-04-17: stepped from 0.04 → 0.08 at user request; saturates at 4 bonuses)
