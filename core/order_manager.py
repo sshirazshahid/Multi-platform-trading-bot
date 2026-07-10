@@ -75,6 +75,15 @@ def _should_fire_partial_tp(position, price: float, partial_tp_config: dict):
     """
     if not partial_tp_config.get("enabled"):
         return (False, 0.0, 0.0)
+    # ACCURACY band (2026-07-10, second leak): with the compressed TP the
+    # partial level sits a whisker from entry, so partial-TP fired almost
+    # immediately, moved SL to breakeven, and any wiggle stopped the trade
+    # at entry — fees turned would-be geometric wins into losses (3 of the
+    # first 5 per-side closes: exit_px == entry_px exactly, positive
+    # partial_realized_pnl, negative whole-trade). The audited 63-67%
+    # geometry is PURE first-touch SL/TP — band positions never partial.
+    if _is_accuracy_band_position(position):
+        return (False, 0.0, 0.0)
     if getattr(position, "partial_taken", False):
         return (False, 0.0, 0.0)
     if not (position.take_profit and position.entry_price):
@@ -3534,16 +3543,57 @@ class OrderManager:
 # positions inside ACCURACY_TARGET_MODE["max_hold_hours"]. SL/TP/hard
 # max-loss authorities are untouched — only the TIME exits defer.
 # ─────────────────────────────────────────────────────────────────────
-def _accuracy_band_hold_active(position, age_hours) -> bool:
-    """True while a band position is exempt from time-based exits
-    (STALE / AGE_LIMIT / AGE_LOSS / scalp time wall / scalp stale).
+def _is_accuracy_band_position(position) -> bool:
+    """True when this position was opened under ACCURACY_TARGET_MODE.
 
     Band marker: ``position._accuracy_band`` (stamped at the
     bot_engine._execute_open chokepoint when the band rewrites tp_pct) OR
     the restart-surviving geometry fallback — TP distance strictly shorter
     than the IMMUTABLE entry-stop distance, which non-band entries can
     never have (the min-R:R gate enforces tp >= min_rr x sl everywhere
-    else; tsmom carries tp=0 and never matches). Past ``max_hold_hours``
+    else; tsmom carries tp=0 and never matches). Flag off -> always False.
+    Fails closed on any bad input.
+    """
+    try:
+        from config import ACCURACY_TARGET_MODE as _acc
+    except ImportError:
+        return False
+    if not _acc.get("enabled", False):
+        return False
+    # `is True` (not truthiness): the chokepoint stamps a literal True, and
+    # anything else (e.g. a MagicMock auto-attribute in tests, or a stale
+    # serialized value) must fall through to the geometry check instead of
+    # silently classifying the position as band.
+    if getattr(position, "_accuracy_band", False) is True:
+        return True
+    try:
+        entry = float(getattr(position, "entry_price", 0) or 0)
+        tp = float(getattr(position, "take_profit", 0) or 0)
+        if hasattr(position, "entry_risk_stop"):
+            sl = float(position.entry_risk_stop() or 0)
+        else:
+            sl = float(getattr(position, "stop_loss", 0) or 0)
+        if entry > 0 and tp > 0 and sl > 0:
+            sl_frac = abs(entry - sl) / entry
+            tp_frac = abs(tp - entry) / entry
+            # Sanity bounds: real stops/targets live within ~10% of entry
+            # (charter Stop-Loss Guardian is 8%; ATR clamps 1.5-3.5%). A
+            # distance beyond 20% is garbage input (mock/corrupt/stale) —
+            # never classify band on it (float(MagicMock) == 1.0 made a
+            # fake "99% stop" pass this check before the bound).
+            if 0 < sl_frac <= 0.20 and 0 < tp_frac <= 0.20:
+                return tp_frac < sl_frac
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+    return False
+
+
+def _accuracy_band_hold_active(position, age_hours) -> bool:
+    """True while a band position is exempt from time-based exits
+    (STALE / AGE_LIMIT / AGE_LOSS / scalp time wall / scalp stale).
+
+    Delegates the band identification to :func:`_is_accuracy_band_position`
+    (shared with the partial-TP suppression). Past ``max_hold_hours``
     (default 72) returns False so the existing time exits provide
     zombie-position protection. Flag off -> always False (byte-identical
     monitor behavior). Fails closed on any bad input.
@@ -3559,20 +3609,7 @@ def _accuracy_band_hold_active(position, age_hours) -> bool:
             return False
     except (TypeError, ValueError):
         return False
-    if getattr(position, "_accuracy_band", False):
-        return True
-    try:
-        entry = float(getattr(position, "entry_price", 0) or 0)
-        tp = float(getattr(position, "take_profit", 0) or 0)
-        if hasattr(position, "entry_risk_stop"):
-            sl = float(position.entry_risk_stop() or 0)
-        else:
-            sl = float(getattr(position, "stop_loss", 0) or 0)
-        if entry > 0 and tp > 0 and sl > 0:
-            return abs(tp - entry) < abs(entry - sl)
-    except (TypeError, ValueError):
-        pass
-    return False
+    return _is_accuracy_band_position(position)
 
 
 # ─────────────────────────────────────────────────────────────────────

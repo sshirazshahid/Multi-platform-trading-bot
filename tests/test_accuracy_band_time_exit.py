@@ -281,3 +281,54 @@ def test_execute_open_stamps_band_marker():
 def test_config_exposes_env_knob():
     src = Path("config.py").read_text(encoding="utf-8")
     assert "ACCURACY_MAX_HOLD_HOURS" in src
+
+
+# ── 2026-07-10 second leak: partial-TP/breakeven vs the band ─────────────────
+# Live forensics (per-side epoch, first 5 closes): 3 losses had
+# exit_px == entry_px EXACTLY with positive partial_realized_pnl — the
+# compressed band TP put the partial level a whisker from entry, partial-TP
+# fired instantly, SL moved to breakeven, wiggle stopped it, fees made it a
+# loss. Band positions must be PURE first-touch: no partial, no BE move.
+def _band_pos(side="buy", entry=100.0, tp=100.9, sl=98.0):
+    class P:
+        pass
+    p = P()
+    p.side = side
+    p.entry_price = entry
+    p.take_profit = tp
+    p.stop_loss = sl
+    p.partial_taken = False
+    return p
+
+
+def test_partial_tp_never_fires_on_band_position(acc_on):
+    from core.order_manager import _should_fire_partial_tp
+
+    pos = _band_pos()  # tp dist 0.9 < sl dist 2.0 -> band geometry
+    fire, _, _ = _should_fire_partial_tp(
+        pos, price=100.89, partial_tp_config={"enabled": True,
+                                              "first_take_at_pct": 0.5,
+                                              "first_take_size": 0.5})
+    assert fire is False, "band positions are pure first-touch — no partial TP"
+
+
+def test_partial_tp_still_fires_on_non_band_position(acc_on):
+    from core.order_manager import _should_fire_partial_tp
+
+    pos = _band_pos(tp=104.0, sl=98.0)  # tp dist 4 > sl dist 2 -> NOT band
+    fire, size, level = _should_fire_partial_tp(
+        pos, price=102.5, partial_tp_config={"enabled": True,
+                                             "first_take_at_pct": 0.5,
+                                             "first_take_size": 0.5})
+    assert fire is True and size == 0.5
+
+
+def test_partial_tp_unchanged_when_flag_off(acc_off):
+    from core.order_manager import _should_fire_partial_tp
+
+    pos = _band_pos()  # inverted geometry but flag OFF -> legacy behavior
+    fire, _, _ = _should_fire_partial_tp(
+        pos, price=100.89, partial_tp_config={"enabled": True,
+                                              "first_take_at_pct": 0.5,
+                                              "first_take_size": 0.5})
+    assert fire is True, "flag off must stay byte-identical"
