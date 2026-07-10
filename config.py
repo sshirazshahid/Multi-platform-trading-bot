@@ -367,6 +367,26 @@ ACCURACY_TARGET_MODE = {
     "max_hold_hours": float(os.getenv("ACCURACY_MAX_HOLD_HOURS", "72")),
 }
 
+# ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ───────────────────────────────────
+# Fees were 25.4% of the last-500-trade loss ($39.63 of -$156.28) and the
+# 2026-07-10 pre-fix cohort was gross-POSITIVE before fees; on the no-edge
+# directional lane, cost engineering is the only honest expectancy lever
+# (blueprinted 2026-06-11 "honest paper maker-fill model").
+# When enabled, PAPER futures entries on the mcp/algorithmic lane place a
+# VIRTUAL post-only limit at the touch (bid for buys / ask for sells) instead
+# of an immediate taker fill. HONEST FILL RULE: the limit fills as maker only
+# when the market trades strictly THROUGH the price (never on a touch).
+# After timeout_sec unfilled -> taker fallback at the CURRENT price; if the
+# market ran >0.3% beyond the signal price the entry is ABANDONED (no chase).
+# SL/TP recompute off the actual fill so the ACCURACY band geometry is exact.
+# Scope: PAPER futures entries only (exits, carry runner, live smart_executor
+# untouched). Default OFF -> byte-identical to today.
+MAKER_FIRST_PAPER = {
+    "enabled": os.getenv("MAKER_FIRST_PAPER_ENABLED", "false").lower() == "true",
+    "timeout_sec": int(os.getenv("MAKER_FIRST_PAPER_TIMEOUT_SEC", "45")),
+    "max_chase": int(os.getenv("MAKER_FIRST_PAPER_MAX_CHASE", "1")),
+}
+
 # ── MIN-NOTIONAL FLOOR (owner UNBLOCK directive 2026-07-10) ──────────────────
 # "The trading bot should perform ANY trades ... which it analyzes to be
 # profitable." The last de-facto edge-opinion block: the stacked EV size

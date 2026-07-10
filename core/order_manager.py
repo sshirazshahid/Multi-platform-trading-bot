@@ -102,6 +102,30 @@ def _should_fire_partial_tp(position, price: float, partial_tp_config: dict):
         return (price <= partial_level, take_sz, partial_level)
 
 
+# MAKER-FIRST PAPER ENTRIES (2026-07-10): abandon (never chase) a timed-out
+# virtual maker entry whose market moved beyond this fraction of the original
+# signal price. 0.3% per the design blueprint.
+_MAKER_CHASE_GUARD_PCT = 0.003
+
+
+def _maker_first_cfg() -> dict:
+    """Live view of config.MAKER_FIRST_PAPER (lazy so tests can monkeypatch)."""
+    try:
+        from config import MAKER_FIRST_PAPER
+        return MAKER_FIRST_PAPER
+    except (ImportError, AttributeError):
+        return {"enabled": False}
+
+
+def _safe_ticker_px(ticker: dict, key: str) -> float:
+    """Positive float from a ticker field, else 0.0."""
+    try:
+        v = float((ticker or {}).get(key) or 0)
+        return v if v > 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _mid_from_ticker(ticker: dict) -> float:
     """Extract mid price (bid+ask)/2 from a ccxt ticker dict.
 
@@ -252,6 +276,20 @@ class OrderManager:
         # shared scalar let the FIRST venue each window consume it for ALL —
         # only that venue accrued funding (audit 2026-07-07).
         self._last_funding_hour: dict = {}
+
+        # MAKER-FIRST PAPER ENTRIES (2026-07-10): pending virtual post-only
+        # entry intents keyed "Exchange:SYMBOL", plus soak counters. Persisted
+        # to data/pending_maker_entries.json so a restart CANCELS cleanly
+        # (never ghost-opens). Boot is lazy (first enabled use) so the file is
+        # untouched while the flag is off.
+        self._pending_maker: dict = {}
+        self._maker_counters: dict = {
+            "maker": 0, "taker_fallback": 0, "abandoned": 0}
+        # Per-maker-fill measurement rows (signal_px vs fill_px delta) for
+        # the soak readout; persisted alongside the counters, capped at 200.
+        self._maker_fills: list = []
+        self._pending_maker_path = Path("data/pending_maker_entries.json")
+        self._maker_first_booted = False
 
         # Close failure counter: {position_id: fail_count}
         # After 3 failures, force-close in tracker to break infinite loops
@@ -899,7 +937,8 @@ class OrderManager:
                       order_type: str = "market", price: float = None,
                       candidate_id: int = None, mcp_score: float = None,
                       model_version: str = None,
-                      decision_id: str | None = None):
+                      decision_id: str | None = None,
+                      _maker_first_ctx: dict | None = None):
 
         # Provenance: reset per attempt; every internal reject stashes a
         # reason here before returning None.
@@ -1031,9 +1070,11 @@ class OrderManager:
         # widening stop losses. Deterministic ATR-based SL/TP is authoritative.
 
         # ── MCP Brain confidence → position size scaling ──
-        # High-conviction signals get more capital, marginal ones get less
+        # High-conviction signals get more capital, marginal ones get less.
+        # Skipped on a maker-first finalize (_maker_first_ctx): the intent's
+        # size was already boosted at register time — never boost twice.
         _pre_boost_size = size
-        if self.mcp_brain:
+        if self.mcp_brain and _maker_first_ctx is None:
             try:
                 base = symbol.split("/")[0].split(":")[0]
                 mcp_dec = self.mcp_brain.last_decisions().get(base, {})
@@ -1101,12 +1142,64 @@ class OrderManager:
             return None
         fill_price = float(fill_price)
 
+        # ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ──
+        # PAPER futures mcp/algorithmic-lane entries: instead of an immediate
+        # taker fill, register a VIRTUAL post-only limit at the touch (bid for
+        # buys / ask for sells). The position is NOT opened here — the monitor
+        # tick resolves the intent (honest strict trade-through -> maker fill;
+        # timeout -> taker fallback; runaway -> abandoned). _maker_first_ctx
+        # marks a finalize call from the resolver and must never re-intercept.
+        # tsmom is a hold-lane with its own exit policy — out of scope.
+        if (_maker_first_ctx is None and self.dry_run
+                and market_type == "futures" and order_type == "market"
+                and _maker_first_cfg().get("enabled", False)
+                and "tsmom" not in str(strategy or "").lower()
+                and sl and tp and float(sl) > 0 and float(tp) > 0):
+            self._maker_first_boot()
+            _mf_key = f"{exchange.name}:{symbol}"
+            if _mf_key in self._pending_maker:
+                self.last_open_reject = "maker_first_pending"
+                return None
+            _mf_bid = _safe_ticker_px(ticker, "bid")
+            _mf_ask = _safe_ticker_px(ticker, "ask")
+            _mf_ref = float(price) if (price and float(price) > 0) else fill_price
+            if _mf_bid > 0 and _mf_ask > 0 and _mf_ref > 0:
+                _mf_limit = _mf_bid if side == "buy" else _mf_ask
+                self._pending_maker[_mf_key] = {
+                    "exchange": exchange.name, "symbol": symbol, "side": side,
+                    "market_type": market_type, "strategy": strategy,
+                    "size": float(size), "leverage": int(leverage),
+                    "limit_px": float(_mf_limit),
+                    # signal_px: the market print at intent time — the
+                    # adverse-selection baseline for the 2-week soak.
+                    "signal_px": float(fill_price),
+                    "sl_pct": abs(_mf_ref - float(sl)) / _mf_ref,
+                    "tp_pct": abs(float(tp) - _mf_ref) / _mf_ref,
+                    "candidate_id": candidate_id, "mcp_score": mcp_score,
+                    "model_version": model_version, "decision_id": decision_id,
+                    "created_ts": time.time(),
+                }
+                self._persist_pending_maker()
+                logger.info(
+                    f"[MakerFirst] {symbol} {side.upper()}: virtual post-only "
+                    f"limit @ {_mf_limit:.6g} (last={fill_price:.6g}) — "
+                    f"awaiting strict trade-through, timeout "
+                    f"{_maker_first_cfg().get('timeout_sec', 45)}s")
+                self.last_open_reject = "maker_first_pending"
+                return None
+            # No usable book — a maker price cannot be justified honestly;
+            # fall through to the normal taker fill.
+
         # ── DRY_RUN realism: apply slippage + spread (2026-04-11) ──
         # In LIVE, SmartExecutor crosses the book and pays real slippage.
         # In DRY_RUN, paper used midpoint-ish ticker.last → systematically
         # better than any real fill. Apply directional spread + slippage so
         # paper pays what LIVE pays. See core/sim_execution.py for rationale.
-        if self.dry_run:
+        # Maker-first MAKER fills skip this: the fill IS the resting limit
+        # price exactly (no slippage on a passive fill); the taker_fallback
+        # leg still pays full slippage like any market order.
+        if self.dry_run and (_maker_first_ctx is None
+                             or _maker_first_ctx.get("fill_type") != "maker"):
             sim_fill = self.sim.paper_fill_price(
                 exchange, symbol, side, market_type,
                 base_price=fill_price, phase="open", size=size)
@@ -1115,6 +1208,25 @@ class OrderManager:
                     f"[SimExec] {symbol} {side} OPEN slip: "
                     f"{fill_price:.6g} → {sim_fill:.6g}")
                 fill_price = sim_fill
+
+        # ── Maker-first finalize: SL/TP off the ACTUAL fill price ──
+        # Both the maker and taker_fallback legs re-derive SL/TP from the
+        # original signal percentages against the realized fill, so the
+        # ACCURACY band geometry (tp-dist / sl-dist ratio) stays exact.
+        if _maker_first_ctx is not None:
+            if (_maker_first_ctx.get("fill_type") == "maker"
+                    and float(_maker_first_ctx.get("fill_px") or 0) > 0):
+                # A maker fill happens AT the resting limit price — exactly.
+                fill_price = float(_maker_first_ctx["fill_px"])
+            _mf_slp = float(_maker_first_ctx.get("sl_pct") or 0.0)
+            _mf_tpp = float(_maker_first_ctx.get("tp_pct") or 0.0)
+            if _mf_slp > 0 and _mf_tpp > 0 and fill_price > 0:
+                if side == "buy":
+                    sl = fill_price * (1.0 - _mf_slp)
+                    tp = fill_price * (1.0 + _mf_tpp)
+                else:
+                    sl = fill_price * (1.0 + _mf_slp)
+                    tp = fill_price * (1.0 - _mf_tpp)
 
         # ── Price Band Sanity Check ──
         if not self._check_price_band(symbol, side, fill_price, exchange, market_type):
@@ -1162,6 +1274,19 @@ class OrderManager:
         # Execution fill type ('maker'|'taker'|'maker_partial'); None in dry-run
         # (no real fill) and tagged by the executor on the live path below.
         _fill_type: str | None = None
+
+        # Maker-first finalize: tag the fill type for warehouse attribution
+        # and, on a MAKER fill, book the venue MAKER fee (the point of the
+        # feature) via the venue+fill-aware fee plumbing — instead of the
+        # generic taker rate Position.__post_init__ assumed. Must run BEFORE
+        # wallet.on_open so the paper wallet is charged the maker fee too.
+        if _maker_first_ctx is not None:
+            _fill_type = _maker_first_ctx.get("fill_type")
+            if _fill_type == "maker":
+                from core.position_tracker import _fee_rate as _mf_fee_rate
+                pos.entry_fee = pos.size * pos.entry_price * _mf_fee_rate(
+                    market_type, exchange.name, "maker")
+                pos.total_fees = pos.entry_fee + pos.exit_fee
 
         if self.dry_run:
             ok = self.wallet.on_open(
@@ -3025,10 +3150,234 @@ class OrderManager:
             except Exception as e:
                 logger.debug(f"[SimFund] {pos.symbol}: {e}")
 
+    # ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ──────────────────────────────
+
+    def _maker_first_boot(self):
+        """One-time boot sweep for maker-first paper entries.
+
+        Pending intents left on disk by a dead process are CANCELLED (never
+        ghost-opened): they are not loaded into memory, and the state file is
+        rewritten with an empty pending map. Soak counters and per-fill
+        measurement rows survive the restart. Lazy — first enabled use.
+        """
+        if self._maker_first_booted:
+            return
+        self._maker_first_booted = True
+        try:
+            if not self._pending_maker_path.exists():
+                return
+            state = json.loads(
+                self._pending_maker_path.read_text(encoding="utf-8"))
+            counters = state.get("counters") or {}
+            for k in self._maker_counters:
+                self._maker_counters[k] = int(
+                    counters.get(k, self._maker_counters[k]))
+            self._maker_fills = list(state.get("fills") or [])[-200:]
+            stale = state.get("pending") or {}
+            if stale:
+                logger.warning(
+                    f"[MakerFirst] boot sweep: cancelled {len(stale)} stale "
+                    f"pending intent(s) from a prior process "
+                    f"({sorted(stale)}) — never ghost-opened")
+                self._persist_pending_maker()
+        except Exception as e:
+            logger.warning(f"[MakerFirst] boot sweep failed: {e}")
+
+    def _persist_pending_maker(self):
+        """Persist pending intents + soak counters so a restart cancels
+        cleanly (the boot sweep discards whatever is pending here)."""
+        try:
+            self._pending_maker_path.parent.mkdir(parents=True, exist_ok=True)
+            self._pending_maker_path.write_text(
+                json.dumps({
+                    "pending": self._pending_maker,
+                    "counters": self._maker_counters,
+                    "fills": self._maker_fills[-200:],
+                }, indent=2),
+                encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[MakerFirst] persist failed: {e}")
+
+    def _maker_wick_through(self, exchange: BaseExchange, intent: dict) -> bool:
+        """True when a CLOSED 1m bar that opened AFTER the intent printed
+        strictly through the resting limit (wick fill between monitor ticks).
+
+        Bars that opened before the intent existed cannot honestly fill it,
+        and a still-forming bar is not consulted (its extreme is not final).
+        """
+        try:
+            candles = exchange.fetch_ohlcv(
+                intent["symbol"], "1m", limit=3,
+                market_type=intent["market_type"]) or []
+        except Exception:
+            return False
+        limit_px = float(intent["limit_px"])
+        created = float(intent.get("created_ts") or 0)
+        now = time.time()
+        for c in candles:
+            try:
+                ts = float(c[0]) / 1000.0
+                high, low = float(c[2]), float(c[3])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if ts < created or ts + 60.0 > now:
+                continue  # pre-intent bar, or bar still forming
+            if intent["side"] == "buy" and low < limit_px:
+                return True
+            if intent["side"] == "sell" and high > limit_px:
+                return True
+        return False
+
+    def _resolve_pending_maker_entries(self, exchange: BaseExchange):
+        """Resolve this venue's pending virtual maker intents (monitor tick).
+
+        HONEST FILL RULE: the resting limit fills as MAKER only when the
+        market trades STRICTLY THROUGH it — ticker last, or a post-intent
+        closed 1m bar extreme, strictly beyond the limit; a touch never
+        fills. After timeout_sec: taker fallback at the CURRENT price, unless
+        the market ran > _MAKER_CHASE_GUARD_PCT past the signal price, in
+        which case the entry is abandoned (maker_chase_abandoned).
+        """
+        self._maker_first_boot()
+        if not self._pending_maker:
+            return
+        cfg = _maker_first_cfg()
+        timeout = float(cfg.get("timeout_sec", 45))
+        now = time.time()
+        keys = [k for k, v in self._pending_maker.items()
+                if v.get("exchange") == exchange.name]
+        for key in keys:
+            intent = self._pending_maker.get(key)
+            if not intent:
+                continue
+            symbol, side = intent["symbol"], intent["side"]
+            limit_px = float(intent["limit_px"])
+            try:
+                ticker = exchange.fetch_ticker(symbol, intent["market_type"])
+            except Exception as e:
+                logger.debug(f"[MakerFirst] {symbol}: ticker fetch failed ({e})")
+                continue
+            last = _safe_ticker_px(ticker, "last")
+            # Strict trade-through on the live print (touch does NOT fill) …
+            filled = last > 0 and (
+                last < limit_px if side == "buy" else last > limit_px)
+            # … or on a post-intent closed 1m bar extreme (wick fill).
+            if not filled:
+                filled = self._maker_wick_through(exchange, intent)
+            if filled:
+                self._finalize_maker_intent(exchange, key, intent, "maker")
+                continue
+            if now - float(intent.get("created_ts") or now) <= timeout:
+                continue  # still resting inside the timeout window
+            # Timed out. Runaway guard: never chase a market that ran beyond
+            # the guard fraction of the ORIGINAL signal price.
+            signal_px = float(intent.get("signal_px") or 0)
+            cross_px = _safe_ticker_px(
+                ticker, "ask" if side == "buy" else "bid") or last
+            ran = 0.0
+            if signal_px > 0 and cross_px > 0:
+                ran = ((cross_px - signal_px) / signal_px if side == "buy"
+                       else (signal_px - cross_px) / signal_px)
+            if ran > _MAKER_CHASE_GUARD_PCT:
+                self._pending_maker.pop(key, None)
+                self._maker_counters["abandoned"] += 1
+                self._persist_pending_maker()
+                self.last_open_reject = "maker_chase_abandoned"
+                logger.info(
+                    f"[MakerFirst] {symbol} {side.upper()}: chase abandoned — "
+                    f"price ran {ran * 100:.2f}% past signal {signal_px:.6g} "
+                    f"(guard {_MAKER_CHASE_GUARD_PCT * 100:.1f}%)")
+                continue
+            self._finalize_maker_intent(
+                exchange, key, intent, "taker_fallback")
+
+    def _finalize_maker_intent(self, exchange: BaseExchange, key: str,
+                               intent: dict, fill_type: str):
+        """Open the position for a resolved intent through the normal open
+        path (all gates re-checked), then log the soak measurement.
+
+        fill_type 'maker' fills AT the resting limit with the venue maker
+        fee and no slippage; 'taker_fallback' pays the full current-price
+        taker fill like any market order.
+        """
+        self._pending_maker.pop(key, None)
+        side = intent["side"]
+        limit_px = float(intent["limit_px"])
+        sl_pct = float(intent.get("sl_pct") or 0.0)
+        tp_pct = float(intent.get("tp_pct") or 0.0)
+        # Provisional SL/TP off the limit; open_position re-derives both off
+        # the ACTUAL fill so the ACCURACY band geometry stays exact.
+        if side == "buy":
+            prov_sl, prov_tp = limit_px * (1 - sl_pct), limit_px * (1 + tp_pct)
+        else:
+            prov_sl, prov_tp = limit_px * (1 + sl_pct), limit_px * (1 - tp_pct)
+        ctx = {"fill_type": fill_type, "fill_px": limit_px,
+               "sl_pct": sl_pct, "tp_pct": tp_pct}
+        pos = self.open_position(
+            exchange, intent["symbol"], side, intent["market_type"],
+            intent["strategy"], float(intent["size"]), prov_sl, prov_tp,
+            leverage=int(intent.get("leverage") or 1),
+            candidate_id=intent.get("candidate_id"),
+            mcp_score=intent.get("mcp_score"),
+            model_version=intent.get("model_version"),
+            decision_id=intent.get("decision_id"),
+            _maker_first_ctx=ctx)
+        if pos is None:
+            logger.warning(
+                f"[MakerFirst] {intent['symbol']} {side.upper()}: resolved as "
+                f"{fill_type} but the open was rejected "
+                f"({self.last_open_reject}) — intent dropped")
+            self._persist_pending_maker()
+            return
+        self._maker_counters[fill_type] = (
+            self._maker_counters.get(fill_type, 0) + 1)
+        elapsed = time.time() - float(intent.get("created_ts") or time.time())
+        signal_px = float(intent.get("signal_px") or 0)
+        if fill_type == "maker":
+            from core.position_tracker import _fee_rate as _mf_fee_rate
+            mt = intent["market_type"]
+            fee_saved_bps = (
+                _mf_fee_rate(mt, exchange.name, "taker")
+                - _mf_fee_rate(mt, exchange.name, "maker")) * 1e4
+            px_delta_bps = 0.0
+            if signal_px > 0:
+                px_delta_bps = ((signal_px - pos.entry_price) / signal_px
+                                if side == "buy" else
+                                (pos.entry_price - signal_px) / signal_px) * 1e4
+            self._maker_fills.append({
+                "ts": time.time(), "symbol": intent["symbol"], "side": side,
+                "signal_px": signal_px, "fill_px": float(pos.entry_price),
+                "px_delta_bps": round(px_delta_bps, 3),
+                "fee_saved_bps": round(fee_saved_bps, 3),
+                "wait_sec": round(elapsed, 1),
+            })
+            logger.info(
+                f"[MakerFirst] {intent['symbol']} {side.upper()}: "
+                f"filled as MAKER after {elapsed:.0f}s "
+                f"(saved ~{fee_saved_bps + px_delta_bps:.1f} bps: "
+                f"fee {fee_saved_bps:.1f} + px {px_delta_bps:+.1f}; "
+                f"signal {signal_px:.6g} → fill {pos.entry_price:.6g})")
+        else:
+            logger.info(
+                f"[MakerFirst] {intent['symbol']} {side.upper()}: taker "
+                f"FALLBACK after {elapsed:.0f}s @ {pos.entry_price:.6g} "
+                f"(never traded through {limit_px:.6g})")
+        self._persist_pending_maker()
+
     def check_sl_tp(self, exchange: BaseExchange, market_type: str = "spot"):
         # Funding settlement piggybacks on the monitor loop
         if self.dry_run and market_type == "futures":
             self.accrue_paper_funding(exchange)
+        # MAKER-FIRST PAPER ENTRIES (2026-07-10): the monitor tick resolves
+        # pending virtual post-only intents for this venue (strict trade-
+        # through → maker fill; timeout → taker fallback / chase abandon).
+        if (self.dry_run and market_type == "futures"
+                and (self._pending_maker
+                     or _maker_first_cfg().get("enabled", False))):
+            try:
+                self._resolve_pending_maker_entries(exchange)
+            except Exception as e:
+                logger.warning(f"[MakerFirst] resolve tick failed: {e}")
         positions = self.tracker.get_open(exchange=exchange.name)
         for pos in positions:
             if pos.market_type != market_type:
