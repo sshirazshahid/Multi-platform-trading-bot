@@ -3,12 +3,12 @@ core/news_scanner.py — Market News + Sentiment + Trending Coins (24/7 Enhanced
 
 Fetches real-time crypto market data from free public APIs (no API keys needed):
 
-Sources:
-  CoinGecko      — trending coins, global market stats, fear & greed index
-  CryptoCompare  — latest crypto news headlines (free, no key)
-  Alternative.me — Fear & Greed Index
-  CoinDesk RSS   — major crypto news via RSS feed
-  CryptoPanic    — aggregated crypto news (free tier, no key for public posts)
+Sources (2026-07-10: CryptoCompare + CryptoPanic replaced — both dead keyless):
+  CoinGecko          — trending coins, global market stats
+  Alternative.me     — Fear & Greed Index
+  CoinDesk RSS       — major crypto news via RSS feed
+  Cointelegraph RSS  — crypto news via RSS feed
+  Decrypt RSS        — crypto news via RSS feed
 
 Output written to:
   data/news_cache.json         — full structured data
@@ -65,14 +65,17 @@ BREAKING_NEWS_ALERT  = NEWS_CFG.get("breaking_news_alert", True)
 
 # ── API Endpoints ──────────────────────────────────────────────────────
 
-# CryptoCompare free news endpoint (no API key required)
-NEWS_URL       = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=20"
-
-# CoinDesk RSS feed
-COINDESK_RSS   = "https://www.coindesk.com/arc/outboundfeeds/rss/"
-
-# CryptoPanic free tier (public posts, no API key needed)
-CRYPTOPANIC_URL = "https://cryptopanic.com/api/free/v1/posts/?public=true"
+# Keyless RSS news sources (2026-07-10 repair):
+#   - CryptoCompare min-api news now requires a key AND returns 0 items even
+#     with one (product discontinued) — removed.
+#   - CryptoPanic /api/free/v1 was removed upstream (404; v1 is 403) — removed.
+#   - Replaced with Cointelegraph + Decrypt RSS alongside the existing
+#     CoinDesk RSS (all probed working keyless 2026-07-10).
+RSS_SOURCES = [
+    ("coindesk",      "CoinDesk",      "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    ("cointelegraph", "Cointelegraph", "https://cointelegraph.com/rss"),
+    ("decrypt",       "Decrypt",       "https://decrypt.co/feed"),
+]
 
 # CoinGecko trending coins (free, no key)
 TRENDING_URL   = "https://api.coingecko.com/api/v3/search/trending"
@@ -113,12 +116,29 @@ MEDIUM_IMPACT_KEYWORDS = [
 
 # ── Rate limiting ──────────────────────────────────────────────────────
 _RATE_LIMIT = {
-    "cryptocompare": {"last": 0.0, "min_gap": 60},
     "coindesk":      {"last": 0.0, "min_gap": 120},
-    "cryptopanic":   {"last": 0.0, "min_gap": 120},
+    "cointelegraph": {"last": 0.0, "min_gap": 120},
+    "decrypt":       {"last": 0.0, "min_gap": 120},
     "coingecko":     {"last": 0.0, "min_gap": 60},
     "feargreed":     {"last": 0.0, "min_gap": 60},
 }
+
+# ── Per-source health (source -> ok/dead attempt counts, process lifetime) ──
+_SOURCE_HEALTH: dict[str, dict[str, int]] = {}
+
+
+def _health_mark(source: str, ok: bool):
+    """Record the outcome of an actual fetch attempt (rate-limit skips don't count)."""
+    h = _SOURCE_HEALTH.setdefault(source, {"ok": 0, "dead": 0})
+    h["ok" if ok else "dead"] += 1
+
+
+def _health_summary() -> str:
+    """One-line source health for the heartbeat log, e.g. 'coindesk:5ok/0dead'."""
+    return ", ".join(
+        f"{s}:{h['ok']}ok/{h['dead']}dead"
+        for s, h in sorted(_SOURCE_HEALTH.items())
+    )
 
 
 def _rate_ok(source: str) -> bool:
@@ -161,6 +181,60 @@ def _fetch_xml(url: str, timeout: int = 8) -> str | None:
     except Exception as e:
         logger.debug(f"[News] RSS fetch error ({url[:50]}...): {e}")
         return None
+
+
+def _parse_rss_items(xml_text: str, source_name: str) -> list:
+    """Parse an RSS 2.0 feed into the scanner's article-dict format.
+
+    Pure function (no network) so parsing is testable offline.
+    Returns [] on any parse failure (fail-open).
+    """
+    try:
+        root = ET.fromstring(xml_text)
+        items = root.findall(".//item")
+        result = []
+        for item in items[:15]:
+            title = (item.findtext("title") or "").strip()
+            if not title:
+                continue
+            pub_date = (item.findtext("pubDate") or "").strip()
+            link = (item.findtext("link") or "").strip()
+
+            # Parse RFC 822 date to our format
+            published = ""
+            if pub_date:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    dt = parsedate_to_datetime(pub_date)
+                    published = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    published = pub_date[:16]
+
+            # Extract categories from RSS
+            categories = ",".join(
+                (cat.text or "") for cat in item.findall("category")
+                if cat.text
+            )
+
+            impact = _classify_impact(title)
+            result.append({
+                "title":      title,
+                "source":     source_name,
+                "url":        link,
+                "published":  published,
+                "categories": categories,
+                "sentiment":  _score_headline(title),
+                "impact":     impact,
+                "breaking":   False,
+                "tags":       [c.strip() for c in categories.split(",")
+                               if c.strip()],
+            })
+        return result
+    except ET.ParseError as e:
+        logger.debug(f"[News] {source_name} RSS parse error: {e}")
+        return []
+    except Exception:
+        return []
 
 
 def _score_headline(title: str) -> int:
@@ -482,20 +556,12 @@ class NewsScanner:
     # ── News fetchers (all sources) ────────────────────────────────────
 
     def _fetch_all_news(self) -> list:
-        """Fetch from all news sources and merge into a single list."""
+        """Fetch from all RSS news sources and merge into a single list."""
         all_articles = []
-
-        # Source 1: CryptoCompare
-        articles = self._fetch_news_cryptocompare()
-        all_articles.extend(articles)
-
-        # Source 2: CoinDesk RSS
-        articles = self._fetch_news_coindesk()
-        all_articles.extend(articles)
-
-        # Source 3: CryptoPanic
-        articles = self._fetch_news_cryptopanic()
-        all_articles.extend(articles)
+        for rate_key, source_name, url in RSS_SOURCES:
+            all_articles.extend(
+                self._fetch_news_rss(rate_key, source_name, url)
+            )
 
         # Sort by published date descending (newest first)
         all_articles.sort(
@@ -504,146 +570,21 @@ class NewsScanner:
         )
         return all_articles
 
-    def _fetch_news_cryptocompare(self) -> list:
-        """Fetch headlines from CryptoCompare (original source)."""
-        if not _rate_ok("cryptocompare"):
-            logger.debug("[News] CryptoCompare rate-limited, skipping")
-            return self._get_cached_source_articles("CryptoCompare")
-        _rate_mark("cryptocompare")
+    def _fetch_news_rss(self, rate_key: str, source_name: str, url: str) -> list:
+        """Fetch and parse one RSS news source (keyless), with health tracking."""
+        if not _rate_ok(rate_key):
+            logger.debug(f"[News] {source_name} rate-limited, skipping")
+            return self._get_cached_source_articles(source_name)
+        _rate_mark(rate_key)
 
-        data = _fetch(NEWS_URL)
-        if not data:
-            return []
-        try:
-            articles = data.get("Data", [])
-            result = []
-            for a in articles[:20]:
-                title = a.get("title", "")
-                impact = _classify_impact(title)
-                result.append({
-                    "title":      title,
-                    "source":     a.get("source_info", {}).get("name", "CryptoCompare"),
-                    "url":        a.get("url", ""),
-                    "published":  datetime.fromtimestamp(
-                        a.get("published_on", 0)
-                    ).strftime("%Y-%m-%d %H:%M") if a.get("published_on") else "",
-                    "categories": a.get("categories", ""),
-                    "sentiment":  _score_headline(title),
-                    "impact":     impact,
-                    "breaking":   False,
-                    "tags":       [t.strip() for t in a.get("tags", "").split("|")
-                                   if t.strip()],
-                })
-            return result
-        except Exception:
-            return []
-
-    def _fetch_news_coindesk(self) -> list:
-        """Fetch headlines from CoinDesk RSS feed."""
-        if not _rate_ok("coindesk"):
-            logger.debug("[News] CoinDesk rate-limited, skipping")
-            return self._get_cached_source_articles("CoinDesk")
-        _rate_mark("coindesk")
-
-        xml_text = _fetch_xml(COINDESK_RSS)
+        xml_text = _fetch_xml(url)
         if not xml_text:
+            _health_mark(rate_key, ok=False)
             return []
 
-        try:
-            root = ET.fromstring(xml_text)
-            items = root.findall(".//item")
-            result = []
-            for item in items[:15]:
-                title = (item.findtext("title") or "").strip()
-                if not title:
-                    continue
-                pub_date = (item.findtext("pubDate") or "").strip()
-                link = (item.findtext("link") or "").strip()
-
-                # Parse RFC 822 date to our format
-                published = ""
-                if pub_date:
-                    try:
-                        from email.utils import parsedate_to_datetime
-                        dt = parsedate_to_datetime(pub_date)
-                        published = dt.strftime("%Y-%m-%d %H:%M")
-                    except Exception:
-                        published = pub_date[:16]
-
-                # Extract categories from RSS
-                categories = ",".join(
-                    (cat.text or "") for cat in item.findall("category")
-                    if cat.text
-                )
-
-                impact = _classify_impact(title)
-                result.append({
-                    "title":      title,
-                    "source":     "CoinDesk",
-                    "url":        link,
-                    "published":  published,
-                    "categories": categories,
-                    "sentiment":  _score_headline(title),
-                    "impact":     impact,
-                    "breaking":   False,
-                    "tags":       [c.strip() for c in categories.split(",")
-                                   if c.strip()],
-                })
-            return result
-        except ET.ParseError as e:
-            logger.debug(f"[News] CoinDesk RSS parse error: {e}")
-            return []
-        except Exception:
-            return []
-
-    def _fetch_news_cryptopanic(self) -> list:
-        """Fetch headlines from CryptoPanic free tier (public posts)."""
-        if not _rate_ok("cryptopanic"):
-            logger.debug("[News] CryptoPanic rate-limited, skipping")
-            return self._get_cached_source_articles("CryptoPanic")
-        _rate_mark("cryptopanic")
-
-        data = _fetch(CRYPTOPANIC_URL)
-        if not data:
-            return []
-
-        try:
-            posts = data.get("results", [])
-            result = []
-            for post in posts[:15]:
-                title = post.get("title", "").strip()
-                if not title:
-                    continue
-
-                # Parse ISO date
-                pub_raw = post.get("published_at", "")
-                published = ""
-                if pub_raw:
-                    try:
-                        published = pub_raw[:16].replace("T", " ")
-                    except Exception:
-                        published = ""
-
-                # Extract coin symbols from currencies array
-                currencies = post.get("currencies", []) or []
-                tags = [c.get("code", "").upper() for c in currencies
-                        if c.get("code")]
-
-                impact = _classify_impact(title)
-                result.append({
-                    "title":      title,
-                    "source":     "CryptoPanic",
-                    "url":        post.get("url", ""),
-                    "published":  published,
-                    "categories": ",".join(tags),
-                    "sentiment":  _score_headline(title),
-                    "impact":     impact,
-                    "breaking":   False,
-                    "tags":       tags,
-                })
-            return result
-        except Exception:
-            return []
+        items = _parse_rss_items(xml_text, source_name)
+        _health_mark(rate_key, ok=bool(items))
+        return items
 
     def _get_cached_source_articles(self, source: str) -> list:
         """Return articles from a specific source that are in the current cache."""
@@ -755,8 +696,9 @@ class NewsScanner:
             return self._cache.get("global", {})
 
     # ── Original _fetch_news removed — replaced by _fetch_all_news ────
-    # The old _fetch_news() is replaced by _fetch_news_cryptocompare()
-    # which has the same logic but adds impact/breaking fields.
+    # 2026-07-10: CryptoCompare (keyless 401 / keyed 0-items) and CryptoPanic
+    # (free/v1 endpoint removed upstream) sources dropped; RSS_SOURCES via
+    # _fetch_news_rss() is the news path now.
 
     def _build_sentiment(self, news: list) -> dict:
         """Aggregate sentiment score per coin from news tags and titles."""
@@ -933,5 +875,6 @@ class NewsScanner:
             f"BTC dom={glb.get('btc_dominance',0):.1f}% | "
             f"Trending: {', '.join(top)} | "
             f"{len(news)} headlines ({high_count} HIGH, {breaking_count} breaking) | "
-            f"Sources: {source_list}"
+            f"Sources: {source_list} | "
+            f"SrcHealth: {_health_summary() or 'n/a'}"
         )

@@ -18,10 +18,18 @@ Cache TTL: 600s (10 min). News doesn't change faster than this for scoring.
 
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+# Written every news cycle by core/news_scanner.py (RSS multi-source).
+# Used as the last-resort article source when direct APIs are down (2026-07-10).
+SCANNER_CACHE_PATH = Path("data/news_cache.json")
+_SCANNER_CACHE_MAX_AGE = 7200  # 2h — matches the veto window
 
 # High-impact negative keywords (veto-worthy)
 _VETO_KEYWORDS = frozenset({
@@ -54,6 +62,18 @@ class NewsSentimentFeed:
         self._veto_window = veto_window_sec  # 2 hours
         self._raw_articles: list[dict] = []
         self._raw_time: float = 0.0
+        # source -> {"ok": n, "dead": n} attempt counters (health visibility)
+        self._source_health: dict[str, dict[str, int]] = {}
+
+    def _health_mark(self, source: str, ok: bool):
+        h = self._source_health.setdefault(source, {"ok": 0, "dead": 0})
+        h["ok" if ok else "dead"] += 1
+
+    def _health_str(self) -> str:
+        return ", ".join(
+            f"{s}:{h['ok']}ok/{h['dead']}dead"
+            for s, h in sorted(self._source_health.items())
+        ) or "n/a"
 
     def fetch(self, coins: list[str]) -> dict[str, dict[str, Any]]:
         """Fetch news sentiment for a list of base coins.
@@ -188,7 +208,8 @@ class NewsSentimentFeed:
         logger.debug(
             f"[NewsFeed] {len(self._raw_articles)} articles, "
             f"{len(result)-1} coins scored, "
-            f"market_sentiment={result['__market__']['sentiment_score']:+.3f}")
+            f"market_sentiment={result['__market__']['sentiment_score']:+.3f}, "
+            f"src_health=[{self._health_str()}]")
         return result
 
     def _fetch_articles(self) -> list[dict]:
@@ -218,7 +239,9 @@ class NewsSentimentFeed:
                         "source": item.get("SOURCE_DATA", {}).get("NAME", ""),
                         "categories": categories,
                     })
+            self._health_mark("coindesk_api", ok=bool(articles))
         except Exception as e:
+            self._health_mark("coindesk_api", ok=False)
             logger.debug(f"[NewsFeed] CoinDesk fetch failed: {e}")
 
         # Fallback: CryptoCompare (already used by mcp_brain.fetch_news)
@@ -247,9 +270,59 @@ class NewsSentimentFeed:
                         "source": item.get("source_info", {}).get("name", ""),
                         "categories": [],
                     })
+                self._health_mark("cryptocompare", ok=bool(articles))
             except Exception as e:
+                self._health_mark("cryptocompare", ok=False)
                 logger.debug(f"[NewsFeed] CryptoCompare fallback failed: {e}")
 
+        # Last resort: articles collected by core/news_scanner.py (RSS
+        # multi-source) and persisted to data/news_cache.json. Zero network.
+        if not articles:
+            articles = self._articles_from_scanner_cache()
+            self._health_mark("scanner_cache", ok=bool(articles))
+
+        return articles
+
+    def _articles_from_scanner_cache(self) -> list[dict]:
+        """Map fresh (<2h) news_scanner cache articles to this feed's format.
+
+        Fail-open: any read/parse problem returns [] (neutral sentiment).
+        """
+        try:
+            raw = json.loads(SCANNER_CACHE_PATH.read_text(encoding="utf-8"))
+            fetched = datetime.fromisoformat(raw.get("fetched_at", ""))
+        except Exception:
+            return []
+        if time.time() - fetched.timestamp() > _SCANNER_CACHE_MAX_AGE:
+            return []
+
+        articles = []
+        for a in raw.get("news", []):
+            title = a.get("title", "")
+            if not title:
+                continue
+            score = a.get("sentiment", 0)
+            if isinstance(score, (int, float)) and score != 0:
+                sentiment = "POSITIVE" if score > 0 else "NEGATIVE"
+            else:
+                sentiment = self._classify_sentiment(title)
+            published_on = 0
+            pub = a.get("published", "")
+            if pub:
+                try:
+                    published_on = int(
+                        datetime.strptime(pub, "%Y-%m-%d %H:%M").timestamp()
+                    )
+                except Exception:
+                    published_on = 0
+            articles.append({
+                "title": title,
+                "body": "",
+                "sentiment": sentiment,
+                "published_on": published_on,
+                "source": a.get("source", ""),
+                "categories": [{"NAME": t} for t in (a.get("tags") or [])],
+            })
         return articles
 
     @staticmethod
