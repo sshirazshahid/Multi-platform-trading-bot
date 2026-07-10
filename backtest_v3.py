@@ -142,6 +142,19 @@ def resample_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
     return df_4h
 
 
+def closed_4h_bar(df_4h: pd.DataFrame, ts) -> "pd.Series | None":
+    """Most recent 4h bar that has CLOSED by the decision time of the 1h bar
+    labeled ``ts`` (decision happens at that bar's close, ts+1h). A 4h bar
+    starting at S spans S..S+4h, so it is closed iff S+4h <= ts+1h, i.e.
+    S <= ts-3h. Selecting merely ``index <= ts`` reads a forming bar (with up
+    to 3h of future data in its indicators) on 3 of every 4 decision bars —
+    the look-ahead flagged by the 2026-07-10 scan audit (finding A)."""
+    mask = df_4h.index <= (ts - pd.Timedelta(hours=3))
+    if not mask.any():
+        return None
+    return df_4h.loc[mask].iloc[-1]
+
+
 # C11 (tpbot retrofit 2026-07-08): one warehouse-backed DistFitSL fit per
 # (symbol, side) per run. Fitted quantiles are data-driven (85th-pctl MAE /
 # mean-MFE R-target), not ATR-scaled, so caching is sound; the 'fallback'
@@ -350,11 +363,15 @@ def run_backtest(df_1h: pd.DataFrame, symbol: str, leverage: int = 5,
         low = float(bar["low"])
         ts = df_1h.index[i]
 
-        # Get corresponding 4h bar (most recent 4h bar before this 1h bar)
-        mask_4h = df_4h.index <= ts
-        if mask_4h.sum() == 0:
+        # Get the most recent CLOSED 4h bar (audit 2026-07-10, finding A):
+        # `index <= ts` selected a still-FORMING 4h bar on 3 of every 4
+        # decision bars — a 12:00-labeled 4h bar spans 12:00-16:00, so at
+        # 13:00 its EMAs/ADX already contain up to 3h of future 1h data.
+        # A 4h bar is closed at decision time (the 1h bar's close, ts+1h)
+        # only when its start satisfies start+4h <= ts+1h, i.e. <= ts-3h.
+        bar_4h_row = closed_4h_bar(df_4h, ts)
+        if bar_4h_row is None:
             continue
-        bar_4h_row = df_4h.loc[mask_4h].iloc[-1]
         bar_4h = bar_4h_row.to_dict()
 
         bar_1h = bar.to_dict()
