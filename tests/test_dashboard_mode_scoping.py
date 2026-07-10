@@ -149,10 +149,12 @@ def test_warehouse_queries_are_mode_filtered():
     operating mode — the trades table mixes PAPER and CONTROLLED_LIVE."""
     src = DASH.read_text(encoding="utf-8")
     i = src.index("def load_warehouse_stats")
-    block = src[i:i + 4500]
-    assert block.count("AND mode = ?") >= 4, (
-        "per_symbol / per_family / slippage / header-count queries must "
-        "all filter by mode")
+    # 4500->6000 (2026-07-10): the current-boot cohort block grew the function
+    # head; it adds a 5th mode-filtered query, so the floor rises to 5.
+    block = src[i:i + 6000]
+    assert block.count("AND mode = ?") >= 5, (
+        "per_symbol / current-boot / per_family / slippage / header-count "
+        "queries must all filter by mode")
     assert '"PAPER" if _dr else "CONTROLLED_LIVE"' in block
 
 

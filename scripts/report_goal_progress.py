@@ -110,6 +110,65 @@ def directional_summary(conn: sqlite3.Connection, days: int = 30) -> dict:
     return out
 
 
+def _boot_epoch(root: Path) -> float | None:
+    """Epoch of the live process boot: the NEWEST "Signal source:" line in
+    today's bot log (bot_engine.run() logs it once per engine start). Loguru
+    writes local time; returns None when the log/line is missing."""
+    log = root / "logs" / f"bot_{datetime.now():%Y-%m-%d}.log"
+    best = None
+    try:
+        with log.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if "Signal source:" not in line:
+                    continue
+                try:
+                    best = datetime.strptime(
+                        line[:19], "%Y-%m-%d %H:%M:%S").timestamp()
+                except ValueError:
+                    continue
+    except OSError:
+        return None
+    return best
+
+
+def current_boot_summary(conn: sqlite3.Connection, since_epoch=None,
+                         root: Path = ROOT) -> dict:
+    """Current-boot cohort (2026-07-10): WR/n/pnl of trades ENTERED since the
+    live process boot — the honest "what is the bot doing NOW" lane. The 30d
+    aggregate blends dead-regime cohorts (pre-band geometry, old cutoffs) and
+    reads ~44% while the current cohort can sit in the target band."""
+    if since_epoch is not None:
+        since, src = float(since_epoch), "explicit"
+    else:
+        boot = _boot_epoch(root)
+        since = boot if boot is not None else time.time() - 6 * 3600
+        src = "boot_log" if boot is not None else "fallback_6h"
+    out: dict = {
+        "lane": "current_boot", "available": False,
+        "since_epoch": since, "since_source": src,
+    }
+    try:
+        res = conn.execute(
+            "SELECT COUNT(*) AS n, SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,"
+            "       SUM(realized_pnl) AS pnl"
+            "  FROM trades WHERE ts_exit IS NOT NULL AND ts_entry >= ?",
+            (since,),
+        ).fetchone()
+        n, wins = int(res["n"] or 0), int(res["wins"] or 0)
+        out.update(
+            {
+                "available": True,
+                "closed_trades": n,
+                "wins": wins,
+                "wr": round(wins / n, 4) if n else None,
+                "net_pnl": round(float(res["pnl"] or 0.0), 4),
+            }
+        )
+    except sqlite3.Error as e:
+        out["note"] = f"trades unreadable ({e})"
+    return out
+
+
 def build_report(root: Path = ROOT) -> dict:
     report: dict = {
         "goal": GOAL_LINE,
@@ -122,6 +181,7 @@ def build_report(root: Path = ROOT) -> dict:
         try:
             report["lanes"].append(probe_summary(conn))
             report["lanes"].append(directional_summary(conn))
+            report["lanes"].append(current_boot_summary(conn, root=root))
         finally:
             conn.close()
     report["lanes"].append(carry_summary(root / "data" / "carry_positions.json"))
@@ -148,6 +208,13 @@ def render_journal(report: dict) -> str:
             lines.append(
                 f"- **F1 carry** (validated, PAPER): {lane['cycles']} forward cycles, "
                 f"WR {_fmt_wr(lane['forward_wr'])}, open positions {lane['open_positions']}"
+            )
+        elif name == "current_boot":
+            lines.append(
+                f"- **current-boot cohort** ({lane['since_source']}): "
+                f"{lane['closed_trades']} closed, WR {_fmt_wr(lane.get('wr'))}, "
+                f"net {lane['net_pnl']} USDT — trades entered since the live "
+                f"process boot; the 30d line blends dead-regime cohorts"
             )
         else:
             lines.append(

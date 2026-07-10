@@ -1058,6 +1058,33 @@ def load_warehouse_stats() -> dict:
         ).fetchall()
         out["per_symbol"] = [dict(r) for r in rows]
 
+        # Current-boot cohort (2026-07-10): WR/n/pnl of trades ENTERED since
+        # the live process boot (fallback: last 6h) — the 30d/all-time
+        # aggregates blend dead-regime cohorts and understate the current
+        # geometry's WR. Reuses the goal-progress report's boot detection.
+        try:
+            import time as _t
+
+            from scripts.report_goal_progress import _boot_epoch
+            _boot = _boot_epoch(Path(".").resolve())
+            _since = _boot if _boot is not None else _t.time() - 6 * 3600
+            cb = conn.execute(
+                """SELECT COUNT(*) AS n,
+                          SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) > 0
+                                   THEN 1 ELSE 0 END) AS wins,
+                          SUM(realized_pnl + COALESCE(partial_realized_pnl,0)) AS net
+                     FROM trades
+                    WHERE status='CLOSED' AND mode = ? AND ts_entry >= ?""",
+                (wh_mode, _since)).fetchone()
+            out["current_boot"] = {
+                "n": int(cb["n"] or 0),
+                "wins": int(cb["wins"] or 0),
+                "net": float(cb["net"] or 0.0),
+                "src": "boot" if _boot is not None else "last 6h",
+            }
+        except Exception:
+            pass
+
         # Per-strategy-family whole-trade net PnL + count (current mode)
         fam = conn.execute(
             """SELECT COALESCE(strategy_family,'unknown') AS fam,
@@ -3320,6 +3347,14 @@ def render(open_pos, closed, dry_run, tick, fetcher: LiveFetcher):
             col("Source:", DIM),
             col(str(wh.get("total_candidates", 0)), WHITE),
             col(str(wh.get("total_trades", 0)), WHITE)))
+        _cb = wh.get("current_boot")
+        if _cb and _cb.get("n", 0) > 0:
+            _cb_wr = _cb["wins"] / _cb["n"] * 100
+            _cb_c = GREEN if _cb["net"] > 0 else (RED if _cb["net"] < 0 else DIM)
+            row("  {}  n={}  WR: {:.0f}%  net: {}".format(
+                col("THIS BOOT ({}):".format(_cb.get("src", "?")), CYAN + BOLD),
+                _cb["n"], _cb_wr,
+                col("{:+.2f}".format(_cb["net"]), _cb_c)))
         row("  {:<14} {:>4} {:>9} {:>6} {:>7} {:>9}".format(
             "Symbol", "N", "Net", "WR", "PF", "Expect"))
         for r_ in wh["per_symbol"]:

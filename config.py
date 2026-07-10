@@ -348,6 +348,15 @@ ACCURACY_TARGET_MODE = {
     "enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
     "tp_frac_of_sl": float(os.getenv("ACCURACY_TP_FRAC_OF_SL", "0.5")),
     "min_tp_pct": float(os.getenv("ACCURACY_MIN_TP_PCT", "0.5")),
+    # Band time-exit horizon (2026-07-10 leak fix): the band's 63-67% WR was
+    # audited on pure first-touch SL/TP with a 72h horizon, but the Phase-14
+    # era STALE/AGE_LIMIT cutoffs (~60min-4h) were closing band trades BEFORE
+    # the tight TP could be touched (warehouse 2026-07-10: take_profit 10/10
+    # wins vs STALE n=5 + AGE_LIMIT n=1 ALL losses). While a band position is
+    # younger than this horizon, time-based closes are suppressed and
+    # first-touch SL/TP governs; past it the existing time exits apply
+    # (zombie-position protection). See order_manager._accuracy_band_hold_active.
+    "max_hold_hours": float(os.getenv("ACCURACY_MAX_HOLD_HOURS", "72")),
 }
 
 # ── MIN-NOTIONAL FLOOR (owner UNBLOCK directive 2026-07-10) ──────────────────

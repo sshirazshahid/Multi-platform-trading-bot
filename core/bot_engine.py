@@ -3500,6 +3500,15 @@ class BotEngine:
                 _omr = getattr(self.order_mgr, "last_open_reject", None)
                 action["reject_reason"] = f"order_manager:{_omr or 'unspecified'}"
                 return False
+            # ACCURACY band marker (2026-07-10 time-exit leak fix): stamp
+            # entries whose TP the band rewrote so the position monitor
+            # suppresses STALE/AGE_LIMIT/scalp time exits inside
+            # ACCURACY_TARGET_MODE["max_hold_hours"] and first-touch SL/TP
+            # governs (order_manager._accuracy_band_hold_active; the tp-dist
+            # < sl-dist geometry fallback there covers restarts, since this
+            # dynamic attr does not persist to positions.json).
+            if _acc_mode_on:
+                pos._accuracy_band = True
             # Warehouse record_trade_open now happens inside open_position
             # (before SL placement) so fail-closed paths don't lose the row.
             # CLAUDE.md §4: structured markdown journal of the action (best-effort).

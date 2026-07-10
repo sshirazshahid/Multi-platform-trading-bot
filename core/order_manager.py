@@ -3177,7 +3177,17 @@ class OrderManager:
                             _pos_age_min = (datetime.now(timezone.utc) - _ot.replace(tzinfo=timezone.utc if _ot.tzinfo is None else _ot.tzinfo)).total_seconds() / 60
                     except Exception:
                         pass
-                    if _pos_age_min >= _tw_min:
+                    # ACCURACY band (2026-07-10 leak fix): band positions
+                    # defer ALL scalp time exits inside max_hold_hours so
+                    # first-touch SL/TP governs. False when the flag is off
+                    # (byte-identical) or past the horizon.
+                    _band_hold_scalp = _accuracy_band_hold_active(
+                        pos, _pos_age_min / 60.0)
+                    if _band_hold_scalp:
+                        logger.debug(
+                            f"[Orders] ACCURACY band hold: {pos.symbol} "
+                            f"age={_pos_age_min:.0f}m — scalp time exits deferred")
+                    if _pos_age_min >= _tw_min and not _band_hold_scalp:
                         logger.warning(
                             f"[Orders] SCALP_TIME_WALL: {pos.symbol} age={_pos_age_min:.0f}m >= {_tw_min}m — force-closing")
                         self.close_position(exchange, pos, "scalp_time_wall")
@@ -3186,7 +3196,7 @@ class OrderManager:
                     # Scalp stale close: flat positions at 45 min
                     _stale_min = _SM_tw.get("stale_close_min", 45)
                     _stale_profit = _SM_tw.get("stale_min_profit", 0.3)
-                    if _pos_age_min >= _stale_min:
+                    if _pos_age_min >= _stale_min and not _band_hold_scalp:
                         # Live fee-aware net. pos.pnl_pct is None on an OPEN
                         # position (only set at close, position_tracker.py:248),
                         # so the old read made `0.0 < stale_profit` ALWAYS true
@@ -3468,7 +3478,20 @@ class OrderManager:
             pos.current_px = price
             pos.unrealized_pnl_pct = net_pct / 100.0
 
-            if (age_hours >= max_age_h and net_pnl < 0
+            # ACCURACY band (2026-07-10 leak fix): band positions defer the
+            # STALE / AGE_LIMIT / AGE_LOSS time exits inside max_hold_hours
+            # (default 72h) so first-touch SL/TP governs — the geometry the
+            # 60-65% WR band was audited on. False when the flag is off
+            # (byte-identical) or past the horizon (zombie protection).
+            _band_hold = _accuracy_band_hold_active(pos, age_hours)
+            if _band_hold and age_hours >= min(max_age_h, max_stale_h):
+                logger.debug(
+                    f"[Orders] ACCURACY band hold: {pos.symbol} "
+                    f"age={age_hours:.1f}h — STALE/AGE time exits deferred "
+                    f"until SL/TP or horizon")
+
+            if (not _band_hold
+                    and age_hours >= max_age_h and net_pnl < 0
                     and abs(net_pct) >= AGE_LIMIT_MIN_LOSS_PCT):
                 logger.warning(
                     f"[Orders] AGE_LIMIT: {pos.symbol} {pos.side} "
@@ -3476,7 +3499,7 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — force-closing losing position")
                 _try_soft_close(self, pos, "AGE_LIMIT", proceed_fn=_close)
                 continue
-            elif (AGE_LOSS_ENABLED
+            elif (AGE_LOSS_ENABLED and not _band_hold
                     and age_hours >= max_loss_age_h
                     and net_pct <= -max_loss_age_pct):
                 logger.warning(
@@ -3485,7 +3508,8 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — cutting before mid-hold bleed worsens")
                 _try_soft_close(self, pos, "AGE_LOSS", proceed_fn=_close)
                 continue
-            elif age_hours >= max_stale_h and -0.3 <= net_pct <= 0.0:
+            elif (not _band_hold
+                    and age_hours >= max_stale_h and -0.3 <= net_pct <= 0.0):
                 # 2026-05-28: only STALE-close flat/losing positions.
                 # Profitable trades (net_pct > 0) should run to TP, not get
                 # killed as "stale". The old range [-0.3, +0.3] was prematurely
@@ -3496,6 +3520,59 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — flat/slight loss, freeing capital")
                 _try_soft_close(self, pos, "STALE", proceed_fn=_close)
                 continue
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ACCURACY_TARGET_MODE time-exit suppression (2026-07-10 leak fix).
+#
+# Warehouse diagnosis: with the band live (TP = 0.4-0.5 x SL), take_profit
+# exits ran 10/10 wins while STALE (n=5) and AGE_LIMIT (n=1) were ALL
+# losses — the Phase-14-era time cutoffs close band trades BEFORE the
+# tight TP can be touched, converting geometric wins into guaranteed
+# losses. The band's 63-67% WR was audited on pure first-touch SL/TP
+# with a 72h horizon, so time-based closes are suppressed on band
+# positions inside ACCURACY_TARGET_MODE["max_hold_hours"]. SL/TP/hard
+# max-loss authorities are untouched — only the TIME exits defer.
+# ─────────────────────────────────────────────────────────────────────
+def _accuracy_band_hold_active(position, age_hours) -> bool:
+    """True while a band position is exempt from time-based exits
+    (STALE / AGE_LIMIT / AGE_LOSS / scalp time wall / scalp stale).
+
+    Band marker: ``position._accuracy_band`` (stamped at the
+    bot_engine._execute_open chokepoint when the band rewrites tp_pct) OR
+    the restart-surviving geometry fallback — TP distance strictly shorter
+    than the IMMUTABLE entry-stop distance, which non-band entries can
+    never have (the min-R:R gate enforces tp >= min_rr x sl everywhere
+    else; tsmom carries tp=0 and never matches). Past ``max_hold_hours``
+    (default 72) returns False so the existing time exits provide
+    zombie-position protection. Flag off -> always False (byte-identical
+    monitor behavior). Fails closed on any bad input.
+    """
+    try:
+        from config import ACCURACY_TARGET_MODE as _acc
+    except ImportError:
+        return False
+    if not _acc.get("enabled", False):
+        return False
+    try:
+        if float(age_hours) >= float(_acc.get("max_hold_hours", 72)):
+            return False
+    except (TypeError, ValueError):
+        return False
+    if getattr(position, "_accuracy_band", False):
+        return True
+    try:
+        entry = float(getattr(position, "entry_price", 0) or 0)
+        tp = float(getattr(position, "take_profit", 0) or 0)
+        if hasattr(position, "entry_risk_stop"):
+            sl = float(position.entry_risk_stop() or 0)
+        else:
+            sl = float(getattr(position, "stop_loss", 0) or 0)
+        if entry > 0 and tp > 0 and sl > 0:
+            return abs(tp - entry) < abs(entry - sl)
+    except (TypeError, ValueError):
+        pass
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────
