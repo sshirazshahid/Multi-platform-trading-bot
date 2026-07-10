@@ -87,3 +87,23 @@ def test_applied_at_both_tp_authorities():
     )
     i = src.index("_claude_tp_clamped = _apply_accuracy_target")
     assert i > 0, "Claude ingestion clamp must apply the accuracy geometry"
+
+
+def test_execute_open_chokepoint_covers_all_builders():
+    """First live entry (ARB 2026-07-10, sl=0.8/tp=1.3 via the SCALP path)
+    proved builder-level overrides miss paths. _execute_open is the final TP
+    authority: every executed futures entry with a real TP must route through
+    the band, tsmom (tp=0) excluded, and the min-R:R gate must not reject the
+    intentional inverted shape when the mode produced it."""
+    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    i = src.index("def _execute_open")
+    block = src[i:]
+    j = block.index("actual_rr = tp_pct / sl_pct")
+    pre_rr = block[:j]
+    assert "_apply_accuracy_target(sl_pct, tp_pct)" in pre_rr, (
+        "the chokepoint must apply the band BEFORE the R:R gate"
+    )
+    rr_window = block[j : j + 400]
+    assert "not _acc_mode_on" in rr_window, (
+        "the min-R:R gate must carve out the intentional accuracy-band shape"
+    )

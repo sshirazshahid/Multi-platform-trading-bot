@@ -2900,11 +2900,31 @@ class BotEngine:
                 f"SL {_orig_sl:.2f}%→{sl_pct:.2f}% size "
                 f"{_orig_size:.1f}%→{size_pct:.1f}% (Phase 28)")
 
+        # ── ACCURACY_TARGET_MODE chokepoint (owner goal 2026-07-10) ──────────
+        # The FINAL TP authority: actions reach here from several builders
+        # (algorithmic block, Claude ingestion clamp, SCALP tier defaults,
+        # tier_params) — the first live entry proved builder-level overrides
+        # miss some paths (ARB opened sl=0.8/tp=1.3 via the scalp path). Apply
+        # the band geometry to every executed futures entry with a real TP;
+        # tsmom (tp_pct=0, exit = momentum flip) is excluded. Flag-off = no-op.
+        _acc_mode_on = False
+        if tp_pct > 0 and not _tsmom_bypass_rr:
+            from core.mcp_brain import _apply_accuracy_target
+            _tp_before_acc = tp_pct
+            tp_pct = _apply_accuracy_target(sl_pct, tp_pct)
+            _acc_mode_on = tp_pct != _tp_before_acc
+            if _acc_mode_on:
+                logger.info(
+                    f"[Claude] {symbol} ACCURACY band: TP {_tp_before_acc:.2f}%"
+                    f"→{tp_pct:.2f}% (SL={sl_pct:.2f}%, target WR 60-65%)")
+
         # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
         # Phase 2b: tsmom has no take-profit (R:R undefined) — its only price rail
         # is the wide disaster stop, so the R:R gate does not apply.
+        # ACCURACY_TARGET_MODE: the inverted shape (R:R ~0.5) is INTENTIONAL —
+        # the min-R:R gate exists to catch malformed proposals, not the band.
         actual_rr = tp_pct / sl_pct if sl_pct > 0 else 0
-        if actual_rr < min_rr and not _tsmom_bypass_rr:
+        if actual_rr < min_rr and not _tsmom_bypass_rr and not _acc_mode_on:
             logger.info(
                 f"[Claude] BLOCKED: {symbol} R:R {actual_rr:.2f}:1 "
                 f"< {min_rr:.1f}:1 minimum (SL={sl_pct}% TP={tp_pct}%)")
