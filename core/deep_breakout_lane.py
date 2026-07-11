@@ -73,6 +73,7 @@ from core.agents.breakout_probe_agent import (
     breakout_signal_last,
 )
 from core.agents.tsmom_probe_agent import ATR_LEN, wilder_atr_last
+from core.kill_switch import entries_halted
 
 STRATEGY_FAMILY = "deep_breakout"
 MODEL_VERSION = "deep_breakout_4h_v1"
@@ -164,6 +165,14 @@ class DeepBreakoutLane:
                 paused, pause_reason = self._pause_check()
             except Exception as e:
                 paused, pause_reason = True, f"pause_check_error:{e}"
+
+        # Entries-only kill switch (Codex port, 2026-07-12): blocks NEW lane
+        # entries only — the max-hold close above and all monitoring keep
+        # running. Transient like the vol pause: the signal bar is NOT marked
+        # seen, so entries resume within the bar once data/KILL_SWITCH is
+        # removed. State-change logging lives in core.kill_switch.
+        if not paused and entries_halted():
+            paused, pause_reason = True, "kill_switch_active"
 
         for symbol in self._cfg.get("symbols", ()):
             base = str(symbol).split("/")[0].split(":")[0]

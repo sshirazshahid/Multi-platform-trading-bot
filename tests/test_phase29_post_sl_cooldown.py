@@ -241,7 +241,10 @@ def test_execute_open_checks_cooldown_early():
     eo_idx = src.index("def _execute_open(self, action: dict)")
     # Window widened 3000→3500 (2026-06-12): provenance reject_reason stashes
     # added ~3 one-liner lines before this point; check order is unchanged.
-    head = src[eo_idx:eo_idx + 3500]
+    # Widened 3500→4300 (2026-07-12): the entries-only kill switch (an even
+    # cheaper, entries-global early exit) now sits BEFORE the cooldown check;
+    # check order relative to MCP/risk eval is unchanged.
+    head = src[eo_idx:eo_idx + 4300]
     assert "self.risk.is_sl_cooldown_active(" in head
 
 

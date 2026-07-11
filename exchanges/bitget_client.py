@@ -15,7 +15,7 @@ from loguru import logger
 
 from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY, DRY_RUN
 
-from .base import BaseExchange
+from .base import BaseExchange, validate_ohlcv
 
 _PLACEHOLDERS = {
     "", "none", "null",
@@ -246,7 +246,9 @@ class BitgetClient(BaseExchange):
                     result = []
             finally:
                 self.switch_to_spot()
-        return result
+        # Bitget bypasses super().fetch_ohlcv (direct ccxt call for the TF
+        # map), so the shared integrity gate is applied here explicitly.
+        return validate_ohlcv(result, timeframe, symbol=symbol, exchange=self.name)
 
     # ── fetch_ticker ──────────────────────────────────────────────────
 

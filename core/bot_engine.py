@@ -2424,6 +2424,17 @@ class BotEngine:
             action["reject_reason"] = "invalid_action_fields"
             return False
 
+        # Entries-only kill switch (Codex port, 2026-07-12): data/KILL_SWITCH
+        # present -> refuse this NEW entry before any sizing/order work.
+        # Monitoring, SL/TP management, maker-resolver, reconciliation and
+        # shadow probes keep running (deliberately NOT Codex's skip-whole-cycle
+        # semantics). State-change logging lives in core.kill_switch; removing
+        # the file resumes entries without a restart.
+        from core.kill_switch import entries_halted
+        if entries_halted():
+            action["reject_reason"] = "kill_switch_active"
+            return False
+
         # Phase 23 (2026-05-04): per-symbol cooldown — see __init__ context.
         # Silent early-exit when the symbol was just dust-skipped or
         # calibrator-refused. Stops MCP/news/sizing waste on the same

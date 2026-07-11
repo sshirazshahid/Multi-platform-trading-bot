@@ -139,10 +139,18 @@ class TestScalpModeConfig:
         )
 
     def test_scalp_longs_only_default(self):
+        # 2026-07-12: owner directive enabled shorts via SCALP_LONGS_ONLY=false
+        # in .env, so the LIVE value is operator-controlled. Pin the SHIPPED
+        # default literal in config.py instead (env absent -> longs-only True,
+        # the 61.9%-WR VWAP+Long evidence), and only type-check the live value.
+        from pathlib import Path
+
         from config import SCALP_MODE
-        assert SCALP_MODE["longs_only"] is True, (
-            "longs_only should be True — 61.9% WR for VWAP+Long signal"
+        src = Path("config.py").read_text(encoding="utf-8")
+        assert 'os.getenv("SCALP_LONGS_ONLY", "true")' in src, (
+            "shipped default must remain longs-only (env absent -> true)"
         )
+        assert isinstance(SCALP_MODE["longs_only"], bool)
 
     def test_scalp_trailing_disabled_default(self):
         from config import SCALP_MODE

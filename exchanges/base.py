@@ -120,6 +120,98 @@ def _is_timestamp_error(e: Exception) -> bool:
     return any(s in msg for s in _TIMESTAMP_ERRORS)
 
 
+# ── OHLCV integrity validation (Codex port, 2026-07-12) ────────────────
+# Reference semantics: Codex/bot/engine.py::_validate_candles, adapted to the
+# ccxt list-of-lists contract. Deliberate differences:
+#   * the forming bar is KEPT (mcp_brain / the lanes drop it themselves —
+#     dropping it here would change closed-bar semantics for every caller);
+#   * a defective series returns [] — the existing no-data return every
+#     fetch_ohlcv caller already handles — instead of raising. Fail-closed
+#     for the data, fail-open for the bot: the symbol is skipped this cycle.
+# Kill flag: config.OHLCV_VALIDATION_ENABLED (default true).
+
+_TF_UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+# Last candle OPEN must be within this many timeframes of now; beyond it the
+# feed is stale and every indicator computed from it is silently wrong.
+# 3 bars tolerates one venue hiccup plus the just-closed + forming bars.
+OHLCV_MAX_STALE_BARS = 3
+
+
+def _timeframe_seconds(timeframe: str) -> Optional[int]:
+    """'15m'/'1h'/'4h'/'1d' -> seconds; None when unparseable (staleness
+    check is then skipped — the structural checks still run)."""
+    tf = str(timeframe).strip().lower()
+    try:
+        return int(tf[:-1]) * _TF_UNIT_SECONDS[tf[-1]]
+    except (KeyError, ValueError, IndexError):
+        return None
+
+
+def _ohlcv_defect(candles: list, timeframe: str, now_s: float) -> Optional[str]:
+    """First integrity defect in a ccxt candle list, or None when sane.
+
+    Checks: row shape/coercibility, finite values, strictly-increasing
+    timestamps, OHLC range sanity (high >= max(o,c), low <= min(o,c),
+    volume >= 0 — note high >= max(o,c) >= min(o,c) >= low implies
+    high >= low), and staleness of the last candle vs the timeframe.
+    """
+    import math
+    prev_ts = None
+    for i, row in enumerate(candles):
+        try:
+            ts, o, h, low, c, v = (float(row[j]) for j in range(6))
+        except (TypeError, ValueError, IndexError):
+            return f"malformed row at index {i}: {str(row)[:80]}"
+        if not all(math.isfinite(x) for x in (ts, o, h, low, c, v)):
+            return f"non-finite OHLCV value at index {i}"
+        if prev_ts is not None and ts <= prev_ts:
+            return (f"non-increasing timestamp at index {i} "
+                    f"({int(ts)} <= {int(prev_ts)})")
+        prev_ts = ts
+        if h < max(o, c):
+            return f"high {h} < max(open, close) at index {i}"
+        if low > min(o, c):
+            return f"low {low} > min(open, close) at index {i}"
+        if v < 0:
+            return f"negative volume {v} at index {i}"
+    tf_s = _timeframe_seconds(timeframe)
+    if tf_s:
+        age_s = now_s - float(candles[-1][0]) / 1000.0  # ccxt ts are ms
+        if age_s > OHLCV_MAX_STALE_BARS * tf_s:
+            return (f"stale series: last candle open {int(age_s)}s ago "
+                    f"(> {OHLCV_MAX_STALE_BARS} x {timeframe})")
+    return None
+
+
+def validate_ohlcv(candles, timeframe: str, *, symbol: str = "",
+                   exchange: str = "", now_s: Optional[float] = None):
+    """Shared fetch_ohlcv integrity gate.
+
+    Returns ``candles`` unchanged when the series is sane, when validation is
+    disabled (config.OHLCV_VALIDATION_ENABLED=false), or when the input is
+    empty/None (the existing no-data contract — not a defect). On a defect:
+    logs ONE WARNING naming it and returns [] so the caller skips the symbol
+    this cycle. The return type is always what callers already handle.
+    """
+    if not candles or not isinstance(candles, list):
+        return candles
+    try:
+        import config as _config
+        if not getattr(_config, "OHLCV_VALIDATION_ENABLED", True):
+            return candles
+    except Exception:
+        pass  # config unimportable (isolated unit tests) -> validate anyway
+    defect = _ohlcv_defect(
+        candles, timeframe, _time.time() if now_s is None else float(now_s))
+    if defect is None:
+        return candles
+    logger.warning(
+        f"[{exchange or 'exchange'}] OHLCV integrity check failed for "
+        f"{symbol or '?'} {timeframe}: {defect} — skipping this symbol this cycle")
+    return []
+
+
 def _first_float(*vals) -> Optional[float]:
     """First value coercible to a positive float, else None."""
     for v in vals:
@@ -168,8 +260,10 @@ class BaseExchange(ABC):
         for attempt in range(MAX_RETRIES):
             try:
                 params = self._futures_params() if market_type == "futures" else {}
-                return self.exchange.fetch_ohlcv(
-                    symbol, timeframe, limit=limit, params=params)
+                return validate_ohlcv(
+                    self.exchange.fetch_ohlcv(
+                        symbol, timeframe, limit=limit, params=params),
+                    timeframe, symbol=symbol, exchange=self.name)
             except Exception as e:
                 if _is_symbol_error(e):
                     logger.debug(f"[{self.name}] {symbol} not available — skipped")

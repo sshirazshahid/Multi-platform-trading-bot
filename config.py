@@ -245,6 +245,15 @@ MAKER_ONLY = {
 SLTP_TRIGGER_MARK_PRICE = (
     os.getenv("SLTP_TRIGGER_MARK_PRICE", "true").lower() == "true")
 
+# OHLCV integrity validation (Codex port, 2026-07-12): every
+# BaseExchange.fetch_ohlcv result is checked for monotonic timestamps,
+# finite values, OHLC range sanity and staleness (exchanges/base.py::
+# validate_ohlcv). A defective series is replaced by [] (the existing
+# no-data return) so callers skip the symbol for one cycle — fail-closed
+# for the data, fail-open for the bot. Kill flag for emergencies only.
+OHLCV_VALIDATION_ENABLED = (
+    os.getenv("OHLCV_VALIDATION_ENABLED", "true").lower() == "true")
+
 # C8 (tpbot retrofit 2026-07-08): venue clock-drift alert threshold (ms).
 # The 60s health cycle samples an NTP-style offset per venue; sustained
 # drift beyond this warns in-engine and edge-alerts via health_watchdog.
