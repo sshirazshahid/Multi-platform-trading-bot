@@ -353,6 +353,42 @@ UNLOCK_SHORT_PROBE = {
     "venue_order": ("binance", "bybit", "bitget"),
 }
 
+# ── TSMOM-20d shadow probe (owner-directed regime-watch, 2026-07-11) ─────────
+# NOT a pipeline GO: time-series momentum is a REFUTED family (refuted-families
+# ledger — long-only TSMOM 2026-06-15, textbook trend 0/40 OOS 2026-06-13) and
+# the external Codex backtest behind this probe did NOT meet the reopen bar
+# (~1.8-month single-regime OOS, ~90-run sweep winner, prior period -17.4%).
+# The owner explicitly directed a LOG-ONLY forward paper test — the Codex
+# report's own recommendation was "regime-watch: monitor in paper mode, do NOT
+# automate" (bot_weight 0.0). TsmomProbeAgent proposes 20d-momentum entries on
+# BTC/ETH/SOL perps in two arms (1h + 4h; 2xATR stop, 2R target, 7d max hold,
+# notational 1%-risk sizing) into the shadow lane. Expectation: NO-PROMOTE.
+# It places NO orders and only runs inside the (already log-only) shadow lane,
+# so it changes ZERO live behaviour. Off restores the pre-probe lane exactly.
+TSMOM_PROBE = {
+    "enabled": os.getenv("SHADOW_TSMOM_PROBE_ENABLED", "true").lower() == "true",
+    # the Codex backtest data source was Bybit USDT linear perps
+    "venue": os.getenv("SHADOW_TSMOM_PROBE_VENUE", "bybit"),
+}
+
+# ── Breakout-60d shadow probe (owner-directed, Codex deep-run winner, 2026-07-11)
+# NOT a pipeline GO: textbook trend/breakout is a REFUTED family (ledger: 0/40
+# OOS 2026-06-13; donchian scored F in Codex's own first sweep). The Codex deep
+# run (5-6yr x 10 markets, survives 2x costs, 9/9 parameter cells stable) is
+# the family's strongest external evidence yet BUT was selected ON burned
+# holdout across 20 candidates, and Codex's OWN Monte Carlo fails our frozen
+# capital-preservation gates (P>0 91.5% < 0.95; maxDD p95 42.5% > 0.25).
+# Codex's own creation gate requires forward paper trading — this probe is
+# that, per owner directive. ~30-35% WR by design (3:1 R:R): conflicts with
+# the owner's >=65% WR-floor preference; could never join the accuracy-band
+# lane without a separate owner decision. Expectation: NO-PROMOTE. LOG-ONLY:
+# no orders, shadow lane only; off restores the pre-probe lane exactly.
+BREAKOUT_PROBE = {
+    "enabled": os.getenv("SHADOW_BREAKOUT_PROBE_ENABLED", "true").lower() == "true",
+    # the Codex deep run's data source was Bybit USDT linear perps
+    "venue": os.getenv("SHADOW_BREAKOUT_PROBE_VENUE", "bybit"),
+}
+
 # ── ACCURACY TARGET MODE (owner goal 2026-07-10: 60-65% WR futures band) ─────
 # Inverts the exit geometry at BOTH TP authorities in mcp_brain: TP distance
 # becomes tp_frac_of_sl x SL distance (default 0.5 -> theoretical hit rate

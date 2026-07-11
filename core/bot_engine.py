@@ -365,7 +365,8 @@ class BotEngine:
                 ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
             except Exception:
                 bl, ah = set(), None
-            extra_probes = self._build_listing_probe(wh) + self._build_unlock_probe(wh)
+            extra_probes = (self._build_listing_probe(wh) + self._build_unlock_probe(wh)
+                            + self._build_tsmom_probe(wh) + self._build_breakout_probe(wh))
             self._shadow_runner = ShadowRunner(
                 warehouse=wh,
                 ctx_provider=self._shadow_ctx_for_symbol,
@@ -428,6 +429,61 @@ class BotEngine:
             return [probe]
         except Exception as e:
             logger.warning(f"[Engine] unlock-short probe init skipped: {e}")
+            return []
+
+    def _build_tsmom_probe(self, wh) -> list:
+        """Construct the log-only TsmomProbeAgent — the OWNER-DIRECTED
+        TSMOM-20d regime-watch forward paper test (2026-07-11). NOT a pipeline
+        GO: TSMOM is a refuted family and the Codex backtest did not meet the
+        reopen bar; see the agent's module docstring. Fail-open: any error
+        yields no probe. The probe never receives an order path. The market
+        data / OHLCV providers are the generic venue-parameterized READ-ONLY
+        helpers already used by the unlock probe."""
+        try:
+            from config import TSMOM_PROBE
+            if not TSMOM_PROBE.get("enabled"):
+                return []
+            from core.agents.tsmom_probe_agent import TsmomProbeAgent
+            probe = TsmomProbeAgent(
+                warehouse=wh,
+                ohlcv_provider=self._unlock_ohlcv,
+                market_data_provider=self._unlock_market_data,
+                account_balance_provider=self._shadow_free_balance,
+                venue=str(TSMOM_PROBE.get("venue", "bybit")),
+            )
+            self._tsmom_probe = probe
+            logger.info("[Engine] TsmomProbeAgent registered (log-only shadow probe; "
+                        "owner-directed regime-watch, NOT a pipeline GO)")
+            return [probe]
+        except Exception as e:
+            logger.warning(f"[Engine] tsmom probe init skipped: {e}")
+            return []
+
+    def _build_breakout_probe(self, wh) -> list:
+        """Construct the log-only BreakoutProbeAgent — the OWNER-DIRECTED
+        forward paper test of the Codex deep-run winner breakout_60d
+        (2026-07-11). NOT a pipeline GO: textbook breakout is a refuted
+        family and the deep run fails our frozen capital-preservation gates;
+        see the agent's module docstring. Fail-open; never receives an order
+        path; reuses the generic venue-parameterized READ-ONLY providers."""
+        try:
+            from config import BREAKOUT_PROBE
+            if not BREAKOUT_PROBE.get("enabled"):
+                return []
+            from core.agents.breakout_probe_agent import BreakoutProbeAgent
+            probe = BreakoutProbeAgent(
+                warehouse=wh,
+                ohlcv_provider=self._unlock_ohlcv,
+                market_data_provider=self._unlock_market_data,
+                account_balance_provider=self._shadow_free_balance,
+                venue=str(BREAKOUT_PROBE.get("venue", "bybit")),
+            )
+            self._breakout_probe = probe
+            logger.info("[Engine] BreakoutProbeAgent registered (log-only shadow probe; "
+                        "owner-directed Codex deep-run winner, NOT a pipeline GO)")
+            return [probe]
+        except Exception as e:
+            logger.warning(f"[Engine] breakout probe init skipped: {e}")
             return []
 
     def _unlock_venue_order(self) -> tuple:

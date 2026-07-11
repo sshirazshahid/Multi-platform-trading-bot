@@ -124,7 +124,9 @@ def _build_probe_funding_provider(warehouse):
     """funding_rate_provider for resolve_pending: realized per-settlement funding
     RATE sum for a shadow_decisions row, sourced from the probes that book real
     per-8h funding — shadow_listing_probe.realized_funding_rate_sum (listing-short
-    probe) and shadow_unlock_probe (unlock-short probe, 2026-07-11). An unlock
+    probe), shadow_unlock_probe (unlock-short probe, 2026-07-11),
+    shadow_tsmom_probe and shadow_breakout_probe (owner-directed Codex
+    regime-watch probes, 2026-07-11). An unlock
     '-sl8' counterfactual row reads the SL-FROZEN sum (sl_cf_funding_rate_sum):
     a Guardian-stopped position pays no further funding, so giving it the full
     hold-to-T sum would misstate the counterfactual. Any row without a probe
@@ -153,6 +155,26 @@ def _build_probe_funding_provider(warehouse):
                 f"SELECT {col} AS frs FROM shadow_unlock_probe "  # noqa: S608 - col is a literal
                 "WHERE proposal_id=? AND decision='ENTER'",
                 (base_pid,),
+            )
+        except Exception:
+            rows = []  # table absent -> try the TSMOM probe
+        if rows:
+            return float(rows[0].get("frs") or 0.0)
+        try:
+            rows = warehouse.query(
+                "SELECT realized_funding_rate_sum AS frs FROM shadow_tsmom_probe "
+                "WHERE proposal_id=?",
+                (pid,),
+            )
+        except Exception:
+            rows = []  # table absent -> try the breakout probe
+        if rows:
+            return float(rows[0].get("frs") or 0.0)
+        try:
+            rows = warehouse.query(
+                "SELECT realized_funding_rate_sum AS frs FROM shadow_breakout_probe "
+                "WHERE proposal_id=?",
+                (pid,),
             )
         except Exception:
             return 0.0
