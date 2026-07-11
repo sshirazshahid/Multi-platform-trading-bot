@@ -31,3 +31,26 @@ def _warehouse_isolation_guard(tmp_path, monkeypatch):
     cw._default = None
     yield
     cw._default = None
+
+
+@pytest.fixture(autouse=True)
+def _maker_state_isolation_guard(tmp_path, monkeypatch):
+    """Maker-first state-file isolation (2026-07-11).
+
+    The owner's .env sets MAKER_FIRST_PAPER_ENABLED=true, so any test that
+    reaches open_position/_maker_first_boot with the DEFAULT state path
+    (order_manager.py:291, cwd-relative data/pending_maker_entries.json)
+    rewrites the PRODUCTION file — the boot sweep empties its pending map,
+    wiping the live bot's persisted intents/counters mid-suite. Redirect the
+    default at construction; tests that assign their own path keep theirs.
+    """
+    import core.order_manager as om_mod
+
+    orig_init = om_mod.OrderManager.__init__
+
+    def _patched(self, *a, **k):
+        orig_init(self, *a, **k)
+        self._pending_maker_path = tmp_path / "pending_maker_entries.json"
+
+    monkeypatch.setattr(om_mod.OrderManager, "__init__", _patched)
+    yield

@@ -3655,7 +3655,13 @@ class BotEngine:
 
     def _check_all_sl_tp(self):
         """Check SL/TP for all open positions — parallel across exchanges."""
-        if self.tracker.count_open() == 0:
+        # Maker-first (2026-07-11): pending virtual intents are entries WITHOUT
+        # positions — on an empty book the old zero-open early-return starved
+        # the resolver forever (INJ/ARB intents hung 2h past their 45s timeout;
+        # the entries were silently lost). Run the monitor whenever intents
+        # are pending, even with zero open positions.
+        if (self.tracker.count_open() == 0
+                and not getattr(self.order_mgr, "_pending_maker", None)):
             return
 
         def _check_one(ex_name, exchange, mtype):

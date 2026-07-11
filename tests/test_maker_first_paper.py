@@ -379,3 +379,19 @@ def test_no_book_at_all_falls_through_to_taker(mf_on, tmp_path):
     pos = _open(om, ex, side="buy")
     assert pos is not None, "no honest maker price -> normal taker entry"
     assert f"{ex.name}:{SYM}" not in om._pending_maker
+
+
+# ── 2026-07-11: zero-open starvation deadlock ────────────────────────────────
+# _check_all_sl_tp early-returned when count_open()==0 — but pending maker
+# intents ARE entries without positions, so on an empty book the resolver
+# never ran and intents hung forever past their 45s timeout (INJ/ARB lost).
+def test_monitor_runs_with_zero_positions_when_intents_pending():
+    from pathlib import Path
+
+    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    i = src.index("def _check_all_sl_tp")
+    block = src[i : i + 900]
+    assert "_pending_maker" in block, (
+        "the zero-open early-return must be bypassed while maker intents "
+        "are pending, or the resolver starves and entries are lost"
+    )
