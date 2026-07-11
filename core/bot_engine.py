@@ -365,7 +365,7 @@ class BotEngine:
                 ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
             except Exception:
                 bl, ah = set(), None
-            extra_probes = self._build_listing_probe(wh)
+            extra_probes = self._build_listing_probe(wh) + self._build_unlock_probe(wh)
             self._shadow_runner = ShadowRunner(
                 warehouse=wh,
                 ctx_provider=self._shadow_ctx_for_symbol,
@@ -402,6 +402,94 @@ class BotEngine:
             return [probe]
         except Exception as e:
             logger.warning(f"[Engine] listing-short probe init skipped: {e}")
+            return []
+
+    def _build_unlock_probe(self, wh) -> list:
+        """Construct the log-only UnlockShortProbeAgent (pipeline 08b
+        CONFIRMED-GO, 2026-07-11) with READ-ONLY calendar/market providers.
+        Fail-open: any error yields no probe (the shadow lane runs without
+        it). The probe never receives an order path."""
+        try:
+            from config import UNLOCK_SHORT_PROBE
+            if not UNLOCK_SHORT_PROBE.get("enabled"):
+                return []
+            from core.agents.unlock_short_probe_agent import UnlockShortProbeAgent
+            probe = UnlockShortProbeAgent(
+                warehouse=wh,
+                perp_resolver=self._unlock_perp_resolver,
+                market_data_provider=self._unlock_market_data,
+                ohlcv_provider=self._unlock_ohlcv,
+                account_balance_provider=self._shadow_free_balance,
+                calendar_dir=str(UNLOCK_SHORT_PROBE.get("calendar_dir",
+                                                        "data/unlock_calendar")),
+            )
+            self._unlock_probe = probe
+            logger.info("[Engine] UnlockShortProbeAgent registered (log-only shadow probe)")
+            return [probe]
+        except Exception as e:
+            logger.warning(f"[Engine] unlock-short probe init skipped: {e}")
+            return []
+
+    def _unlock_venue_order(self) -> tuple:
+        try:
+            from config import UNLOCK_SHORT_PROBE
+            return tuple(UNLOCK_SHORT_PROBE.get("venue_order") or ())
+        except Exception:
+            return ("binance", "bybit", "bitget")
+
+    def _unlock_perp_resolver(self, base: str):
+        """(venue, unified symbol) of the FIRST venue in the screen's frozen
+        fee-preference order listing an active USDT-linear perp for ``base``.
+        Read-only; None when no venue lists it (probe logs SKIP_NO_PERP)."""
+        want = f"{base}/USDT:USDT"
+        for venue in self._unlock_venue_order():
+            try:
+                ex = (self.active_exchanges or {}).get(venue)
+                client = getattr(ex, "exchange", None)
+                m = (getattr(client, "markets", None) or {}).get(want)
+                if m and m.get("swap") and m.get("active", True):
+                    return (venue, want)
+            except Exception:
+                continue
+        return None
+
+    def _unlock_market_data(self, venue: str, symbol: str) -> dict:
+        """Best bid/ask/quoteVolume + current funding rate for a perp on
+        ``venue``. Read-only; fail-open to {} so a missing symbol skips."""
+        out: dict = {}
+        try:
+            ex = (self.active_exchanges or {}).get(venue)
+            if ex is None:
+                return out
+            t = ex.fetch_ticker(symbol, market_type="futures") or {}
+            out.update({
+                "bid": t.get("bid"), "ask": t.get("ask"), "last": t.get("last"),
+                "quoteVolume": (t.get("quoteVolume")
+                                or (t.get("info", {}) or {}).get("quoteVolume")),
+                "active": True,
+            })
+            client = getattr(ex, "exchange", None)
+            if client is not None and hasattr(client, "fetch_funding_rate"):
+                fr = client.fetch_funding_rate(symbol) or {}
+                out["funding_rate"] = fr.get("fundingRate")
+        except Exception as e:
+            logger.debug(f"[UnlockProbe] market_data {venue} {symbol} failed: {e}")
+        return out
+
+    def _unlock_ohlcv(self, venue: str, symbol: str, timeframe: str, since_ms: int) -> list:
+        """1h candles on ``venue`` since ``since_ms``. Read-only."""
+        try:
+            ex = (self.active_exchanges or {}).get(venue)
+            if ex is None:
+                return []
+            client = getattr(ex, "exchange", None)
+            if client is not None:
+                return client.fetch_ohlcv(
+                    symbol, timeframe, since=int(since_ms), limit=1000,
+                    params=self._futures_ohlcv_params(ex)) or []
+            return ex.fetch_ohlcv(symbol, timeframe, limit=1000, market_type="futures") or []
+        except Exception as e:
+            logger.debug(f"[UnlockProbe] ohlcv {venue} {symbol} failed: {e}")
             return []
 
     def _listing_venue_client(self):

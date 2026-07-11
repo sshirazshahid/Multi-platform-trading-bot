@@ -334,6 +334,25 @@ LISTING_SHORT_PROBE = {
     "venue": os.getenv("SHADOW_LISTING_PROBE_VENUE", "binance"),
 }
 
+# ── Unlock-short shadow probe (pipeline 08b CONFIRMED-GO, 2026-07-11) ────────
+# LOG-ONLY forward soak of the capital-scaled pre-unlock cliff short
+# (_workspace/strategy_pipeline/09_audit_candidate2_final.md). Scans the
+# data/unlock_calendar/ snapshot for >=10%-of-mcap cliff unlocks, proposes
+# 3%-notional UNLEVERED shorts at T-28d (W1) and T-14d (W2) exiting at unlock
+# T (4-concurrent cap per arm) into the shadow lane, and logs the per-bar MTM
+# path, the charter-§2 8%-SL-Guardian counterfactual, realized funding, and
+# the frozen discriminating score — binding conditions 1-5 of the audit. It
+# places NO orders and only runs inside the (already log-only) shadow lane, so
+# it changes ZERO live behaviour. Off restores the pre-probe shadow lane
+# exactly. NOTE: the probe only sees events present in data/unlock_calendar/ —
+# keep it refreshed via scripts/backfill_unlock_calendar.py --forward-days.
+UNLOCK_SHORT_PROBE = {
+    "enabled": os.getenv("SHADOW_UNLOCK_PROBE_ENABLED", "true").lower() == "true",
+    "calendar_dir": os.getenv("SHADOW_UNLOCK_CALENDAR_DIR", "data/unlock_calendar"),
+    # screen venue-preference order (binance 5 bps taker, then bybit/bitget 6)
+    "venue_order": ("binance", "bybit", "bitget"),
+}
+
 # ── ACCURACY TARGET MODE (owner goal 2026-07-10: 60-65% WR futures band) ─────
 # Inverts the exit geometry at BOTH TP authorities in mcp_brain: TP distance
 # becomes tp_frac_of_sl x SL distance (default 0.5 -> theoretical hit rate

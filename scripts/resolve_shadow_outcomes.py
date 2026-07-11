@@ -120,13 +120,18 @@ def build_fetch_candles(fetch_ohlcv, *, now_ms=None, max_group_fetches=DEFAULT_M
     return fetch_candles
 
 
-def _build_listing_funding_provider(warehouse):
+def _build_probe_funding_provider(warehouse):
     """funding_rate_provider for resolve_pending: realized per-settlement funding
-    RATE sum for a shadow_decisions row, sourced from the listing-short probe's
-    shadow_listing_probe.realized_funding_rate_sum (the only probe that books
-    real per-8h funding). Any row without a probe record (or if the table does
-    not exist yet) returns 0.0 — the resolver then keeps funding at 0, a
-    documented optimistic bound; funding is never fabricated."""
+    RATE sum for a shadow_decisions row, sourced from the probes that book real
+    per-8h funding — shadow_listing_probe.realized_funding_rate_sum (listing-short
+    probe) and shadow_unlock_probe (unlock-short probe, 2026-07-11). An unlock
+    '-sl8' counterfactual row reads the SL-FROZEN sum (sl_cf_funding_rate_sum):
+    a Guardian-stopped position pays no further funding, so giving it the full
+    hold-to-T sum would misstate the counterfactual. Any row without a probe
+    record (or if the tables do not exist yet) returns 0.0 — the resolver then
+    keeps funding at 0, a documented optimistic bound; funding is never
+    fabricated."""
+
     def provider(row: dict) -> float:
         pid = row.get("proposal_id")
         if not pid:
@@ -138,12 +143,28 @@ def _build_listing_funding_provider(warehouse):
                 (pid,),
             )
         except Exception:
-            return 0.0  # table absent (probe never ran) -> no realized funding
+            rows = []  # table absent (probe never ran) -> try the unlock probe
+        if rows:
+            return float(rows[0].get("frs") or 0.0)
+        base_pid = pid[:-4] if pid.endswith("-sl8") else pid
+        col = "sl_cf_funding_rate_sum" if pid.endswith("-sl8") else "realized_funding_rate_sum"
+        try:
+            rows = warehouse.query(
+                f"SELECT {col} AS frs FROM shadow_unlock_probe "  # noqa: S608 - col is a literal
+                "WHERE proposal_id=? AND decision='ENTER'",
+                (base_pid,),
+            )
+        except Exception:
+            return 0.0
         if not rows:
             return 0.0
         return float(rows[0].get("frs") or 0.0)
 
     return provider
+
+
+# Back-compat alias (pre-2026-07-11 name; tests and any external callers).
+_build_listing_funding_provider = _build_probe_funding_provider
 
 
 def _make_ccxt_fetcher():
@@ -205,7 +226,7 @@ def main(argv=None) -> int:
         _make_ccxt_fetcher(), max_group_fetches=args.max_group_fetches
     )
     summary = resolve_pending(
-        wh, fetch_candles, funding_rate_provider=_build_listing_funding_provider(wh)
+        wh, fetch_candles, funding_rate_provider=_build_probe_funding_provider(wh)
     )
     print(
         f"[resolve_shadow] resolved={summary['resolved']} "
