@@ -112,7 +112,13 @@ COOLDOWN_SEC = {
     # entry documents the family default (edge-triggered, so the cooldown
     # only matters across restarts of a still-true episode).
     "clock_drift":           60 * 60,
+    # 2026-07-11: stale maker-first intents = resolver starvation class.
+    "stale_maker_intents":   60 * 60,
 }
+
+# A pending maker intent older than this means the resolver is not running
+# (timeout is 45s; 10 minutes = unambiguous starvation, not a slow tick).
+STALE_MAKER_INTENT_SEC = 10 * 60
 
 # A forward feed must stay unhealthy this long before we alert — absorbs the
 # startup warmup window (status files from a previous run look stale until the
@@ -185,6 +191,7 @@ class HealthWatchdog:
             self._check_forward_feeds,
             self._check_latest_audit,
             self._check_clock_drift,
+            self._check_stale_maker_intents,
         ):
             try:
                 check()
@@ -266,6 +273,40 @@ class HealthWatchdog:
                  "drift_ms": round(drift, 1) if is_bad else None,
                  "threshold_ms": _thr} if is_bad else None,
             )
+
+    def _check_stale_maker_intents(self) -> None:
+        """2026-07-11 (watchdog check #16): stale maker-first intents.
+
+        A pending virtual maker entry that outlives ~10x its 45s timeout means
+        the resolver is not running — the starvation class that silently lost
+        the INJ/ARB entries on 2026-07-11 (zero-open early-return). Runtime
+        net: WARN the operator instead of losing entries quietly. Edge-
+        triggered; re-arms when pending drains.
+        """
+        state_path = Path("data/pending_maker_entries.json")
+        oldest_age = 0.0
+        stale_syms: list = []
+        try:
+            if state_path.exists():
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                now = time.time()
+                for key, intent in (state.get("pending") or {}).items():
+                    age = now - float(intent.get("created_ts") or now)
+                    if age > STALE_MAKER_INTENT_SEC:
+                        stale_syms.append(f"{key}@{age / 60:.0f}min")
+                    oldest_age = max(oldest_age, age)
+        except (OSError, ValueError, TypeError):
+            return  # unreadable state — not this check's business
+        is_bad = bool(stale_syms)
+        self._edge_alert(
+            "stale_maker_intents", is_bad, "WARN",
+            (f"{len(stale_syms)} maker-first intent(s) pending far past the "
+             f"45s timeout ({', '.join(stale_syms[:4])}) — the resolver is "
+             f"not running; entries are being LOST (starvation class, see "
+             f"2026-07-11 fix)" if is_bad else ""),
+            {"stale": stale_syms[:8],
+             "oldest_age_min": round(oldest_age / 60, 1)} if is_bad else None,
+        )
 
     def _check_heartbeat(self) -> None:
         if not HEARTBEAT_PATH.exists():

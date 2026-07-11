@@ -395,3 +395,43 @@ def test_monitor_runs_with_zero_positions_when_intents_pending():
         "the zero-open early-return must be bypassed while maker intents "
         "are pending, or the resolver starves and entries are lost"
     )
+
+
+# ── 2026-07-11: watchdog runtime net for the starvation class ────────────────
+def test_watchdog_alerts_on_stale_maker_intent(tmp_path, monkeypatch):
+    """A pending intent older than STALE_MAKER_INTENT_SEC must raise the
+    stale_maker_intents WARN edge-alert (the runtime net that turns any
+    future resolver-starvation bug into an email instead of lost entries)."""
+    import core.health_watchdog as hw
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "pending_maker_entries.json").write_text(json.dumps({
+        "pending": {"Binance:INJ/USDT:USDT": {
+            "created_ts": time.time() - 3600}},
+        "counters": {"maker": 0, "taker_fallback": 0, "abandoned": 0},
+        "fills": [],
+    }), encoding="utf-8")
+    wd = hw.HealthWatchdog(bot_engine=MagicMock(), notifier=MagicMock())
+    alerts = []
+    wd._edge_alert = lambda key, is_bad, level, msg, ctx=None, **kw: alerts.append(
+        (key, is_bad))
+    wd._check_stale_maker_intents()
+    assert ("stale_maker_intents", True) in alerts
+
+
+def test_watchdog_quiet_on_fresh_or_empty_pending(tmp_path, monkeypatch):
+    import core.health_watchdog as hw
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "pending_maker_entries.json").write_text(json.dumps({
+        "pending": {"Binance:ARB/USDT:USDT": {"created_ts": time.time() - 30}},
+        "counters": {}, "fills": [],
+    }), encoding="utf-8")
+    wd = hw.HealthWatchdog(bot_engine=MagicMock(), notifier=MagicMock())
+    alerts = []
+    wd._edge_alert = lambda key, is_bad, level, msg, ctx=None, **kw: alerts.append(
+        (key, is_bad))
+    wd._check_stale_maker_intents()
+    assert ("stale_maker_intents", False) in alerts  # re-arm path, not bad
