@@ -85,7 +85,11 @@ def carry_summary(positions_path: Path) -> dict:
 
 
 def directional_summary(conn: sqlite3.Connection, days: int = 30) -> dict:
-    """Directional (mcp) lane, closed PAPER trades over the window — the contrast."""
+    """Directional (mcp) lane, closed PAPER trades over the window — the contrast.
+
+    Excludes strategy_family='deep_breakout' (2026-07-11): that ACTIVE PAPER
+    lane is a ~33%-WR-by-design 3R cohort and must not contaminate the
+    65-70% accuracy-goal metric."""
     out: dict = {"lane": "directional_30d", "available": False}
     try:
         since = time.time() - days * 86400
@@ -94,7 +98,8 @@ def directional_summary(conn: sqlite3.Connection, days: int = 30) -> dict:
             "       SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0"
             "                THEN 1 ELSE 0 END) AS wins,"
             "       SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl"
-            "  FROM trades WHERE ts_exit IS NOT NULL AND ts_exit >= ?",
+            "  FROM trades WHERE ts_exit IS NOT NULL AND ts_exit >= ?"
+            "   AND COALESCE(strategy_family, '') <> 'deep_breakout'",
             (since,),
         ).fetchone()
         n, wins = int(res["n"] or 0), int(res["wins"] or 0)
@@ -150,12 +155,15 @@ def current_boot_summary(conn: sqlite3.Connection, since_epoch=None,
         "since_epoch": since, "since_source": src,
     }
     try:
+        # deep_breakout exclusion mirrors directional_summary — the active
+        # 3R lane (2026-07-11) is its own cohort, not the band's.
         res = conn.execute(
             "SELECT COUNT(*) AS n,"
             "       SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl, 0) > 0"
             "                THEN 1 ELSE 0 END) AS wins,"
             "       SUM(realized_pnl + COALESCE(partial_realized_pnl, 0)) AS pnl"
-            "  FROM trades WHERE ts_exit IS NOT NULL AND ts_entry >= ?",
+            "  FROM trades WHERE ts_exit IS NOT NULL AND ts_entry >= ?"
+            "   AND COALESCE(strategy_family, '') <> 'deep_breakout'",
             (since,),
         ).fetchone()
         n, wins = int(res["n"] or 0), int(res["wins"] or 0)

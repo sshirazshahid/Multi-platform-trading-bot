@@ -486,6 +486,61 @@ class BotEngine:
             logger.warning(f"[Engine] breakout probe init skipped: {e}")
             return []
 
+    def _run_deep_breakout_lane(self):
+        """Scheduled tick for the ACTIVE PAPER deep-breakout lane (owner
+        directive 2026-07-11, cohort strategy_family='deep_breakout').
+        Lazy-init; never raises into the scheduler. The lane's own
+        assert_paper_only() re-refuses every tick off-PAPER — any
+        PaperOnlyViolation lands here and is logged loudly, and no order
+        path is ever reached."""
+        try:
+            lane = getattr(self, "_deep_breakout_lane", None)
+            if lane is None:
+                from config import DEEP_BREAKOUT_LANE as _dbl_cfg
+                from core.deep_breakout_lane import DeepBreakoutLane
+                from core.warehouse import get_warehouse
+                lane = DeepBreakoutLane(
+                    exchanges=self.active_exchanges,
+                    order_manager=self.order_mgr,
+                    tracker=self.tracker,
+                    risk=self.risk,
+                    equity_provider=lambda: _deployable_total(self._balances),
+                    ohlcv_provider=self._unlock_ohlcv,
+                    warehouse=get_warehouse(),
+                    entry_pause_check=self._deep_breakout_entry_paused,
+                    cfg=_dbl_cfg,
+                )
+                self._deep_breakout_lane = lane
+                logger.info(
+                    "[Engine] DeepBreakoutLane initialized (ACTIVE PAPER, "
+                    "binance+bybit, cohort strategy_family='deep_breakout')")
+            lane.tick()
+        except Exception as e:
+            # includes PaperOnlyViolation — the lane never trades off-PAPER
+            logger.error(f"[Engine] deep-breakout lane tick refused/failed: {e}")
+
+    def _deep_breakout_entry_paused(self) -> tuple:
+        """(paused, reason) — the same market-wide BTC vol circuit breaker
+        _execute_open applies at C.4, for the deep-breakout lane's entries.
+        A2 convention: a BROKEN evaluation blocks entries (fail-closed)."""
+        try:
+            from config import BTC_VOL_PAUSE as _bvp_cfg
+        except ImportError:
+            return (False, "")
+        if not _bvp_cfg.get("enabled", False):
+            return (False, "")
+        try:
+            _bvp = getattr(self, "_btc_vol_pause", None)
+            if _bvp is None:
+                from core.btc_vol_pause import BtcVolPause
+                _bvp = BtcVolPause()
+                self._btc_vol_pause = _bvp
+            _ei = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
+            paused, reason, _ = _bvp.update_and_evaluate(_ei)
+            return (bool(paused), str(reason or "btc_vol_pause"))
+        except Exception as e:
+            return (True, f"btc_vol_pause_error:{e}")
+
     def _unlock_venue_order(self) -> tuple:
         try:
             from config import UNLOCK_SHORT_PROBE
@@ -3728,6 +3783,20 @@ class BotEngine:
                 f"{target.symbol} {target.id[:8]}")
             return False
 
+        # Deep-breakout lane positions (2026-07-11) likewise own their exit
+        # (2.2xATR SL / 3R TP / 126-bar max-hold via the lane tick + the §2 8%
+        # guardian). A discretionary portfolio CLOSE would clip the researched
+        # 3R geometry. The lane itself closes via order_manager.close_position
+        # directly, never through this path. ALWAYS-ON invariant.
+        from core.deep_breakout_lane import (
+            is_deep_breakout_position as _is_db_pos,
+        )
+        if _is_db_pos(target):
+            logger.info(
+                f"[Claude] portfolio CLOSE skipped — deep_breakout owns its "
+                f"exit: {target.symbol} {target.id[:8]}")
+            return False
+
         try:
             from core.machine_signal import (
                 is_machine_action as _is_machine_action,
@@ -5159,12 +5228,20 @@ class BotEngine:
             # discovered) positions don't have full Position state (stop_loss,
             # entry_price, side as a Position attr) and are handled in the
             # source=='exchange' branch of the MCP-advice loop below.
+            from core.deep_breakout_lane import (
+                is_deep_breakout_position as _is_db_pos,
+            )
             from core.tsmom_signal import is_tsmom_position as _is_tsmom_pos
             for pid_local, p_local in list(tracker_map.items()):
                 try:
                     # Phase 2b: tsmom positions own their exit (momentum flip) —
                     # skip the deterministic small-TP capture + age→BE tightener.
                     if _is_tsmom_pos(p_local):
+                        continue
+                    # Deep-breakout lane (2026-07-11): SL/TP + 126-bar max-hold
+                    # own the exit — small-TP capture / age→BE would clip the
+                    # researched 3R geometry.
+                    if _is_db_pos(p_local):
                         continue
                     if self._maybe_capture_small_tp(p_local):
                         continue  # Area 5 fired — position closing; skip Area 4
@@ -5204,6 +5281,11 @@ class BotEngine:
                     # CLOSE — no MCP advice (TAKE_PROFIT/TIGHTEN/BREAKEVEN) may
                     # clip or ratchet them. The wide disaster stop is the only rail.
                     if _is_tsmom_pos(p):
+                        continue
+                    # Deep-breakout lane: no MCP advice may clip or ratchet a
+                    # lane hold either — its rails are SL/TP, the §2 8%
+                    # guardian, and the lane's 126-bar max-hold close.
+                    if _is_db_pos(p):
                         continue
 
                     if action == "TAKE_PROFIT":
@@ -5694,6 +5776,30 @@ class BotEngine:
                 logger.info("[Engine] Self-improvement loop scheduled (PAPER, learn cadence)")
         except Exception:
             pass
+        # ── Deep-breakout ACTIVE PAPER lane (owner directive 2026-07-11) ──
+        # Places real PAPER orders (cohort strategy_family='deep_breakout';
+        # ~33% WR by design — excluded from the accuracy-band metrics). The
+        # log-only BreakoutProbeAgent keeps collecting frozen-gate evidence in
+        # parallel. Scheduled ONLY in PAPER; the lane additionally re-refuses
+        # every tick via assert_paper_only().
+        try:
+            from config import DEEP_BREAKOUT_LANE as _DBL_SCHED
+            if _DBL_SCHED.get("enabled"):
+                if DRY_RUN:
+                    _dbl_tick = max(60, int(_DBL_SCHED.get("tick_sec", 300)))
+                    schedule.every(_dbl_tick).seconds.do(self._run_deep_breakout_lane)
+                    logger.info(
+                        f"[Engine] Deep-breakout PAPER lane scheduled "
+                        f"(venues={list(_DBL_SCHED.get('venues', ()))}, "
+                        f"tick={_dbl_tick}s, 4h-boundary evaluation)")
+                else:
+                    logger.error(
+                        "[Engine] DEEP_BREAKOUT_LANE_ENABLED but mode is "
+                        "CONTROLLED_LIVE — lane REFUSED (PAPER-only hard gate; "
+                        "going live requires an owner decision + code change)")
+        except Exception as _dbl_e:
+            logger.debug(f"[Engine] deep-breakout lane scheduling skipped: {_dbl_e}")
+
         # Balance refresh happens inside _claude_portfolio_cycle, but also on schedule
         schedule.every(15).minutes.do(self._log_balances)
         if not DRY_RUN:

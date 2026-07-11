@@ -1068,13 +1068,17 @@ def load_warehouse_stats() -> dict:
             from scripts.report_goal_progress import _boot_epoch
             _boot = _boot_epoch(Path(".").resolve())
             _since = _boot if _boot is not None else _t.time() - 6 * 3600
+            # strategy_family='deep_breakout' excluded (2026-07-11): the
+            # active 3R lane is ~33% WR by design — a separate cohort that
+            # must not pollute the THIS-BOOT accuracy-band read.
             cb = conn.execute(
                 """SELECT COUNT(*) AS n,
                           SUM(CASE WHEN realized_pnl + COALESCE(partial_realized_pnl,0) > 0
                                    THEN 1 ELSE 0 END) AS wins,
                           SUM(realized_pnl + COALESCE(partial_realized_pnl,0)) AS net
                      FROM trades
-                    WHERE status='CLOSED' AND mode = ? AND ts_entry >= ?""",
+                    WHERE status='CLOSED' AND mode = ? AND ts_entry >= ?
+                      AND COALESCE(strategy_family,'') <> 'deep_breakout'""",
                 (wh_mode, _since)).fetchone()
             out["current_boot"] = {
                 "n": int(cb["n"] or 0),

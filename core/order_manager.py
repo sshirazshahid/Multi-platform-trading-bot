@@ -1150,10 +1150,15 @@ class OrderManager:
         # timeout -> taker fallback; runaway -> abandoned). _maker_first_ctx
         # marks a finalize call from the resolver and must never re-intercept.
         # tsmom is a hold-lane with its own exit policy — out of scope.
+        # deep_breakout likewise (2026-07-11): the researched Codex config
+        # fills TAKER at the next print after the 4h close — waiting at the
+        # touch would adverse-select breakout entries (price is running away
+        # by definition) and distort the forward test.
         if (_maker_first_ctx is None and self.dry_run
                 and market_type == "futures" and order_type == "market"
                 and _maker_first_cfg().get("enabled", False)
                 and "tsmom" not in str(strategy or "").lower()
+                and "deep_breakout" not in str(strategy or "").lower()
                 and sl and tp and float(sl) > 0 and float(tp) > 0):
             self._maker_first_boot()
             _mf_key = f"{exchange.name}:{symbol}"
@@ -3493,6 +3498,54 @@ class OrderManager:
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
                 continue  # hold to the momentum-flip CLOSE; skip all scalp exits
+
+            # ── DEEP-BREAKOUT lane exit policy (2026-07-11) ──────────────
+            # An ACTIVE-PAPER deep_breakout position exits ONLY via its own
+            # 2.2xATR SL / 3R TP (the wick check above in paper; exchange
+            # conditionals in live) or the lane's 126-bar max-hold close
+            # (core/deep_breakout_lane.py). Suppress the scalp machinery
+            # below (partial-TP, trailing, breakeven, entry-staleness,
+            # age/stale, the 3% hard-max-loss) which would clip the
+            # researched 3R geometry — but KEEP the charter §2 8%
+            # Stop-Loss-Guardian backstop and a polled SL/TP fallback so the
+            # position is never unprotected. Mirrors the tsmom precedent.
+            from core.deep_breakout_lane import (
+                is_deep_breakout_position as _is_db_pos,
+            )
+            if _is_db_pos(pos):
+                try:
+                    from config import DEEP_BREAKOUT_LANE as _DBL_CFG
+                    _db_guard = float(_DBL_CFG.get("hard_max_loss_pct", 8.0))
+                except Exception:
+                    _db_guard = 8.0
+                _db_pnl, _db_pct, _ = self._net_pnl_at_price(pos, price)
+                if _db_pnl < 0 and abs(_db_pct) >= _db_guard:
+                    logger.error(
+                        f"[Orders] DEEP-BREAKOUT GUARDIAN: {pos.symbol} "
+                        f"{pos.side.upper()} @ {price:.4f} net={_db_pct:+.2f}% "
+                        f"— charter §2 {_db_guard:g}% backstop close")
+                    self.close_position(exchange, pos, "hard_max_loss", price)
+                    continue
+                if not _exchange_handles_sltp:
+                    _db_sl = float(pos.stop_loss or 0)
+                    _db_tp = float(pos.take_profit or 0)
+                    if _db_sl > 0 and (
+                            (pos.side == "buy" and price <= _db_sl)
+                            or (pos.side == "sell" and price >= _db_sl)):
+                        logger.warning(
+                            f"[Orders] DEEP-BREAKOUT STOP LOSS: {pos.symbol} "
+                            f"{pos.side.upper()} @ {price:.4f} (SL={_db_sl:.6g})")
+                        self.close_position(exchange, pos, "stop_loss", price)
+                        continue
+                    if _db_tp > 0 and (
+                            (pos.side == "buy" and price >= _db_tp)
+                            or (pos.side == "sell" and price <= _db_tp)):
+                        logger.info(
+                            f"[Orders] DEEP-BREAKOUT TAKE PROFIT: {pos.symbol} "
+                            f"{pos.side.upper()} @ {price:.4f} (TP={_db_tp:.6g})")
+                        self.close_position(exchange, pos, "take_profit", price)
+                        continue
+                continue  # hold to SL/TP/max-hold; skip scalp early-exits
 
             # ── B6 (audit 2026-06-21): PLANNED-TP-FIRST (flag-gated) ──────────
             # When near_target_exit is ON, the configured/planned TP is the FIRST

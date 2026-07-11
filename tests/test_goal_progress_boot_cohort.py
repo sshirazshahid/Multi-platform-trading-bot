@@ -23,11 +23,16 @@ def _conn_with_trades(rows):
     conn.row_factory = sqlite3.Row
     # partial_realized_pnl: the report uses whole-trade PnL (2026-07-10
     # alignment with the dashboard cohort lane); rows may be 3- or 4-tuples.
+    # strategy_family mirrors the real warehouse schema (2026-07-11): the
+    # report now excludes the deep_breakout cohort, so the column must exist.
     conn.execute(
         "CREATE TABLE trades (ts_entry REAL, ts_exit REAL, realized_pnl REAL,"
-        " partial_realized_pnl REAL DEFAULT 0)")
+        " partial_realized_pnl REAL DEFAULT 0,"
+        " strategy_family TEXT DEFAULT 'claude_portfolio')")
     rows4 = [r if len(r) == 4 else (*r, 0.0) for r in rows]
-    conn.executemany("INSERT INTO trades VALUES (?,?,?,?)", rows4)
+    conn.executemany(
+        "INSERT INTO trades (ts_entry, ts_exit, realized_pnl,"
+        " partial_realized_pnl) VALUES (?,?,?,?)", rows4)
     return conn
 
 

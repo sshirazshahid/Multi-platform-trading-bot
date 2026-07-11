@@ -389,6 +389,35 @@ BREAKOUT_PROBE = {
     "venue": os.getenv("SHADOW_BREAKOUT_PROBE_VENUE", "bybit"),
 }
 
+# ── Deep-breakout ACTIVE PAPER lane (owner: "start trading aggressively", 2026-07-11)
+# ACTIVE PAPER orders (sim fills via sim_execution) for the Codex deep_breakout
+# strategy — unlike the log-only BREAKOUT_PROBE above, which stays untouched and
+# keeps collecting frozen-gate evidence in parallel. PAPER-ONLY by structural
+# gate: core/deep_breakout_lane.py refuses to construct/tick unless DRY_RUN
+# (going live = explicit owner decision + code change; Codex forward gate).
+# ~33% WR BY DESIGN (3:1 R:R trend system) — every order is cohort-tagged
+# strategy_family='deep_breakout' and the accuracy-band goal reporting
+# (report_goal_progress + dashboard THIS-BOOT) excludes the family.
+# "Aggressive" = every valid signal at the researched size, never above it.
+DEEP_BREAKOUT_LANE = {
+    "enabled": os.getenv("DEEP_BREAKOUT_LANE_ENABLED", "false").lower() == "true",
+    # Codex cross-exchange confidence: binance 78.8, bybit 57.4 — binance-first.
+    # bitget EXCLUDED: 44.7 on only ~100 days of usable 4h history.
+    "venues": ("binance", "bybit"),
+    # the 10 Codex-validated majors (== core.agents.breakout_probe_agent.SYMBOLS)
+    "symbols": (
+        "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
+        "BNB/USDT:USDT", "ADA/USDT:USDT", "DOGE/USDT:USDT", "LINK/USDT:USDT",
+        "AVAX/USDT:USDT", "DOT/USDT:USDT",
+    ),
+    "risk_pct": 1.0,               # researched: 1% equity risk per trade
+    "max_notional_multiple": 2.0,  # researched: notional <= 2x equity (< 2.5x charter)
+    "max_concurrent": 4,           # lane position cap
+    "lane_exposure_cap_pct": 6.0,  # lane gross notional <= 6% equity (half the §2 12% cap)
+    "hard_max_loss_pct": 8.0,      # charter §2 Stop-Loss-Guardian backstop (order_manager)
+    "tick_sec": 300,               # lane tick cadence; no-ops off the 4h boundary
+}
+
 # ── ACCURACY TARGET MODE (owner goal 2026-07-10: 60-65% WR futures band) ─────
 # Inverts the exit geometry at BOTH TP authorities in mcp_brain: TP distance
 # becomes tp_frac_of_sl x SL distance (default 0.5 -> theoretical hit rate
