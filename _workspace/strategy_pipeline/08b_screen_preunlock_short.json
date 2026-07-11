@@ -1,0 +1,46 @@
+{
+  "candidate": "pre_unlock_short_capital_scaled",
+  "hypothesis": "Shorting perps of tokens with >=10%-of-mcap non-insider cliff unlocks, entering T-28d or T-14d and exiting at unlock T (plus a T->T+3d adjudication arm), capital-scaled at 3%/12% unlevered on the account equity curve, clears the frozen gates after full costs including realized funding paid by the short.",
+  "n": {"W1": 32, "W2": 36, "W3": 41},
+  "after_cost_metrics": {
+    "W1": {"raw_net_mean": 0.0981, "win_rate": 0.750, "oos_wr": 0.875, "dsr": 0.847, "auc": 0.693, "mc_p_pos": 0.959, "mc_maxdd_p95": 0.062, "realized_mtm_maxdd": 0.073, "funding_sum_mean": -0.0150, "acct_total_return": 0.094},
+    "W2": {"raw_net_mean": 0.0996, "win_rate": 0.639, "oos_wr": 0.750, "dsr": 0.999, "auc": 0.682, "mc_p_pos": 0.996, "mc_maxdd_p95": 0.035, "realized_mtm_maxdd": 0.026, "funding_sum_mean": -0.0035, "acct_total_return": 0.108},
+    "W3": {"raw_net_mean": 0.0501, "win_rate": 0.683, "oos_wr": 0.719, "dsr": 0.975, "auc": 0.591, "mc_p_pos": 1.000, "mc_maxdd_p95": 0.016, "realized_mtm_maxdd": 0.012, "funding_sum_mean": -0.0018, "acct_total_return": 0.062},
+    "pbo_across_windows": 0.452,
+    "control_diagnostics": {"W1_underperf_vs_ctrl_mean": 0.108, "W2_underperf_vs_ctrl_mean": 0.089, "underperf_positive_rate": 0.73}
+  },
+  "gates": {
+    "dsr_min_0.10": {"W1": 0.847, "W2": 0.999, "W3": 0.975, "pass": true, "n_trials": 3},
+    "pbo_max_0.5": {"value": 0.452, "pass": true},
+    "oos_wr_min_0.55": {"W1": 0.875, "W2": 0.750, "W3": 0.719, "pass": true},
+    "auc_min_0.60": {"W1": 0.693, "W2": 0.682, "W3": 0.591, "pass_W1_W2": true, "pass_W3": false},
+    "mc_p_total_gt_0_min_0.95": {"W1": 0.959, "W2": 0.996, "W3": 1.000, "pass": true},
+    "mc_maxdd_p95_max_0.25_account_curve": {"W1": 0.062, "W2": 0.035, "W3": 0.016, "realized_mtm": {"W1": 0.073, "W2": 0.026, "W3": 0.012}, "pass": true}
+  },
+  "verdict": "GO",
+  "verdict_detail": "W1 (T-28d) and W2 (T-14d) clear ALL frozen gates; W3 (post-unlock adjudication arm) fails only AUC and is the weakest arm - pre-unlock beats post-unlock, matching the external anchor. Second-ever pipeline GO. Authorizes AT MOST a log-only shadow probe after honesty-auditor review.",
+  "data_used": {
+    "calendar": "data/unlock_calendar/ (147 symbols, keyless DefiLlama datasets bucket per audit 08d C2-a; scripts/backfill_unlock_calendar.py)",
+    "funding": "data/funding_history/ extended 137 -> 492 venue-symbol CSVs (real prints; zero events funding-excluded after extension)",
+    "prices": "local 1h OHLCV (spot-as-perp proxy, frozen convention)"
+  },
+  "exclusions_counted": {
+    "protocols_unmapped_ticker": 24, "protocols_no_perp": 67, "bucket_fetch_errors": 2,
+    "events_zero_tokens_or_no_ratio": 814, "events_ratio_below_10pct": 9321,
+    "events_no_ohlcv_file": 24, "events_no_price_window_per_window": "130-137 (local OHLCV depth; outcome-independent)",
+    "events_no_funding_coverage": 0
+  },
+  "caveats": [
+    "spot-as-perp proxy prices (frozen, stated divergence)",
+    "137/171 qualifying events unmeasurable from local OHLCV depth; 2024 nearly absent from sample",
+    "symbol concentration: SUI 7/32 W1 events",
+    "calendar/perp-listing survivorship (delisted tokens absent) - conservative for shorts",
+    "circ denominator = documented supply, median calibration 0.91 vs index (p10 0.53)",
+    "n just above the frozen 30 floor"
+  ],
+  "preregistration_frozen": true,
+  "n_trials_registered": 3,
+  "screen_script": "research/screen_preunlock_short.py",
+  "auditor_artifacts": "_workspace/tmp_phase2_run/diag_08b.json (per-event rows incl. control returns)",
+  "notes": "Source swap (paywalled api.llama.fi -> keyless defillama-datasets bucket) recorded per audit 08d; hypothesis/windows/sizing/costs/gates untouched. AUC score frozen pre-outcome in the execution addendum. Largest single W1 event is a LOSS (BASED -61.5%); top winner 13-15% of total PnL."
+}

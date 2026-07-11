@@ -1,0 +1,41 @@
+{
+  "candidate": "funding_settlement_window_timing_f1_refinement",
+  "hypothesis": "Shifting F1 delta-neutral carry entry to a tighter pre-settlement offset (-15m/-30m/-60m) or to +15m post-settlement changes net carry per episode vs F1's current [20,180]-min pre-settlement entry window (baseline = -105m mid-window), after identical registered costs.",
+  "n": 2586,
+  "n_by_venue": {"binance": 1642, "bybit": 944},
+  "after_cost_metrics": {
+    "frozen_sign_primary": {
+      "variant_mean_delta_bps": {"V1_-15m": 1.33, "V2_-30m": 1.26, "V3_-60m": 0.75, "V4_+15m": -11.17},
+      "best_variant": "V1",
+      "venue_mean_delta_bps": {"binance": 2.37, "bybit": -0.48}
+    },
+    "corrected_sign_diagnostic": {
+      "variant_mean_delta_bps": {"V1_-15m": -1.33, "V2_-30m": -1.26, "V3_-60m": -0.75, "V4_+15m": -14.60},
+      "note": "all variants negative under direct short-perp arithmetic; corrected_would_change_verdict = false"
+    },
+    "baseline_episode_mean_ret": 0.0167
+  },
+  "gates": {
+    "dsr_min_0.10": {"value": 1.0, "pass": true, "n_trials": 4, "note": "n=2586 makes a ~1bp mean statistically significant; economic bound below fails"},
+    "pbo_max_0.5": {"value": 0.0, "pass": true},
+    "oos_wr_min_0.55": {"value": 0.510, "pass": false, "folds": 5},
+    "fold_sign_stable": {"signs": [1, 1, 1, 1, -1], "pass": false},
+    "venue_sign_stable": {"binance_bps": 2.37, "bybit_bps": -0.48, "pass": false},
+    "best_mean_delta_gt_unmodeled_fill_bound_5bps": {"value_bps": 1.33, "pass": false},
+    "mc_p_total_gt_0_min_0.95": {"value": 1.0, "pass": true},
+    "mc_maxdd_p95_max_0.25": {"value": 0.064, "pass": true}
+  },
+  "verdict": "NO_GO",
+  "reason": "Best variant's improvement (+1.33 bps/episode, V1) is smaller than the unmodeled fill-quality bound (5 bps leg-spread cap, historically unverifiable), OOS-WR is a coin flip (0.510), and the Delta sign is unstable across walk-forward folds AND across binance vs bybit - the exact NO_GO declared in the frozen pre-registration. NO_GO holds under BOTH the frozen basis-term sign and the corrected-sign diagnostic.",
+  "byproduct_finding": "V4 (+15m post-settlement entry) is decisively bad (-11 to -15 bps/episode): skipping the s0 funding print costs real money. F1's current pre-settlement entry gate is on the right side; intra-window micro-timing adds nothing robust.",
+  "sign_convention_flag": "Frozen basis-term sign -(basis(t_V)-basis(t_B)) contradicts direct short-perp arithmetic; flagged pre-run in the execution addendum, both series computed, verdict identical under both. Auditor adjudication requested for the frozen text, not the verdict.",
+  "data_used": {
+    "premium_index": "data/premium_index/ 30 series 15m (binance depth to 2019-12, bybit to 2020-10; scripts/backfill_premium_index.py; bybit route added per audit 08d C1-a)",
+    "funding": "data/funding_history/{binance,bybit}_{BASE}.csv realized prints"
+  },
+  "exclusions_counted": {"not_qualifying_prints": 167036, "no_premium_bar": 118, "no_trailing_prints": 30, "missing_files": 0},
+  "partial_run_note": "First run executed with 29/30 series (binance_LTC mid-write); DISCARDED and re-run on the complete set. Partial runs are never verdicts.",
+  "preregistration_frozen": true,
+  "n_trials_registered": 4,
+  "screen_script": "research/screen_funding_timing.py"
+}

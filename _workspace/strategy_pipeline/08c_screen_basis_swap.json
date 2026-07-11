@@ -1,0 +1,35 @@
+{
+  "candidate": "quarterly_futures_basis_leg_swap_f1",
+  "hypothesis": "When annualized dated-futures basis exceeds expected perp funding APR, expressing the F1 carry short leg via the Binance quarterly (long spot + short dated future, hold to expiry) yields higher net carry than the floating perp leg after identical registered costs.",
+  "n": 31,
+  "after_cost_metrics": {
+    "sample": "conditional (APR_basis > APR_funding at entry), 31 of 64 monthly decision points 2021-03 -> 2026-06, all resolved",
+    "delta_mean_per_event": 0.00092,
+    "delta_median_per_event": 0.00177,
+    "win_rate": 0.581,
+    "unconditional_delta_mean": -0.00073,
+    "unconditional_win_rate": 0.547,
+    "cost_qtr_frac": 0.0045,
+    "cost_perp_frac": 0.005
+  },
+  "gates": {
+    "dsr_min_0.10": {"value": 0.463, "pass": true, "n_trials": 1},
+    "pbo_max_0.5": {"value": 0.0, "pass": true, "construction": "CSCV on per-event [basis_net, perp_net] 2-column matrix"},
+    "oos_wr_min_0.55": {"value": 0.625, "pass": true},
+    "mc_p_total_gt_0_min_0.95": {"value": 0.683, "pass": false},
+    "mc_maxdd_p95_max_0.25": {"value": 0.114, "pass": true}
+  },
+  "verdict": "NO_GO",
+  "verdict_detail": {
+    "btc_variant": "INFEASIBLE-AT-CURRENT-CAPITAL (unchanged, audit-confirmed; not re-probed)",
+    "eth_variant": "NO_GO: conditional leg-swap mean is positive (+9.2 bps/event) and clears DSR/PBO/OOS-WR/maxDD, but MC P(total>0)=0.683 << 0.95 — the capital-preservation probability gate fails; per the frozen decision tree a positive mean failing any gate is NO_GO."
+  },
+  "data_used": {
+    "quarterly": "data/ohlcv_cache/ETH-USDT_qtrcont_1h.parquet 2021-02-04 -> 2026-07-11 (47598 bars, scripts/backfill_quarterly_basis.py)",
+    "spot": "data/ohlcv_cache/ETH-USDT_qtrspot_1h.parquet 2021-02-04 -> 2026-07-11 (47591 bars)",
+    "funding": "data/funding_history/binance_ETH.csv (realized prints)"
+  },
+  "preregistration_frozen": true,
+  "screen_script": "research/screen_basis_swap_eth.py",
+  "notes": "Full ETH screen pre-registration was written into 08c BEFORE any quarterly data was pulled, per the frozen protocol. Quarterly-leg slippage registered as max(5bps convention, live measured half-spread 0.31-0.88bps) = 5bps; delivery modeled as Binance settlement fee = taker 5bps, no exit crossing. Small-N stated: n=31 is the bare minimum. Unconditional leg-swap is negative (-7.3 bps/event) - the conditional gate is doing real work but not enough."
+}
