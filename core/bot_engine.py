@@ -541,6 +541,78 @@ class BotEngine:
         except Exception as e:
             return (True, f"btc_vol_pause_error:{e}")
 
+    def _band_regime_veto(self, action: dict) -> str:
+        """Band-lane-ONLY toxic-regime entry veto (2026-07-12). Returns a
+        reject_reason string to veto the entry, or "" to allow.
+
+        Evidence — pre-registered screen `_workspace/strategy_pipeline/
+        13_band_conditional_screen.json` (14,555 resolved band outcomes,
+        12d span, Bonferroni m=16, band baseline WR 65.7%):
+          * 4h ADX > 30 at entry           -> band WR 59.0% (n=5,352,
+            halves 59.0/59.0, z~-10)
+          * BTC 1h ATR / 30d median < 0.7  -> band WR 55.6% (n=3,203, z~-12)
+        Thresholds are the screen's pre-registered bucket edges — hardcoded
+        on purpose; retuning them means a NEW pre-registered screen.
+
+        HONESTY: WR-band protection + bleed reduction — it removes the
+        conditionally-WORST buckets, it is NOT edge. Every bucket in the
+        screen kept a NEGATIVE after-cost expectancy; PnL-positive still
+        requires the evidence lanes.
+
+        Scope: called ONLY from _execute_open's accuracy-band carve-out
+        (_acc_mode_on), so mcp_brain scoring (which serves all consumers),
+        the deep_breakout lane, and shadow probes are untouched. Fail-OPEN:
+        missing ADX/ratio or any error allows the entry (protective filter,
+        not an availability gate); data gaps log once per distinct message.
+        """
+        try:
+            import config as _brf_cfg
+            if not getattr(_brf_cfg, "BAND_REGIME_FILTER_ENABLED", False):
+                return ""
+            # Veto 1 — 4h ADX > 30. mcp_brain's algo action builder threads
+            # its already-computed 4h ADX onto the action payload; sources
+            # that do not carry it (e.g. Claude ingestion) fail open.
+            _adx = action.get("adx_4h")
+            try:
+                _adx = float(_adx) if _adx is not None else None
+            except (TypeError, ValueError):
+                _adx = None
+            if _adx is None:
+                self._band_regime_log_once(
+                    "adx_4h missing on action -> fail-open (adx veto skipped)")
+            elif _adx > 30.0:
+                return "band_regime_filter:adx_4h>30"
+            # Veto 2 — BTC 1h ATR ratio vs its trailing median < 0.7. Reuses
+            # the BtcVolPause baseline (C.4 gate maintains it) read-only.
+            _bvp = getattr(self, "_btc_vol_pause", None)
+            if _bvp is None:
+                from core.btc_vol_pause import BtcVolPause
+                _bvp = BtcVolPause()
+                self._btc_vol_pause = _bvp
+            _brain = getattr(self, "mcp_brain", None)
+            _ic = getattr(_brain, "_indicator_cache", None) if _brain else None
+            _ratio = _bvp.current_ratio(_ic)
+            if _ratio is None:
+                self._band_regime_log_once(
+                    "BTC ATR ratio unavailable -> fail-open (vol veto skipped)")
+            elif _ratio < 0.7:
+                return "band_regime_filter:btc_vol<0.7"
+            return ""
+        except Exception as e:
+            self._band_regime_log_once(f"veto errored ({e}) -> fail-open")
+            return ""
+
+    def _band_regime_log_once(self, msg: str) -> None:
+        """Warn once per distinct band-regime data-gap message (fail-open
+        must be visible in the log without spamming every candidate)."""
+        seen = getattr(self, "_band_regime_logged", None)
+        if seen is None:
+            seen = set()
+            self._band_regime_logged = seen
+        if msg not in seen:
+            seen.add(msg)
+            logger.warning(f"[BandRegime] {msg}")
+
     def _unlock_venue_order(self) -> tuple:
         try:
             from config import UNLOCK_SHORT_PROBE
@@ -3182,6 +3254,19 @@ class BotEngine:
                 logger.info(
                     f"[Claude] {symbol} ACCURACY band: TP {_tp_before_acc:.2f}%"
                     f"→{tp_pct:.2f}% (SL={sl_pct:.2f}%, target WR 60-65%)")
+                # ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY veto ────
+                # Inside the _acc_mode_on carve-out by design: the evidence
+                # (screen 13_band_conditional) was measured on band outcomes,
+                # so mcp_brain scoring, the deep_breakout lane, and shadow
+                # probes are untouched. WR-band protection + bleed reduction,
+                # NOT edge (all screen buckets stay after-cost negative).
+                _brf_reason = self._band_regime_veto(action)
+                if _brf_reason:
+                    logger.info(
+                        f"[BandRegime] BLOCKED {symbol} — {_brf_reason} "
+                        f"(band-lane toxic regime; screen 13_band_conditional)")
+                    action["reject_reason"] = _brf_reason
+                    return False
 
         # R:R validation (always > min_rr_ratio because tiers define tp > 2x sl, but sanity-check)
         # Phase 2b: tsmom has no take-profit (R:R undefined) — its only price rail

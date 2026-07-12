@@ -477,6 +477,24 @@ ACCURACY_TARGET_MODE = {
     "max_hold_hours": float(os.getenv("ACCURACY_MAX_HOLD_HOURS", "72")),
 }
 
+# ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY toxic-regime veto ───────
+# Pre-registered screen _workspace/strategy_pipeline/13_band_conditional_screen
+# .json (14,555 resolved band outcomes, 12d span, Bonferroni m=16; band
+# baseline WR 65.7%) found two conditionally-WORST regimes for the accuracy
+# band:
+#   * 4h ADX > 30 at entry          -> band WR 59.0% (n=5,352, halves 59.0/59.0)
+#   * BTC 1h ATR / 30d median < 0.7 -> band WR 55.6% (n=3,203)
+# When enabled, _execute_open's accuracy-band carve-out VETOES new band-lane
+# entries in either regime (reject_reason band_regime_filter:*). Applies ONLY
+# where the band geometry is applied — never mcp_brain scoring, the
+# deep_breakout lane, or shadow probes. Fail-OPEN on missing ADX/ratio.
+# Thresholds are the screen's pre-registered bucket edges, hardcoded at the
+# check site (not tunable knobs — retuning means a NEW pre-registered screen).
+# HONESTY: WR-band protection + bleed reduction (removes the worst buckets),
+# NOT edge — every screen bucket kept a NEGATIVE after-cost expectancy;
+# PnL-positive still requires the evidence lanes.
+BAND_REGIME_FILTER_ENABLED = os.getenv("BAND_REGIME_FILTER_ENABLED", "false").lower() == "true"
+
 # ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ───────────────────────────────────
 # Fees were 25.4% of the last-500-trade loss ($39.63 of -$156.28) and the
 # 2026-07-10 pre-fix cohort was gross-POSITIVE before fees; on the no-edge

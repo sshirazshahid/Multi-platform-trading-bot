@@ -156,3 +156,24 @@ class BtcVolPause:
         if dirty:
             self._save()
         return False, "calm", info
+
+    def current_ratio(self, indicator_cache):
+        """BTC 1h ATR% divided by its trailing-median baseline, or None.
+
+        Read-only (no buffer append, no pause-state change) — the C.4 gate's
+        update_and_evaluate() owns and maintains the baseline. Returns None on
+        missing BTC data, warmup (< min_samples), or a non-positive median;
+        callers MUST fail OPEN on None. Added 2026-07-12 for the band-lane
+        regime filter (bot_engine._band_regime_veto, screen 13_band_conditional).
+        """
+        cfg = _cfg()
+        atr = extract_btc_atr_pct(indicator_cache, cfg.get("timeframe", "1h"))
+        if atr is None:
+            return None
+        samples = [a for (_, a) in self._buf]
+        if len(samples) < int(cfg.get("min_samples", 24)):
+            return None
+        median = statistics.median(samples)
+        if median <= 0:
+            return None
+        return atr / median

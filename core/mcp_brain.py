@@ -3959,6 +3959,10 @@ class MCPBrain:
                 "tp_pct": tp_pct,
                 "confidence": result["confidence"],
                 "mcp_score": result.get("score", 0),
+                # Band regime filter (2026-07-12): thread the 4h ADX the scorer
+                # already computed so _execute_open's band-lane veto can read
+                # it without recomputing. Sources without it fail open there.
+                "adx_4h": (exchange_indicators.get(coin) or {}).get("4h", {}).get("adx"),
                 "model_version": result.get("model_version"),
                 "p_win_ensemble": result.get("p_win_ensemble"),
                 "reason": (
