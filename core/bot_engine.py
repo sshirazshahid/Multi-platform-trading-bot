@@ -5708,6 +5708,28 @@ class BotEngine:
                 _op_mode,
                 strategy_family=_strategy_family,
             )
+            # Codex preflight port (2026-07-12): ADDITIONAL live-latch
+            # condition — venue capability preflight (clock skew, position
+            # mode, margin mode, protective-order path, min-notional floors).
+            # Never replaces the signed-checklist latch above; dormant in
+            # OBSERVATION/PAPER (guard keeps those startups untouched).
+            if (_op_mode or "").upper() == "CONTROLLED_LIVE":
+                from config import WHITELIST_SYMBOLS as _wl_syms
+                from core.live_gate import enforce_live_preflight_gate
+                # Connected venues only: an intentionally unconfigured venue
+                # must not block live startup; ZERO connected venues still
+                # fails closed inside run_live_preflight.
+                enforce_live_preflight_gate(
+                    _op_mode,
+                    exchanges=self.active_exchanges,
+                    symbols=sorted(_wl_syms),
+                    notify=getattr(self.notifier, "send", None),
+                    expect_one_way={
+                        str(_exn).lower():
+                            (str(_exn).lower() in self.order_mgr._oneway_mode)
+                        for _exn in self.active_exchanges
+                    },
+                )
         except SystemExit:
             raise
         except Exception as _e:

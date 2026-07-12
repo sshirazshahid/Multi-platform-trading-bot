@@ -283,6 +283,73 @@ def test_outlier_removed_pf_math():
         pytest.approx((0.1 * 18) / (0.05 * 20))
 
 
+# ── moving-block bootstrap expectancy lower bound (diagnostic c) ──────────
+# Codex statistics.py::moving_block_bootstrap_lower_mean semantics, pinned to
+# block~10 / 2000 resamples, seeded deterministically from the data length.
+# INFORMATIONAL ONLY — flagged when the 5th-pct lower bound is < 0.
+
+
+def test_bootstrap_lb_deterministic_across_calls():
+    gs = _gs()
+    data = [0.5, -1.0, 2.0, -0.5, 1.0, 0.3, -0.2, 0.8, -1.5, 0.6,
+            0.1, -0.4, 0.9, -0.7, 1.2]
+    a = gs.bootstrap_expectancy_lb(data)
+    b = gs.bootstrap_expectancy_lb(data)
+    assert a == b  # length-seeded RNG: identical input -> identical output
+    assert isinstance(a, float)
+
+
+def test_bootstrap_lb_flags_sign_correctly():
+    gs = _gs()
+    # every resample of an all-negative series has a negative mean
+    assert gs.bootstrap_expectancy_lb([-1.0] * 40) == pytest.approx(-1.0)
+    # and an all-positive series a positive one
+    assert gs.bootstrap_expectancy_lb([1.0] * 40) == pytest.approx(1.0)
+
+
+def test_bootstrap_lb_is_a_lower_bound_of_the_mean():
+    gs = _gs()
+    data = [0.5, -1.0, 2.0, -0.5, 1.0, 0.3, -0.2, 0.8, -1.5, 0.6] * 3
+    lb = gs.bootstrap_expectancy_lb(data)
+    assert lb <= sum(data) / len(data)
+
+
+def test_bootstrap_lb_short_or_empty_is_none():
+    gs = _gs()
+    assert gs.bootstrap_expectancy_lb([]) is None
+    assert gs.bootstrap_expectancy_lb([1.0]) is None
+
+
+def test_bootstrap_line_reported_per_arm_and_lane_informational(tmp_path):
+    gs = _gs()
+    report = gs.build_report(_fixture_db(tmp_path), now=NOW)
+    for scope in ("listing_short", "deep_breakout"):
+        c = _checks_by(report, scope, "bootstrap_expectancy_lb_p05")
+        assert c["info"] is True  # diagnostic line, NEVER a gate
+        assert c["actual"] is not None  # both scopes have >=2 resolved rows
+    # arms without resolved rows degrade to n/a, never crash
+    empty = _checks_by(report, "tsmom_1h", "bootstrap_expectancy_lb_p05")
+    assert empty["actual"] is None
+    assert empty["flagged"] is False
+
+
+def test_bootstrap_line_never_affects_blocked_or_score(tmp_path):
+    """Reporting only: strip every bootstrap line and the gate verdict and
+    readiness score must be unchanged."""
+    gs = _gs()
+    report = gs.build_report(_fixture_db(tmp_path), now=NOW)
+    gate_checks = [c for c in report["checks"] if not c["info"]]
+    assert all(c["name"] != "bootstrap_expectancy_lb_p05" for c in gate_checks)
+    assert report["blocked"] is True  # unchanged by the diagnostic
+
+
+def test_promotion_gate_does_not_import_gate_status():
+    """Reporting only — nothing may be imported INTO core/promotion_gate.py."""
+    src = (ROOT / "core" / "promotion_gate.py").read_text(encoding="utf-8")
+    assert "gate_status" not in src
+    assert "bootstrap_expectancy_lb" not in src
+
+
 def test_outlier_removed_pf_flag_in_report(tmp_path):
     gs = _gs()
     report = gs.build_report(_fixture_db(tmp_path), now=NOW)

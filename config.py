@@ -245,6 +245,23 @@ MAKER_ONLY = {
 SLTP_TRIGGER_MARK_PRICE = (
     os.getenv("SLTP_TRIGGER_MARK_PRICE", "true").lower() == "true")
 
+# ==============================================================
+# SL-FAIL EMERGENCY CLOSE (Codex order_router port, 2026-07-12)
+# ==============================================================
+# Charter §2 Stop-Loss Guardian alignment: when exchange-side SL placement
+# GENUINELY fails after the full retry ladder (BaseExchange.create_order
+# retries incl. Bybit-110072 clientOrderId regen / Binance -4120 routing),
+# the position is closed immediately through the NORMAL close path
+# (close_position → tracker.close → on_close hooks, reason=
+# 'sl_placement_failed') and the alert then reports "closed fail-safe".
+# Default TRUE. The flag exists ONLY as an operator escape hatch: false
+# restores the old behavior (_sl_failed=True + EMERGENCY alert + local
+# polled SL + per-minute exchange-SL reconcile — position stays open
+# WITHOUT exchange-side protection). Identical in PAPER and
+# CONTROLLED_LIVE (close_position sim-closes in paper).
+SL_FAIL_EMERGENCY_CLOSE_ENABLED = (
+    os.getenv("SL_FAIL_EMERGENCY_CLOSE_ENABLED", "true").lower() == "true")
+
 # OHLCV integrity validation (Codex port, 2026-07-12): every
 # BaseExchange.fetch_ohlcv result is checked for monotonic timestamps,
 # finite values, OHLC range sanity and staleness (exchanges/base.py::

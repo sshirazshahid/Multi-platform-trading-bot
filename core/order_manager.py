@@ -1781,16 +1781,34 @@ class OrderManager:
                     f"[Orders] SL-FAIL DEBUG hdrs | req={req_hdrs} resp={resp_hdrs}")
             except Exception as dbg_err:
                 logger.warning(f"[Orders] SL-FAIL debug capture itself failed: {dbg_err}")
-            try:
-                self.notifier.send(
-                    f"EMERGENCY: SL placement FAILED for {symbol} on {exchange.name}. "
-                    f"Closing position {pos.id[:8]} at market. Reason: {e}")
-            except Exception:
-                pass
             pos._sl_failed = True
-            # Fail-closed: close position immediately at market.
+            # Codex order_router port (2026-07-12): SL_FAIL_EMERGENCY_CLOSE_ENABLED
+            # (default TRUE — charter §2 Stop-Loss Guardian) gates the fail-closed
+            # close. This point is only reached after create_order's FULL retry
+            # ladder exhausted (incl. Bybit-110072 clientOrderId regen and the
+            # Binance -4120 algo routing) — never on a recovered transient error.
+            import config as _cfg
+            if not bool(getattr(_cfg, "SL_FAIL_EMERGENCY_CLOSE_ENABLED", True)):
+                # Operator escape hatch: position stays OPEN without exchange-side
+                # protection; local polled SL (check_sl_tp) + _reconcile_missing_sl
+                # (once/minute) are the only rails until the SL is restored.
+                try:
+                    self.notifier.send(
+                        f"EMERGENCY: SL placement FAILED for {symbol} on "
+                        f"{exchange.name}. Position {pos.id[:8]} is OPEN "
+                        f"WITHOUT exchange-side protection "
+                        f"(SL_FAIL_EMERGENCY_CLOSE_ENABLED=false); local SL "
+                        f"monitoring + per-minute reconcile active. Reason: {e}")
+                except Exception:
+                    pass
+                return
+            # Fail-closed: close FIRST through the NORMAL close path
+            # (close_position → tracker.close → on_close hooks — every close
+            # path hits all safety hooks), THEN alert with the true outcome.
+            closed_ok = False
             try:
                 self.close_position(exchange, pos, reason="sl_placement_failed")
+                closed_ok = True
             except Exception as close_err:
                 logger.critical(
                     f"[Orders] CRITICAL: fail-closed close_position also failed "
@@ -1801,6 +1819,14 @@ class OrderManager:
                         f"CRITICAL: {symbol} on {exchange.name} is NAKED and "
                         f"auto-close failed. MANUAL INTERVENTION REQUIRED. "
                         f"Reason: {close_err}")
+                except Exception:
+                    pass
+            if closed_ok:
+                try:
+                    self.notifier.send(
+                        f"EMERGENCY: SL placement FAILED for {symbol} on "
+                        f"{exchange.name} — position {pos.id[:8]} closed "
+                        f"fail-safe (charter §2 Stop-Loss Guardian). Reason: {e}")
                 except Exception:
                     pass
             # Do not attempt TP placement; position is (or should be) closed.

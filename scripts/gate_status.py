@@ -17,10 +17,13 @@ breakout_60d) and for the deep_breakout PAPER lane:
 
 For the deep_breakout lane the Codex forward-gate progress markers (trades
 n/60, PF vs 1.15, maxDD vs 12%, days vs 90) are reported PURELY
-INFORMATIONALLY, plus two honesty diagnostics (also informational, not gates):
+INFORMATIONALLY, plus honesty diagnostics (also informational, not gates):
   (a) expectancy-drift vs the frozen research baseline, flagged outside +/-30%;
   (b) outlier-removed profit factor (top max(1, ceil(5% n)) winners dropped),
-      flagged when < 1.0.
+      flagged when < 1.0;
+  (c) per arm/lane, the 5th-percentile expectancy from a moving-block
+      bootstrap (block ~10, 2000 resamples, RNG seeded from the data length
+      so output is deterministic), flagged when < 0.
 
 Read-only: opens the warehouse with sqlite mode=ro; degrades per-table when
 schema pieces are missing (fresh installs report zeros, never crash).
@@ -34,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import sqlite3
 import sys
 import time
@@ -130,7 +134,42 @@ ARMS = (
 )
 
 
+# Moving-block bootstrap (honesty diagnostic c, Codex statistics.py port
+# 2026-07-12) — block size pinned ~10 per the port review, 2000 resamples.
+BOOTSTRAP_BLOCK_SIZE = 10
+BOOTSTRAP_RESAMPLES = 2000
+BOOTSTRAP_PCT = 0.05
+
+
 # ── pure metric helpers ──────────────────────────────────────────────────────
+def bootstrap_expectancy_lb(returns, *, block_size=BOOTSTRAP_BLOCK_SIZE,
+                            simulations=BOOTSTRAP_RESAMPLES,
+                            pct=BOOTSTRAP_PCT):
+    """5th-percentile expectancy from a moving-block circular bootstrap
+    (Codex statistics.py::moving_block_bootstrap_lower_mean semantics with
+    the block size pinned to ~10). Deterministic: the RNG is seeded from the
+    data LENGTH — same resolved set, same answer; no wall-clock randomness
+    anywhere in the output. INFORMATIONAL ONLY — never a gate input.
+    Returns None below 2 finite observations."""
+    clean = [float(v) for v in returns if math.isfinite(float(v))]
+    n = len(clean)
+    if n < 2 or simulations < 1 or not 0.0 < pct < 0.5:
+        return None
+    block = max(1, min(int(block_size), n))
+    blocks_needed = math.ceil(n / block)
+    rng = random.Random(n)  # length-seeded — deterministic per resolved count
+    means = []
+    for _ in range(int(simulations)):
+        sample = []
+        for _ in range(blocks_needed):
+            start = rng.randrange(n)
+            sample.extend(clean[(start + off) % n] for off in range(block))
+        means.append(sum(sample[:n]) / n)
+    means.sort()
+    idx = max(0, min(len(means) - 1, math.floor(pct * len(means))))
+    return means[idx]
+
+
 def profit_factor(returns) -> float:
     """Sum(gains)/|sum(losses)|; inf when loss-free, 0.0 when gain-free."""
     gains = sum(v for v in returns if v > 0)
@@ -348,6 +387,23 @@ def _gate_checks(scope: str, rows: list) -> list:
     auc = rank_auc([s for s, _ in scored], [y for _, y in scored]) if scored else None
     checks.append(
         _check(scope, "auc", bool(auc is not None and auc >= MIN_AUC), auc, f">= {MIN_AUC:.2f}")
+    )
+
+    # (c) moving-block bootstrap expectancy lower bound — INFORMATIONAL line
+    # per arm/lane (never a gate; core/promotion_gate.py imports nothing here).
+    lb = bootstrap_expectancy_lb(rets) if rets else None
+    checks.append(
+        _check(
+            scope,
+            "bootstrap_expectancy_lb_p05",
+            None,
+            lb,
+            f"5th-pct moving-block bootstrap mean (block={BOOTSTRAP_BLOCK_SIZE}, "
+            f"{BOOTSTRAP_RESAMPLES} resamples, length-seeded) — informational, "
+            f"flagged when < 0",
+            info=True,
+            flagged=bool(lb is not None and lb < 0.0),
+        )
     )
     return checks
 
