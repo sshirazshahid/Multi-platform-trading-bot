@@ -50,6 +50,19 @@ if str(ROOT) not in sys.path:
 
 import numpy as np  # noqa: E402
 
+# Per-arm model_version strings — IMPORTED from the probe agents that write
+# them, so a probe rename can never silently desync this reporter.
+from core.agents.breakout_probe_agent import BREAKOUT_60D_MODEL_VERSION  # noqa: E402
+from core.agents.listing_short_probe_agent import LISTING_SHORT_MODEL_VERSION  # noqa: E402
+from core.agents.tsmom_probe_agent import (  # noqa: E402
+    TSMOM_1H_MODEL_VERSION,
+    TSMOM_4H_MODEL_VERSION,
+)
+from core.agents.unlock_short_probe_agent import (  # noqa: E402
+    UNLOCK_W1_MODEL_VERSION,
+    UNLOCK_W2_MODEL_VERSION,
+)
+
 # Frozen gate thresholds — IMPORTED, never re-declared (drift protection).
 from core.promotion_gate import (  # noqa: E402
     MAX_PBO,
@@ -61,21 +74,10 @@ from core.promotion_gate import (  # noqa: E402
 )
 from core.stat_tests import deflated_sharpe, sharpe  # noqa: E402
 
-
-def _load_resolved_floor() -> int:
-    """The >=30 resolved-events evaluation floor is owned by
-    scripts/report_goal_progress.py (auditor minimum, 2026-07-09). Loaded from
-    the file so the two reporters can never drift apart."""
-    import importlib.util
-
-    p = Path(__file__).resolve().parent / "report_goal_progress.py"
-    spec = importlib.util.spec_from_file_location("_gate_status_goal_floor", p)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return int(mod.RESOLVED_FLOOR)
-
-
-RESOLVED_FLOOR = _load_resolved_floor()
+# The >=30 resolved-events evaluation floor is owned by
+# scripts/report_goal_progress.py (auditor minimum, 2026-07-09). Imported so
+# the two reporters can never drift apart.
+from scripts.report_goal_progress import RESOLVED_FLOOR  # noqa: E402
 
 # ── Frozen research baseline (honesty diagnostic a) ─────────────────────────
 # Provenance: Codex/reports/deep_futures_runs.csv — the 10 `full_history` rows
@@ -111,24 +113,32 @@ DEEP_BREAKOUT_FORWARD_TARGETS = {
 ARMS = (
     {
         "name": "listing_short",
-        "model_version": "listing_short_probe_v1",
+        "model_version": LISTING_SHORT_MODEL_VERSION,
         "probe_table": "shadow_listing_probe",
     },
     {
         "name": "unlock_short_w1",
-        "model_version": "unlock_short_w1_v1",
+        "model_version": UNLOCK_W1_MODEL_VERSION,
         "probe_table": "shadow_unlock_probe",
     },
     {
         "name": "unlock_short_w2",
-        "model_version": "unlock_short_w2_v1",
+        "model_version": UNLOCK_W2_MODEL_VERSION,
         "probe_table": "shadow_unlock_probe",
     },
-    {"name": "tsmom_1h", "model_version": "tsmom_20d_1h_v1", "probe_table": "shadow_tsmom_probe"},
-    {"name": "tsmom_4h", "model_version": "tsmom_20d_4h_v1", "probe_table": "shadow_tsmom_probe"},
+    {
+        "name": "tsmom_1h",
+        "model_version": TSMOM_1H_MODEL_VERSION,
+        "probe_table": "shadow_tsmom_probe",
+    },
+    {
+        "name": "tsmom_4h",
+        "model_version": TSMOM_4H_MODEL_VERSION,
+        "probe_table": "shadow_tsmom_probe",
+    },
     {
         "name": "breakout_60d",
-        "model_version": "breakout_60d_4h_v1",
+        "model_version": BREAKOUT_60D_MODEL_VERSION,
         "probe_table": "shadow_breakout_probe",
     },
 )

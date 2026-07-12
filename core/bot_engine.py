@@ -365,8 +365,8 @@ class BotEngine:
                 ah = set(ALLOWED_HOURS_UTC) if ALLOWED_HOURS_UTC else None
             except Exception:
                 bl, ah = set(), None
-            extra_probes = (self._build_listing_probe(wh) + self._build_unlock_probe(wh)
-                            + self._build_tsmom_probe(wh) + self._build_breakout_probe(wh))
+            extra_probes = [p for spec in self._PROBE_SPECS
+                            for p in self._build_probe(wh, spec)]
             self._shadow_runner = ShadowRunner(
                 warehouse=wh,
                 ctx_provider=self._shadow_ctx_for_symbol,
@@ -381,110 +381,89 @@ class BotEngine:
             logger.error(f"[Engine] ShadowRunner init failed: {e}")
             self._shadow_runner = None
 
-    def _build_listing_probe(self, wh) -> list:
-        """Construct the log-only ListingShortProbeAgent with READ-ONLY market
-        providers. Fail-open: any error yields no probe (the shadow lane runs
-        without it). The probe never receives an order path."""
-        try:
-            from config import LISTING_SHORT_PROBE
-            if not LISTING_SHORT_PROBE.get("enabled"):
-                return []
-            from core.agents.listing_short_probe_agent import ListingShortProbeAgent
-            probe = ListingShortProbeAgent(
-                warehouse=wh,
+    # Log-only shadow probe specs, in registration order. Every probe is
+    # config-gated, fail-open, built from READ-ONLY providers only, and never
+    # receives an order path. Provenance notes live in each agent's module
+    # docstring (tsmom/breakout are OWNER-DIRECTED forward paper tests of
+    # refuted families, NOT pipeline GOs — see their headers).
+    _PROBE_SPECS = (
+        {
+            "config": "LISTING_SHORT_PROBE",
+            "import_path": "core.agents.listing_short_probe_agent:ListingShortProbeAgent",
+            "warn_label": "listing-short",
+            "log": "[Engine] ListingShortProbeAgent registered (log-only shadow probe)",
+            "kwargs": lambda self, cfg: dict(
                 markets_provider=self._listing_markets,
                 market_data_provider=self._listing_market_data,
                 ohlcv_provider=self._listing_ohlcv,
-                account_balance_provider=self._shadow_free_balance,
-                venue=str(LISTING_SHORT_PROBE.get("venue", "binance")),
-            )
-            self._listing_probe = probe
-            logger.info("[Engine] ListingShortProbeAgent registered (log-only shadow probe)")
-            return [probe]
-        except Exception as e:
-            logger.warning(f"[Engine] listing-short probe init skipped: {e}")
-            return []
-
-    def _build_unlock_probe(self, wh) -> list:
-        """Construct the log-only UnlockShortProbeAgent (pipeline 08b
-        CONFIRMED-GO, 2026-07-11) with READ-ONLY calendar/market providers.
-        Fail-open: any error yields no probe (the shadow lane runs without
-        it). The probe never receives an order path."""
-        try:
-            from config import UNLOCK_SHORT_PROBE
-            if not UNLOCK_SHORT_PROBE.get("enabled"):
-                return []
-            from core.agents.unlock_short_probe_agent import UnlockShortProbeAgent
-            probe = UnlockShortProbeAgent(
-                warehouse=wh,
+                venue=str(cfg.get("venue", "binance")),
+            ),
+        },
+        {
+            "config": "UNLOCK_SHORT_PROBE",
+            "import_path": "core.agents.unlock_short_probe_agent:UnlockShortProbeAgent",
+            "warn_label": "unlock-short",
+            "log": "[Engine] UnlockShortProbeAgent registered (log-only shadow probe)",
+            "kwargs": lambda self, cfg: dict(
                 perp_resolver=self._unlock_perp_resolver,
                 market_data_provider=self._unlock_market_data,
                 ohlcv_provider=self._unlock_ohlcv,
-                account_balance_provider=self._shadow_free_balance,
-                calendar_dir=str(UNLOCK_SHORT_PROBE.get("calendar_dir",
-                                                        "data/unlock_calendar")),
-            )
-            self._unlock_probe = probe
-            logger.info("[Engine] UnlockShortProbeAgent registered (log-only shadow probe)")
-            return [probe]
-        except Exception as e:
-            logger.warning(f"[Engine] unlock-short probe init skipped: {e}")
-            return []
-
-    def _build_tsmom_probe(self, wh) -> list:
-        """Construct the log-only TsmomProbeAgent — the OWNER-DIRECTED
-        TSMOM-20d regime-watch forward paper test (2026-07-11). NOT a pipeline
-        GO: TSMOM is a refuted family and the Codex backtest did not meet the
-        reopen bar; see the agent's module docstring. Fail-open: any error
-        yields no probe. The probe never receives an order path. The market
-        data / OHLCV providers are the generic venue-parameterized READ-ONLY
-        helpers already used by the unlock probe."""
-        try:
-            from config import TSMOM_PROBE
-            if not TSMOM_PROBE.get("enabled"):
-                return []
-            from core.agents.tsmom_probe_agent import TsmomProbeAgent
-            probe = TsmomProbeAgent(
-                warehouse=wh,
+                calendar_dir=str(cfg.get("calendar_dir", "data/unlock_calendar")),
+            ),
+        },
+        {
+            "config": "TSMOM_PROBE",
+            "import_path": "core.agents.tsmom_probe_agent:TsmomProbeAgent",
+            "warn_label": "tsmom",
+            "log": "[Engine] TsmomProbeAgent registered (log-only shadow probe; "
+                   "owner-directed regime-watch, NOT a pipeline GO)",
+            "kwargs": lambda self, cfg: dict(
                 ohlcv_provider=self._unlock_ohlcv,
                 market_data_provider=self._unlock_market_data,
-                account_balance_provider=self._shadow_free_balance,
-                venue=str(TSMOM_PROBE.get("venue", "bybit")),
-            )
-            self._tsmom_probe = probe
-            logger.info("[Engine] TsmomProbeAgent registered (log-only shadow probe; "
-                        "owner-directed regime-watch, NOT a pipeline GO)")
-            return [probe]
-        except Exception as e:
-            logger.warning(f"[Engine] tsmom probe init skipped: {e}")
-            return []
-
-    def _build_breakout_probe(self, wh) -> list:
-        """Construct the log-only BreakoutProbeAgent — the OWNER-DIRECTED
-        forward paper test of the Codex deep-run winner breakout_60d
-        (2026-07-11). NOT a pipeline GO: textbook breakout is a refuted
-        family and the deep run fails our frozen capital-preservation gates;
-        see the agent's module docstring. Fail-open; never receives an order
-        path; reuses the generic venue-parameterized READ-ONLY providers."""
-        try:
-            from config import BREAKOUT_PROBE
-            if not BREAKOUT_PROBE.get("enabled"):
-                return []
-            from core.agents.breakout_probe_agent import BreakoutProbeAgent
-            probe = BreakoutProbeAgent(
-                warehouse=wh,
+                venue=str(cfg.get("venue", "bybit")),
+            ),
+        },
+        {
+            "config": "BREAKOUT_PROBE",
+            "import_path": "core.agents.breakout_probe_agent:BreakoutProbeAgent",
+            "warn_label": "breakout",
+            "log": "[Engine] BreakoutProbeAgent registered (log-only shadow probe; "
+                   "owner-directed Codex deep-run winner, NOT a pipeline GO)",
+            "kwargs": lambda self, cfg: dict(
                 ohlcv_provider=self._unlock_ohlcv,
                 market_data_provider=self._unlock_market_data,
+                venue=str(cfg.get("venue", "bybit")),
+            ),
+        },
+    )
+
+    def _build_probe(self, wh, spec: dict) -> list:
+        """Construct one log-only shadow probe agent from its _PROBE_SPECS
+        entry. Fail-open: any error yields no probe (the shadow lane runs
+        without it). The probe never receives an order path."""
+        try:
+            import config
+            cfg = getattr(config, spec["config"])
+            if not cfg.get("enabled"):
+                return []
+            import importlib
+            mod_name, cls_name = spec["import_path"].split(":")
+            cls = getattr(importlib.import_module(mod_name), cls_name)
+            probe = cls(
+                warehouse=wh,
                 account_balance_provider=self._shadow_free_balance,
-                venue=str(BREAKOUT_PROBE.get("venue", "bybit")),
+                **spec["kwargs"](self, cfg),
             )
-            self._breakout_probe = probe
-            logger.info("[Engine] BreakoutProbeAgent registered (log-only shadow probe; "
-                        "owner-directed Codex deep-run winner, NOT a pipeline GO)")
+            logger.info(spec["log"])
             return [probe]
         except Exception as e:
-            logger.warning(f"[Engine] breakout probe init skipped: {e}")
+            logger.warning(f"[Engine] {spec['warn_label']} probe init skipped: {e}")
             return []
+
+    def _build_listing_probe(self, wh) -> list:
+        """Thin wrapper kept for the wire-up test surface
+        (tests/test_botengine_shadow_wire.py)."""
+        return self._build_probe(wh, self._PROBE_SPECS[0])
 
     def _run_deep_breakout_lane(self):
         """Scheduled tick for the ACTIVE PAPER deep-breakout lane (owner
@@ -519,6 +498,15 @@ class BotEngine:
             # includes PaperOnlyViolation — the lane never trades off-PAPER
             logger.error(f"[Engine] deep-breakout lane tick refused/failed: {e}")
 
+    def _get_btc_vol_pause(self):
+        """Lazily construct and cache the shared BtcVolPause instance."""
+        _bvp = getattr(self, "_btc_vol_pause", None)
+        if _bvp is None:
+            from core.btc_vol_pause import BtcVolPause
+            _bvp = BtcVolPause()
+            self._btc_vol_pause = _bvp
+        return _bvp
+
     def _deep_breakout_entry_paused(self) -> tuple:
         """(paused, reason) — the same market-wide BTC vol circuit breaker
         _execute_open applies at C.4, for the deep-breakout lane's entries.
@@ -530,11 +518,7 @@ class BotEngine:
         if not _bvp_cfg.get("enabled", False):
             return (False, "")
         try:
-            _bvp = getattr(self, "_btc_vol_pause", None)
-            if _bvp is None:
-                from core.btc_vol_pause import BtcVolPause
-                _bvp = BtcVolPause()
-                self._btc_vol_pause = _bvp
+            _bvp = self._get_btc_vol_pause()
             _ei = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
             paused, reason, _ = _bvp.update_and_evaluate(_ei)
             return (bool(paused), str(reason or "btc_vol_pause"))
@@ -584,11 +568,7 @@ class BotEngine:
                 return "band_regime_filter:adx_4h>30"
             # Veto 2 — BTC 1h ATR ratio vs its trailing median < 0.7. Reuses
             # the BtcVolPause baseline (C.4 gate maintains it) read-only.
-            _bvp = getattr(self, "_btc_vol_pause", None)
-            if _bvp is None:
-                from core.btc_vol_pause import BtcVolPause
-                _bvp = BtcVolPause()
-                self._btc_vol_pause = _bvp
+            _bvp = self._get_btc_vol_pause()
             _brain = getattr(self, "mcp_brain", None)
             _ic = getattr(_brain, "_indicator_cache", None) if _brain else None
             _ratio = _bvp.current_ratio(_ic)
@@ -2685,11 +2665,7 @@ class BotEngine:
             _BVP_CFG = {"enabled": False}
         if _BVP_CFG.get("enabled", False):
             try:
-                _bvp = getattr(self, "_btc_vol_pause", None)
-                if _bvp is None:
-                    from core.btc_vol_pause import BtcVolPause
-                    _bvp = BtcVolPause()
-                    self._btc_vol_pause = _bvp
+                _bvp = self._get_btc_vol_pause()
                 _ei_bvp = getattr(self.mcp_brain, "_indicator_cache", None) if self.mcp_brain else None
                 _paused, _preason, _ = _bvp.update_and_evaluate(_ei_bvp)
                 if _paused:

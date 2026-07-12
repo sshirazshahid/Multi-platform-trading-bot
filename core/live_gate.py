@@ -15,6 +15,7 @@ the full engine (which drags in `schedule`, exchanges, etc.).
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, timedelta
 from pathlib import Path
@@ -309,7 +310,7 @@ def preflight_exchange(name, ex, symbols, *,
                     f = float(v)
                 except (TypeError, ValueError):
                     continue
-                if f > 0 and f == f and f != float("inf"):
+                if math.isfinite(f) and f > 0:
                     floors.append(f)
             if not floors:
                 failures.append(

@@ -59,10 +59,14 @@ from typing import Callable, Optional
 
 from loguru import logger
 
-from core.agents.listing_short_probe_agent import (
+from core.agents.probe_common import (
+    FUNDING_SETTLE_S,
     _pos_float,
     concurrent_account_mtm,
+    ensure_schema,
+    insert_row,
     unrealized_short_return,
+    write_shadow_decision,
 )
 
 # ── Frozen 08b constants (pre-registration + execution addendum) ─────────────
@@ -80,6 +84,14 @@ AUC_FUNDING_W = 10.0
 # (binding condition 4). arm -> entry offset before floor_day(T).
 ARMS = {"W1": 28 * 24 * 3600, "W2": 14 * 24 * 3600}
 
+# Per-arm shadow_decisions.model_version strings — importable (e.g. by
+# scripts/gate_status.py) so a probe rename can never silently desync a reporter.
+# The "-sl8" rows are the charter-§2 Guardian counterfactual, NOT the promoted arm.
+UNLOCK_W1_MODEL_VERSION = "unlock_short_w1_v1"
+UNLOCK_W2_MODEL_VERSION = "unlock_short_w2_v1"
+ARM_MODEL_VERSIONS = {"W1": UNLOCK_W1_MODEL_VERSION, "W2": UNLOCK_W2_MODEL_VERSION}
+ARM_SL8_MODEL_VERSIONS = {"W1": "unlock_short_w1_sl8_v1", "W2": "unlock_short_w2_sl8_v1"}
+
 # Charter §2 Stop-Loss Guardian: close when value drops 8% below entry. For a
 # SHORT that is price rising to entry * 1.08 — the counterfactual barrier.
 SL_GUARDIAN_ADVERSE = 0.08
@@ -89,7 +101,6 @@ DAY_S = 24 * HOUR_S
 # The screen's frozen 12h bar tolerance (BAR_TOL): an entry window discovered
 # more than 12h late is SKIP_LATE — never a retro-entry at a past price.
 ENTRY_LATE_TOL_S = 12 * HOUR_S
-FUNDING_SETTLE_S = 8 * HOUR_S     # perp funding settles every 8h
 TIMEFRAME = "1h"
 # Keep finishing MTM backfill this long after unlock, then drop from monitoring.
 MONITOR_GRACE_S = 7 * DAY_S
@@ -123,16 +134,34 @@ def unlock_short_score(ratio: float, funding_entry: float) -> float:
         return 0.0
 
 
+# load_calendar_docs mtime cache: calendar_dir -> (fingerprint, docs). The
+# calendar changes only when the backfill script runs, but the probe reads the
+# directory every ~300s tick — re-parse only when a file name or mtime changed.
+_CALENDAR_CACHE: dict = {}
+
+
 def load_calendar_docs(calendar_dir: str = DEFAULT_CALENDAR_DIR) -> list:
     """Parse every data/unlock_calendar/*.json doc (backfill script output).
-    Unreadable files are skipped, never guessed."""
+    Unreadable files are skipped, never guessed. Results are cached per
+    directory on a (filename, mtime) fingerprint; callers must treat the
+    returned list as read-only."""
+    files = sorted(glob.glob(os.path.join(calendar_dir, "*.json")))
+    try:
+        fingerprint = tuple((f, os.path.getmtime(f)) for f in files)
+    except OSError:
+        fingerprint = None  # racing a file change — fall through, don't cache
+    cached = _CALENDAR_CACHE.get(calendar_dir)
+    if fingerprint is not None and cached is not None and cached[0] == fingerprint:
+        return cached[1]
     docs = []
-    for f in sorted(glob.glob(os.path.join(calendar_dir, "*.json"))):
+    for f in files:
         try:
             with open(f, encoding="utf-8") as fh:
                 docs.append(json.load(fh))
         except (OSError, ValueError):
             continue
+    if fingerprint is not None:
+        _CALENDAR_CACHE[calendar_dir] = (fingerprint, docs)
     return docs
 
 
@@ -221,9 +250,7 @@ class UnlockShortProbeAgent:
 
     # ── schema / state ───────────────────────────────────────────────────
     def _ensure_schema(self) -> None:
-        conn = self._wh._conn()
-        conn.executescript(_SCHEMA)
-        conn.commit()
+        ensure_schema(self._wh, _SCHEMA)
 
     def _load_state(self) -> dict:
         try:
@@ -373,16 +400,15 @@ class UnlockShortProbeAgent:
 
         pid = f"us-{uuid.uuid4().hex[:10]}"
         horizon_bars = max(1, (sig["unlock_ts"] - entry_ts) // HOUR_S)
-        arm_l = sig["arm"].lower()
         # raw arm: naked hold to unlock T (the screened strategy)
         self._write_decision_row(
             pid, symbol, venue, entry_ts, entry_px, horizon_bars, notional,
-            sl_px=0.0, model_version=f"unlock_short_{arm_l}_v1")
+            sl_px=0.0, model_version=ARM_MODEL_VERSIONS[sig["arm"]])
         # charter-§2 8%-SL-Guardian counterfactual (binding condition 3)
         self._write_decision_row(
             f"{pid}-sl8", symbol, venue, entry_ts, entry_px, horizon_bars, notional,
             sl_px=entry_px * (1.0 + SL_GUARDIAN_ADVERSE),
-            model_version=f"unlock_short_{arm_l}_sl8_v1")
+            model_version=ARM_SL8_MODEL_VERSIONS[sig["arm"]])
         self._write_probe_row(proposal_id=pid, decision="ENTER", now=now, **common)
         self._mark(key)
         return 1, 0
@@ -539,37 +565,12 @@ class UnlockShortProbeAgent:
         at the SNAPSHOTTED unlock T via horizon_bars — a later calendar edit
         can never move a logged exit). sim_pnl stays NULL: this probe does no
         PnL projection; the resolver owns the after-cost net."""
-        row = {
-            "ts": int(entry_ts),
-            "model_version": model_version,
-            "symbol": symbol,
-            "side": "sell",
-            "decision": "ALLOW",
-            "p_win": None,
-            "sim_pnl": None,
-            "sim_r_multiple": None,
-            "agent_id": self.name,
-            "proposal_id": pid,
-            "proposed_at": int(entry_ts),
-            "vetoed_by": None,
-            "veto_reason": None,
-            "projected_notional_current": float(notional),
-            "projected_notional_alt": float(notional),
-            "projected_pnl": None,
-            "projected_fee": None,
-            "entry_px": float(entry_px),
-            "sl_px": float(sl_px),
-            "tp_px": 0.0,
-            "venue": venue,
-            "timeframe": TIMEFRAME,
-            "horizon_bars": int(horizon_bars),
-            "label_status": "PENDING",
-        }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
-        conn.execute(f"INSERT INTO shadow_decisions ({cols}) VALUES ({ph})", tuple(row.values()))
-        conn.commit()
+        write_shadow_decision(
+            self._wh, ts=entry_ts, model_version=model_version, symbol=symbol,
+            side="sell", agent_id=self.name, proposal_id=pid, notional=notional,
+            entry_px=entry_px, sl_px=sl_px, tp_px=0.0, venue=venue,
+            timeframe=TIMEFRAME, horizon_bars=horizon_bars,
+        )
 
     def _write_probe_row(self, *, proposal_id, decision, now, base, symbol, venue,
                          arm, unlock_ts, unlock_ratio, event_tokens, calendar_source,
@@ -592,14 +593,9 @@ class UnlockShortProbeAgent:
             "concurrent_open_at_entry": int(concurrent_open_at_entry),
             "sl_cf_hit_ts": None, "sl_cf_hit_px": None, "created_ts": int(now),
         }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
         # Plain INSERT (condition 5): a probe row is written exactly once and
         # never replaced by a later signal or calendar refresh.
-        conn.execute(f"INSERT INTO shadow_unlock_probe ({cols}) VALUES ({ph})",
-                     tuple(row.values()))
-        conn.commit()
+        insert_row(self._wh, "shadow_unlock_probe", row)
 
     def _log_skip(self, sig: dict, decision: str, now: int, *,
                   venue: str = "", symbol: str = "") -> None:

@@ -72,7 +72,7 @@ from core.agents.breakout_probe_agent import (
     WINDOW_BARS,
     breakout_signal_last,
 )
-from core.agents.tsmom_probe_agent import ATR_LEN, wilder_atr_last
+from core.agents.probe_common import ATR_LEN, wilder_atr_last
 from core.kill_switch import entries_halted
 
 STRATEGY_FAMILY = "deep_breakout"

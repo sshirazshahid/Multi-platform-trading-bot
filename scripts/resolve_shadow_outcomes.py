@@ -138,49 +138,29 @@ def _build_probe_funding_provider(warehouse):
         pid = row.get("proposal_id")
         if not pid:
             return 0.0
-        try:
-            rows = warehouse.query(
-                "SELECT realized_funding_rate_sum AS frs FROM shadow_listing_probe "
-                "WHERE proposal_id=? AND decision='ENTER'",
-                (pid,),
-            )
-        except Exception:
-            rows = []  # table absent (probe never ran) -> try the unlock probe
-        if rows:
-            return float(rows[0].get("frs") or 0.0)
         base_pid = pid[:-4] if pid.endswith("-sl8") else pid
         col = "sl_cf_funding_rate_sum" if pid.endswith("-sl8") else "realized_funding_rate_sum"
-        try:
-            rows = warehouse.query(
-                f"SELECT {col} AS frs FROM shadow_unlock_probe "  # noqa: S608 - col is a literal
-                "WHERE proposal_id=? AND decision='ENTER'",
-                (base_pid,),
-            )
-        except Exception:
-            rows = []  # table absent -> try the TSMOM probe
-        if rows:
-            return float(rows[0].get("frs") or 0.0)
-        try:
-            rows = warehouse.query(
-                "SELECT realized_funding_rate_sum AS frs FROM shadow_tsmom_probe "
-                "WHERE proposal_id=?",
-                (pid,),
-            )
-        except Exception:
-            rows = []  # table absent -> try the breakout probe
-        if rows:
-            return float(rows[0].get("frs") or 0.0)
-        try:
-            rows = warehouse.query(
-                "SELECT realized_funding_rate_sum AS frs FROM shadow_breakout_probe "
-                "WHERE proposal_id=?",
-                (pid,),
-            )
-        except Exception:
-            return 0.0
-        if not rows:
-            return 0.0
-        return float(rows[0].get("frs") or 0.0)
+        # (sql, params) per probe funding table, tried in the FROZEN
+        # resolution order: listing -> unlock -> tsmom -> breakout. A missing
+        # table (probe never ran) or an empty result falls through to the next.
+        queries = (
+            ("SELECT realized_funding_rate_sum AS frs FROM shadow_listing_probe "
+             "WHERE proposal_id=? AND decision='ENTER'", (pid,)),
+            (f"SELECT {col} AS frs FROM shadow_unlock_probe "  # noqa: S608 - col is a literal
+             "WHERE proposal_id=? AND decision='ENTER'", (base_pid,)),
+            ("SELECT realized_funding_rate_sum AS frs FROM shadow_tsmom_probe "
+             "WHERE proposal_id=?", (pid,)),
+            ("SELECT realized_funding_rate_sum AS frs FROM shadow_breakout_probe "
+             "WHERE proposal_id=?", (pid,)),
+        )
+        for sql, params in queries:
+            try:
+                rows = warehouse.query(sql, params)
+            except Exception:
+                continue  # table absent -> try the next probe
+            if rows:
+                return float(rows[0].get("frs") or 0.0)
+        return 0.0
 
     return provider
 

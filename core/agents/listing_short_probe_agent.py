@@ -35,7 +35,6 @@ the pre-specified discriminating score.
 """
 from __future__ import annotations
 
-import bisect
 import json
 import math
 import time
@@ -44,6 +43,16 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from loguru import logger
+
+from core.agents.probe_common import (
+    FUNDING_SETTLE_S,
+    _pos_float,
+    concurrent_account_mtm,
+    ensure_schema,
+    insert_row,
+    unrealized_short_return,
+    write_shadow_decision,
+)
 
 # ── Frozen rev3 constants (pre-registration §Sizing / §Universe / §Horizons) ──
 STAKE_FRAC = 0.03                 # 3% of account per listing short (CLAUDE.md §2)
@@ -54,7 +63,6 @@ HOUR_S = 3600
 DAY_S = 24 * HOUR_S
 ENTRY_DELAY_S = DAY_S             # entry at the day-1 close (screen: first_ts + DAY)
 MAX_ENTRY_WAIT_S = 3 * DAY_S      # give up waiting for day-1 data after 3d -> SKIP_NO_DATA
-FUNDING_SETTLE_S = 8 * HOUR_S     # perp funding settles every 8h
 TIMEFRAME = "1h"
 DEFAULT_STATE_PATH = "data/shadow_listing_state.json"  # gitignored (/data/)
 
@@ -109,59 +117,13 @@ def compute_pump_pct(highs, listing_px: float) -> float:
     return (max(vals) - float(listing_px)) / float(listing_px)
 
 
-def unrealized_short_return(entry_px: float, mark_px: float) -> float:
-    """Unrealized return of a SHORT marked at ``mark_px``: (entry - mark) / entry.
-    Positive when price falls (short in profit), negative on a pump against it."""
-    if not entry_px or entry_px <= 0:
-        return 0.0
-    return (float(entry_px) - float(mark_px)) / float(entry_px)
+# unrealized_short_return / concurrent_account_mtm / _pos_float moved to
+# probe_common (shared with the unlock probe) and are re-exported above.
 
 
-def concurrent_account_mtm(bars_by_pos: dict, stake_frac: float = STAKE_FRAC):
-    """Calendar-time concurrent account-MTM curve + max drawdown (auditor B1/B2).
-
-    ``bars_by_pos`` maps proposal_id -> [(bar_ts, unrealized_short_ret), ...].
-    At each calendar bar the account MTM is the sum, over positions OPEN at that
-    bar (forward-filled from their last observed bar), of
-    ``stake_frac * unrealized_short_ret`` — NOT the realized-return cumsum the
-    frozen MC used (which understated the true drawdown ~2x). Drawdown is
-    peak-to-trough of the equity curve (1 + MTM), with the pre-trade baseline
-    equity 1.0 as the initial peak.
-
-    Returns (series, max_drawdown) where series is [(bar_ts, account_mtm), ...].
-    """
-    # Per-position sorted bar timestamps + values, and active windows.
-    prepared = {}
-    all_ts: set = set()
-    for pid, bars in bars_by_pos.items():
-        if not bars:
-            continue
-        sb = sorted((int(t), float(v)) for t, v in bars)
-        ts_list = [t for t, _ in sb]
-        val_list = [v for _, v in sb]
-        prepared[pid] = (ts_list, val_list, ts_list[0], ts_list[-1])
-        all_ts.update(ts_list)
-    if not all_ts:
-        return [], 0.0
-
-    series = []
-    peak_equity = 1.0
-    max_dd = 0.0
-    for ts in sorted(all_ts):
-        mtm = 0.0
-        for ts_list, val_list, first_ts, last_ts in prepared.values():
-            if ts < first_ts or ts > last_ts:
-                continue  # position not open at this calendar bar
-            idx = bisect.bisect_right(ts_list, ts) - 1  # last bar <= ts (forward-fill)
-            if idx >= 0:
-                mtm += stake_frac * val_list[idx]
-        equity = 1.0 + mtm
-        peak_equity = max(peak_equity, equity)
-        dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
-        max_dd = max(max_dd, dd)
-        series.append((ts, mtm))
-    return series, max_dd
-
+# shadow_decisions.model_version for this probe — importable (e.g. by
+# scripts/gate_status.py) so a probe rename can never silently desync a reporter.
+LISTING_SHORT_MODEL_VERSION = "listing_short_probe_v1"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS shadow_listing_probe (
@@ -215,7 +177,7 @@ class ListingShortProbeAgent:
     """Market-wide new-listing detector + log-only short proposer. See header."""
 
     name = "ListingShortProbeAgent"
-    model_version = "listing_short_probe_v1"
+    model_version = LISTING_SHORT_MODEL_VERSION
 
     def __init__(
         self,
@@ -242,9 +204,7 @@ class ListingShortProbeAgent:
 
     # ── schema / state ───────────────────────────────────────────────────
     def _ensure_schema(self) -> None:
-        conn = self._wh._conn()
-        conn.executescript(_SCHEMA)
-        conn.commit()
+        ensure_schema(self._wh, _SCHEMA)
 
     def _load_state(self) -> dict:
         try:
@@ -513,37 +473,15 @@ class ListingShortProbeAgent:
         shadow_outcomes. side='sell', no SL/TP (naked, held to the horizon bar —
         auditor B2 unlevered-3%-notional, no-SL variant). sim_pnl is left NULL:
         this probe does no PnL projection; the resolver owns the after-cost net."""
-        row = {
-            "ts": int(entry_ts),
-            "model_version": self.model_version,
-            "symbol": sym,
-            "side": "sell",
-            "decision": "ALLOW",
-            "p_win": None,
-            "sim_pnl": None,
-            "sim_r_multiple": None,
-            "agent_id": self.name,
-            "proposal_id": pid,
-            "proposed_at": int(entry_ts),
-            "vetoed_by": None,
-            "veto_reason": None,
-            "projected_notional_current": float(notional),
-            "projected_notional_alt": float(notional),
-            "projected_pnl": None,
-            "projected_fee": None,
-            "entry_px": float(entry_px),
-            "sl_px": 0.0,   # no stop: sl>0 checks in the resolver never fire
-            "tp_px": 0.0,   # no target: runs to the horizon bar (time exit)
-            "venue": self._venue,
-            "timeframe": TIMEFRAME,
-            "horizon_bars": int(horizon_days) * 24,
-            "label_status": "PENDING",
-        }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
-        conn.execute(f"INSERT INTO shadow_decisions ({cols}) VALUES ({ph})", tuple(row.values()))
-        conn.commit()
+        write_shadow_decision(
+            self._wh, ts=entry_ts, model_version=self.model_version, symbol=sym,
+            side="sell", agent_id=self.name, proposal_id=pid, notional=notional,
+            entry_px=entry_px,
+            sl_px=0.0,   # no stop: sl>0 checks in the resolver never fire
+            tp_px=0.0,   # no target: runs to the horizon bar (time exit)
+            venue=self._venue, timeframe=TIMEFRAME,
+            horizon_bars=int(horizon_days) * 24,
+        )
 
     def _write_probe_row(self, *, proposal_id, decision, now, symbol, base,
                          horizon_days, detected_ts, entry_ts, entry_px, listing_px,
@@ -564,14 +502,7 @@ class ListingShortProbeAgent:
             "concurrent_open_at_entry": int(concurrent_open_at_entry),
             "created_ts": int(now),
         }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
-        conn.execute(
-            f"INSERT OR REPLACE INTO shadow_listing_probe ({cols}) VALUES ({ph})",
-            tuple(row.values()),
-        )
-        conn.commit()
+        insert_row(self._wh, "shadow_listing_probe", row, replace=True)
 
     def _log_skip(self, sym: str, decision: str, now: int, *, detected_ts,
                   entry_ts=0, entry_px=0.0, listing_px=0.0, pump_pct=0.0,
@@ -586,12 +517,3 @@ class ListingShortProbeAgent:
             day1_funding_rate=0.0, shortable=shortable, quote_volume_usd=quote_volume_usd,
             pump_pct=pump_pct, score=0.0, concurrent_open_at_entry=0,
         )
-
-
-def _pos_float(v) -> Optional[float]:
-    """Coerce to a positive float, else None."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f > 0 else None

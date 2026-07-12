@@ -72,17 +72,30 @@ import time
 import uuid
 from typing import Callable, Optional
 
-from loguru import logger
+from core.agents.probe_common import (
+    ATR_LEN,
+    FUNDING_SETTLE_S,  # noqa: F401 (re-export; value pinned by consumers/tests)
+    MAX_NOTIONAL_MULTIPLE,  # noqa: F401 (re-export; pinned by test_frozen_pine_constants)
+    RISK_PCT,
+    accrue_funding,
+    codex_position_units,
+    ensure_schema,
+    eval_gate,
+    insert_row,
+    monitor_open_barriers,
+    probe_tick,
+    wilder_atr_last,
+    write_shadow_decision,
+)
 
 # ── Frozen Codex/Pine constants (Pine 17/18 + research/futures_backtest.py) ──
 # Editing any of these is a NEW pre-registration, not a tweak. Pinned by
-# tests/test_tsmom_probe.py::test_frozen_pine_constants.
+# tests/test_tsmom_probe.py::test_frozen_pine_constants. ATR_LEN / RISK_PCT /
+# MAX_NOTIONAL_MULTIPLE / FUNDING_SETTLE_S live in probe_common (values
+# unchanged) and are re-exported above for the pinning test + consumers.
 SYMBOLS = ("BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT")
-ATR_LEN = 14  # ta.atr(14) — Wilder RMA
 STOP_ATR = 2.0  # stop = entry -/+ 2 x ATR
 REWARD_RISK = 2.0  # target = entry +/- 2R
-RISK_PCT = 0.01  # Codex risk model: 1% equity risk (NOTATIONAL)
-MAX_NOTIONAL_MULTIPLE = 2.0  # Codex cap: notional <= 2x equity (NOTATIONAL)
 SCORE_MOM_SCALE = 0.10  # FROZEN pre-outcome; never re-tune post-outcome
 
 ARMS = {
@@ -90,10 +103,16 @@ ARMS = {
     "4h": {"tf": "4h", "bar_s": 14400, "mom_bars": 120, "ema_bars": 30, "max_hold_bars": 42},
 }
 
-FUNDING_SETTLE_S = 8 * 3600  # perp funding settles every 8h
+# Per-arm shadow_decisions.model_version strings — importable (e.g. by
+# scripts/gate_status.py) so a probe rename can never silently desync a reporter.
+TSMOM_1H_MODEL_VERSION = "tsmom_20d_1h_v1"
+TSMOM_4H_MODEL_VERSION = "tsmom_20d_4h_v1"
+ARM_MODEL_VERSIONS = {"1h": TSMOM_1H_MODEL_VERSION, "4h": TSMOM_4H_MODEL_VERSION}
 
 
 # ── Pure indicator math (mirrors research/futures_backtest.py pandas ewm) ────
+# wilder_atr_last moved to probe_common (shared with the breakout probe and
+# core/deep_breakout_lane.py) and is re-exported above.
 def ema_last(closes, n: int) -> Optional[float]:
     """Last value of EMA(n) — pandas ewm(span=n, adjust=False, min_periods=n).
     None until min_periods is met (the reference's warm-up guard)."""
@@ -104,26 +123,6 @@ def ema_last(closes, n: int) -> Optional[float]:
     for c in closes[1:]:
         e = alpha * float(c) + (1.0 - alpha) * e
     return e
-
-
-def wilder_atr_last(candles, n: int = ATR_LEN) -> Optional[float]:
-    """Last Wilder ATR(n) — TR(prev-close) smoothed by pandas
-    ewm(alpha=1/n, adjust=False, min_periods=n). None until warm-up."""
-    if n <= 0 or len(candles) < n:
-        return None
-    prev_close: Optional[float] = None
-    rma: Optional[float] = None
-    for c in candles:
-        try:
-            high, low, close = float(c[2]), float(c[3]), float(c[4])
-        except (IndexError, TypeError, ValueError):
-            return None
-        tr = high - low
-        if prev_close is not None:
-            tr = max(tr, abs(high - prev_close), abs(low - prev_close))
-        rma = tr if rma is None else rma + (tr - rma) / float(n)
-        prev_close = close
-    return rma
 
 
 def momentum_lookback(closes, mom_bars: int) -> Optional[float]:
@@ -155,13 +154,6 @@ def tsmom_score(mom) -> float:
         return math.tanh(abs(float(mom)) / SCORE_MOM_SCALE)
     except (TypeError, ValueError):
         return 0.0
-
-
-def codex_position_units(equity: float, entry_px: float, risk_distance: float) -> float:
-    """Codex sizing (NOTATIONAL): min(1%-risk units, 2x-notional cap units)."""
-    if equity <= 0 or entry_px <= 0 or risk_distance <= 0:
-        return 0.0
-    return min(equity * RISK_PCT / risk_distance, equity * MAX_NOTIONAL_MULTIPLE / entry_px)
 
 
 _SCHEMA = """
@@ -226,63 +218,44 @@ class TsmomProbeAgent:
         self._now = now_fn
         self._venue = venue
         self._symbols = tuple(symbols)
+        # expected-bar no-op guards (probe_common eval_gate / monitor):
+        # (symbol, tf) -> open ts of the last bar already evaluated/fetched.
+        self._bar_seen: dict = {}
+        self._mon_seen: dict = {}
         self._ensure_schema()
 
     # ── schema ───────────────────────────────────────────────────────────
     def _ensure_schema(self) -> None:
-        conn = self._wh._conn()
-        conn.executescript(_SCHEMA)
-        conn.commit()
+        ensure_schema(self._wh, _SCHEMA)
 
     # ── public tick ──────────────────────────────────────────────────────
     def tick(self) -> dict:
         """One probe cycle: update MTM/hints on open holds FIRST (a barrier
         hit this bar frees the slot honestly), then evaluate the latest closed
         bar per (symbol, arm). Returns a stats dict. NEVER raises upward."""
-        stats = {"evaluated": 0, "entered": 0, "mtm_rows": 0}
-        now = int(self._now())
-        try:
-            stats["mtm_rows"] = self._monitor_open(now)
-        except Exception as e:
-            logger.debug(f"[TsmomProbe] monitor error: {e}")
-        for symbol in self._symbols:
-            for arm_key in ARMS:
-                try:
-                    stats["entered"] += self._eval_entry(symbol, arm_key, now)
-                    stats["evaluated"] += 1
-                except Exception as e:
-                    logger.debug(f"[TsmomProbe] {symbol} {arm_key} eval error: {e}")
-        return stats
+        units = [(f"{symbol} {arm_key}", (symbol, arm_key))
+                 for symbol in self._symbols for arm_key in ARMS]
+        return probe_tick(self, units, log_tag="TsmomProbe")
 
     # ── entry evaluation ─────────────────────────────────────────────────
     def _eval_entry(self, symbol: str, arm_key: str, now: int) -> int:
         spec = ARMS[arm_key]
         bar_s = int(spec["bar_s"])
 
-        candles = self._closed_candles(symbol, spec, now)
-        if len(candles) < spec["mom_bars"] + 1:
-            return 0  # insufficient history — never guess a signal
-        latest_ts = int(candles[-1][0]) // 1000
-
-        last = self._wh.query(
-            "SELECT signal_bar_ts, closed_hint_ts, max_hold_bars "
-            "FROM shadow_tsmom_probe WHERE symbol=? AND arm=? "
-            "ORDER BY signal_bar_ts DESC LIMIT 1",
-            (symbol, arm_key),
+        gate = eval_gate(
+            self, symbol=symbol, tf=str(spec["tf"]), bar_s=bar_s,
+            fetch_bars=int(spec["mom_bars"]) + int(spec["ema_bars"]) + ATR_LEN + 8,
+            min_bars=int(spec["mom_bars"]) + 1,
+            last_sql="SELECT signal_bar_ts, closed_hint_ts, max_hold_bars "
+                     "FROM shadow_tsmom_probe WHERE symbol=? AND arm=? "
+                     "ORDER BY signal_bar_ts DESC LIMIT 1",
+            last_params=(symbol, arm_key),
+            hold_col="max_hold_bars",
+            now=now,
         )
-        if last:
-            r = last[0]
-            hint_ts = r["closed_hint_ts"]
-            # ONE position per (symbol, arm) — the reference backtest's
-            # no-overlap rule. Time bound: the position exits at the close of
-            # bar entry+max_hold, i.e. signal_bar_ts + (max_hold+1) bars.
-            time_free = int(r["signal_bar_ts"]) + (int(r["max_hold_bars"]) + 1) * bar_s
-            if hint_ts is None and now < time_free:
-                return 0  # occupied
-            if latest_ts <= int(r["signal_bar_ts"]):
-                return 0  # this bar was already acted on — never re-signal it
-            if hint_ts is not None and latest_ts <= int(hint_ts):
-                return 0  # re-entry earliest one bar AFTER the exit-hint bar
+        if gate is None:
+            return 0
+        candles, latest_ts = gate
 
         closes = [float(c[4]) for c in candles]
         mom = momentum_lookback(closes, int(spec["mom_bars"]))
@@ -318,7 +291,7 @@ class TsmomProbeAgent:
             int(spec["max_hold_bars"]),
             str(spec["tf"]),
             notional,
-            model_version=f"tsmom_20d_{arm_key}_v1",
+            model_version=ARM_MODEL_VERSIONS[arm_key],
         )
         self._write_probe_row(
             proposal_id=pid,
@@ -340,123 +313,35 @@ class TsmomProbeAgent:
         )
         return 1
 
-    def _closed_candles(self, symbol: str, spec: dict, now: int) -> list:
-        """CLOSED bars for (symbol, arm timeframe), oldest-first. The forming
-        bar is dropped so a signal never repaints."""
-        bar_s = int(spec["bar_s"])
-        need = int(spec["mom_bars"]) + int(spec["ema_bars"]) + ATR_LEN + 8
-        since_ms = (now - need * bar_s) * 1000
-        raw = self._ohlcv(self._venue, symbol, str(spec["tf"]), since_ms) or []
-        out = []
-        for c in raw:
-            try:
-                bar_ts = int(c[0]) // 1000
-                close = float(c[4])
-            except (IndexError, TypeError, ValueError):
-                continue
-            if bar_ts + bar_s <= now and close > 0:
-                out.append(c)
-        out.sort(key=lambda c: c[0])
-        return out
-
     # ── monitoring: per-bar MTM + occupancy hints + funding ──────────────
     def _monitor_open(self, now: int) -> int:
-        rows = self._wh.query(
-            "SELECT proposal_id, symbol, arm, side, signal_bar_ts, entry_px, "
-            "sl_px, tp_px, max_hold_bars, last_funding_bucket, "
-            "realized_funding_rate_sum FROM shadow_tsmom_probe "
-            "WHERE closed_hint_ts IS NULL"
+        return monitor_open_barriers(
+            self, now,
+            probe_table="shadow_tsmom_probe",
+            mtm_table="shadow_tsmom_mtm",
+            rows_sql=(
+                "SELECT proposal_id, symbol, arm, side, signal_bar_ts, entry_px, "
+                "sl_px, tp_px, max_hold_bars, last_funding_bucket, "
+                "realized_funding_rate_sum FROM shadow_tsmom_probe "
+                "WHERE closed_hint_ts IS NULL"
+            ),
+            frame_of=self._frame_of,
         )
-        written = 0
-        conn = self._wh._conn()
-        for r in rows:
-            spec = ARMS.get(r["arm"])
-            if spec is None:
-                continue
-            bar_s = int(spec["bar_s"])
-            entry_ts = int(r["signal_bar_ts"])
-            entry_px = float(r["entry_px"])
-            is_buy = r["side"] == "buy"
-            sl, tp = float(r["sl_px"]), float(r["tp_px"])
-            cap_open = entry_ts + int(r["max_hold_bars"]) * bar_s
-            hinted = False
 
-            last = self._wh.query(
-                "SELECT MAX(bar_ts) AS m FROM shadow_tsmom_mtm WHERE proposal_id=?",
-                (r["proposal_id"],),
-            )
-            since = (int(last[0]["m"]) + 1) if last and last[0]["m"] is not None else entry_ts + 1
-            if since <= min(now, cap_open):
-                candles = self._ohlcv(self._venue, r["symbol"], str(spec["tf"]), since * 1000) or []
-                for c in sorted(candles, key=lambda c: c[0]):
-                    try:
-                        bar_ts = int(c[0]) // 1000
-                        high, low, mark = float(c[2]), float(c[3]), float(c[4])
-                    except (IndexError, TypeError, ValueError):
-                        continue
-                    if bar_ts <= entry_ts or bar_ts > cap_open:
-                        continue
-                    if bar_ts + bar_s > now:
-                        continue  # forming/unclosed bar — no repaint
-                    ur = (mark - entry_px) / entry_px if is_buy else (entry_px - mark) / entry_px
-                    conn.execute(
-                        "INSERT OR REPLACE INTO shadow_tsmom_mtm "
-                        "(proposal_id, bar_ts, mark_px, unrealized_ret) "
-                        "VALUES (?,?,?,?)",
-                        (r["proposal_id"], bar_ts, mark, ur),
-                    )
-                    written += 1
-                    # Occupancy hint, SL-FIRST on a both-barrier bar — the same
-                    # conservative tie-break the resolver applies. The resolved
-                    # outcome still comes ONLY from core/shadow_resolver.py.
-                    hit_sl = (low <= sl) if is_buy else (high >= sl)
-                    hit_tp = (high >= tp) if is_buy else (low <= tp)
-                    if hit_sl or hit_tp:
-                        self._set_hint(
-                            r["proposal_id"], bar_ts, "stop_loss" if hit_sl else "take_profit"
-                        )
-                        hinted = True
-                        break
-            if not hinted and now >= cap_open + bar_s:
-                # max-hold bar has closed: the Pine close_all time exit
-                self._set_hint(r["proposal_id"], cap_open, "time")
-                hinted = True
-            if not hinted:
-                self._accrue_funding(r, now)
-        if written:
-            conn.commit()
-        return written
-
-    def _set_hint(self, pid: str, bar_ts: int, reason: str) -> None:
-        conn = self._wh._conn()
-        conn.execute(
-            "UPDATE shadow_tsmom_probe SET closed_hint_ts=?, closed_hint_reason=? "
-            "WHERE proposal_id=? AND closed_hint_ts IS NULL",
-            (int(bar_ts), reason, pid),
-        )
-        conn.commit()
+    @staticmethod
+    def _frame_of(row) -> Optional[tuple]:
+        """(timeframe, bar_s, hold_bars) for an open row; None on unknown arm."""
+        spec = ARMS.get(row["arm"])
+        if spec is None:
+            return None
+        return str(spec["tf"]), int(spec["bar_s"]), int(row["max_hold_bars"])
 
     def _accrue_funding(self, row: dict, now: int) -> None:
         """Book the current funding print once per 8h settlement bucket while
         the position is open. Missing funding is never guessed."""
-        try:
-            md = self._market_data(self._venue, row["symbol"]) or {}
-        except Exception:
-            return
-        fr = md.get("funding_rate")
-        if fr is None:
-            return
-        bucket = now // FUNDING_SETTLE_S
-        if row["last_funding_bucket"] is not None and int(row["last_funding_bucket"]) == bucket:
-            return  # this settlement already booked
-        new_sum = float(row["realized_funding_rate_sum"] or 0.0) + float(fr)
-        conn = self._wh._conn()
-        conn.execute(
-            "UPDATE shadow_tsmom_probe SET realized_funding_rate_sum=?, "
-            "last_funding_bucket=? WHERE proposal_id=?",
-            (new_sum, int(bucket), row["proposal_id"]),
-        )
-        conn.commit()
+        accrue_funding(self._wh, table="shadow_tsmom_probe",
+                       market_data=self._market_data, venue=self._venue,
+                       row=row, now=now)
 
     # ── warehouse writes ─────────────────────────────────────────────────
     def _write_decision_row(
@@ -478,37 +363,12 @@ class TsmomProbeAgent:
         shadow_outcomes: SL-first, fees + slippage, censoring-guarded time exit
         at the max-hold bar. sim_pnl stays NULL — this probe does no PnL
         projection; the resolver owns the after-cost net."""
-        row = {
-            "ts": int(entry_ts),
-            "model_version": model_version,
-            "symbol": symbol,
-            "side": side,
-            "decision": "ALLOW",
-            "p_win": None,
-            "sim_pnl": None,
-            "sim_r_multiple": None,
-            "agent_id": self.name,
-            "proposal_id": pid,
-            "proposed_at": int(entry_ts),
-            "vetoed_by": None,
-            "veto_reason": None,
-            "projected_notional_current": float(notional),
-            "projected_notional_alt": float(notional),
-            "projected_pnl": None,
-            "projected_fee": None,
-            "entry_px": float(entry_px),
-            "sl_px": float(sl_px),
-            "tp_px": float(tp_px),
-            "venue": self._venue,
-            "timeframe": str(timeframe),
-            "horizon_bars": int(horizon_bars),
-            "label_status": "PENDING",
-        }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
-        conn.execute(f"INSERT INTO shadow_decisions ({cols}) VALUES ({ph})", tuple(row.values()))
-        conn.commit()
+        write_shadow_decision(
+            self._wh, ts=entry_ts, model_version=model_version, symbol=symbol,
+            side=side, agent_id=self.name, proposal_id=pid, notional=notional,
+            entry_px=entry_px, sl_px=sl_px, tp_px=tp_px, venue=self._venue,
+            timeframe=timeframe, horizon_bars=horizon_bars,
+        )
 
     def _write_probe_row(
         self,
@@ -554,9 +414,5 @@ class TsmomProbeAgent:
             "closed_hint_reason": None,
             "created_ts": int(now),
         }
-        cols = ", ".join(row.keys())
-        ph = ", ".join("?" * len(row))
-        conn = self._wh._conn()
         # Plain INSERT: an entry row is written exactly once, never replaced.
-        conn.execute(f"INSERT INTO shadow_tsmom_probe ({cols}) VALUES ({ph})", tuple(row.values()))
-        conn.commit()
+        insert_row(self._wh, "shadow_tsmom_probe", row)
