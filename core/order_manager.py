@@ -362,7 +362,10 @@ class OrderManager:
         # Keyed by exchange name: accrue_paper_funding runs once per venue, so a
         # shared scalar let the FIRST venue each window consume it for ALL —
         # only that venue accrued funding (audit 2026-07-07).
-        self._last_funding_hour: dict = {}
+        # A5 (2026-07-16): persisted — in-memory only, a restart inside a
+        # settled window forgot it and charged funding a second time.
+        self._funding_windows_path = Path("data/paper_funding_windows.json")
+        self._last_funding_hour: dict = self._load_funding_windows()
 
         # MAKER-FIRST PAPER ENTRIES (2026-07-10): pending virtual post-only
         # entry intents keyed "Exchange:SYMBOL", plus soak counters. Persisted
@@ -676,6 +679,28 @@ class OrderManager:
             }), encoding="utf-8")
         except Exception as e:
             logger.debug(f"[Orders] Failed to save order mode state: {e}")
+
+    def _load_funding_windows(self) -> dict:
+        """Restore per-venue settled funding windows (A5) — never raises."""
+        try:
+            if self._funding_windows_path.exists():
+                data = json.loads(self._funding_windows_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {
+                        str(k): int(v) for k, v in data.items()
+                        if isinstance(v, (int, float))
+                    }
+        except Exception:
+            pass
+        return {}
+
+    def _save_funding_windows(self):
+        try:
+            self._funding_windows_path.parent.mkdir(parents=True, exist_ok=True)
+            self._funding_windows_path.write_text(
+                json.dumps(self._last_funding_hour), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Orders] Failed to save funding windows: {e}")
 
     def _load_sl_widened(self) -> set:
         try:
@@ -3692,6 +3717,7 @@ class OrderManager:
         if self._last_funding_hour.get(venue) == window_key:
             return
         self._last_funding_hour[venue] = window_key
+        self._save_funding_windows()
 
         positions = [p for p in self.tracker.get_open(exchange=exchange.name)
                      if p.market_type == "futures"]

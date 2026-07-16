@@ -43,7 +43,10 @@ from core.carry_runner import (  # noqa: E402
     CarryRunner,
     write_report,
 )
-from core.funding_history import avg_7d  # noqa: E402
+from core.funding_history import (  # noqa: E402
+    avg_7d,
+    load_recent_realized_settlements,
+)
 
 STATE_PATH = ROOT / DEFAULT_STATE_PATH
 HEARTBEAT_PATH = ROOT / "data" / "carry_heartbeat.json"
@@ -140,12 +143,24 @@ def build_live_snapshot_provider(venue: str):
             return None
         if spot is None or perp is None or not funding:
             return None
+        try:
+            perp_exchange_symbol = client.exchange.market_id(f"{symbol}:USDT")
+        except Exception:  # noqa: BLE001 - identity must be venue-derived
+            return None
+        trailing = load_recent_realized_settlements(
+            venue,
+            coin,
+            limit=21,
+            before_ts=now,
+            base_dir=ROOT / "data" / "funding_history",
+        )
         return {
             "spot_bid": spot[0],
             "spot_ask": spot[1],
             "perp_bid": perp[0],
             "perp_ask": perp[1],
             "perp_mark": mi.get("mark") or (perp[0] + perp[1]) / 2.0,
+            "perp_exchange_symbol": perp_exchange_symbol,
             "depth_ratio": min(spot[2], perp[2]) / PAPER_NOTIONAL_HINT,
             "liq_buffer_x": PAPER_LIQ_BUFFER_X,
             "both_legs_fillable": True,
@@ -154,6 +169,9 @@ def build_live_snapshot_provider(venue: str):
             # periods exist in the window (core/funding_history).
             "avg_funding_7d": avg_7d(venue, coin,
                                      base_dir=ROOT / "data" / "funding_carry"),
+            "trailing_funding_rates": (
+                [row.rate for row in trailing] if trailing is not None else None
+            ),
             "round_trip_cost_frac": rt_cost,
             "funding": funding,
             "ts": now,
@@ -227,6 +245,18 @@ def main() -> None:
         return
     if "--clear-recovery" in sys.argv[1:]:
         clear_recovery()
+        return
+
+    # A4 (2026-07-16): singleton lock — the 15-min scheduler fires while a
+    # previous pass is still running (observed LastTaskResult 267009), and two
+    # concurrent passes race the ONE shared state file (load->mutate->save is a
+    # lost-update race), corrupting F1's promotion evidence. Skip this fire;
+    # the next one picks up. The handle must stay referenced until exit.
+    from utils.process_lock import acquire_process_lock
+
+    _lock = acquire_process_lock("f1_carry_paper", root=ROOT)
+    if _lock is None:
+        print("[f1_carry_paper] another pass is still running — skipping this fire")
         return
     from core.warehouse import Warehouse
     from research.funding_carry_lab import build_f1_spec
