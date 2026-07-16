@@ -2727,6 +2727,38 @@ class OrderManager:
             f"tp={tp_present} conclusive={conclusive}")
         return bool(conclusive and tp_present)
 
+    def _position_flat_on_venue(self, exchange: BaseExchange, symbol: str):
+        """Tri-state venue check: True = POSITIVELY flat, False = POSITIVELY
+        still open, None = UNVERIFIABLE (the fetch itself failed).
+
+        Tri-state on purpose: each caller must choose its own fail-direction
+        for None, because the safe answer is OPPOSITE depending on what the
+        check gates —
+          * untracking a position (close path): None -> keep it TRACKED. A
+            falsely-untracked open position is naked (no SL, no monitor); a
+            falsely-kept closed one reconciles away harmlessly via ghost-sync.
+          * retrying a close without reduceOnly: None -> do NOT retry. A retry
+            against an already-flat position opens a naked REVERSE (root cause
+            of the 2026-04-20 ALGO short cascade).
+        Collapsing this into one boolean is what let the two call sites encode
+        opposite fail-directions implicitly; keep the choice at the call site.
+        """
+        try:
+            live = exchange.fetch_positions([symbol]) or []
+        except Exception as e:
+            logger.warning(
+                f"[Orders] fetch_positions failed for {symbol}: "
+                f"{str(e)[:100]} — venue state UNVERIFIABLE")
+            return None
+        for p in live:
+            try:
+                size = abs(float(p.get("contracts") or p.get("contractSize") or 0))
+            except (TypeError, ValueError):
+                size = 0.0
+            if size > 0:
+                return False  # positively still open
+        return True  # positively flat
+
     # ── Close position ────────────────────────────────────────────────
 
     def partial_close_position(self, exchange: BaseExchange, position: Position,
@@ -3068,21 +3100,10 @@ class OrderManager:
                     # path below keeps it OPEN + tracked for reconcile. (A
                     # falsely-KEPT closed position reconciles away harmlessly via
                     # ghost-sync; a falsely-UNTRACKED open one does not.)
-                    _flat = True
-                    try:
-                        _live = exchange.fetch_positions([position.symbol]) or []
-                        for _p in _live:
-                            _sz = abs(float(_p.get("contracts")
-                                            or _p.get("contractSize") or 0))
-                            if _sz > 0:
-                                _flat = False
-                                break
-                    except Exception as _ve:
-                        _flat = False  # cannot verify -> fail-safe: keep tracked
-                        logger.warning(
-                            f"[Orders] close-verify fetch_positions failed for "
-                            f"{position.symbol}: {str(_ve)[:100]} — keeping tracked")
-                    if _flat:
+                    # Fail-direction: only a POSITIVE True untracks. False
+                    # (still open) and None (unverifiable) both keep it tracked.
+                    if self._position_flat_on_venue(
+                            exchange, position.symbol) is True:
                         logger.info(
                             f"[Orders] {position.symbol} confirmed flat on exchange "
                             f"— syncing tracker")
@@ -3101,19 +3122,12 @@ class OrderManager:
                     # the retry opens a NAKED REVERSE position when the target
                     # is already closed (e.g. TP/SL fired, stale list caller).
                     # Root cause of the ALGO naked-short cascade on 2026-04-20.
-                    _still_open = False
-                    try:
-                        _live = exchange.fetch_positions([position.symbol]) or []
-                        for _p in _live:
-                            _sz = abs(float(_p.get("contracts") or _p.get("contractSize") or 0))
-                            if _sz > 0:
-                                _still_open = True
-                                break
-                    except Exception as _fe:
-                        logger.warning(
-                            f"[Orders] fetch_positions failed during close-retry "
-                            f"guard for {position.symbol}: {_fe} — "
-                            f"treating as closed to avoid naked reverse")
+                    # Fail-direction (opposite of the untrack path above): only a
+                    # POSITIVE False (still open) justifies the retry. True and
+                    # None (unverifiable) both skip it — never retry into an
+                    # unknown venue state, that is how the naked reverse happens.
+                    _still_open = self._position_flat_on_venue(
+                        exchange, position.symbol) is False
                     if not _still_open:
                         logger.info(
                             f"[Orders] {position.symbol} already flat on exchange "
