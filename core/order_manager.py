@@ -8,6 +8,8 @@ core/order_manager.py — Order lifecycle with:
 """
 
 import json
+import os
+import re
 import threading
 import time
 import uuid
@@ -52,6 +54,48 @@ _SKIP_PAIR_ERRORS = (
     "not supported", "symbol not found",
     "does not have market symbol",
 )
+
+_SENSITIVE_HTTP_FIELD = (
+    r"api[_-]?key|apikey|secret(?:key)?|signature|authorization|"
+    r"access[_-]?token|refresh[_-]?token|token|passphrase|password|"
+    r"x-bapi-api-key|x-mbx-apikey|ok-access-key|ok-access-passphrase"
+)
+_SENSITIVE_HTTP_ASSIGNMENT_RE = re.compile(
+    rf"(?i)((?:[\"']?(?:{_SENSITIVE_HTTP_FIELD})[\"']?)\s*[:=]\s*)"
+    r"(\"[^\"]*\"|'[^']*'|[^&,\s}\]]+)"
+)
+_BEARER_TOKEN_RE = re.compile(r"(?i)(\bbearer\s+)[^\s,}\]]+")
+
+
+def _redact_http_debug(value, *, max_chars: int = 4000) -> str:
+    """Return bounded HTTP diagnostics with credentials removed."""
+    if value is None:
+        return "None"
+    try:
+        if isinstance(value, (dict, list, tuple)):
+            rendered = json.dumps(value, default=str, sort_keys=True)
+        else:
+            rendered = str(value)
+    except Exception:
+        rendered = f"<{type(value).__name__}>"
+
+    rendered = _SENSITIVE_HTTP_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group(1)}[REDACTED]", rendered
+    )
+    rendered = _BEARER_TOKEN_RE.sub(r"\1[REDACTED]", rendered)
+
+    # SDK error shapes are not stable, so also remove configured credential
+    # values wherever they occur, even if their field names were discarded.
+    for key, secret in os.environ.items():
+        if not re.search(_SENSITIVE_HTTP_FIELD, key, re.IGNORECASE):
+            continue
+        if len(secret) >= 4:
+            rendered = rendered.replace(secret, "[REDACTED]")
+
+    limit = max(128, int(max_chars))
+    if len(rendered) > limit:
+        rendered = rendered[:limit] + "...[truncated]"
+    return rendered
 
 
 def _is_permission_error(e: Exception) -> bool:
@@ -139,6 +183,38 @@ def _mid_from_ticker(ticker: dict) -> float:
             return (bid + ask) / 2.0
     except (TypeError, ValueError):
         pass
+    return 0.0
+
+
+def _mark_from_ticker(ticker: dict, *, now: float | None = None) -> float:
+    """Return a fresh positive mark price from a ccxt-shaped ticker."""
+    ticker = ticker or {}
+    info = ticker.get("info") if isinstance(ticker.get("info"), dict) else {}
+    for value in (
+        ticker.get("markPrice"),
+        ticker.get("mark"),
+        info.get("markPrice"),
+        info.get("markPx"),
+        info.get("mark_price"),
+    ):
+        try:
+            mark = float(value)
+        except (TypeError, ValueError):
+            continue
+        if mark <= 0:
+            continue
+        timestamp = ticker.get("timestamp")
+        if timestamp is not None:
+            try:
+                event_ts = float(timestamp)
+                if event_ts > 100_000_000_000:
+                    event_ts /= 1000.0
+                age = (time.time() if now is None else float(now)) - event_ts
+                if age > 15.0 or age < -2.0:
+                    return 0.0
+            except (TypeError, ValueError):
+                return 0.0
+        return mark
     return 0.0
 
 
@@ -246,6 +322,13 @@ class OrderManager:
         self.executor    = SmartExecutor()
         self.sim         = SimExecutionModel()  # DRY_RUN realism
         self.mcp_brain   = None  # Set by bot_engine after construction
+        # Application composition enables this final new-exposure latch. It is
+        # opt-in here so isolated research/backtest uses of OrderManager remain
+        # deterministic; BotEngine enables it immediately after construction.
+        self.enforce_entry_policy = False
+        self.enforce_event_provenance = False
+        self.enforce_mark_price_triggers = False
+        self._mark_data_incidents: set[str] = set()
         # Provenance (2026-06-12): last open_position rejection reason —
         # read by bot_engine when open_position returns None so the
         # rejection row carries the order-manager-level cause.
@@ -254,6 +337,10 @@ class OrderManager:
         # receive an exchange parameter. BotEngine populates this via
         # set_exchanges() after constructing its exchange dict.
         self._exchanges: dict = {}
+        # LazyRealtimeHub is composed by BotEngine.  Keeping this optional
+        # preserves deterministic isolated tests while production entry and
+        # maker-resolution paths prefer a healthy venue WebSocket book.
+        self.realtime_streams = None
         # Track exchanges where futures is disabled (don't retry)
         # Track exchanges using One-Way Mode (no positionSide param)
         # Bitget is ALWAYS one-way — pre-populate to avoid first-order 40774 error
@@ -386,6 +473,79 @@ class OrderManager:
             pos._ext_dirty = not ok
         except Exception as e:
             logger.debug(f"[Extremes] update skipped: {e}")
+
+    @staticmethod
+    def _maintenance_margin_rate(exchange, pos) -> float:
+        """Best available PAPER maintenance rate, normalized to a fraction."""
+        try:
+            explicit = float(getattr(pos, "maintenance_margin_rate", 0) or 0)
+            if explicit > 0:
+                return explicit / 100.0 if explicit > 0.1 else explicit
+        except (TypeError, ValueError):
+            pass
+        try:
+            client = getattr(exchange, "exchange", None)
+            market = client.market(pos.symbol) if client is not None else {}
+            info = market.get("info") if isinstance(market, dict) else {}
+            for key in (
+                "maintenanceMarginRate",
+                "maintMarginRate",
+                "maintMarginPercent",
+                "maintenanceMarginPercent",
+            ):
+                value = info.get(key) if isinstance(info, dict) else None
+                if value is None:
+                    continue
+                rate = float(value)
+                if rate > 0:
+                    return rate / 100.0 if rate > 0.1 else rate
+        except (AttributeError, TypeError, ValueError):
+            pass
+        try:
+            from config import PAPER_MAINTENANCE_MARGIN_RATE
+
+            fallback = float(PAPER_MAINTENANCE_MARGIN_RATE)
+        except (ImportError, TypeError, ValueError):
+            fallback = 0.01
+        return min(0.2, max(0.0001, fallback))
+
+    def _required_futures_mark(self, exchange, pos, ticker: dict) -> float:
+        mark = _mark_from_ticker(ticker)
+        if mark > 0:
+            return mark
+        try:
+            payload = exchange.fetch_mark_index(pos.symbol, "futures") or {}
+            mark = float(payload.get("mark") or 0)
+            stamp = float(payload.get("ts") or time.time())
+            age = time.time() - stamp
+            if mark > 0 and -2.0 <= age <= 15.0:
+                return mark
+        except (AttributeError, TypeError, ValueError):
+            pass
+        return 0.0
+
+    def _target_traded_through(self, pos, price: float) -> bool:
+        target = float(getattr(pos, "take_profit", 0) or 0)
+        if target <= 0:
+            return False
+        if not self.enforce_mark_price_triggers:
+            return price >= target if pos.side == "buy" else price <= target
+        # A resting reduce-only limit touching the mark does not prove a fill.
+        return price > target if pos.side == "buy" else price < target
+
+    def _close_take_profit(self, exchange, pos, observed_price: float):
+        """Model an already-resting PAPER target as a limit fill at target."""
+        if self.dry_run and self.enforce_mark_price_triggers:
+            return self.close_position(
+                exchange,
+                pos,
+                "take_profit",
+                float(pos.take_profit),
+                order_type="limit",
+            )
+        return self.close_position(
+            exchange, pos, "take_profit", float(observed_price)
+        )
 
     def _record_lifecycle(self, pos, event_type: str,
                           payload: dict = None) -> None:
@@ -590,6 +750,141 @@ class OrderManager:
                 self._recent_client_ids.discard(r)
         self._recent_client_ids.add(cid)
         return cid
+
+    @staticmethod
+    def _provenance_venue(exchange_name: str) -> str:
+        value = str(exchange_name or "").lower()
+        for venue in ("binance", "bybit", "bitget"):
+            if venue in value:
+                return venue
+        raise ValueError(f"unsupported execution venue: {exchange_name!r}")
+
+    def _append_order_intent(
+        self,
+        exchange,
+        symbol: str,
+        market_type: str,
+        side: str,
+        size: float,
+        decision_id: str | None,
+        strategy: str,
+        candidate_id: int | None,
+        leverage: float,
+    ):
+        """Write the logical order intent before any exposure can be created."""
+        if not getattr(self, "enforce_event_provenance", False):
+            return None
+        try:
+            from datetime import datetime, timezone
+
+            from core.contracts import InstrumentId, MarketType, OrderIntent
+            from core.warehouse import get_warehouse
+
+            resolved_decision_id = str(decision_id or f"direct-{uuid.uuid4()}")
+            instrument = InstrumentId(
+                venue=self._provenance_venue(exchange.name),
+                market=(
+                    MarketType.PERPETUAL
+                    if market_type == "futures"
+                    else MarketType.SPOT
+                ),
+                canonical_symbol=symbol,
+                exchange_symbol=symbol,
+            )
+            intent = OrderIntent(
+                intent_id=f"intent-{uuid.uuid4()}",
+                decision_id=resolved_decision_id,
+                instrument=instrument,
+                created_at=datetime.now(timezone.utc),
+                side=side,
+                order_type="market",
+                quantity=size,
+                context={
+                    "strategy_id": str(strategy or "unassigned"),
+                    "candidate_id": candidate_id,
+                    "leverage": float(leverage),
+                    "execution_policy": "limit_then_market_or_paper_l2",
+                },
+            )
+            get_warehouse().append_order_intent(intent)
+            return intent
+        except Exception as exc:
+            self.last_open_reject = "order_intent_persistence_failed"
+            logger.error(f"[Provenance] order intent write failed: {exc}")
+            try:
+                self.risk.latch_incident(
+                    f"order intent persistence failed: {exc}",
+                    category="execution",
+                )
+            except Exception:
+                pass
+            return False
+
+    def _append_execution_event(
+        self,
+        intent,
+        event_type: str,
+        *,
+        order: dict | None = None,
+        quantity: float | None = None,
+        price: float | None = None,
+        reason: str | None = None,
+        context: dict | None = None,
+    ) -> bool:
+        """Append an acknowledgement/fill/cancel/error for an order intent."""
+        if intent is None:
+            return True
+        if intent is False:
+            return False
+        try:
+            from datetime import datetime, timezone
+
+            from core.contracts import ExecutionEvent, ExecutionEventType
+            from core.warehouse import get_warehouse
+
+            payload = order if isinstance(order, dict) else {}
+            info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
+            client_order_id = (
+                payload.get("_client_order_id")
+                or payload.get("clientOrderId")
+                or info.get("clientOrderId")
+                or info.get("orderLinkId")
+                or info.get("clientOid")
+            )
+            now = datetime.now(timezone.utc)
+            event_kind = ExecutionEventType(event_type)
+            event = ExecutionEvent(
+                event_id=f"execution-{uuid.uuid4()}",
+                intent_id=intent.intent_id,
+                decision_id=intent.decision_id,
+                instrument=intent.instrument,
+                event_type=event_kind,
+                occurred_at=now,
+                received_at=now,
+                venue_order_id=(
+                    str(payload.get("id")) if payload.get("id") is not None else None
+                ),
+                client_order_id=(
+                    str(client_order_id) if client_order_id is not None else None
+                ),
+                quantity=quantity,
+                price=price,
+                cumulative_quantity=quantity,
+                rejection_reason=reason,
+                context=context or {},
+            )
+            get_warehouse().append_execution_event(event)
+            return True
+        except Exception as exc:
+            logger.error(f"[Provenance] execution event write failed: {exc}")
+            try:
+                self.risk.latch_incident(
+                    f"execution event persistence failed: {exc}",
+                    category="execution",
+                )
+            except Exception:
+                pass
+            return False
 
     def _fill_freshness_reason(self, ticker: dict, exchange) -> str | None:
         """Phase C: reason a fill should be rejected for a stale ticker, else None.
@@ -938,11 +1233,75 @@ class OrderManager:
                       candidate_id: int = None, mcp_score: float = None,
                       model_version: str = None,
                       decision_id: str | None = None,
+                      execution_snapshot: dict | None = None,
                       _maker_first_ctx: dict | None = None):
 
         # Provenance: reset per attempt; every internal reject stashes a
         # reason here before returning None.
         self.last_open_reject = None
+
+        if getattr(self, "enforce_entry_policy", False):
+            from core.entry_policy import authorize_runtime_entry
+
+            authorization = authorize_runtime_entry(
+                strategy,
+                strategy_version=model_version,
+            )
+            if not authorization.allowed:
+                self.last_open_reject = authorization.reason
+                logger.warning(
+                    f"[EntryPolicy] blocked {strategy}:{symbol} open: "
+                    f"{authorization.reason}"
+                )
+                return None
+
+        if getattr(self, "enforce_event_provenance", False):
+            try:
+                from datetime import datetime, timezone
+
+                from config import EXECUTION_BOOK_MAX_AGE_SEC
+
+                snapshot_payload = execution_snapshot["snapshot"]
+                snapshot_venue = str(
+                    snapshot_payload["instrument"]["venue"]
+                ).lower()
+                snapshot_market = str(
+                    snapshot_payload["instrument"]["market"]
+                ).lower()
+                snapshot_symbol = str(
+                    snapshot_payload["instrument"]["canonical_symbol"]
+                ).upper()
+                snapshot_source = str(snapshot_payload["source"]).lower()
+                received_at = datetime.fromisoformat(
+                    str(snapshot_payload["received_at"]).replace("Z", "+00:00")
+                ).astimezone(timezone.utc)
+                snapshot_quantity = float(execution_snapshot["filled_quantity"])
+                expected_venue = self._provenance_venue(exchange.name)
+                expected_market = (
+                    "perpetual" if market_type == "futures" else "spot"
+                )
+                if execution_snapshot.get("allowed") is not True:
+                    raise ValueError("snapshot was not execution-approved")
+                if snapshot_venue != expected_venue:
+                    raise ValueError("snapshot venue does not match adapter")
+                if snapshot_market != expected_market:
+                    raise ValueError("snapshot market does not match order")
+                expected_symbol = str(symbol).upper()
+                if market_type == "futures" and ":" not in expected_symbol:
+                    expected_symbol = f"{expected_symbol}:USDT"
+                if snapshot_symbol != expected_symbol:
+                    raise ValueError("snapshot symbol does not match order")
+                if not snapshot_source.startswith(f"{expected_venue}."):
+                    raise ValueError("snapshot source does not match adapter")
+                age = (datetime.now(timezone.utc) - received_at).total_seconds()
+                if age < -2 or age > float(EXECUTION_BOOK_MAX_AGE_SEC):
+                    raise ValueError("execution snapshot is stale or future-dated")
+                if snapshot_quantity + 1e-12 < float(size):
+                    raise ValueError("snapshot depth is below order quantity")
+            except (KeyError, TypeError, ValueError) as exc:
+                self.last_open_reject = "execution_snapshot_invalid"
+                logger.warning(f"[Orders] {symbol}: execution snapshot denied: {exc}")
+                return None
 
         if self.blacklist.is_blacklisted(symbol):
             logger.warning(f"[Orders] {symbol} blacklisted — skipped.")
@@ -1193,6 +1552,7 @@ class OrderManager:
                     "tp_pct": abs(float(tp) - _mf_ref) / _mf_ref,
                     "candidate_id": candidate_id, "mcp_score": mcp_score,
                     "model_version": model_version, "decision_id": decision_id,
+                    "execution_snapshot": execution_snapshot,
                     "created_ts": time.time(),
                 }
                 self._persist_pending_maker()
@@ -1222,7 +1582,8 @@ class OrderManager:
                              or _maker_first_ctx.get("fill_type") != "maker"):
             sim_fill = self.sim.paper_fill_price(
                 exchange, symbol, side, market_type,
-                base_price=fill_price, phase="open", size=size)
+                base_price=fill_price, phase="open", size=size,
+                execution_snapshot=execution_snapshot)
             if sim_fill > 0 and sim_fill != fill_price:
                 logger.debug(
                     f"[SimExec] {symbol} {side} OPEN slip: "
@@ -1308,6 +1669,20 @@ class OrderManager:
                     market_type, exchange.name, "maker")
                 pos.total_fees = pos.entry_fee + pos.exit_fee
 
+        _provenance_intent = self._append_order_intent(
+            exchange,
+            symbol,
+            market_type,
+            side,
+            size,
+            decision_id,
+            strategy,
+            candidate_id,
+            leverage,
+        )
+        if _provenance_intent is False:
+            return None
+
         if self.dry_run:
             ok = self.wallet.on_open(
                 exchange.name, symbol, side,
@@ -1316,6 +1691,12 @@ class OrderManager:
             )
             if not ok:
                 self.last_open_reject = "paper_wallet_reject"
+                self._append_execution_event(
+                    _provenance_intent,
+                    "rejected",
+                    order={"id": pos.order_id},
+                    reason="paper_wallet_reject",
+                )
                 return None
             logger.info(
                 f"[Orders] [DRY] {side.upper()} {size:.6f} {symbol} "
@@ -1341,10 +1722,18 @@ class OrderManager:
                 spread_info = self.executor.check_spread(
                     exchange, symbol, market_type)
                 if not spread_info["ok"]:
+                    _spread_reason = str(
+                        spread_info.get("reason") or "spread_too_wide"
+                    )
                     logger.info(
-                        f"[Orders] {symbol}: spread too wide "
+                        f"[Orders] {symbol}: execution book rejected "
                         f"({spread_info['spread_pct']*100:.3f}%) — skip")
-                    self.last_open_reject = "spread_too_wide"
+                    self.last_open_reject = _spread_reason
+                    self._append_execution_event(
+                        _provenance_intent,
+                        "rejected",
+                        reason=_spread_reason,
+                    )
                     return None
                 # Prefer the order-book mid over the ticker mid for LIVE —
                 # check_spread fetches a fresh top-of-book snapshot.
@@ -1377,6 +1766,25 @@ class OrderManager:
                             f"[Orders] {symbol}: no fill "
                             f"({(order or {}).get('status') or 'empty'}) — no position opened")
                     self.last_open_reject = "no_fill"
+                    self._append_execution_event(
+                        _provenance_intent,
+                        "error" if _outcome == "uncertain" else "cancelled",
+                        order=order,
+                        reason=(
+                            "unknown_submission_outcome"
+                            if _outcome == "uncertain"
+                            else "entry_not_filled"
+                        ),
+                    )
+                    if _outcome == "uncertain":
+                        try:
+                            self.risk.latch_incident(
+                                f"unknown entry submission outcome: "
+                                f"{exchange.name}:{symbol}",
+                                category="execution",
+                            )
+                        except Exception:
+                            pass
                     return None
                 if 0 < _fill_sz < size:
                     logger.warning(
@@ -1423,6 +1831,11 @@ class OrderManager:
                     # Auto-blacklist to prevent repeated warnings each cycle
                     self.blacklist.add(symbol, reason=f"skip_pair:{str(e)[:60]}")
                     self.last_open_reject = "skip_pair_error"
+                    self._append_execution_event(
+                        _provenance_intent,
+                        "rejected",
+                        reason="skip_pair_error",
+                    )
                     return None
                 # Handle position mode mismatch — retry without positionSide
                 if _is_position_mode_error(e) and market_type == "futures":
@@ -1442,6 +1855,12 @@ class OrderManager:
                                 f"[Orders] {symbol}: one-way retry no fill "
                                 f"({(order or {}).get('status') or 'empty'}) — skipping")
                             self.last_open_reject = "no_fill_oneway_retry"
+                            self._append_execution_event(
+                                _provenance_intent,
+                                "cancelled",
+                                order=order,
+                                reason="no_fill_oneway_retry",
+                            )
                             return None
                         if 0 < _f2 < size:
                             logger.warning(
@@ -1463,6 +1882,12 @@ class OrderManager:
                     except Exception as e2:
                         logger.error(f"[Orders] Order failed (one-way retry): {e2}")
                         self.last_open_reject = "order_failed_oneway_retry"
+                        self._append_execution_event(
+                            _provenance_intent,
+                            "error",
+                            reason="order_failed_oneway_retry",
+                            context={"error": str(e2)[:500]},
+                        )
                         return None
                 elif _is_permission_error(e) and market_type == "futures":
                     self._futures_disabled.add(ex_name_lower)
@@ -1472,6 +1897,11 @@ class OrderManager:
                         f"— falling back to SPOT for buy signals.")
                     if side == "buy":
                         spot_symbol = symbol.replace(":USDT", "")
+                        self._append_execution_event(
+                            _provenance_intent,
+                            "rejected",
+                            reason="futures_permission_spot_fallback",
+                        )
                         # E-7: forward ALL provenance kwargs — this retry
                         # previously dropped candidate_id/mcp_score/
                         # model_version (pre-existing data loss).
@@ -1480,15 +1910,70 @@ class OrderManager:
                             strategy, size, sl, tp, leverage=1,
                             candidate_id=candidate_id, mcp_score=mcp_score,
                             model_version=model_version,
-                            decision_id=decision_id)
+                            decision_id=decision_id,
+                            execution_snapshot=execution_snapshot)
                     self.last_open_reject = "futures_permission_denied"
+                    self._append_execution_event(
+                        _provenance_intent,
+                        "rejected",
+                        reason="futures_permission_denied",
+                    )
                     return None
                 else:
                     logger.error(f"[Orders] Order failed on {exchange.name}: {e}")
                     self.notifier.error(
                         f"Order FAILED: {symbol} {side.upper()}\n{str(e)[:200]}")
                     self.last_open_reject = "order_failed"
+                    self._append_execution_event(
+                        _provenance_intent,
+                        "error",
+                        reason="order_failed",
+                        context={"error": str(e)[:500]},
+                    )
                     return None
+
+        if self.dry_run:
+            self._append_execution_event(
+                _provenance_intent,
+                "filled",
+                order={"id": pos.order_id},
+                quantity=float(pos.size),
+                price=float(pos.entry_price),
+                context={"paper": True, "fill_type": _fill_type or "taker"},
+            )
+        else:
+            requested_quantity = (
+                float(_provenance_intent.quantity)
+                if _provenance_intent not in (None, False)
+                else float(pos.size)
+            )
+            if float(pos.size) + 1e-12 < requested_quantity:
+                self._append_execution_event(
+                    _provenance_intent,
+                    "partially_filled",
+                    order=order,
+                    quantity=float(pos.size),
+                    price=float(pos.entry_price),
+                    context={"requested_quantity": requested_quantity},
+                )
+                self._append_execution_event(
+                    _provenance_intent,
+                    "cancelled",
+                    order=order,
+                    reason="unfilled_remainder_cancelled",
+                    context={
+                        "unfilled_quantity": requested_quantity - float(pos.size)
+                    },
+                )
+            else:
+                self._append_execution_event(
+                    _provenance_intent,
+                    "filled",
+                    order=order,
+                    quantity=float(pos.size),
+                    price=float(pos.entry_price),
+                    context={"fill_type": _fill_type or "taker"},
+                )
 
         self.tracker.add(pos)
 
@@ -1748,8 +2233,10 @@ class OrderManager:
                         f"[Orders] close_position failed after SL race-reject "
                         f"for {symbol}: {close_err}")
                 return
+            _safe_error = _redact_http_debug(e, max_chars=1000)
             logger.error(
-                f"[Orders] EMERGENCY: SL order FAILED on {exchange.name} {symbol}: {e} "
+                f"[Orders] EMERGENCY: SL order FAILED on {exchange.name} {symbol}: "
+                f"{_safe_error} "
                 f"— closing position {pos.id[:8]} at market (fail-closed policy).")
             # Capture ccxt's last HTTP round-trip so the next occurrence of
             # -4120 (or any repeat rejection) leaves enough evidence on disk
@@ -1772,13 +2259,16 @@ class OrderManager:
                     f"order_type={sl_type} close_side={close_side} size={size_rounded} "
                     f"sl_params={sl_params} defaultType={opts_type}")
                 logger.error(
-                    f"[Orders] SL-FAIL DEBUG | request_url={req_url} "
-                    f"request_body={req_body}")
+                    f"[Orders] SL-FAIL DEBUG | "
+                    f"request_url={_redact_http_debug(req_url)} "
+                    f"request_body={_redact_http_debug(req_body)}")
                 logger.error(
-                    f"[Orders] SL-FAIL DEBUG | response_body={resp_body}")
-                # Full headers only at debug level — they contain auth/signature echoes.
+                    f"[Orders] SL-FAIL DEBUG | "
+                    f"response_body={_redact_http_debug(resp_body)}")
                 logger.debug(
-                    f"[Orders] SL-FAIL DEBUG hdrs | req={req_hdrs} resp={resp_hdrs}")
+                    f"[Orders] SL-FAIL DEBUG hdrs | "
+                    f"req={_redact_http_debug(req_hdrs)} "
+                    f"resp={_redact_http_debug(resp_hdrs)}")
             except Exception as dbg_err:
                 logger.warning(f"[Orders] SL-FAIL debug capture itself failed: {dbg_err}")
             pos._sl_failed = True
@@ -1798,7 +2288,8 @@ class OrderManager:
                         f"{exchange.name}. Position {pos.id[:8]} is OPEN "
                         f"WITHOUT exchange-side protection "
                         f"(SL_FAIL_EMERGENCY_CLOSE_ENABLED=false); local SL "
-                        f"monitoring + per-minute reconcile active. Reason: {e}")
+                        f"monitoring + per-minute reconcile active. "
+                        f"Reason: {_safe_error}")
                 except Exception:
                     pass
                 return
@@ -2493,8 +2984,12 @@ class OrderManager:
         # the wider `pct_stop_loss` because market orders fill worse during
         # the fast moves that trigger SLs.
         _is_paper = position.paper_trade if hasattr(position, 'paper_trade') else self.dry_run
-        if _is_paper:
-            phase = "stop" if reason in ("stop_loss", "trailing_stop") else "close"
+        if _is_paper and order_type != "limit":
+            phase = (
+                "stop"
+                if reason in ("stop_loss", "trailing_stop", "liquidation")
+                else "close"
+            )
             sim_px = self.sim.paper_fill_price(
                 exchange, position.symbol, close_side,
                 position.market_type, base_price=price, phase=phase,
@@ -2562,10 +3057,41 @@ class OrderManager:
                     or "order not found" in err.lower()
                 )
                 if _already_closed:
-                    logger.info(
-                        f"[Orders] {position.symbol} already closed on exchange "
-                        f"— syncing tracker")
-                    order_placed = True  # Proceed to close in tracker
+                    # A1 (2026-07-16): the error string is a TRIGGER TO VERIFY,
+                    # never proof. "order not found" is an ORDER-level error that
+                    # also fires while the POSITION is still open; the other
+                    # phrases are substring matches that can false-positive.
+                    # Untracking a still-open position leaves it NAKED (no SL, no
+                    # monitor) with phantom PnL — the worst state. Only untrack
+                    # when fetch_positions POSITIVELY confirms flat; on still-open
+                    # OR fetch failure leave order_placed=False so the fail-closed
+                    # path below keeps it OPEN + tracked for reconcile. (A
+                    # falsely-KEPT closed position reconciles away harmlessly via
+                    # ghost-sync; a falsely-UNTRACKED open one does not.)
+                    _flat = True
+                    try:
+                        _live = exchange.fetch_positions([position.symbol]) or []
+                        for _p in _live:
+                            _sz = abs(float(_p.get("contracts")
+                                            or _p.get("contractSize") or 0))
+                            if _sz > 0:
+                                _flat = False
+                                break
+                    except Exception as _ve:
+                        _flat = False  # cannot verify -> fail-safe: keep tracked
+                        logger.warning(
+                            f"[Orders] close-verify fetch_positions failed for "
+                            f"{position.symbol}: {str(_ve)[:100]} — keeping tracked")
+                    if _flat:
+                        logger.info(
+                            f"[Orders] {position.symbol} confirmed flat on exchange "
+                            f"— syncing tracker")
+                        order_placed = True  # Proceed to close in tracker
+                    else:
+                        logger.error(
+                            f"[Orders] close error resembled already-closed "
+                            f"({err[:90]}) but {position.symbol} is STILL OPEN or "
+                            f"unverifiable — NOT untracking; keeping protected.")
                 # "reduceonly not required" — Binance One-Way mode
                 elif "reduceonly" in err.lower() or "-1106" in err:
                     self._oneway_mode.add(ex_lower)
@@ -3359,6 +3885,40 @@ class OrderManager:
             prov_sl, prov_tp = limit_px * (1 + sl_pct), limit_px * (1 - tp_pct)
         ctx = {"fill_type": fill_type, "fill_px": limit_px,
                "sl_pct": sl_pct, "tp_pct": tp_pct}
+        resolved_snapshot = intent.get("execution_snapshot")
+        if getattr(self, "enforce_event_provenance", False):
+            try:
+                from config import (
+                    EXECUTION_BOOK_DEPTH_LEVELS,
+                    EXECUTION_BOOK_MAX_AGE_SEC,
+                    MAX_ENTRY_SLIPPAGE_BPS,
+                )
+                from core.execution_guard import fetch_and_validate_execution_book
+
+                refreshed = fetch_and_validate_execution_book(
+                    exchange,
+                    venue=self._provenance_venue(exchange.name),
+                    market_type=intent["market_type"],
+                    canonical_symbol=intent["symbol"],
+                    exchange_symbol=intent["symbol"],
+                    side=side,
+                    requested_quantity=float(intent["size"]),
+                    max_slippage_bps=MAX_ENTRY_SLIPPAGE_BPS,
+                    max_age_seconds=EXECUTION_BOOK_MAX_AGE_SEC,
+                    limit=EXECUTION_BOOK_DEPTH_LEVELS,
+                    realtime_provider=self.realtime_streams,
+                )
+                if not refreshed.allowed:
+                    raise ValueError(refreshed.reason)
+                resolved_snapshot = refreshed.to_action_dict()
+            except Exception as exc:
+                self.last_open_reject = "maker_resolution_book_invalid"
+                logger.warning(
+                    f"[MakerFirst] {intent['symbol']}: fresh execution book "
+                    f"required at resolution: {exc}"
+                )
+                self._persist_pending_maker()
+                return
         pos = self.open_position(
             exchange, intent["symbol"], side, intent["market_type"],
             intent["strategy"], float(intent["size"]), prov_sl, prov_tp,
@@ -3367,6 +3927,7 @@ class OrderManager:
             mcp_score=intent.get("mcp_score"),
             model_version=intent.get("model_version"),
             decision_id=intent.get("decision_id"),
+            execution_snapshot=resolved_snapshot,
             _maker_first_ctx=ctx)
         if pos is None:
             logger.warning(
@@ -3442,10 +4003,62 @@ class OrderManager:
                 and getattr(pos, '_exchange_tp', False)
             )
             ticker = exchange.fetch_ticker(pos.symbol, market_type)
-            price  = ticker.get("last")
+            last_price = _safe_ticker_px(ticker, "last") or _safe_ticker_px(
+                ticker, "close"
+            )
+            price = last_price
+            if market_type == "futures" and self.enforce_mark_price_triggers:
+                price = self._required_futures_mark(exchange, pos, ticker)
+                if price <= 0:
+                    incident_key = f"{exchange.name}:{pos.symbol}"
+                    if incident_key not in self._mark_data_incidents:
+                        self._mark_data_incidents.add(incident_key)
+                        self.risk.latch_incident(
+                            f"mark price unavailable for {incident_key}",
+                            category="data",
+                            metadata={
+                                "venue": str(exchange.name).lower(),
+                                "symbol": pos.symbol,
+                                "market_type": market_type,
+                            },
+                        )
+                    if last_price > 0 and (
+                        self.dry_run or not _exchange_handles_sltp
+                    ):
+                        self.close_position(
+                            exchange, pos, "data_feed_failure", last_price
+                        )
+                    continue
             if not price:
                 continue
             price = float(price)
+
+            if self.dry_run and market_type == "futures":
+                from core.fill_reality import liquidation_buffer_breach
+
+                mmr = self._maintenance_margin_rate(exchange, pos)
+                margin = liquidation_buffer_breach(
+                    pos.side,
+                    float(pos.entry_price),
+                    price,
+                    float(pos.leverage or 1),
+                    mmr=mmr,
+                    buffer_frac=0.0,
+                )
+                pos._paper_liquidation_price = float(margin["liq_px"])
+                if margin["crossed"]:
+                    logger.error(
+                        f"[Orders] PAPER LIQUIDATION: {pos.symbol} "
+                        f"{pos.side.upper()} mark={price:.6g} "
+                        f"liq={float(margin['liq_px']):.6g} mmr={mmr:.4%}"
+                    )
+                    self.close_position(
+                        exchange,
+                        pos,
+                        "liquidation",
+                        float(margin["liq_px"]),
+                    )
+                    continue
 
             # ── C7 (2026-07-08): running intra-trade extremes ──
             # Feeds trades.mfe/mae so DistFitSL fits real excursions
@@ -3476,7 +4089,14 @@ class OrderManager:
                 wick_reason, wick_px = self.sim.check_wick_trigger(
                     exchange, pos.symbol, market_type, pos.side,
                     pos.stop_loss, pos.take_profit,
-                    entry_ts=getattr(pos, "open_time", None))
+                    entry_ts=getattr(pos, "open_time", None),
+                    price_basis=(
+                        "mark"
+                        if market_type == "futures"
+                        and self.enforce_mark_price_triggers
+                        else "trade"
+                    ),
+                )
                 if wick_reason == "stop_loss":
                     logger.warning(
                         f"[Orders] WICK STOP: {pos.symbol} {pos.side.upper()} "
@@ -3490,8 +4110,7 @@ class OrderManager:
                         f"[Orders] WICK TP: {pos.symbol} {pos.side.upper()} "
                         f"1m wick touched TP={pos.take_profit:.6g} "
                         f"(ticker last={price:.6g})")
-                    self.close_position(
-                        exchange, pos, "take_profit", wick_px)
+                    self._close_take_profit(exchange, pos, wick_px)
                     continue
 
             # ── TSMOM capital-preservation exit policy (Phase 2b) ───────
@@ -3563,13 +4182,11 @@ class OrderManager:
                             f"{pos.side.upper()} @ {price:.4f} (SL={_db_sl:.6g})")
                         self.close_position(exchange, pos, "stop_loss", price)
                         continue
-                    if _db_tp > 0 and (
-                            (pos.side == "buy" and price >= _db_tp)
-                            or (pos.side == "sell" and price <= _db_tp)):
+                    if _db_tp > 0 and self._target_traded_through(pos, price):
                         logger.info(
                             f"[Orders] DEEP-BREAKOUT TAKE PROFIT: {pos.symbol} "
                             f"{pos.side.upper()} @ {price:.4f} (TP={_db_tp:.6g})")
-                        self.close_position(exchange, pos, "take_profit", price)
+                        self._close_take_profit(exchange, pos, price)
                         continue
                 continue  # hold to SL/TP/max-hold; skip scalp early-exits
 
@@ -3585,15 +4202,14 @@ class OrderManager:
             if RISK.get("near_target_exit_enabled", False):
                 _tp_ptf = pos.take_profit
                 if _tp_ptf and float(_tp_ptf) > 0 and not _exchange_handles_sltp:
-                    _hit = (pos.side == "buy" and price >= float(_tp_ptf)) or \
-                           (pos.side == "sell" and price <= float(_tp_ptf))
+                    _hit = self._target_traded_through(pos, price)
                     if _hit:
                         _, _ntp_ptf, _ = self._net_pnl_at_price(pos, price)
                         logger.info(
                             f"[Orders] TAKE PROFIT (planned-first): {pos.symbol} "
                             f"{pos.side.upper()} @ {price:.4f} "
                             f"(TP={float(_tp_ptf):.4f}) net={_ntp_ptf:+.2f}%")
-                        self.close_position(exchange, pos, "take_profit", price)
+                        self._close_take_profit(exchange, pos, price)
                         continue
 
             # ── PARTIAL TAKE PROFIT ──
@@ -3774,7 +4390,7 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif price >= pos.take_profit:
+                elif self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED — always close at TP.
                     # The old "MCP says RIDE" gate collapsed R:R from 2.5:1 to 1.12:1
                     # by letting winning positions ride past TP, only to retrace and
@@ -3784,7 +4400,7 @@ class OrderManager:
                         f"[Orders] TAKE PROFIT: {pos.symbol} "
                         f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
                     )
-                    self.close_position(exchange, pos, "take_profit", price)
+                    self._close_take_profit(exchange, pos, price)
                     continue
 
                 # 2026-04-16 (post-audit): Proactive MCP TP-at-+2% REMOVED.
@@ -3804,14 +4420,14 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif price <= pos.take_profit:
+                elif self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED for shorts too.
                     _, net_pct, _ = self._net_pnl_at_price(pos, price)
                     logger.info(
                         f"[Orders] TAKE PROFIT (short): {pos.symbol} "
                         f"@ {price:.4f} (TP={pos.take_profit:.4f}) net={net_pct:+.2f}%"
                     )
-                    self.close_position(exchange, pos, "take_profit", price)
+                    self._close_take_profit(exchange, pos, price)
                     continue
 
                 # 2026-04-16 (post-audit): Proactive MCP TP-at-+2% REMOVED
