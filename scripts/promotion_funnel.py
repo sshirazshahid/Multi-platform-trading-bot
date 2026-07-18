@@ -276,3 +276,87 @@ def build_dossier(lane: LaneState, gate_result: dict, outcomes: list[dict],
         f"# SHADOW_ONLY -> PAPER_CANDIDATE (paper_eligible=True). Owner applies by hand.\n",
         encoding="utf-8")
     return d
+
+
+def compute_all(paths: dict, now: float) -> dict:
+    lanes: list[LaneState] = []
+    try:
+        conn = sqlite3.connect(f"file:{paths['warehouse']}?mode=ro", uri=True)
+        lanes += probe_lane_states(conn, now)
+        lanes.append(listing_lane_state(conn, now))
+        conn.close()
+    except sqlite3.Error as exc:
+        lanes += [LaneState(l, "ERROR", detail={"error": str(exc)})
+                  for l in [*PROBE_LANES, "listing_short"]]
+    for ls in lanes:
+        if ls.lane == "unlock_short" and ls.state != "ERROR":
+            cov = unlock_calendar_coverage(paths["cal_dir"], now)
+            ls.detail["calendar"] = cov
+            if cov["starved"]:
+                ls.state = "STARVED"
+    lanes.append(f1_lane_state(paths["gate_log"], now))
+    lanes.append(band_lane_state(paths["goal_json"]))
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    for ls in lanes:  # gate + dossier on any GATE_READY probe lane
+        if ls.state == "GATE_READY" and ls.lane in PROBE_LANES:
+            agent, timeframe = PROBE_LANES[ls.lane]
+            conn = sqlite3.connect(f"file:{paths['warehouse']}?mode=ro", uri=True)
+            tf_sql = " AND d.timeframe = ?" if timeframe else ""
+            args: tuple = (agent, timeframe) if timeframe else (agent,)
+            outcomes = [{"net_pnl": r[0], "p_win": r[1]} for r in conn.execute(
+                "SELECT o.net_pnl, d.p_win FROM shadow_decisions d JOIN shadow_outcomes o"
+                " ON o.proposal_id = d.proposal_id WHERE d.agent_id = ?"
+                f" AND d.label_status = 'RESOLVED'{tf_sql}", args)]
+            conn.close()
+            gate = run_gate(outcomes)
+            ls.detail["gate"] = gate
+            if gate["passed"]:
+                if build_dossier(ls, gate, outcomes, Path(paths["dossier_dir"]), today):
+                    ls.state = "STAGED"
+    return {"generated_utc": datetime.now(timezone.utc).isoformat(),
+            "resolved_floor": RESOLVED_FLOOR,
+            "lanes": [ls.to_dict() for ls in lanes]}
+
+
+def persist(doc: dict, paths: dict) -> None:
+    prev = {}
+    try:
+        prev = {l["lane"]: l["state"]
+                for l in json.loads(Path(paths["funnel_json"]).read_text(
+                    encoding="utf-8"))["lanes"]}
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+    atomic_write_json(Path(paths["funnel_json"]), doc)
+    changes = [(l["lane"], prev.get(l["lane"]), l["state"]) for l in doc["lanes"]
+               if prev.get(l["lane"]) != l["state"]]
+    f1 = next((l for l in doc["lanes"] if l["lane"] == "f1_carry"), None)
+    alert = bool(f1 and f1["detail"].get("alert"))
+    if not changes and not alert:
+        return
+    jdir = Path(paths["journal_dir"])
+    jdir.mkdir(parents=True, exist_ok=True)
+    day = jdir / f"{datetime.now(timezone.utc):%Y-%m-%d}.md"
+    lines = [f"\n## {datetime.now(timezone.utc):%H:%M}Z — Promotion funnel"]
+    lines += [f"- {lane}: {old or 'NEW'} → **{new}**" for lane, old, new in changes]
+    if alert:
+        lines.append(f"- ⚠ F1 REGIME ALERT: positive net edge sustained — "
+                     f"{f1['detail']['top_edges'][:3]}")
+    with day.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def main() -> int:
+    paths = {"warehouse": ROOT / "data" / "warehouse.sqlite",
+             "gate_log": ROOT / "data" / "carry_gate_log.jsonl",
+             "goal_json": ROOT / "data" / "goal_progress.json",
+             "cal_dir": ROOT / "data" / "unlock_calendar",
+             "funnel_json": FUNNEL_JSON, "dossier_dir": DOSSIER_DIR,
+             "journal_dir": ROOT / "journal"}
+    doc = compute_all(paths, time.time())
+    persist(doc, paths)
+    print(f"promotion funnel -> {FUNNEL_JSON}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

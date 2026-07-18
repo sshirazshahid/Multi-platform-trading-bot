@@ -202,3 +202,33 @@ def test_dossier_written_complete_and_idempotent(tmp_path):
     md = (d / "evidence.md").read_text(encoding="utf-8")
     assert "owner sign-off" in md.lower() and "0.667" in md
     assert pf.build_dossier(lane, gate, outcomes, tmp_path, "20260718") is None  # idempotent
+
+
+def test_compute_all_and_journal_on_state_change(tmp_path):
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE shadow_decisions (id INTEGER PRIMARY KEY, ts REAL, agent_id TEXT,"
+              " timeframe TEXT, proposal_id TEXT, label_status TEXT)")
+    c.execute("CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)")
+    c.execute("CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, decision TEXT,"
+              " shortable INTEGER, created_ts REAL)")
+    c.commit()
+    (tmp_path / "carry_gate_log.jsonl").write_text("")
+    (tmp_path / "goal_progress.json").write_text(json.dumps({"lanes": []}))
+    (tmp_path / "unlock_calendar").mkdir()
+    paths = {"warehouse": db, "gate_log": tmp_path / "carry_gate_log.jsonl",
+             "goal_json": tmp_path / "goal_progress.json",
+             "cal_dir": tmp_path / "unlock_calendar",
+             "funnel_json": tmp_path / "promotion_funnel.json",
+             "dossier_dir": tmp_path / "dossiers", "journal_dir": tmp_path / "journal"}
+    now = time.time()
+    doc1 = pf.compute_all(paths, now)
+    assert {l["lane"] for l in doc1["lanes"]} >= {"tsmom_20d_1h", "listing_short",
+                                                  "f1_carry", "band_cohort", "unlock_short"}
+    pf.persist(doc1, paths)            # first run: journal written (all states new)
+    files = list((tmp_path / "journal").glob("*.md"))
+    assert len(files) == 1
+    first = files[0].read_text(encoding="utf-8")
+    doc2 = pf.compute_all(paths, now + 60)
+    pf.persist(doc2, paths)            # no state change: journal unchanged
+    assert files[0].read_text(encoding="utf-8") == first
