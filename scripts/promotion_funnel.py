@@ -153,3 +153,47 @@ def unlock_calendar_coverage(cal_dir: Path, now: float) -> dict:
     return {"forward_days": round(fwd, 1), "starved": fwd < 30,
             "backfill_cmd": ("venv/Scripts/python.exe scripts/backfill_unlock_calendar.py"
                              " --forward-days 60")}
+
+
+def f1_lane_state(gate_log: Path, now: float) -> LaneState:
+    try:
+        lines = gate_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+    except OSError as exc:
+        return LaneState("f1_carry", "ERROR", detail={"error": str(exc)})
+    recent = []
+    for ln in lines[-2000:]:
+        try:
+            e = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if float(e.get("ts", 0)) >= now - 48 * 3600:
+            recent.append(e)
+    streaks: dict[tuple, int] = {}
+    best: dict[tuple, float] = {}
+    alert = False
+    for e in recent:  # log is append-ordered; consecutive = successive entries per key
+        key = (e.get("venue"), e.get("symbol"))
+        edge = float(e.get("net_edge_bps") or 0)
+        best[key] = max(best.get(key, -1e9), edge)
+        streaks[key] = streaks.get(key, 0) + 1 if edge > 0 else 0
+        if streaks[key] >= 3:
+            alert = True
+    top = sorted(({"venue": k[0], "symbol": k[1], "best_edge_bps": round(v, 2)}
+                  for k, v in best.items()), key=lambda d: -d["best_edge_bps"])[:5]
+    state = "ACCRUING" if alert else ("IDLE" if recent else "STARVED")
+    return LaneState("f1_carry", state, detail={
+        "alert": alert, "top_edges": top, "entries_48h": len(recent),
+        "note": "alert = net_edge_bps>0 on >=3 consecutive gate evals (hysteresis)"})
+
+
+def band_lane_state(goal_json: Path) -> LaneState:
+    try:
+        data = json.loads(goal_json.read_text(encoding="utf-8"))
+        boot = next(l for l in data.get("lanes", []) if l.get("lane") == "current_boot")
+    except (OSError, json.JSONDecodeError, StopIteration) as exc:
+        return LaneState("band_cohort", "ERROR", detail={"error": str(exc)})
+    n, w = int(boot.get("closed_trades") or 0), int(boot.get("wins") or 0)
+    return LaneState("band_cohort", "ACCRUING" if n else "IDLE", n, w,
+                     boot.get("wr"), f"{n}/{RESOLVED_FLOOR}",
+                     detail={"net_pnl": boot.get("net_pnl"),
+                             "note": "tuning protocol owned by band program, funnel reports only"})

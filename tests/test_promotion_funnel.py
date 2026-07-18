@@ -130,3 +130,40 @@ def test_unlock_calendar_coverage_flags_short_horizon(tmp_path):
     cov = pf.unlock_calendar_coverage(cal, now)
     assert cov["forward_days"] < 30 and cov["starved"] is True
     assert "--forward-days 60" in cov["backfill_cmd"]
+
+
+def _write_gate_log(p, entries):
+    p.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
+
+
+def test_f1_alert_needs_three_consecutive_positives(tmp_path):
+    log = tmp_path / "carry_gate_log.jsonl"
+    now = time.time()
+    mk = lambda i, edge: {"ts": now - 600 + i * 60, "symbol": "XRP/USDT",  # noqa: E731
+                          "venue": "bitget", "net_edge_bps": edge}
+    _write_gate_log(log, [mk(0, 5.0), mk(1, 6.0)])          # only 2 consecutive
+    assert pf.f1_lane_state(log, now).detail["alert"] is False
+    _write_gate_log(log, [mk(0, 5.0), mk(1, 6.0), mk(2, 7.0)])
+    st = pf.f1_lane_state(log, now)
+    assert st.detail["alert"] is True and st.state == "ACCRUING"
+    assert st.detail["top_edges"][0]["symbol"] == "XRP/USDT"
+
+
+def test_f1_idle_and_error_paths(tmp_path):
+    log = tmp_path / "carry_gate_log.jsonl"
+    now = time.time()
+    _write_gate_log(log, [{"ts": now, "symbol": "XRP/USDT", "venue": "bitget",
+                           "net_edge_bps": -20.0}])
+    st = pf.f1_lane_state(log, now)
+    assert st.state == "IDLE" and st.detail["alert"] is False
+    assert pf.f1_lane_state(tmp_path / "missing.jsonl", now).state == "ERROR"
+
+
+def test_band_lane_reads_current_boot(tmp_path):
+    gp = tmp_path / "goal_progress.json"
+    gp.write_text(json.dumps({"lanes": [
+        {"lane": "current_boot", "closed_trades": 3, "wins": 2, "wr": 0.667,
+         "net_pnl": 1.5}]}))
+    st = pf.band_lane_state(gp)
+    assert (st.resolved, st.wins, st.wr) == (3, 2, 0.667)
+    assert st.state == "ACCRUING" and st.detail["net_pnl"] == 1.5
