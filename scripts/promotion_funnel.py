@@ -247,3 +247,32 @@ def run_gate(outcomes: list[dict], market: str = "futures") -> dict:
                 "note": "not computable on single forward stream"},
     }
     return {"passed": all(g["ok"] for g in gates.values()), "gates": gates}
+
+
+def build_dossier(lane: LaneState, gate_result: dict, outcomes: list[dict],
+                  out_root: Path, today: str) -> Path | None:
+    d = out_root / f"{lane.lane}_{today}"
+    if d.exists():
+        return None
+    d.mkdir(parents=True)
+    ev = {"lane": lane.to_dict(), "gate": gate_result, "n_outcomes": len(outcomes),
+          "generated_utc": datetime.now(timezone.utc).isoformat()}
+    atomic_write_json(d / "evidence.json", ev)
+    rows = "\n".join(f"| {g} | {v['value']} | {v['threshold']} | {'PASS' if v['ok'] else 'FAIL'} |"
+                     for g, v in gate_result["gates"].items())
+    (d / "evidence.md").write_text(
+        f"# Promotion dossier — {lane.lane} ({today})\n\n"
+        f"Gate verdict: **{'PASS' if gate_result['passed'] else 'FAIL'}** on "
+        f"{lane.resolved} resolved outcomes (WR {lane.wr}).\n\n"
+        f"| gate | value | threshold | verdict |\n|---|---|---|---|\n{rows}\n\n"
+        "**This dossier stages evidence only. Promotion requires OWNER SIGN-OFF: "
+        "review, then apply proposed_change.patch manually.** Re-read the lane's "
+        "binding caveats in its integration report "
+        "(_workspace/strategy_pipeline/ 11_/12_ files) before signing.\n",
+        encoding="utf-8")
+    (d / "proposed_change.patch").write_text(
+        f"# PROPOSED (not applied): promote {lane.lane}\n"
+        f"# core/strategy_program.py: set the lane's StrategyProgramEntry status\n"
+        f"# SHADOW_ONLY -> PAPER_CANDIDATE (paper_eligible=True). Owner applies by hand.\n",
+        encoding="utf-8")
+    return d

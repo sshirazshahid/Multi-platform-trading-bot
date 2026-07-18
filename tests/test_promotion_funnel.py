@@ -189,3 +189,16 @@ def test_gate_fails_on_nondiscriminating_score():
 def test_gate_fails_below_wr_floor():
     res = pf.run_gate(_outcomes(15, 15))  # WR 0.50 < 0.55
     assert res["passed"] is False and res["gates"]["oos_wr"]["ok"] is False
+
+
+def test_dossier_written_complete_and_idempotent(tmp_path):
+    lane = pf.LaneState(lane="tsmom_20d_1h", state="GATE_READY", resolved=30, wins=20,
+                        wr=0.667, floor_progress="30/30")
+    gate = {"passed": True, "gates": {"oos_wr": {"value": 0.667, "threshold": 0.55, "ok": True}}}
+    outcomes = [{"net_pnl": 1.0, "p_win": 0.7}] * 30
+    d = pf.build_dossier(lane, gate, outcomes, tmp_path, "20260718")
+    assert d is not None and (d / "evidence.md").exists() and (d / "evidence.json").exists()
+    assert (d / "proposed_change.patch").exists()
+    md = (d / "evidence.md").read_text(encoding="utf-8")
+    assert "owner sign-off" in md.lower() and "0.667" in md
+    assert pf.build_dossier(lane, gate, outcomes, tmp_path, "20260718") is None  # idempotent
