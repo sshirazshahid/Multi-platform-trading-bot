@@ -1,4 +1,4 @@
-"""Daily goal-progress reporter — "65-70% accuracy in FUTURES" (owner goal, 2026-07-09).
+"""Daily goal-progress reporter — "63-67% WR + profitability band, FUTURES" (owner goal, 2026-07-18).
 
 Read-only: opens the warehouse in sqlite mode=ro and reads data/carry_positions.json.
 Measures the forward evidence the promotion gate needs, per lane:
@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-GOAL_LINE = "Goal: autonomous FUTURES accuracy 65-70% (owner directive 2026-07-09)"
+GOAL_LINE = "Goal: WR + profitability band 63-67% daily, FUTURES (owner directive 2026-07-18; supersedes 65-70% of 2026-07-09)"
 RESOLVED_FLOOR = 30  # auditor's evaluation-time minimum before gates are computable
 
 
@@ -89,7 +89,7 @@ def directional_summary(conn: sqlite3.Connection, days: int = 30) -> dict:
 
     Excludes strategy_family='deep_breakout' (2026-07-11): that ACTIVE PAPER
     lane is a ~33%-WR-by-design 3R cohort and must not contaminate the
-    65-70% accuracy-goal metric."""
+    63-67% accuracy-goal metric."""
     out: dict = {"lane": "directional_30d", "available": False}
     try:
         since = time.time() - days * 86400
@@ -237,6 +237,18 @@ def render_journal(report: dict) -> str:
         "- Promotion bar: >=30 resolved probes then DSR>=0.10, PBO<=0.5, "
         "OOS-WR>=0.55, AUC>=0.60 + owner sign-off. Probe stays unlevered."
     )
+    # Promotion funnel summary (data/promotion_funnel.json, written hourly by
+    # scripts/promotion_funnel.py; absent file = funnel task not scheduled yet).
+    try:
+        funnel = json.loads((ROOT / "data" / "promotion_funnel.json").read_text(
+            encoding="utf-8"))
+        lines.append("")
+        lines.append("### Promotion funnel")
+        for lane in funnel.get("lanes", []):
+            lines.append(f"- {lane['lane']}: {lane['state']} ({lane['floor_progress']}"
+                         f", eta={lane['eta_days']}d)")
+    except (OSError, json.JSONDecodeError, KeyError):
+        lines.append("- promotion funnel: no data (task not scheduled yet)")
     return "\n".join(lines) + "\n"
 
 

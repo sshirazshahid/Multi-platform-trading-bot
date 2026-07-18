@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:  # direct-script runs (scheduled task) need repo root
+    sys.path.insert(0, str(ROOT))
 RESOLVED_FLOOR = 30  # per-lane promotion floor (>=30 resolved, owner-signed)
 FUNNEL_JSON = ROOT / "data" / "promotion_funnel.json"
 DOSSIER_DIR = ROOT / "reports" / "promotion_dossiers"
