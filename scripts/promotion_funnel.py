@@ -89,3 +89,67 @@ def probe_lane_states(conn: sqlite3.Connection, now: float) -> list[LaneState]:
         except sqlite3.Error as exc:
             out.append(LaneState(lane, "ERROR", detail={"error": str(exc)}))
     return out
+
+
+# Static copies from core/pair_discovery.py (2026-07-18) — provenance comment per
+# spec: keeps the funnel's import surface at zero beyond promotion_gate constants.
+_STOCK_BASES = {"AAPL", "TSLA", "GOOG", "GOOGL", "AMZN", "MSFT", "META", "NVDA",
+                "NFLX", "AMD", "COIN", "MSTR", "GME", "AMC", "PLTR", "BABA", "TSM",
+                "INTC", "PYPL", "SQ", "SHOP", "UBER", "ABNB", "SNAP", "SPY", "QQQ"}
+_COMMODITY_BASES = {"XAU", "XAG", "WTI", "CL", "BRENT", "UKOIL", "USOIL", "GOLD",
+                    "SILVER", "COPPER", "NATGAS"}
+# Leveraged/inverse-ETF tickers seen in venue tokenized-equity listings
+# (TZA/SOXS observed live 2026-07-18; extend list as new ones appear).
+_ETF_EXPLICIT = {"TZA", "SOXS", "SOXL", "TQQQ", "SQQQ", "UVXY", "SPXS", "SPXL",
+                 "LABU", "LABD"}
+
+
+def classify_base(base: str) -> str:
+    b = (base or "").upper()
+    if b in _STOCK_BASES or b in _COMMODITY_BASES or b in _ETF_EXPLICIT:
+        return "tokenized"
+    return "crypto"
+
+
+def listing_lane_state(conn: sqlite3.Connection, now: float) -> LaneState:
+    try:
+        rows = conn.execute(
+            "SELECT base, decision, created_ts FROM shadow_listing_probe"
+            " WHERE created_ts >= ?", (now - 30 * 86400,)).fetchall()
+        resolved = conn.execute(
+            "SELECT COUNT(*) FROM shadow_listing_probe WHERE decision NOT LIKE 'SKIP%'"
+        ).fetchone()[0]
+        native = sum(1 for b, _, _ in rows if classify_base(b) == "crypto")
+        tokenized = len(rows) - native
+        state = ("STARVED" if rows and native == 0 else
+                 "GATE_READY" if resolved >= RESOLVED_FLOOR else
+                 "ACCRUING" if resolved else "STARVED" if rows else "IDLE")
+        return LaneState("listing_short", state, resolved, 0, None,
+                         f"{resolved}/{RESOLVED_FLOOR}", 0.0, None,
+                         {"crypto_native_listings_30d": native,
+                          "tokenized_listings_30d": tokenized,
+                          "note": "starved while venue listing flow is tokenized-equity"})
+    except sqlite3.Error as exc:
+        return LaneState("listing_short", "ERROR", detail={"error": str(exc)})
+
+
+def unlock_calendar_coverage(cal_dir: Path, now: float) -> dict:
+    horizon = 0.0
+    try:
+        for f in cal_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            events = data.get("events", data if isinstance(data, list) else [])
+            for ev in events:
+                if not isinstance(ev, dict):
+                    continue
+                ts = float(ev.get("ts") or ev.get("timestamp") or 0)
+                horizon = max(horizon, ts)
+    except OSError:
+        pass
+    fwd = max(0.0, (horizon - now) / 86400.0)
+    return {"forward_days": round(fwd, 1), "starved": fwd < 30,
+            "backfill_cmd": ("venv/Scripts/python.exe scripts/backfill_unlock_calendar.py"
+                             " --forward-days 60")}

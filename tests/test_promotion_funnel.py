@@ -94,3 +94,39 @@ def test_probe_lane_error_isolated():
     ro = sqlite3.connect(":memory:")  # empty db: tables missing -> per-lane ERROR
     lanes = pf.probe_lane_states(ro, time.time())
     assert all(l.state == "ERROR" for l in lanes) and len(lanes) == len(pf.PROBE_LANES)
+
+
+def test_classifier_tokenized_vs_crypto():
+    assert pf.classify_base("TZA") == "tokenized"     # leveraged-ETF explicit list
+    assert pf.classify_base("SOXS") == "tokenized"
+    assert pf.classify_base("NVDA") == "tokenized"    # static stock set
+    assert pf.classify_base("XAU") == "tokenized"     # commodity set
+    assert pf.classify_base("PEPE") == "crypto"
+
+
+def test_listing_lane_starved_when_all_recent_tokenized(tmp_path):
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, decision TEXT,"
+              " shortable INTEGER, created_ts REAL)")
+    now = time.time()
+    for i, b in enumerate(["TZA", "SOXS", "NVDA"]):
+        c.execute("INSERT INTO shadow_listing_probe VALUES (?,?,?,?,?)",
+                  (f"ls{i}", b, "SKIP_UNSHORTABLE", 0, now - i * 86400))
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    ls = pf.listing_lane_state(ro, now)
+    assert ls.state == "STARVED"
+    assert ls.detail["crypto_native_listings_30d"] == 0
+    assert ls.detail["tokenized_listings_30d"] == 3
+
+
+def test_unlock_calendar_coverage_flags_short_horizon(tmp_path):
+    cal = tmp_path / "unlock_calendar"
+    cal.mkdir()
+    now = time.time()
+    (cal / "AAA.json").write_text(json.dumps(
+        {"events": [{"ts": now + 10 * 86400}]}))          # only 10 days forward
+    cov = pf.unlock_calendar_coverage(cal, now)
+    assert cov["forward_days"] < 30 and cov["starved"] is True
+    assert "--forward-days 60" in cov["backfill_cmd"]
