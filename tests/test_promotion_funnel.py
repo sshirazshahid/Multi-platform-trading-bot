@@ -167,3 +167,25 @@ def test_band_lane_reads_current_boot(tmp_path):
     st = pf.band_lane_state(gp)
     assert (st.resolved, st.wins, st.wr) == (3, 2, 0.667)
     assert st.state == "ACCRUING" and st.detail["net_pnl"] == 1.5
+
+
+def _outcomes(n_win, n_loss, p_hi=0.7, p_lo=0.3):
+    """Wins carry high p_win, losses low — a discriminating score (AUC ~1)."""
+    return ([{"net_pnl": 1.0, "p_win": p_hi}] * n_win
+            + [{"net_pnl": -1.0, "p_win": p_lo}] * n_loss)
+
+
+def test_gate_passes_on_strong_discriminating_lane():
+    res = pf.run_gate(_outcomes(24, 6))   # WR 0.80, AUC 1.0
+    assert res["passed"] is True
+    assert res["gates"]["oos_wr"]["ok"] and res["gates"]["auc"]["ok"]
+
+
+def test_gate_fails_on_nondiscriminating_score():
+    res = pf.run_gate(_outcomes(24, 6, p_hi=0.5, p_lo=0.5))  # AUC 0.5
+    assert res["passed"] is False and res["gates"]["auc"]["ok"] is False
+
+
+def test_gate_fails_below_wr_floor():
+    res = pf.run_gate(_outcomes(15, 15))  # WR 0.50 < 0.55
+    assert res["passed"] is False and res["gates"]["oos_wr"]["ok"] is False

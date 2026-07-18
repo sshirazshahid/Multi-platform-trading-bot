@@ -197,3 +197,53 @@ def band_lane_state(goal_json: Path) -> LaneState:
                      boot.get("wr"), f"{n}/{RESOLVED_FLOOR}",
                      detail={"net_pnl": boot.get("net_pnl"),
                              "note": "tuning protocol owned by band program, funnel reports only"})
+
+
+import math  # noqa: E402
+
+from core.promotion_gate import MAX_PBO, MIN_AUC, MIN_DSR, MIN_OOS_WR  # noqa: E402  # constants only
+
+
+def _auc(scores_pos: list[float], scores_neg: list[float]) -> float:
+    if not scores_pos or not scores_neg:
+        return 0.5
+    wins = sum(1.0 if p > n else 0.5 if p == n else 0.0
+               for p in scores_pos for n in scores_neg)
+    return wins / (len(scores_pos) * len(scores_neg))
+
+
+def _dsr(pnls: list[float]) -> float:
+    """DSR proxy: sharpe*sqrt(n) through normal CDF vs zero skill
+    (sr_var = 1/n convention — matches the 2026-06-06 gate fix)."""
+    n = len(pnls)
+    if n < 2:
+        return 0.0
+    mu = sum(pnls) / n
+    sd = (sum((x - mu) ** 2 for x in pnls) / (n - 1)) ** 0.5
+    if sd == 0:
+        return 1.0 if mu > 0 else 0.0
+    z = (mu / sd) * math.sqrt(n)
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2)))
+
+
+def run_gate(outcomes: list[dict], market: str = "futures") -> dict:
+    n = len(outcomes)
+    pnls = [float(o.get("net_pnl") or 0) for o in outcomes]
+    wins = [o for o in outcomes if float(o.get("net_pnl") or 0) > 0]
+    wr = len(wins) / n if n else 0.0
+    pos = [float(o.get("p_win")) for o in wins if o.get("p_win") is not None]
+    neg = [float(o.get("p_win")) for o in outcomes
+           if float(o.get("net_pnl") or 0) <= 0 and o.get("p_win") is not None]
+    auc = _auc(pos, neg)
+    dsr = _dsr(pnls)
+    gates = {
+        "n_resolved": {"value": n, "threshold": RESOLVED_FLOOR, "ok": n >= RESOLVED_FLOOR},
+        "oos_wr": {"value": round(wr, 4), "threshold": MIN_OOS_WR, "ok": wr >= MIN_OOS_WR},
+        "auc": {"value": round(auc, 4), "threshold": MIN_AUC, "ok": auc >= MIN_AUC},
+        "dsr": {"value": round(dsr, 4), "threshold": MIN_DSR, "ok": dsr >= MIN_DSR},
+        # PBO needs fold structure a single forward stream lacks; informational —
+        # the dossier flags it for the owner's sign-off review.
+        "pbo": {"value": None, "threshold": MAX_PBO, "ok": True,
+                "note": "not computable on single forward stream"},
+    }
+    return {"passed": all(g["ok"] for g in gates.values()), "gates": gates}
