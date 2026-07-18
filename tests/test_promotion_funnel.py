@@ -42,3 +42,55 @@ def test_zero_live_path_imports():
     )
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert res.returncode == 0, f"funnel import purity failed:\n{res.stderr}"
+
+
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+
+
+def _mk_shadow_db(tmp_path):
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE shadow_decisions (id INTEGER PRIMARY KEY, ts REAL, agent_id TEXT,"
+              " timeframe TEXT, proposal_id TEXT, label_status TEXT)")
+    c.execute("CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)")
+    return db, c
+
+
+def test_probe_lane_counts_resolved_and_wins_by_arm(tmp_path):
+    db, c = _mk_shadow_db(tmp_path)
+    now = time.time()
+    for i in range(4):  # 4 resolved 1h tsmom, 3 wins, spread over last 7d (rate>0)
+        c.execute("INSERT INTO shadow_decisions (ts, agent_id, timeframe, proposal_id, label_status)"
+                  " VALUES (?,?,?,?,?)", (now - i * 86400, "TsmomProbeAgent", "1h", f"p{i}", "RESOLVED"))
+        c.execute("INSERT INTO shadow_outcomes VALUES (?,?,?)",
+                  (f"p{i}", 1.0 if i < 3 else -1.0, now - i * 86400))
+    c.execute("INSERT INTO shadow_decisions (ts, agent_id, timeframe, proposal_id, label_status)"
+              " VALUES (?,?,?,?,?)", (now, "TsmomProbeAgent", "4h", "p9", "PENDING"))
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    lanes = {l.lane: l for l in pf.probe_lane_states(ro, now)}
+    l1 = lanes["tsmom_20d_1h"]
+    assert (l1.resolved, l1.wins, l1.state) == (4, 3, "ACCRUING")
+    assert l1.floor_progress == "4/30" and l1.accrual_rate_7d > 0 and l1.eta_days is not None
+    assert lanes["tsmom_20d_4h"].resolved == 0
+    assert lanes["breakout_60d"].state == "IDLE"  # zero proposals ever
+
+
+def test_probe_lane_gate_ready_at_floor(tmp_path):
+    db, c = _mk_shadow_db(tmp_path)
+    now = time.time()
+    for i in range(30):
+        c.execute("INSERT INTO shadow_decisions (ts, agent_id, timeframe, proposal_id, label_status)"
+                  " VALUES (?,?,?,?,?)", (now - i * 3600, "BreakoutProbeAgent", "4h", f"b{i}", "RESOLVED"))
+        c.execute("INSERT INTO shadow_outcomes VALUES (?,?,?)", (f"b{i}", 1.0, now - i * 3600))
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    lanes = {l.lane: l for l in pf.probe_lane_states(ro, now)}
+    assert lanes["breakout_60d"].state == "GATE_READY"
+
+
+def test_probe_lane_error_isolated():
+    ro = sqlite3.connect(":memory:")  # empty db: tables missing -> per-lane ERROR
+    lanes = pf.probe_lane_states(ro, time.time())
+    assert all(l.state == "ERROR" for l in lanes) and len(lanes) == len(pf.PROBE_LANES)
