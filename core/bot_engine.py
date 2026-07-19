@@ -27,9 +27,9 @@ from rich.table import Table
 from config import (
     DRY_RUN,
     PORTFOLIO_MIN_VALUE_USD,
-    SLTP_TRIGGER_MARK_PRICE,
     PORTFOLIO_RESCAN_MINUTES,
     RISK,
+    SLTP_TRIGGER_MARK_PRICE,
     TRADING_MODE,
     TRADING_PAIRS,
 )
@@ -235,9 +235,17 @@ def _boot_profile_log_lines() -> list:
     try:
         from config import (
             ACCURACY_TARGET_MODE as _acc,
+        )
+        from config import (
             MCP_ENTRY_MIN_SCORE as _floor,
+        )
+        from config import (
             PAPER_PROFILE_STARTED_AT as _epoch,
+        )
+        from config import (
             PAPER_TRADING_PROFILE as _profile,
+        )
+        from config import (
             SL_COOLDOWN_ENABLED as _sl_cd,
         )
     except Exception as exc:  # pragma: no cover — config import is load-bearing
@@ -633,6 +641,7 @@ class BotEngine:
                 ohlcv_provider=self._unlock_ohlcv,
                 market_data_provider=self._unlock_market_data,
                 venue=str(cfg.get("venue", "bybit")),
+                symbols=self._bundle_probe_symbols(str(cfg.get("venue", "bybit"))),
             ),
         },
         {
@@ -645,9 +654,42 @@ class BotEngine:
                 ohlcv_provider=self._unlock_ohlcv,
                 market_data_provider=self._unlock_market_data,
                 venue=str(cfg.get("venue", "bybit")),
+                symbols=self._bundle_probe_symbols(str(cfg.get("venue", "bybit"))),
             ),
         },
     )
+
+    def _venue_perp_available(self, venue: str, symbol: str) -> bool:
+        """True when ``venue``'s ALREADY-LOADED ccxt markets list ``symbol``
+        as an active linear perp. Read-only, never a network call; any
+        failure means 'unavailable' (mirrors _unlock_perp_resolver)."""
+        try:
+            ex = (self.active_exchanges or {}).get(venue)
+            m = (getattr(getattr(ex, "exchange", None), "markets", None) or {}).get(symbol)
+            return bool(m and m.get("swap") and m.get("active", True))
+        except Exception:
+            return False
+
+    def _bundle_probe_symbols(self, venue: str) -> tuple:
+        """Spec-derived widened universe for BOTH bundle-MR arms
+        (owner-approved 2026-07-20): MCP_DIRECTIONAL_PAPER bases x ``venue``
+        via core.strategy_spec routes. Resolved ONCE per boot and cached so
+        the two arms share one resolution and one boot-log disclosure;
+        resolve_universe fails closed to the frozen 5-major basket."""
+        cached = getattr(self, "_bundle_mr_universe", None)
+        if cached is not None and cached[0] == venue:
+            return cached[1]
+        import core.agents.bundle_mr_probe_agent as _bundle_mod
+        symbols, skipped = _bundle_mod.resolve_universe(
+            venue=venue,
+            perp_available=lambda sym: self._venue_perp_available(venue, sym),
+        )
+        logger.info(
+            f"[Engine] bundle-MR probe universe: {len(symbols)} symbols "
+            f"(spec-derived, venue={venue}, skipped_bases={len(skipped)})"
+        )
+        self._bundle_mr_universe = (venue, symbols)
+        return symbols
 
     def _build_probe(self, wh, spec: dict) -> list:
         """Construct one log-only shadow probe agent from its _PROBE_SPECS
@@ -4261,6 +4303,8 @@ class BotEngine:
         try:
             from config import (
                 MAX_AGGREGATE_OPEN_RISK_PCT as _MAX_OPEN_RISK,
+            )
+            from config import (
                 STRESSED_EXIT_COST_FRAC as _EXIT_STRESS,
             )
             from core.risk_manager import aggregate_open_risk_breached
@@ -4342,7 +4386,11 @@ class BotEngine:
         try:
             from config import (
                 EXECUTION_BOOK_DEPTH_LEVELS as _BOOK_LEVELS,
+            )
+            from config import (
                 EXECUTION_BOOK_MAX_AGE_SEC as _BOOK_MAX_AGE,
+            )
+            from config import (
                 MAX_ENTRY_SLIPPAGE_BPS as _MAX_ENTRY_SLIP,
             )
             from core.cost_model import fee_rate as _entry_fee_rate
@@ -4708,10 +4756,20 @@ class BotEngine:
         try:
             from config import (
                 ENTRY_POLICY as _ENTRY_POLICY,
+            )
+            from config import (
                 MODE_PROFILE as _MODE_PROFILE,
+            )
+            from config import (
                 OPERATING_MODE as _OPERATING_MODE,
+            )
+            from config import (
                 PAPER_PROFILE_STARTED_AT as _PAPER_PROFILE_STARTED_AT,
+            )
+            from config import (
                 PAPER_TRADING_PROFILE as _PAPER_TRADING_PROFILE,
+            )
+            from config import (
                 SIGNAL_SOURCE as _SIGNAL_SOURCE,
             )
         except Exception:

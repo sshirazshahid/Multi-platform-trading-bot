@@ -518,6 +518,243 @@ def test_resolver_funding_provider_reads_bundle_probe(wh):
     assert provider({"proposal_id": pid}) == pytest.approx(0.0042)
 
 
+# ── Spec-derived universe resolver (owner-approved widening, 2026-07-20) ─
+# The probes' accrual universe widens from the frozen 5-major basket to the
+# active PAPER-futures spec artifact's bases x the probe venue. FAIL-CLOSED:
+# missing/invalid spec or zero venue routes -> frozen 5 + ONE warning.
+_WIDE_BASES = (
+    "BTC",
+    "ETH",
+    "SOL",
+    "BNB",
+    "XRP",
+    "ADA",
+    "DOGE",
+    "DOT",
+    "AVAX",
+    "LINK",
+    "LTC",
+    "ATOM",
+    "NEAR",
+    "APT",
+    "ARB",
+    "OP",
+    "SUI",
+    "INJ",
+    "TIA",
+    "SEI",
+    "FIL",
+    "UNI",
+    "AAVE",
+    "MKR",
+    "GRT",
+    "ALGO",
+    "FTM",
+    "SAND",
+    "MANA",
+    "GALA",
+    "CRV",
+    "SNX",
+    "COMP",
+    "1INCH",
+    "ZEC",
+    "DASH",
+    "ETC",
+    "BCH",
+    "TRX",
+    "TON",
+    "PEPE",
+    "WIF",
+    "ENA",
+    "ONDO",
+)  # mirrors data/strategy_specs/MCP_DIRECTIONAL_PAPER.json (44 bases)
+
+FROZEN_5 = (
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+    "XRP/USDT:USDT",
+)
+
+
+def _write_spec(d, name="MCP_DIRECTIONAL_PAPER", **over):
+    import json
+
+    payload = {
+        "id": name,
+        "strategy_version": "directional-research-v1",
+        "market_type": "futures",
+        "promotion_status": "active-paper",
+        "venues": ["binance", "bybit", "bitget"],
+        "symbols": [f"{b}/USDT:USDT" for b in _WIDE_BASES],
+    }
+    payload.update(over)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+    return d
+
+
+def test_resolve_universe_spec_derived_44_bases(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs")
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=d, log_warning=warns.append)
+    assert syms == tuple(f"{b}/USDT:USDT" for b in sorted(_WIDE_BASES))
+    assert len(syms) == 44
+    assert skipped == ()
+    assert warns == []  # clean resolution logs nothing
+
+
+def test_resolve_universe_fail_closed_missing_spec_dir(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=tmp_path / "does_not_exist", log_warning=warns.append)
+    assert syms == FROZEN_5 and skipped == ()
+    assert len(warns) == 1  # exactly ONE warning, per the design spec
+
+
+def test_resolve_universe_fail_closed_invalid_spec_file(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs")
+    (d / "BROKEN.json").write_text("{not json", encoding="utf-8")
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=d, log_warning=warns.append)
+    # a partially loadable spec dir is INVALID — never treat it as complete
+    assert syms == FROZEN_5 and skipped == ()
+    assert len(warns) == 1
+
+
+def test_resolve_universe_fail_closed_zero_venue_routes(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs", venues=["binance"])  # no bybit route
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=d, log_warning=warns.append)
+    assert syms == FROZEN_5 and skipped == ()
+    assert len(warns) == 1
+
+
+def test_resolve_universe_fail_closed_inactive_spec(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs", promotion_status="research")
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=d, log_warning=warns.append)
+    assert syms == FROZEN_5 and skipped == ()
+    assert len(warns) == 1
+
+
+def test_resolve_universe_skips_bases_without_venue_perp(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs")
+    warns: list = []
+    syms, skipped = resolve_universe(
+        spec_dir=d,
+        perp_available=lambda s: not s.startswith(("FTM/", "ALGO/")),
+        log_warning=warns.append,
+    )
+    assert skipped == ("ALGO", "FTM")  # sorted base order
+    assert len(syms) == 42
+    assert "FTM/USDT:USDT" not in syms and "ALGO/USDT:USDT" not in syms
+    assert len(warns) == 1  # ONE aggregated skip line, never per-cycle spam
+    assert "FTM" in warns[0] and "ALGO" in warns[0]
+
+
+def test_resolve_universe_fail_closed_when_no_perp_available(tmp_path):
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    d = _write_spec(tmp_path / "specs")
+
+    def _raise(_sym):  # availability checker itself broken -> unavailable
+        raise RuntimeError("markets not loaded")
+
+    warns: list = []
+    syms, skipped = resolve_universe(spec_dir=d, perp_available=_raise, log_warning=warns.append)
+    assert syms == FROZEN_5 and skipped == ()
+    assert len(warns) == 1
+
+
+def test_probe_default_symbols_stay_frozen_5():
+    """The class default (no symbols kwarg) is the frozen fallback basket —
+    widening happens ONLY through the spec-derived resolver at wiring time."""
+    from core.agents import bundle_mr_probe_agent as m
+
+    assert set(m.SYMBOLS) == set(FROZEN_5)
+
+
+# ── BotEngine wiring: spec-derived symbols reach both arms ───────────────
+def test_botengine_bundle_universe_helpers_exist():
+    from core.bot_engine import BotEngine
+
+    for name in ("_bundle_probe_symbols", "_venue_perp_available"):
+        assert hasattr(BotEngine, name), f"BotEngine missing {name}"
+
+
+def test_botengine_venue_perp_available_reads_loaded_markets():
+    from core.bot_engine import BotEngine
+
+    class _Client:
+        markets = {
+            "BTC/USDT:USDT": {"swap": True, "active": True},
+            "FTM/USDT:USDT": {"swap": True, "active": False},
+            "AAPL/USDT:USDT": {"swap": False, "active": True},
+        }
+
+    class _Ex:
+        exchange = _Client()
+
+    inst = BotEngine.__new__(BotEngine)
+    inst.active_exchanges = {"bybit": _Ex()}
+    assert inst._venue_perp_available("bybit", "BTC/USDT:USDT") is True
+    assert inst._venue_perp_available("bybit", "FTM/USDT:USDT") is False  # inactive
+    assert inst._venue_perp_available("bybit", "AAPL/USDT:USDT") is False  # not swap
+    assert inst._venue_perp_available("bybit", "NOPE/USDT:USDT") is False
+    assert inst._venue_perp_available("kraken", "BTC/USDT:USDT") is False  # no client
+
+
+def test_botengine_bundle_symbols_resolved_once_and_cached(monkeypatch):
+    """Both arms share ONE resolution (ONE boot-log disclosure, no spam)."""
+    import core.agents.bundle_mr_probe_agent as m
+    from core.bot_engine import BotEngine
+
+    calls = []
+
+    def _fake(**kwargs):
+        calls.append(kwargs)
+        return ("BTC/USDT:USDT", "ETH/USDT:USDT"), ("FTM",)
+
+    monkeypatch.setattr(m, "resolve_universe", _fake)
+    inst = BotEngine.__new__(BotEngine)
+    inst.active_exchanges = {}
+    first = inst._bundle_probe_symbols("bybit")
+    second = inst._bundle_probe_symbols("bybit")
+    assert first == second == ("BTC/USDT:USDT", "ETH/USDT:USDT")
+    assert len(calls) == 1  # cached — resolver ran exactly once
+    assert calls[0]["venue"] == "bybit"
+
+
+def test_probe_specs_pass_widened_symbols_to_both_arms():
+    from core.bot_engine import BotEngine
+
+    sentinel = ("AAA/USDT:USDT", "BBB/USDT:USDT")
+    inst = BotEngine.__new__(BotEngine)
+    inst._bundle_probe_symbols = lambda venue: sentinel
+    inst._unlock_ohlcv = lambda *a: []
+    inst._unlock_market_data = lambda *a: {}
+    bundle_specs = [
+        s for s in BotEngine._PROBE_SPECS if "bundle_mr_probe_agent" in s["import_path"]
+    ]
+    assert len(bundle_specs) == 2  # both arms
+    for spec in bundle_specs:
+        kwargs = spec["kwargs"](inst, {"venue": "bybit"})
+        assert kwargs.get("symbols") == sentinel
+
+
 # ── Structure ────────────────────────────────────────────────────────────
 def test_structural_log_only_no_order_path():
     """The probe module must contain no reference to any order/write path."""

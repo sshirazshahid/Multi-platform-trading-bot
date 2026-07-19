@@ -85,6 +85,8 @@ import time
 import uuid
 from typing import Callable, Optional, Tuple
 
+from loguru import logger
+
 from core.agents.probe_common import (
     ATR_LEN,
     accrue_funding,
@@ -124,6 +126,76 @@ SCORE_RSI_SCALE = 10.0  # FROZEN pre-outcome; never re-tune post-outcome
 # rename can never silently desync a reporter.
 ZFADE_MODEL_VERSION = "zfade_4h_cfg365_v1"
 RSI2_MODEL_VERSION = "rsi2_4h_cfg226_v1"
+
+
+# ── Spec-derived probe universe (owner-approved widening, 2026-07-20) ────────
+def resolve_universe(
+    *,
+    venue: str = "bybit",
+    perp_available: Optional[Callable[[str], bool]] = None,
+    spec_dir=None,
+    log_warning: Optional[Callable[[str], None]] = None,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """Widened symbol universe for BOTH bundle-MR arms: bases x ``venue``
+    from the active PAPER-futures spec artifacts
+    (``core.strategy_spec.approved_paper_futures_routes``), so one artifact
+    governs the directional lane and these probes and future universe edits
+    propagate automatically. Returns ``(symbols, skipped_bases)``.
+
+    FAIL-CLOSED (design spec 2026-07-20): a missing spec directory, ANY parse
+    error (a partially loadable dir is invalid, never "complete"), a
+    validation error, or zero approved ``venue`` routes falls back to the
+    frozen 5-major basket (``SYMBOLS``) with exactly ONE warning.
+
+    ``perp_available(unified_symbol)`` — when provided — drops bases without
+    a live ``venue`` USDT-perp, disclosed in ONE aggregated warning line
+    (never per-cycle, never synthetic data). A checker that errors or rejects
+    everything means availability is unknowable -> fail-closed to the frozen
+    basket. Widening is boot-time wiring only; the class default stays
+    ``SYMBOLS``.
+    """
+    warn = log_warning if log_warning is not None else logger.warning
+    try:
+        from core.strategy_spec import approved_paper_futures_routes, load_all_specs
+
+        specs = load_all_specs(directory=spec_dir) if spec_dir is not None else load_all_specs()
+        if specs.errors:
+            raise ValueError(f"spec parse errors: {'; '.join(specs.errors)}")
+        routes = approved_paper_futures_routes(specs)
+        bases = sorted(b for b, route_venues in routes.items() if venue in route_venues)
+        if not bases:
+            raise ValueError(f"zero approved {venue} routes")
+    except Exception as exc:
+        warn(
+            f"[BundleMRProbe] universe fail-closed to the frozen "
+            f"{len(SYMBOLS)}-major basket — spec-derived widening inactive ({exc})"
+        )
+        return SYMBOLS, ()
+    kept, skipped = [], []
+    for base in bases:
+        symbol = f"{base}/USDT:USDT"
+        if perp_available is not None:
+            try:
+                ok = bool(perp_available(symbol))
+            except Exception:
+                ok = False
+            if not ok:
+                skipped.append(base)
+                continue
+        kept.append(symbol)
+    if not kept:
+        warn(
+            f"[BundleMRProbe] universe fail-closed to the frozen "
+            f"{len(SYMBOLS)}-major basket — no live {venue} USDT-perp found "
+            f"for any approved base (availability unknowable)"
+        )
+        return SYMBOLS, ()
+    if skipped:
+        warn(
+            f"[BundleMRProbe] skipping {len(skipped)} approved base(s) without "
+            f"a live {venue} USDT-perp: {', '.join(skipped)}"
+        )
+    return tuple(kept), tuple(skipped)
 
 
 # ── Pure indicator math (mirrors paper_trader.py pandas formulas) ────────────
