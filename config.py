@@ -6,6 +6,14 @@ import os
 
 from dotenv import load_dotenv
 
+from core.entry_policy import (
+    AGGRESSIVE_RESEARCH_PAPER_PROFILE,
+    STANDARD_PAPER_PROFILE,
+    mode_profile_for,
+    normalize_paper_profile,
+    parse_allowlist,
+)
+
 load_dotenv()
 
 # ==============================================================
@@ -54,12 +62,42 @@ OPERATING_MODE = os.getenv("OPERATING_MODE", "PAPER").upper()
 if OPERATING_MODE not in _VALID_MODES:
     raise ValueError(f"OPERATING_MODE must be one of {_VALID_MODES}, got {OPERATING_MODE!r}")
 
+PAPER_TRADING_PROFILE = normalize_paper_profile(
+    os.getenv("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
+)
+if OPERATING_MODE != "PAPER" and PAPER_TRADING_PROFILE != STANDARD_PAPER_PROFILE:
+    raise ValueError(
+        f"PAPER_TRADING_PROFILE={PAPER_TRADING_PROFILE} requires OPERATING_MODE=PAPER"
+    )
+PAPER_PROFILE_STARTED_AT = os.getenv("PAPER_PROFILE_STARTED_AT", "").strip()
+_AGGRESSIVE_PAPER_RESEARCH = (
+    OPERATING_MODE == "PAPER"
+    and PAPER_TRADING_PROFILE == AGGRESSIVE_RESEARCH_PAPER_PROFILE
+)
+
 # Legacy DRY_RUN is now derived from the mode. Any existing code path that
 # branches on DRY_RUN gets paper execution unless we are explicitly CONTROLLED_LIVE.
 DRY_RUN = OPERATING_MODE != "CONTROLLED_LIVE"
 
 # Extra latch for live mode — env var must also be flipped explicitly.
 CONTROLLED_LIVE_ENABLED = os.getenv("CONTROLLED_LIVE_ENABLED", "false").lower() == "true"
+
+# New-exposure authorization is independent from process mode. PAPER can run
+# feeds, shadow decisions, reconciliation, and exits while entries stay denied.
+_VALID_ENTRY_POLICIES = {
+    "PROTECT_ONLY", "SHADOW_ONLY", "APPROVED_PAPER", "CONTROLLED_LIVE",
+}
+ENTRY_POLICY = os.getenv("ENTRY_POLICY", "SHADOW_ONLY").strip().upper()
+if ENTRY_POLICY not in _VALID_ENTRY_POLICIES:
+    raise ValueError(
+        f"ENTRY_POLICY must be one of {_VALID_ENTRY_POLICIES}, got {ENTRY_POLICY!r}"
+    )
+APPROVED_PAPER_STRATEGIES = parse_allowlist(os.getenv("APPROVED_PAPER_STRATEGIES", ""))
+APPROVED_LIVE_STRATEGIES = parse_allowlist(os.getenv("APPROVED_LIVE_STRATEGIES", ""))
+LIVE_ENTRY_APPROVAL_PATH = os.getenv(
+    "LIVE_ENTRY_APPROVAL_PATH", "data/live_entry_approval.json"
+)
+MODE_PROFILE = mode_profile_for(OPERATING_MODE, PAPER_TRADING_PROFILE)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -331,7 +369,9 @@ SCALP_MODE = {
 # Default TRUE per user directive 2026-05-02 (Option 4 multi-agent build).
 SHADOW_MODE = {
     "enabled": os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true",
-    "tick_interval_s": int(os.getenv("SHADOW_TICK_INTERVAL_S", "300")),  # 5 min
+    "tick_interval_s": int(os.getenv(
+        "SHADOW_TICK_INTERVAL_S", "60" if _AGGRESSIVE_PAPER_RESEARCH else "300"
+    )),
     "alt_notional": float(os.getenv("SHADOW_ALT_NOTIONAL", "200.0")),
     "kill_fee_burn_x": float(os.getenv("SHADOW_KILL_FEE_BURN_X", "2.0")),
     "kill_wr_floor": float(os.getenv("SHADOW_KILL_WR_FLOOR", "0.30")),
@@ -342,9 +382,43 @@ SHADOW_MODE = {
     # continuously test scalping the daily movers) instead of the first-listed
     # pairs. Log-only lane; SHADOW_MOVER_UNIVERSE=false restores legacy.
     "mover_universe": os.getenv("SHADOW_MOVER_UNIVERSE", "true").lower() == "true",
-    "mover_cap": int(os.getenv("SHADOW_MOVER_CAP", "10")),
-    "mover_refresh_s": int(os.getenv("SHADOW_MOVER_REFRESH_S", "900")),
+    "mover_cap": int(os.getenv(
+        "SHADOW_MOVER_CAP", "30" if _AGGRESSIVE_PAPER_RESEARCH else "10"
+    )),
+    "mover_refresh_s": int(os.getenv(
+        "SHADOW_MOVER_REFRESH_S", "300" if _AGGRESSIVE_PAPER_RESEARCH else "900"
+    )),
     "mover_min_qv_usd": float(os.getenv("SHADOW_MOVER_MIN_QV_USD", "5000000")),
+}
+
+# Broad USDT-perpetual monitor (READ-ONLY / SHADOW-ONLY). One batched ticker
+# request per active venue feeds a persistent point-in-time store; a small,
+# direction-balanced 1h/24h/7d shortlist is then handed to the existing shadow
+# agents for deeper analysis. It never modifies TRADING_PAIRS/current_pairs or
+# receives an OrderManager, so enabling it cannot widen executable exposure.
+BROAD_UNIVERSE_MONITOR = {
+    "enabled": os.getenv("BROAD_UNIVERSE_MONITOR_ENABLED", "true").lower() == "true",
+    "db_path": os.getenv(
+        "BROAD_UNIVERSE_MONITOR_DB_PATH", "data/universe_monitor.sqlite"
+    ),
+    "min_quote_volume_usdt": float(os.getenv(
+        "BROAD_UNIVERSE_MIN_QUOTE_VOLUME_USDT", "5000000"
+    )),
+    "max_ticker_age_s": float(os.getenv("BROAD_UNIVERSE_MAX_TICKER_AGE_S", "180")),
+    "reference_tolerance_s": float(os.getenv(
+        "BROAD_UNIVERSE_REFERENCE_TOLERANCE_S", "1800"
+    )),
+    "retention_days": float(os.getenv("BROAD_UNIVERSE_RETENTION_DAYS", "8")),
+    "per_direction_per_horizon": int(os.getenv(
+        "BROAD_UNIVERSE_PER_DIRECTION", "10" if _AGGRESSIVE_PAPER_RESEARCH else "3"
+    )),
+    # Final deep-analysis budget is also clamped by SHADOW_MODE.mover_cap.
+    "shortlist_cap": int(os.getenv(
+        "BROAD_UNIVERSE_SHORTLIST_CAP", "36" if _AGGRESSIVE_PAPER_RESEARCH else "18"
+    )),
+    "max_contracts_per_venue": int(os.getenv(
+        "BROAD_UNIVERSE_MAX_CONTRACTS_PER_VENUE", "5000"
+    )),
 }
 
 # ── Listing-short shadow probe (pipeline rev3 CONFIRMED_GO, 2026-07-09) ──────
@@ -455,7 +529,11 @@ DEEP_BREAKOUT_LANE = {
 # after-cost expectancy. SL authority (ATR/DistFit floors) is NOT modified —
 # only the TP leg compresses; min_tp_pct keeps TP above round-trip costs.
 ACCURACY_TARGET_MODE = {
-    "enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
+    # Retained only so historical replay/tests can decode old positions. The
+    # strategy program rejects hit-rate optimization as an entry/exit policy;
+    # runtime cannot reactivate it through an environment toggle.
+    "enabled": False,
+    "requested_enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
     "tp_frac_of_sl": float(os.getenv("ACCURACY_TP_FRAC_OF_SL", "0.5")),
     # Per-side frac overrides (2026-07-10 geometry sweep, 8,878 entries +
     # adversarial audit): at frac 0.50 longs realized 67.0% WR vs shorts
@@ -476,6 +554,16 @@ ACCURACY_TARGET_MODE = {
     # (zombie-position protection). See order_manager._accuracy_band_hold_active.
     "max_hold_hours": float(os.getenv("ACCURACY_MAX_HOLD_HOURS", "72")),
 }
+
+# ── MCP ENTRY MIN SCORE (2026-07-19 max-flow band engine, owner-approved) ────
+# Overrides the mcp_brain algorithmic-fallback entry-score floors (standard
+# path 66, scalp path SCALP_MODE.entry_threshold default 65) when set. The
+# layers_ok gates (6+/10 standard, 4+ scalp) are NOT affected. Unset/blank ->
+# None -> exactly today's 66/65 behavior. PAPER research knob (max-flow
+# firehose, threshold 50 per owner amendment); HONESTY: a lower floor admits
+# lower-conviction entries — expectancy expected <= historical (~ -0.24R).
+_MCP_ENTRY_MIN_SCORE_RAW = os.getenv("MCP_ENTRY_MIN_SCORE", "").strip()
+MCP_ENTRY_MIN_SCORE = float(_MCP_ENTRY_MIN_SCORE_RAW) if _MCP_ENTRY_MIN_SCORE_RAW else None
 
 # ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY toxic-regime veto ───────
 # Pre-registered screen _workspace/strategy_pipeline/13_band_conditional_screen
@@ -560,6 +648,34 @@ MODEL_GATE = {
     "threshold_futures": float(os.getenv("MODEL_GATE_THRESHOLD_FUTURES", "0.55")),
     "threshold_spot": float(os.getenv("MODEL_GATE_THRESHOLD_SPOT", "0.58")),
 }
+
+# Final economic admission rule for the canonical MCP_DIRECTIONAL_PAPER
+# futures lane. This is intentionally separate from MODEL_GATE's historical
+# score threshold: the execution boundary requires a real promoted model and
+# prices each candidate using its FINAL SL/TP plus conservative round-trip
+# friction. The margin is a predeclared three percentage points above the
+# candidate-specific after-cost breakeven probability; it is not a target-WR
+# geometry knob and does not rewrite exits or labels. Fee/slippage stresses
+# follow the backtest robustness policy (1.5x fee tier, 2x slippage).
+MCP_DIRECTIONAL_ECONOMIC_GATE = {
+    "probability_margin": float(os.getenv(
+        "MCP_DIRECTIONAL_ECONOMIC_PROBABILITY_MARGIN", "0.03"
+    )),
+    "fee_stress_multiplier": float(os.getenv(
+        "MCP_DIRECTIONAL_ECONOMIC_FEE_STRESS_MULT", "1.5"
+    )),
+    "slippage_stress_multiplier": float(os.getenv(
+        "MCP_DIRECTIONAL_ECONOMIC_SLIPPAGE_STRESS_MULT", "2.0"
+    )),
+}
+if not 0.0 <= MCP_DIRECTIONAL_ECONOMIC_GATE["probability_margin"] <= 1.0:
+    raise ValueError(
+        "MCP_DIRECTIONAL_ECONOMIC_PROBABILITY_MARGIN must be between 0 and 1"
+    )
+if MCP_DIRECTIONAL_ECONOMIC_GATE["fee_stress_multiplier"] < 1.0:
+    raise ValueError("MCP_DIRECTIONAL_ECONOMIC_FEE_STRESS_MULT must be >= 1")
+if MCP_DIRECTIONAL_ECONOMIC_GATE["slippage_stress_multiplier"] < 1.0:
+    raise ValueError("MCP_DIRECTIONAL_ECONOMIC_SLIPPAGE_STRESS_MULT must be >= 1")
 
 # ==============================================================
 # SMART SCANNER (legacy — kept for reference, not used by Claude Portfolio mode)
@@ -820,7 +936,7 @@ RISK = {
     # moves meaningfully larger than fees+spread+slippage. Supersedes the
     # 2026-04-16 signed-checklist value; user accepted the trade-off.
     "max_position_pct": 0.05,
-    "max_open_positions": 60,  # PAPER 2026-05-30: was 8 — ~20/exchange × 3. Revert to 8 before live.
+    "max_open_positions": MODE_PROFILE.max_open_positions,
     # 2026-04-27: tightened from 5% → 1.5% after 16h/9-loss bleed.
     # 2026-04-28 (L99): KEPT at 0.015. Daily-loss halt is the last
     # post-trade circuit breaker — at 99x leverage a single -1% move
@@ -846,8 +962,8 @@ RISK = {
     # At 2x × 0.50 size on $400 balance: $200 margin × 2 = $400 notional;
     # 1.5% SL = $6 loss = 1.5% of balance. Survivable; supports ~2-3
     # concurrent positions per exchange pocket.
-    "futures_max_leverage": 2,
-    "default_leverage": 2,
+    "futures_max_leverage": MODE_PROFILE.max_leverage,
+    "default_leverage": min(1.0, MODE_PROFILE.max_leverage),
     "min_rr_ratio": 1.2,  # 1.2:1 — high-WR strategies don't need large R:R
     "trailing_stop": True,
     # 2026-04-28 retune (Phase 11) — converged trailing on mcp_take_profit
@@ -902,7 +1018,10 @@ RISK = {
     "max_trades_per_day": 200,
 }
 
-RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
+RISK_PER_TRADE_RANGE = (
+    MODE_PROFILE.risk_per_trade_pct,
+    MODE_PROFILE.risk_per_trade_pct,
+)
 
 # 2026-06-11 — per-trade risk-budget (vol-target) sizing.
 # Margin is capped so loss-at-SL <= per_trade_risk_pct of the market-type
@@ -916,7 +1035,7 @@ RISK_PER_TRADE_RANGE = (0.0025, 0.005)  # 0.25%-0.5% risk per trade
 # (~0.5% risk per trade) — surface that before any live flip.
 VOL_TARGET_SIZING = {
     "enabled": True,
-    "per_trade_risk_pct": 0.005,  # 0.5% of pocket at the planned SL
+    "per_trade_risk_pct": MODE_PROFILE.risk_per_trade_pct,
 }
 
 # 2026-06-11 — PORTFOLIO ES SOFT-CAP (core/portfolio_risk.py).
@@ -1611,12 +1730,10 @@ if SIGNAL_SOURCE not in ("mcp", "mcp_det", "tsmom", "machine", "s3", "none"):
         f"got {SIGNAL_SOURCE!r}"
     )
 
-# F1 carry execution model (PAPER). "taker" (default) = pessimistic taker/taker
-# both legs, the shipped baseline evidence. "maker_first" = model the spot leg
-# as a post-only maker fill at mid (perp hedge stays taker) when the spread
-# allows — the research-report actionable update. maker_first models an
-# UNVERIFIED fill assumption; keep taker as the honest default baseline and
-# opt into maker_first only to measure the sensitivity.
+# F1 carry execution intent (PAPER). Both values book pessimistic taker/taker
+# fills today. ``maker_first`` is retained as an experiment label, but receives
+# no maker fee/midpoint credit until an event-driven queue/fill simulator proves
+# a resting spot order filled before its hedge timeout.
 F1_EXECUTION_MODE = os.getenv("F1_EXECUTION_MODE", "taker").lower()
 if F1_EXECUTION_MODE not in ("taker", "maker_first"):
     raise ValueError(
@@ -1758,7 +1875,13 @@ if TSMOM_LOOKBACK_DAYS < 2:
 # total open GROSS NOTIONAL over this % of equity. Set 0 to disable. Reversible knob.
 # Note: gross notional includes leverage, so at futures_max_leverage=2 a single ~5%
 # margin trade is ~10% notional — 12% allows ~1-2 leveraged positions by design.
-MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "12.0"))
+MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv(
+    "MAX_PORTFOLIO_EXPOSURE_PCT", str(MODE_PROFILE.gross_exposure_pct * 100.0)
+))
+MAX_AGGREGATE_OPEN_RISK_PCT = float(os.getenv(
+    "MAX_AGGREGATE_OPEN_RISK_PCT", str(MODE_PROFILE.aggregate_open_risk_pct)
+))
+STRESSED_EXIT_COST_FRAC = float(os.getenv("STRESSED_EXIT_COST_FRAC", "0.002"))
 
 # Phase C fill-time freshness gate (core/feed_health): reject a market/no-price
 # fill when the ticker carries a DEFINITELY-stale timestamp (older than this many
@@ -1766,6 +1889,20 @@ MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "12.0
 # the gate is fail-open on missing data. Generous default so live fresh tickers
 # never trip it; runtime behavior is unchanged. Set 0 to disable the gate.
 FILL_FRESHNESS_MAX_AGE_SEC = float(os.getenv("FILL_FRESHNESS_MAX_AGE_SEC", "300"))
+
+# Final venue-pinned pre-submission book gate. This is deliberately much
+# tighter than the legacy ticker freshness threshold: a marketable entry is
+# denied unless the selected venue supplies enough current depth for the exact
+# quantized quantity that will be submitted.
+EXECUTION_BOOK_MAX_AGE_SEC = float(os.getenv("EXECUTION_BOOK_MAX_AGE_SEC", "5"))
+MAX_ENTRY_SLIPPAGE_BPS = float(os.getenv("MAX_ENTRY_SLIPPAGE_BPS", "30"))
+EXECUTION_BOOK_DEPTH_LEVELS = int(os.getenv("EXECUTION_BOOK_DEPTH_LEVELS", "50"))
+if EXECUTION_BOOK_MAX_AGE_SEC <= 0:
+    raise ValueError("EXECUTION_BOOK_MAX_AGE_SEC must be greater than zero")
+if MAX_ENTRY_SLIPPAGE_BPS < 0:
+    raise ValueError("MAX_ENTRY_SLIPPAGE_BPS must not be negative")
+if not 1 <= EXECUTION_BOOK_DEPTH_LEVELS <= 500:
+    raise ValueError("EXECUTION_BOOK_DEPTH_LEVELS must be between 1 and 500")
 
 if not SCALP_TIER_ENABLED:
     LEVERAGE_TIERS.pop("SCALP", None)
@@ -2273,6 +2410,13 @@ DAILY_LOSS_BREAKER = {
 # flip. RLock is mandatory (fail-closed re-entry) — see the proof in
 # reports/ / tasks/todo.md B7-P2.
 PER_POSITION_LOCK_ENABLED = os.getenv("PER_POSITION_LOCK_ENABLED", "true").lower() == "true"
+
+# PAPER futures margin model. Venue/instrument metadata wins when it exposes a
+# maintenance rate; this conservative fallback is used only when metadata is
+# unavailable. It affects simulation and never changes venue leverage/margin.
+PAPER_MAINTENANCE_MARGIN_RATE = float(
+    os.getenv("PAPER_MAINTENANCE_MARGIN_RATE", "0.01")
+)
 
 # ── PORTFOLIO DISCRETIONARY-CLOSE GUARD (A4, audit 2026-06-21) — default OFF ──
 # The portfolio-cycle Claude CLOSE -> _execute_close has NO gate beyond OBSERVATION

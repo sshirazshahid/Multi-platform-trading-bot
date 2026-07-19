@@ -30,7 +30,8 @@ Two Operating Modes:
   Smart Money integrates: FVG, Fibonacci, Supply/Demand, Liquidity Sweeps,
   Order Blocks, BOS/ChoCH, Volume Profile, ICT OTE, Price Action patterns.
   Live fallback gate: score >= 66 AND 6+/10 layers for entry (scalp path: score >= 65 AND
-  4+ layers). Asymmetric R:R 2.0:1 minimum. NOTE: B1 MACD and B3 15m-timing bonuses are
+  4+ layers). MCP_ENTRY_MIN_SCORE env overrides BOTH score floors when set (2026-07-19
+  max-flow band engine; layers gates unchanged). Asymmetric R:R 2.0:1 minimum. NOTE: B1 MACD and B3 15m-timing bonuses are
   computed but award +0 (v4 anti-predictive finding), so the effective bonus set is 8, not 10.
 
 Safety:
@@ -194,6 +195,25 @@ def _apply_accuracy_target(sl_pct: float, tp_pct: float, side: str = None) -> fl
         return max(floor, sl_pct * frac)
     except Exception:
         return tp_pct
+
+
+def _entry_score_floor(is_scalp: bool = False, scalp_mode: dict = None) -> float:
+    """Entry-score floor for the algorithmic rule gate (2026-07-19 max-flow).
+
+    Defaults are unchanged: 66 on the standard path (layers_ok >= 6) and
+    SCALP_MODE.entry_threshold (default 65, layers_ok >= 4) on the scalp
+    path. When the owner sets config.MCP_ENTRY_MIN_SCORE (PAPER research
+    knob), that value replaces BOTH floors; unset (None) -> exactly the
+    historical behavior. The layers gates are never modified here."""
+    try:
+        from config import MCP_ENTRY_MIN_SCORE as _override
+    except ImportError:
+        _override = None
+    if _override is not None:
+        return float(_override)
+    if is_scalp:
+        return float((scalp_mode or {}).get("entry_threshold", 65))
+    return 66.0
 
 
 def _http_get(url: str, timeout: int = FETCH_TIMEOUT, headers: dict = None):
@@ -1457,6 +1477,7 @@ class MCPBrain:
 
         import pandas as pd
 
+        from exchanges.base import closed_ohlcv
         from utils.indicators import adx, atr, bbands, ema, macd, rolling_vwap, rsi
         from utils.smart_money import compute_smart_money_signals
 
@@ -1488,12 +1509,55 @@ class MCPBrain:
         for coin in _fetch_coins:
             symbol = f"{coin}/USDT"
             _perp_only = coin in ANALYSIS_ONLY_BASES  # commodity/equity perps have no spot
+            # Every timeframe must describe one executable instrument.  The
+            # previous per-timeframe fallback could combine spot and perpetual
+            # candles from different venues into a synthetic signal.
+            _source_candidates = [
+                (exchange, "futures", f"{coin}/USDT:USDT")
+                for exchange in exchange_list
+            ]
+            if not _perp_only:
+                _source_candidates.extend(
+                    (exchange, "spot", symbol) for exchange in exchange_list
+                )
+            _selected_source = None
+            for _candidate_exchange, _candidate_market, _candidate_symbol in _source_candidates:
+                _candidate_rows = {}
+                try:
+                    for _candidate_tf in timeframes:
+                        _candidate_raw = _candidate_exchange.fetch_ohlcv(
+                            _candidate_symbol,
+                            _candidate_tf,
+                            limit=limit_map[_candidate_tf],
+                            market_type=_candidate_market,
+                        )
+                        _candidate_raw = closed_ohlcv(
+                            _candidate_raw, _candidate_tf, now_s=now
+                        )
+                        if len(_candidate_raw) < 30:
+                            _candidate_rows = {}
+                            break
+                        _candidate_rows[_candidate_tf] = _candidate_raw
+                except Exception:
+                    _candidate_rows = {}
+                if len(_candidate_rows) == len(timeframes):
+                    _selected_source = (
+                        _candidate_exchange,
+                        _candidate_market,
+                        _candidate_symbol,
+                        _candidate_rows,
+                    )
+                    break
+            if _selected_source is None:
+                continue
+            _source_exchange, _source_market, _source_symbol, _source_rows = _selected_source
+            _source_venue = str(getattr(_source_exchange, "name", "") or "").lower()
             coin_data = {}
             for tf in timeframes:
                 try:
                     # Try each exchange until one returns valid data
-                    raw = None
-                    if not _perp_only:
+                    raw = _source_rows.get(tf)
+                    if raw is None and not _perp_only:
                         for exchange in exchange_list:
                             raw = exchange.fetch_ohlcv(symbol, tf,
                                                         limit=limit_map[tf],
@@ -1631,6 +1695,10 @@ class MCPBrain:
                                "ote": {}, "price_action": {}}
 
                     coin_data[tf] = {
+                        "source_venue": _source_venue,
+                        "source_market_type": _source_market,
+                        "source_symbol": _source_symbol,
+                        "candle_ts": int(df["ts"].iloc[-1]),
                         "adx": round(adx_val, 1),
                         "pdi": round(pdi_val, 1),
                         "mdi": round(mdi_val, 1),
@@ -3701,9 +3769,9 @@ class MCPBrain:
                     from config import SCALP_MODE as _SM_gate
                 except ImportError:
                     _SM_gate = {}
-                rule_gate = result["score"] >= _SM_gate.get("entry_threshold", 65) and result["layers_ok"] >= 4
+                rule_gate = result["score"] >= _entry_score_floor(True, _SM_gate) and result["layers_ok"] >= 4
             else:
-                rule_gate = result["score"] >= 66 and result["layers_ok"] >= 6
+                rule_gate = result["score"] >= _entry_score_floor(False) and result["layers_ok"] >= 6
             model_gate_active = (
                 MODEL_GATE.get("enabled", False)
                 and not MODEL_GATE.get("shadow_only", False)
@@ -3866,15 +3934,27 @@ class MCPBrain:
         _ex_assigned = {}
 
         for coin, result in scored[:max_new]:
+            _signal_tf = (exchange_indicators.get(coin) or {}).get("4h", {})
+            _signal_venue = str(_signal_tf.get("source_venue") or "").lower()
+            _signal_market = str(_signal_tf.get("source_market_type") or "").lower()
+            if not _signal_venue or _signal_market not in {"spot", "futures"}:
+                logger.warning(
+                    f"[MCP-Algo] SKIP {coin}: indicator source provenance missing"
+                )
+                continue
             # Pick best exchange — distribute across exchanges, prefer highest balance
             candidates = []
             for ex_name, bals in exchange_balances.items():
+                if str(ex_name).lower() != _signal_venue:
+                    continue
                 assigned = _ex_assigned.get(ex_name, 0)
                 fut_bal = bals.get("futures", 0)
                 spot_bal = bals.get("spot", 0)
-                if fut_bal >= 8 and result["side"] in ("buy", "sell"):
+                if (_signal_market == "futures" and fut_bal >= 8
+                        and result["side"] in ("buy", "sell")):
                     candidates.append((ex_name, "futures", fut_bal, assigned))
-                elif spot_bal >= 8 and result["side"] == "buy":
+                elif (_signal_market == "spot" and spot_bal >= 8
+                      and result["side"] == "buy"):
                     candidates.append((ex_name, "spot", spot_bal, assigned))
 
             if not candidates:
@@ -3975,6 +4055,10 @@ class MCPBrain:
                 # Provenance: algo-built actions mint their own fresh ids
                 "decision_id": str(uuid.uuid4()),
                 "source": "algo",
+                "signal_venue": _signal_venue,
+                "signal_market_type": _signal_market,
+                "signal_symbol": _signal_tf.get("source_symbol"),
+                "signal_candle_ts": _signal_tf.get("candle_ts"),
             })
             logger.info(
                 f"[MCP-Algo] OPEN {coin}/USDT {side} on {best_ex} "
