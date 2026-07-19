@@ -9,6 +9,7 @@ FIX: _extract_usdt now handles Bybit Unified Account correctly.
 
 import atexit
 import json
+import math
 import signal
 import sys
 import threading
@@ -26,6 +27,7 @@ from rich.table import Table
 from config import (
     DRY_RUN,
     PORTFOLIO_MIN_VALUE_USD,
+    SLTP_TRIGGER_MARK_PRICE,
     PORTFOLIO_RESCAN_MINUTES,
     RISK,
     TRADING_MODE,
@@ -64,6 +66,7 @@ try:
 except ImportError:
     CapitalAllocator = None
 from utils import TelegramNotifier
+from utils.atomic_io import atomic_write_json
 
 console = Console()
 
@@ -104,6 +107,75 @@ def _canonical_exit_reason(raw: str, source: str = "claude") -> str:
     if " " not in r and len(r) <= 40:
         return r
     return fallback
+
+
+def _live_entry_clock_drift_rejection(
+    operating_mode: str,
+    exchange_name: str,
+    drift_by_exchange: dict | None,
+    threshold_ms: float,
+) -> str | None:
+    """Fail closed on missing or excessive venue clock drift in live mode."""
+
+    if str(operating_mode or "").upper() != "CONTROLLED_LIVE":
+        return None
+    raw = (drift_by_exchange or {}).get(str(exchange_name or "").lower())
+    if isinstance(raw, bool):
+        return "clock_drift_unavailable"
+    try:
+        drift_ms = float(raw)
+        threshold = float(threshold_ms)
+    except (TypeError, ValueError):
+        return "clock_drift_unavailable"
+    if not math.isfinite(drift_ms) or not math.isfinite(threshold) or threshold <= 0:
+        return "clock_drift_unavailable"
+    if abs(drift_ms) > threshold:
+        return "clock_drift_exceeded"
+    return None
+
+
+def _is_mcp_directional_paper_futures(
+    strategy_id: str,
+    market_type: str,
+    operating_mode: str,
+    *,
+    is_tsmom: bool = False,
+) -> bool:
+    """Return whether the P0 economic gate owns this entry.
+
+    Catalog aliases (``mcp_registry``/``algo_det``) resolve to the canonical
+    ``MCP_DIRECTIONAL_PAPER`` ID.  Explicitly excluding tsmom keeps its
+    momentum-flip/no-TP contract out of a bracket-expectancy calculation.
+    Carry and deep-breakout use separate runners and never enter this path.
+    """
+
+    if is_tsmom or str(operating_mode or "").strip().upper() != "PAPER":
+        return False
+    if str(market_type or "").strip().lower() not in {
+        "future",
+        "futures",
+        "perp",
+        "perpetual",
+        "swap",
+    }:
+        return False
+    try:
+        from core.strategy_program import strategy_program_entry
+
+        entry = strategy_program_entry(strategy_id)
+        return bool(
+            entry is not None
+            and entry.spec.strategy_id == "MCP_DIRECTIONAL_PAPER"
+        )
+    except Exception:
+        # The strategy catalog is an authorization dependency.  The caller has
+        # already passed that gate, but an import failure here must not turn the
+        # economic rule into an accidental bypass for its known aliases.
+        return str(strategy_id or "").strip().lower() in {
+            "mcp_directional_paper",
+            "mcp_registry",
+            "algo_det",
+        }
 
 
 def _effective_tp_threshold(take_profit, entry_price, side, leverage,
@@ -153,6 +225,38 @@ from core.balance_utils import UNIFIED_EXCHANGES as _UNIFIED_EXCHANGES
 from core.balance_utils import deployable_total as _deployable_total
 
 
+def _boot_profile_log_lines() -> list:
+    """One in-process boot log line per max-flow knob (2026-07-19 spec T5).
+
+    Restart verification rule: threshold / cooldown / geometry / profile
+    must be readable from the NEW boot log itself — never re-derived by a
+    subprocess re-parse. Values are read from config at call time so the
+    lines always describe THIS process."""
+    try:
+        from config import (
+            ACCURACY_TARGET_MODE as _acc,
+            MCP_ENTRY_MIN_SCORE as _floor,
+            PAPER_PROFILE_STARTED_AT as _epoch,
+            PAPER_TRADING_PROFILE as _profile,
+            SL_COOLDOWN_ENABLED as _sl_cd,
+        )
+    except Exception as exc:  # pragma: no cover — config import is load-bearing
+        return [f"  Profile   : UNAVAILABLE ({exc})"]
+    floor_txt = "default(66/65)" if _floor is None else f"{_floor:g}"
+    acc_on = bool(_acc.get("enabled"))
+    frac_buy = _acc.get("tp_frac_buy") or _acc.get("tp_frac_of_sl")
+    frac_sell = _acc.get("tp_frac_sell") or _acc.get("tp_frac_of_sl")
+    return [
+        f"  Profile   : {_profile} (epoch={_epoch or 'n/a'})",
+        f"  EntryFloor: MCP_ENTRY_MIN_SCORE={floor_txt}",
+        f"  SLCooldown: {'enabled' if _sl_cd else 'DISABLED (sl_cooldown_disabled_by_profile)'}",
+        (
+            f"  AccBand   : {'ON' if acc_on else 'OFF'}"
+            + (f" (fracs buy={frac_buy}/sell={frac_sell})" if acc_on else "")
+        ),
+    ]
+
+
 class BotEngine:
 
     def __init__(self):
@@ -161,12 +265,23 @@ class BotEngine:
         logger.info("  TRADING BOT — Smart Scanner + Learning + News")
         logger.info(f"  Trade Mode : {TRADING_MODE.upper()}")
         logger.info(f"  Run Mode   : {mode_label}")
+        for _boot_line in _boot_profile_log_lines():
+            logger.info(_boot_line)
         logger.info("=" * 60)
 
         self.notifier  = TelegramNotifier()
         self.tracker   = PositionTracker()
         self.risk      = RiskManager()
         self.order_mgr = OrderManager(self.tracker, self.risk, self.notifier)
+        self.order_mgr.enforce_entry_policy = True
+        self.order_mgr.enforce_event_provenance = True
+        # 2026-07-18: was hardcoded True, silently ignoring the documented C3
+        # revert switch — with the mark path failing in-process this halted
+        # the engine on every futures paper position. Now honors the flag.
+        self.order_mgr.enforce_mark_price_triggers = SLTP_TRIGGER_MARK_PRICE
+        logger.info(
+            f"[Engine] SL/TP trigger mode: mark_price={SLTP_TRIGGER_MARK_PRICE}"
+        )
         # 2026-04-26: route every PositionTracker.close() — including ghost
         # syncs detected by sync_with_exchanges — through OrderManager's
         # post-close pipeline (warehouse, risk, Spec §12, blacklist,
@@ -258,6 +373,58 @@ class BotEngine:
         except Exception as _se:
             logger.debug(f"[Engine] order_mgr.set_exchanges skipped: {_se}")
 
+        # WebSocket-first market/private data.  The hub is lazy: constructing
+        # it starts only an idle event-loop thread; subscriptions are opened
+        # when an execution candidate or tracked position names a symbol.
+        self.realtime_streams = None
+        if self.active_exchanges:
+            try:
+                from config import (
+                    BINANCE_API_KEY,
+                    BINANCE_SECRET_KEY,
+                    BITGET_API_KEY,
+                    BITGET_PASSPHRASE,
+                    BITGET_SECRET_KEY,
+                    BYBIT_API_KEY,
+                    BYBIT_SECRET_KEY,
+                )
+                from core.realtime_hub import LazyRealtimeHub
+
+                credentials = {
+                    "binance": {
+                        "apiKey": BINANCE_API_KEY,
+                        "secret": BINANCE_SECRET_KEY,
+                    },
+                    "bybit": {
+                        "apiKey": BYBIT_API_KEY,
+                        "secret": BYBIT_SECRET_KEY,
+                    },
+                    "bitget": {
+                        "apiKey": BITGET_API_KEY,
+                        "secret": BITGET_SECRET_KEY,
+                        "password": BITGET_PASSPHRASE,
+                    },
+                }
+                self.realtime_streams = LazyRealtimeHub(
+                    credentials=credentials,
+                    reconciliation_callback=self._reconcile_realtime_stream,
+                )
+                self.order_mgr.realtime_streams = self.realtime_streams
+                private_venues = sorted(
+                    venue
+                    for venue, values in credentials.items()
+                    if values.get("apiKey") and values.get("secret")
+                )
+                logger.info(
+                    "[Realtime] lazy WebSocket hub enabled; "
+                    f"private read streams configured={private_venues}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Realtime] WebSocket hub unavailable; execution will use "
+                    f"bounded REST fallback until restart ({type(exc).__name__})"
+                )
+
         self._start_time = time.time()
         self._cycle      = 0
         self._consecutive_api_fails: dict[str, int] = {}  # Per-exchange fail counter
@@ -272,18 +439,16 @@ class BotEngine:
         # Exchange position cache — for universal position monitor (60s TTL)
         self._exchange_positions_cache: list[dict] = []
         self._exchange_positions_time: float = 0
+        # Live reconciliation can place SL/TP protection for imported
+        # positions. Defer it until run() passes every authorization gate and
+        # the read-only venue capability preflight.
+        self._live_startup_reconciliation_pending = not DRY_RUN
 
         if not self.active_exchanges:
             logger.error("[Engine] No exchanges connected!")
         else:
             logger.info(f"[Engine] Connected: {list(self.active_exchanges.keys())}")
             self._log_balances()
-            # Sync tracked positions with exchange — close ghosts + import manual on startup
-            if not DRY_RUN:
-                imported = self.tracker.sync_with_exchanges(self.active_exchanges)
-                if imported:
-                    self._protect_imported_positions(imported)
-
             # Wire exchange clients to MCP Brain for direct OHLCV fetching
             if self.mcp_brain:
                 self.mcp_brain.set_exchanges(self.active_exchanges)
@@ -351,6 +516,29 @@ class BotEngine:
                 self._init_shadow_runner()
         except Exception as e:
             logger.debug(f"[Engine] Shadow init skipped: {e}")
+
+    async def _reconcile_realtime_stream(self, request) -> None:
+        """Reconcile a private-stream gap against the same venue's REST state.
+
+        The callback runs on the hub event loop, so blocking exchange wrappers
+        are moved to a worker thread.  Any unavailable venue or failed snapshot
+        raises and keeps the private stream unhealthy instead of falsely fresh.
+        """
+        import asyncio
+
+        venue = str(request.key.venue).lower()
+        exchange = (self.active_exchanges or {}).get(venue)
+        if exchange is None:
+            raise RuntimeError(f"reconciliation venue unavailable: {venue}")
+
+        def _reconcile() -> None:
+            orders = exchange.fetch_open_orders(request.key.symbol, "futures")
+            if orders is None:
+                raise RuntimeError("open-order reconciliation returned no snapshot")
+            if not DRY_RUN:
+                self.tracker.sync_with_exchanges({venue: exchange})
+
+        await asyncio.to_thread(_reconcile)
 
     def _init_shadow_runner(self) -> None:
         """Lazy-init the multi-agent ShadowRunner. Failures don't crash the bot."""
@@ -746,15 +934,16 @@ class BotEngine:
         return total
 
     def _shadow_symbols(self) -> list:
-        """Universe for shadow eval — the day's biggest |24h %| MOVERS among
-        the liquidity-screened futures pairs (2026-07-06 owner ask: keep
-        testing 'scalp the daily movers' in the log-only lane). One batched
-        fetch_tickers call ranks the whole screened universe, cached for
-        ``mover_refresh_s``; capped at ``mover_cap`` so the OHLCV ctx budget
-        stays bounded. Fail-open on ANY error to the legacy first-N pairs —
-        the shadow lane must never go dark on a ticker hiccup."""
+        """Return a bounded mover set for log-only shadow evaluation.
+
+        The broad path ranks point-in-time 1h/24h/7d USDT-perpetual movers
+        across active venues. It is only ShadowRunner's symbols provider and
+        cannot change executable ``current_pairs``. Results are cached to keep
+        the all-ticker REST budget to one batch per venue per refresh. Any
+        failure falls back to the pre-change shadow list.
+        """
         try:
-            from config import SHADOW_MODE
+            from config import BROAD_UNIVERSE_MONITOR, SHADOW_MODE
             cap = int(SHADOW_MODE.get("mover_cap", 10))
             if not SHADOW_MODE.get("mover_universe", True):
                 return self._shadow_symbols_legacy(5)  # true pre-change budget
@@ -762,6 +951,94 @@ class BotEngine:
             cached = getattr(self, "_shadow_mover_cache", None)
             if cached and now - cached[0] < float(SHADOW_MODE.get("mover_refresh_s", 900)):
                 return list(cached[1])
+            # The broad path is strictly a symbols_provider for ShadowRunner.
+            # It never mutates current_pairs and has no reference to an order
+            # manager, so it cannot expand executable exposure.
+            if BROAD_UNIVERSE_MONITOR.get("enabled", False):
+                if not self.active_exchanges:
+                    return self._shadow_symbols_legacy(cap)
+                try:
+                    from core.universe_monitor import (
+                        UniverseMonitor,
+                        UniverseMonitorConfig,
+                    )
+
+                    deep_cap = min(
+                        max(0, cap),
+                        max(0, int(BROAD_UNIVERSE_MONITOR.get("shortlist_cap", 18))),
+                    )
+                    monitor = getattr(self, "_broad_universe_monitor", None)
+                    if monitor is None:
+                        monitor = UniverseMonitor(
+                            self.active_exchanges,
+                            db_path=Path(BROAD_UNIVERSE_MONITOR.get(
+                                "db_path", "data/universe_monitor.sqlite"
+                            )),
+                            config=UniverseMonitorConfig(
+                                min_quote_volume_usdt=float(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "min_quote_volume_usdt", 5_000_000
+                                    )
+                                ),
+                                max_ticker_age_s=float(BROAD_UNIVERSE_MONITOR.get(
+                                    "max_ticker_age_s", 180
+                                )),
+                                reference_tolerance_s=float(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "reference_tolerance_s", 1800
+                                    )
+                                ),
+                                retention_days=float(BROAD_UNIVERSE_MONITOR.get(
+                                    "retention_days", 8
+                                )),
+                                per_direction_per_horizon=int(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "per_direction_per_horizon", 3
+                                    )
+                                ),
+                                max_shortlist=deep_cap,
+                                max_contracts_per_venue=int(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "max_contracts_per_venue", 5000
+                                    )
+                                ),
+                            ),
+                        )
+                        self._broad_universe_monitor = monitor
+                    else:
+                        # Venue wrappers may be refreshed after reconnect.
+                        monitor.exchanges = self.active_exchanges
+                    scan = monitor.scan()
+                    out = list(scan.symbols)
+                    self._shadow_symbol_venues = {
+                        row.symbol: row.venue for row in scan.shortlist
+                    }
+                    if out:
+                        logger.info(
+                            f"[Shadow] broad universe accepted "
+                            f"{scan.accepted_tickers}/{scan.raw_tickers} tickers; "
+                            f"deep-analysis shortlist={len(out)}"
+                        )
+                    else:
+                        logger.warning(
+                            "[Shadow] broad universe produced no valid movers "
+                            f"(accepted={scan.accepted_tickers}, "
+                            f"venue_errors={dict(scan.venue_errors)}) -- "
+                            "legacy fallback"
+                        )
+                        out = self._shadow_symbols_legacy(cap)
+                        self._shadow_symbol_venues = {}
+                    self._shadow_mover_cache = (now, out)
+                    return list(out)
+                except Exception as broad_error:
+                    logger.warning(
+                        f"[Shadow] broad universe failed: {broad_error} -- "
+                        "legacy fallback"
+                    )
+                    out = self._shadow_symbols_legacy(cap)
+                    self._shadow_symbol_venues = {}
+                    self._shadow_mover_cache = (now, out)
+                    return list(out)
             screened: list[str] = []
             for _ename, pairs in (self.current_pairs or {}).items():
                 for sym in (pairs.get("futures") or []):
@@ -828,7 +1105,13 @@ class BotEngine:
         live already does. Returns None if data is unavailable."""
         if not self.active_exchanges:
             return None
-        ex = next(iter(self.active_exchanges.values()))
+        # Broad-universe candidates can originate on any venue.  Preserve the
+        # venue that supplied the ranked ticker so shadow OHLCV/outcome replay
+        # is not silently priced from the first configured exchange.
+        venue_hint = (getattr(self, "_shadow_symbol_venues", {}) or {}).get(symbol)
+        ex = self.active_exchanges.get(venue_hint)
+        if ex is None:
+            ex = next(iter(self.active_exchanges.values()))
         try:
             import pandas as pd
             # 2026-07-07: stamp the venue actually supplying the candles.
@@ -838,7 +1121,9 @@ class BotEngine:
             # left non-binance symbols PENDING forever.
             ctx: dict = {
                 "symbol": symbol,
-                "venue": str(getattr(ex, "name", "") or "binance").lower(),
+                "venue": str(
+                    venue_hint or getattr(ex, "name", "") or "binance"
+                ).lower(),
             }
             for tf, key, lim in (
                 ("5m", "ohlcv_5m", 80),
@@ -1734,6 +2019,7 @@ class BotEngine:
             import pandas as pd
 
             from config import BTC_TREND_EMA_PERIOD, BTC_TREND_TIMEFRAME
+            from exchanges.base import closed_ohlcv
 
             exchange = (self.active_exchanges.get('binance')
                         or next(iter(self.active_exchanges.values()), None))
@@ -1743,6 +2029,7 @@ class BotEngine:
             raw = exchange.fetch_ohlcv(
                 "BTC/USDT", BTC_TREND_TIMEFRAME,
                 BTC_TREND_EMA_PERIOD + 20, "spot")
+            raw = closed_ohlcv(raw, BTC_TREND_TIMEFRAME, now_s=now)
             if not raw or len(raw) < BTC_TREND_EMA_PERIOD + 5:
                 return "neutral"
 
@@ -2151,6 +2438,7 @@ class BotEngine:
             "tsmom": "TSMOM",
             "machine": "Machine",
             "s3": "S3",
+            "mcp": "MCPDet",
             "mcp_det": "MCPDet",
             "none": "NoSignal",
         }.get(SIGNAL_SOURCE, "Claude")
@@ -2165,7 +2453,7 @@ class BotEngine:
             _signal = self._s3_signal()
         elif SIGNAL_SOURCE == "machine":
             _signal = self._machine_signal()
-        elif SIGNAL_SOURCE == "mcp_det":
+        elif SIGNAL_SOURCE in ("mcp", "mcp_det"):
             _signal = self._mcp_det_signal()
         elif SIGNAL_SOURCE == "none":
             _signal = self._none_signal()
@@ -2218,14 +2506,24 @@ class BotEngine:
                 elif action["type"] == "CLOSE":
                     if self._execute_close(action):
                         executed += 1
+                else:
+                    action["reject_reason"] = "unknown_action_type"
+                    self._log_rejection(
+                        action, "unknown_action_type", stage="dispatch"
+                    )
             except Exception as e:
                 logger.error(f"[Claude] Action execution error: {e}")
+                action["reject_reason"] = "action_execution_exception"
+                self._log_terminal_decision(
+                    action,
+                    outcome="error",
+                    reason="action_execution_exception",
+                    stage="dispatch",
+                )
 
-        # Fund ops (transfers between spot/futures) are MCP-brain only.
-        if SIGNAL_SOURCE == "mcp" and self.mcp_brain:
-            fund_ops = self.mcp_brain.last_fund_ops()
-            if fund_ops:
-                self._execute_fund_ops(fund_ops)
+        # The mcp compatibility alias is deterministic and has no implicit
+        # fund-operation authority. Capital moves require a separate explicit
+        # operator workflow and still pass the entry-policy latch.
 
         self._cycle += 1
         logger.info(
@@ -2305,17 +2603,52 @@ class BotEngine:
         decision log, keyed by the action's decision_id. Safe no-op when the
         brain ref is None or lacks log_rejection (old versions / tests)."""
         try:
-            brain = getattr(self, "mcp_brain", None)
-            if brain is None or not hasattr(brain, "log_rejection"):
-                return
-            brain.log_rejection(
-                action.get("decision_id"),
-                action.get("symbol", ""),
-                reason,
-                stage,
+            from core.decision_provenance import outcome_for_rejection
+
+            self._log_terminal_decision(
+                action,
+                outcome=outcome_for_rejection(reason, stage),
+                reason=reason,
+                stage=stage,
             )
         except Exception as e:
+            logger.error(f"[Provenance] terminal rejection write failed: {e}")
+        try:
+            brain = getattr(self, "mcp_brain", None)
+            if brain is not None and hasattr(brain, "log_rejection"):
+                brain.log_rejection(
+                    action.get("decision_id"),
+                    action.get("symbol", ""),
+                    reason,
+                    stage,
+                )
+        except Exception as e:
             logger.debug(f"[Provenance] rejection log skipped: {e}")
+
+    def _log_terminal_decision(
+        self, action: dict, *, outcome, reason: str, stage: str
+    ) -> bool:
+        """Write one immutable terminal outcome for a candidate."""
+        try:
+            from core.decision_provenance import record_terminal_decision
+            from core.warehouse import get_warehouse
+
+            warehouse = getattr(self, "warehouse", None) or get_warehouse()
+            self.warehouse = warehouse
+            record_terminal_decision(
+                warehouse,
+                action,
+                outcome=outcome,
+                reason=reason,
+                stage=stage,
+            )
+            return True
+        except Exception as exc:
+            logger.error(
+                f"[Provenance] terminal decision persistence failed for "
+                f"{action.get('decision_id')}: {exc}"
+            )
+            return False
 
     def _btc_cross_regime_multiplier(self, side: str) -> tuple:
         """Phase 31 (2026-05-05): BTC cross-regime soft veto.
@@ -2452,15 +2785,177 @@ class BotEngine:
             logger.debug(f"[EV] _ev_per_symbol_multiplier exception: {e}")
             return 1.0, ""
 
+    @staticmethod
+    def _validated_promoted_futures_model_version() -> str | None:
+        """Return the version on the currently valid promotion pointer.
+
+        ``MCPBrain.score_via_model`` only emits a model version after this same
+        pointer validator admits the bundle. Revalidating at the final order
+        boundary also catches a pointer that became stale or was replaced
+        between signal generation and submission.
+        """
+
+        try:
+            latest = Path("data/models/ensemble_futures_latest.json")
+            payload = json.loads(latest.read_text(encoding="utf-8"))
+            from core.promotion_gate import validate_model_pointer
+
+            allowed, reason, _ = validate_model_pointer(
+                payload, market_type="futures"
+            )
+            if not allowed:
+                logger.warning(
+                    f"[EconomicGate] promoted futures pointer unavailable: {reason}"
+                )
+                return None
+            version = str(payload.get("model_version") or "").strip()
+            return version or None
+        except Exception as exc:
+            logger.warning(
+                f"[EconomicGate] promoted futures pointer validation failed: {exc}"
+            )
+            return None
+
+    def _apply_mcp_directional_economic_gate(
+        self,
+        action: dict,
+        *,
+        strategy_id: str,
+        operating_mode: str,
+        market_type: str,
+        exchange_name: str,
+        sl_pct: float,
+        tp_pct: float,
+        entry_quote_usdt: float,
+        is_tsmom: bool = False,
+    ) -> bool:
+        """Apply the final after-cost gate and attach its complete audit row.
+
+        Non-owned strategy lanes return unchanged. Owned entries fail closed on
+        missing inputs, promotion ambiguity, or non-positive stressed EV.
+        """
+
+        if not _is_mcp_directional_paper_futures(
+            strategy_id,
+            market_type,
+            operating_mode,
+            is_tsmom=is_tsmom,
+        ):
+            return True
+
+        try:
+            quote = float(entry_quote_usdt)
+            entry_fee_usdt = float(action.get("expected_entry_fee_usdt"))
+            entry_slippage_usdt = float(
+                action.get("expected_entry_slippage_usdt")
+            )
+            if not math.isfinite(quote) or quote <= 0.0:
+                quote = float("nan")
+            entry_fee_frac = entry_fee_usdt / quote
+            entry_slippage_frac = entry_slippage_usdt / quote
+        except (TypeError, ValueError, ZeroDivisionError):
+            quote = float("nan")
+            entry_fee_frac = None
+            entry_slippage_frac = None
+
+        try:
+            from config import (
+                MCP_DIRECTIONAL_ECONOMIC_GATE,
+                SLIPPAGE,
+                STRESSED_EXIT_COST_FRAC,
+            )
+            from core.cost_model import fee_rate
+
+            exit_fee_frac = fee_rate(exchange_name, "futures", "taker")
+            exit_slippage_frac = float(SLIPPAGE["pct_close"])
+            gate_cfg = MCP_DIRECTIONAL_ECONOMIC_GATE
+            exit_cost_floor = float(STRESSED_EXIT_COST_FRAC)
+        except Exception:
+            exit_fee_frac = None
+            exit_slippage_frac = None
+            exit_cost_floor = None
+            gate_cfg = {}
+
+        from core.economic_entry_gate import evaluate_directional_entry
+
+        decision = evaluate_directional_entry(
+            model_version=action.get("model_version"),
+            promoted_model_version=self._validated_promoted_futures_model_version(),
+            p_win=action.get("p_win_ensemble"),
+            stop_frac=float(sl_pct) / 100.0,
+            target_frac=float(tp_pct) / 100.0,
+            entry_fee_frac=entry_fee_frac,
+            entry_slippage_frac=entry_slippage_frac,
+            exit_fee_frac=exit_fee_frac,
+            exit_slippage_frac=exit_slippage_frac,
+            stressed_exit_cost_floor_frac=exit_cost_floor,
+            fee_stress_multiplier=gate_cfg.get("fee_stress_multiplier"),
+            slippage_stress_multiplier=gate_cfg.get(
+                "slippage_stress_multiplier"
+            ),
+            probability_margin=gate_cfg.get("probability_margin"),
+        )
+        audit = decision.to_dict()
+        audit.update({
+            "applied": True,
+            "strategy_id": "MCP_DIRECTIONAL_PAPER",
+            "venue": str(exchange_name or "").lower(),
+            "market_type": "futures",
+            "entry_quote_usdt": quote if math.isfinite(quote) else None,
+            "stressed_exit_cost_floor_frac": exit_cost_floor,
+            "promotion_authority": "ensemble_futures_latest.json",
+        })
+        action["economic_entry_gate"] = audit
+        action["economic_gate_reason"] = decision.reason
+        action["economic_gate_required_p_win"] = decision.required_p_win
+        action["economic_gate_stressed_expectancy_frac"] = (
+            decision.stressed_expectancy_frac
+        )
+
+        # Persist the audit alongside the exact venue book snapshot used for
+        # this terminal decision. Both rejected and filled paths retain it.
+        try:
+            execution = action.get("execution_snapshot")
+            snapshot = dict(execution.get("snapshot") or {})
+            context = dict(snapshot.get("context") or {})
+            context["economic_entry_gate"] = audit
+            snapshot["context"] = context
+            execution["snapshot"] = snapshot
+        except (AttributeError, TypeError, ValueError):
+            # The execution-book guard already requires a valid snapshot in
+            # production; audit attachment failure must not hide the decision.
+            pass
+
+        if decision.allowed:
+            logger.info(
+                f"[EconomicGate] PASS {exchange_name}:{action.get('symbol')} "
+                f"p={decision.p_win:.3f} required={decision.required_p_win:.3f} "
+                f"EV={decision.stressed_expectancy_frac * 10_000:+.2f}bps "
+                f"cost={decision.stressed_round_trip_cost_frac * 10_000:.2f}bps "
+                f"model={decision.model_version}"
+            )
+            return True
+
+        logger.info(
+            f"[EconomicGate] BLOCKED {exchange_name}:{action.get('symbol')} "
+            f"reason={decision.reason} p={decision.p_win} "
+            f"required={decision.required_p_win} "
+            f"EV={decision.stressed_expectancy_frac} "
+            f"model={decision.model_version} promoted={decision.promoted_model_version}"
+        )
+        return False
+
     def _execute_open(self, action: dict) -> bool:
         """Validate and execute an OPEN action from Claude. Returns True if executed."""
         from config import (
             BLACKLIST_HARD,
+            CLOCK_DRIFT_ALERT_MS,
             CONTROLLED_LIVE_ENABLED,
             OPERATING_MODE,
             SHORTS_REQUIRE_BTC_BEAR,
             TRADING_MODE,
             UNIVERSE_WHITELIST,
+            is_analysis_only,
         )
 
         symbol     = action.get("symbol", "")
@@ -2476,6 +2971,42 @@ class BotEngine:
             action["reject_reason"] = "invalid_action_fields"
             return False
 
+        # Cheap, symbol-local gates stay first so repeated proposals are
+        # rejected before venue checks, sizing, scoring, or other I/O.
+        try:
+            import time as _t_p23
+
+            _cool_until = self._dust_skip_cooldown.get(symbol, 0.0)
+            if _cool_until > 0:
+                if _t_p23.time() < _cool_until:
+                    action["reject_reason"] = "symbol_cooldown_active"
+                    return False
+                del self._dust_skip_cooldown[symbol]
+        except Exception:
+            pass
+
+        if is_analysis_only(symbol):
+            logger.info(
+                f"[AnalysisOnly] BLOCKED open {ex_name}:{symbol} {side} - "
+                "analysis/data-collection only (unscreened; no live entry)"
+            )
+            action["reject_reason"] = "analysis_only_symbol"
+            return False
+
+        _clock_rejection = _live_entry_clock_drift_rejection(
+            OPERATING_MODE,
+            ex_name,
+            getattr(self, "_clock_drift_ms", None),
+            CLOCK_DRIFT_ALERT_MS,
+        )
+        if _clock_rejection:
+            logger.warning(
+                f"[ClockDrift] BLOCKED live entry {ex_name}:{symbol}: "
+                f"{_clock_rejection}"
+            )
+            action["reject_reason"] = _clock_rejection
+            return False
+
         # Entries-only kill switch (Codex port, 2026-07-12): data/KILL_SWITCH
         # present -> refuse this NEW entry before any sizing/order work.
         # Monitoring, SL/TP management, maker-resolver, reconciliation and
@@ -2485,35 +3016,6 @@ class BotEngine:
         from core.kill_switch import entries_halted
         if entries_halted():
             action["reject_reason"] = "kill_switch_active"
-            return False
-
-        # Phase 23 (2026-05-04): per-symbol cooldown — see __init__ context.
-        # Silent early-exit when the symbol was just dust-skipped or
-        # calibrator-refused. Stops MCP/news/sizing waste on the same
-        # signal every 5min for 30min.
-        try:
-            import time as _t_p23
-            _cool_until = self._dust_skip_cooldown.get(symbol, 0.0)
-            if _cool_until > 0:
-                if _t_p23.time() < _cool_until:
-                    action["reject_reason"] = "symbol_cooldown_active"
-                    return False
-                # cooldown expired — clear it
-                del self._dust_skip_cooldown[symbol]
-        except Exception:
-            pass
-
-        # (A0) ANALYSIS-ONLY hard block (2026-06-02). Commodity/equity perps
-        # (gold, oil, stock perps) are real + liquid but too new (~5mo) to have a
-        # screened edge. They are fetched + warehoused for research only and must
-        # NEVER reach an order until screened. This is the single safety choke;
-        # it fires in EVERY mode (incl. paper) and well before any sizing/order work.
-        from config import is_analysis_only
-        if is_analysis_only(symbol):
-            logger.info(
-                f"[AnalysisOnly] BLOCKED open {ex_name}:{symbol} {side} — "
-                f"analysis/data-collection only (unscreened; no live entry)")
-            action["reject_reason"] = "analysis_only_symbol"
             return False
 
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
@@ -2534,6 +3036,29 @@ class BotEngine:
                 return False
         except Exception as _e:
             logger.debug(f"[Risk29] sl-cooldown check skipped: {_e}")
+
+        # Deterministic new-exposure latch. This is separate from signal
+        # generation so SHADOW_ONLY still records candidates while no order can
+        # pass this boundary. The OrderManager repeats the check as defense in
+        # depth for future plugins using the shared production instance.
+        from config import SIGNAL_SOURCE
+        from core.entry_policy import authorize_runtime_entry, strategy_id_for_action
+
+        _strategy_id = strategy_id_for_action(action, SIGNAL_SOURCE)
+        _authorization = authorize_runtime_entry(
+            _strategy_id,
+            strategy_version=action.get("strategy_version") or action.get("model_version"),
+        )
+        action["entry_policy"] = _authorization.policy
+        action["entry_policy_reason"] = _authorization.reason
+        action["strategy_id"] = _strategy_id
+        if not _authorization.allowed:
+            logger.info(
+                f"[EntryPolicy] BLOCKED {ex_name}:{symbol} {_strategy_id}: "
+                f"{_authorization.reason}"
+            )
+            action["reject_reason"] = _authorization.reason
+            return False
 
         # ── LEARNING-FIRST MODE GATES (spec §3, §13) ─────────────────────
         # (A) OBSERVATION mode: never place any order, even paper. The
@@ -3605,10 +4130,12 @@ class BotEngine:
             _VTS = {"enabled": False}
         if _VTS.get("enabled", False) and sl_pct > 0:
             try:
+                from config import STRESSED_EXIT_COST_FRAC as _EXIT_STRESS
                 from core.vol_target import risk_budget_margin as _rbm
                 _lev_eff = leverage if market_type == "futures" else 1
                 _budget = _rbm(mtype_bal, sl_pct, _lev_eff,
-                               float(_VTS.get("per_trade_risk_pct", 0.005)))
+                               float(_VTS.get("per_trade_risk_pct", 0.0025)),
+                               _EXIT_STRESS)
                 if _budget < notional:
                     logger.info(
                         f"[VolTarget] {symbol} margin ${notional:.2f} -> "
@@ -3704,6 +4231,37 @@ class BotEngine:
             action["reject_reason"] = "exposure_cap_error"
             return False
 
+        # Aggregate stop-risk cap: gross exposure alone does not bound loss
+        # when stops differ. Include every futures stop plus a stressed exit
+        # cost and deny when the total exceeds the typed mode profile budget.
+        try:
+            from config import (
+                MAX_AGGREGATE_OPEN_RISK_PCT as _MAX_OPEN_RISK,
+                STRESSED_EXIT_COST_FRAC as _EXIT_STRESS,
+            )
+            from core.risk_manager import aggregate_open_risk_breached
+
+            if aggregate_open_risk_breached(
+                self.tracker.get_open(),
+                size * price,
+                sl_pct / 100.0,
+                _equity,
+                _MAX_OPEN_RISK,
+                _EXIT_STRESS,
+            ):
+                logger.warning(
+                    f"[Risk] aggregate open risk cap reached for {symbol}: "
+                    f"budget={_MAX_OPEN_RISK:.2%} of equity"
+                )
+                action["reject_reason"] = "aggregate_open_risk_cap"
+                return False
+        except Exception as _are:
+            logger.warning(
+                f"[Risk] aggregate open-risk check FAILED, blocking entry: {_are}"
+            )
+            action["reject_reason"] = "aggregate_open_risk_error"
+            return False
+
         # Pre-check: will this size survive exchange rounding?
         # BTC at $83k with step=0.001 needs min $83 notional (or $16.6 at 5x).
         # Skip early instead of wasting API calls on doomed orders.
@@ -3737,6 +4295,97 @@ class BotEngine:
         except Exception:
             pass
 
+        # Quantize before evaluating depth so the guard walks the exact amount
+        # that the common paper/live create_order boundary will submit.
+        try:
+            size = float(exchange.round_quantity(
+                trade_symbol, size, market_type=market_type))
+        except Exception as _quantize_error:
+            logger.warning(
+                f"[ExecutionGuard] {ex_name}:{trade_symbol} quantity "
+                f"quantization failed: {_quantize_error}"
+            )
+            action["reject_reason"] = "quantity_quantization_failed"
+            return False
+        if size <= 0:
+            action["reject_reason"] = "quantity_quantized_to_zero"
+            return False
+
+        # A target venue's own book is the only valid execution snapshot.
+        # Generic market features may rank a candidate, but they cannot justify
+        # a fill on another venue. Walk the final size and retain expected costs
+        # for the append-only decision record.
+        try:
+            from config import (
+                EXECUTION_BOOK_DEPTH_LEVELS as _BOOK_LEVELS,
+                EXECUTION_BOOK_MAX_AGE_SEC as _BOOK_MAX_AGE,
+                MAX_ENTRY_SLIPPAGE_BPS as _MAX_ENTRY_SLIP,
+            )
+            from core.cost_model import fee_rate as _entry_fee_rate
+            from core.execution_guard import fetch_and_validate_execution_book
+
+            _book_decision = fetch_and_validate_execution_book(
+                exchange,
+                venue=ex_name,
+                market_type=market_type,
+                canonical_symbol=trade_symbol,
+                exchange_symbol=trade_symbol,
+                side=side,
+                requested_quantity=size,
+                max_slippage_bps=_MAX_ENTRY_SLIP,
+                max_age_seconds=_BOOK_MAX_AGE,
+                limit=_BOOK_LEVELS,
+                realtime_provider=self.realtime_streams,
+            )
+            action["execution_snapshot"] = _book_decision.to_action_dict()
+            # Decimal-safe: quote_cost/vwap/mid/filled_quantity arrive as
+            # Decimal from the quantization retrofit; fee rate is float.
+            # Mixing them raised TypeError and failed every entry closed
+            # (first hit: AXS 2026-07-18 04:45:41).
+            action["expected_entry_fee_usdt"] = float(
+                _book_decision.quote_cost
+            ) * _entry_fee_rate(ex_name, market_type, "taker")
+            action["expected_entry_slippage_usdt"] = float(
+                abs(_book_decision.vwap - _book_decision.mid)
+            ) * float(_book_decision.filled_quantity)
+            if not _book_decision.allowed:
+                logger.info(
+                    f"[ExecutionGuard] BLOCKED {ex_name}:{trade_symbol} {side}: "
+                    f"{_book_decision.reason}"
+                )
+                action["reject_reason"] = _book_decision.reason
+                return False
+        except Exception as _book_error:
+            logger.warning(
+                f"[ExecutionGuard] {ex_name}:{trade_symbol} failed closed: "
+                f"{_book_error}"
+            )
+            action["reject_reason"] = "execution_book_guard_error"
+            return False
+
+        # P0 economic execution gate. The scorer/candidate/shadow pipeline has
+        # already run; this check affects only the order-producing boundary.
+        # It deliberately executes after the FINAL SL/TP geometry, quantity
+        # quantization, and venue-book walk so probability and friction use the
+        # exact bracket and entry snapshot that would be submitted. Catalog
+        # scoping leaves tsmom, carry, deep-breakout, spot, and live lanes
+        # unchanged.
+        if not self._apply_mcp_directional_economic_gate(
+            action,
+            strategy_id=_strategy_id,
+            operating_mode=OPERATING_MODE,
+            market_type=market_type,
+            exchange_name=ex_name,
+            sl_pct=sl_pct,
+            tp_pct=tp_pct,
+            entry_quote_usdt=float(_book_decision.quote_cost),
+            is_tsmom=_is_tsmom_entry,
+        ):
+            action["reject_reason"] = str(
+                action.get("economic_gate_reason") or "economic_gate_rejected"
+            )
+            return False
+
         # Set leverage (LIVE only — 2026-05-31: was an ungated live-account
         # write firing in PAPER too; mirrors order_manager open_position:658).
         if market_type == "futures" and leverage > 1 and not DRY_RUN:
@@ -3765,6 +4414,8 @@ class BotEngine:
                 mcp_score=action.get("mcp_score"),
                 model_version=action.get("model_version"),
                 decision_id=action.get("decision_id"),
+                execution_snapshot=action.get("execution_snapshot"),
+                authorization_strategy_id=action.get("strategy_id"),
             )
             if pos is None:
                 logger.info("[Claude] open_position returned None — rejected by order manager")
@@ -3780,6 +4431,24 @@ class BotEngine:
             # dynamic attr does not persist to positions.json).
             if _acc_mode_on:
                 pos._accuracy_band = True
+            action["exchange_symbol"] = trade_symbol
+            action["filled_quantity"] = float(pos.size)
+            action["filled_price"] = float(pos.entry_price)
+            if not self._log_terminal_decision(
+                action,
+                outcome="filled",
+                reason="position_opened",
+                stage="order_manager",
+            ):
+                # The fill already exists, so keep managing it and latch a
+                # manual-clear incident rather than hiding the position.
+                try:
+                    self.risk.latch_incident(
+                        "filled entry missing terminal provenance",
+                        category="execution",
+                    )
+                except Exception:
+                    pass
             # Warehouse record_trade_open now happens inside open_position
             # (before SL placement) so fail-closed paths don't lose the row.
             # CLAUDE.md §4: structured markdown journal of the action (best-effort).
@@ -4012,10 +4681,48 @@ class BotEngine:
         except Exception:
             pass
 
+        try:
+            from config import (
+                ENTRY_POLICY as _ENTRY_POLICY,
+                MODE_PROFILE as _MODE_PROFILE,
+                OPERATING_MODE as _OPERATING_MODE,
+                PAPER_PROFILE_STARTED_AT as _PAPER_PROFILE_STARTED_AT,
+                PAPER_TRADING_PROFILE as _PAPER_TRADING_PROFILE,
+                SIGNAL_SOURCE as _SIGNAL_SOURCE,
+            )
+        except Exception:
+            _ENTRY_POLICY = "UNKNOWN"
+            _MODE_PROFILE = None
+            _OPERATING_MODE = "UNKNOWN"
+            _PAPER_PROFILE_STARTED_AT = ""
+            _PAPER_TRADING_PROFILE = "UNKNOWN"
+            _SIGNAL_SOURCE = "UNKNOWN"
+
         heartbeat = {
+            "schema_version": 1,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "boot_id": f"{int(self._start_time)}-{os.getpid()}",
             "uptime_seconds": int(time.time() - self._start_time),
             "cycle_count": self._cycle,
+            "last_successful_cycle": self._cycle,
+            "operating_mode": _OPERATING_MODE,
+            "dry_run": bool(DRY_RUN),
+            "entry_policy": _ENTRY_POLICY,
+            "signal_source": _SIGNAL_SOURCE,
+            "paper_trading_profile": _PAPER_TRADING_PROFILE,
+            "paper_profile_started_at": _PAPER_PROFILE_STARTED_AT or None,
+            "risk_profile": (
+                {
+                    "max_open_positions": _MODE_PROFILE.max_open_positions,
+                    "risk_per_trade_pct": _MODE_PROFILE.risk_per_trade_pct,
+                    "aggregate_open_risk_pct": _MODE_PROFILE.aggregate_open_risk_pct,
+                    "gross_exposure_pct": _MODE_PROFILE.gross_exposure_pct,
+                    "max_leverage": _MODE_PROFILE.max_leverage,
+                }
+                if _MODE_PROFILE is not None
+                else None
+            ),
             "open_positions": self.tracker.count_open(),
             "per_exchange_positions": {
                 ex_name: self.tracker.count_open(exchange=ex.name)
@@ -4039,12 +4746,16 @@ class BotEngine:
             "spot_manager_active": self.spot_manager is not None,
             "capital_allocator_active": self.capital_allocator is not None,
             "memory_mb": round(mem_mb, 1),
+            "realtime_streams": (
+                self.realtime_streams.health()
+                if self.realtime_streams is not None
+                else {}
+            ),
         }
         try:
-            Path("data/heartbeat.json").write_text(
-                json.dumps(heartbeat, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+            atomic_write_json(Path("data/heartbeat.json"), heartbeat, indent=2)
+        except Exception as exc:
+            logger.warning(f"[Health] heartbeat write failed: {exc}")
 
     def _try_reconnect(self, ex_name: str, exchange) -> None:
         """Rebuild ccxt client + clear halt if rebuild succeeds.
@@ -4142,6 +4853,9 @@ class BotEngine:
                     keys = list(ticker.keys()) if ticker else []
                     raise Exception(f"Empty ticker (keys={keys[:5]})")
             except Exception as e:
+                if not hasattr(self, "_clock_drift_ms"):
+                    self._clock_drift_ms = {}
+                self._clock_drift_ms[ex_name] = None
                 fails = self._consecutive_api_fails.get(ex_name, 0) + 1
                 self._consecutive_api_fails[ex_name] = fails
                 self._api_latency[ex_name] = -1
@@ -4776,11 +5490,38 @@ class BotEngine:
             return
         for op in fund_ops:
             op_type = op.get("op", "")
+            if op_type in {"TRANSFER", "BUY_PORTFOLIO"}:
+                from core.entry_policy import authorize_runtime_entry
+
+                authorization = authorize_runtime_entry(
+                    "mcp_fund_ops", strategy_version="mcp-fund-ops-v1"
+                )
+                if not authorization.allowed:
+                    logger.info(
+                        f"[EntryPolicy] fund operation {op_type} blocked: "
+                        f"{authorization.reason}"
+                    )
+                    continue
             ex_name = op.get("exchange", "").lower()
             exchange = self.active_exchanges.get(ex_name)
             if not exchange:
                 logger.warning(f"[MCP-FundOps] Exchange '{ex_name}' not active — skip {op_type}")
                 continue
+            if op_type in {"TRANSFER", "BUY_PORTFOLIO"}:
+                from config import CLOCK_DRIFT_ALERT_MS, OPERATING_MODE
+
+                clock_rejection = _live_entry_clock_drift_rejection(
+                    OPERATING_MODE,
+                    ex_name,
+                    getattr(self, "_clock_drift_ms", None),
+                    CLOCK_DRIFT_ALERT_MS,
+                )
+                if clock_rejection:
+                    logger.warning(
+                        f"[ClockDrift] BLOCKED fund operation {op_type} "
+                        f"on {ex_name}: {clock_rejection}"
+                    )
+                    continue
 
             try:
                 if op_type == "TRANSFER":
@@ -5741,8 +6482,29 @@ class BotEngine:
 
     # ── Main run ──────────────────────────────────────────────────────
 
+    def _complete_authorized_live_startup_reconciliation(
+        self,
+        operating_mode: str,
+    ) -> None:
+        """Reconcile/protect live positions after authorization and preflight.
+
+        This is idempotent because future startup refactors may invoke it
+        defensively more than once. PAPER and OBSERVATION never touch the
+        exchange reconciliation path.
+        """
+        if (operating_mode or "").upper() != "CONTROLLED_LIVE" or DRY_RUN:
+            return
+        if not getattr(self, "_live_startup_reconciliation_pending", False):
+            return
+
+        imported = self.tracker.sync_with_exchanges(self.active_exchanges)
+        if imported:
+            self._protect_imported_positions(imported)
+        self._live_startup_reconciliation_pending = False
+
     def run(self):
         # Spec Appendix B: refuse to run CONTROLLED_LIVE without a signed checklist.
+        _op_mode = None
         try:
             from config import (
                 CONTROLLED_LIVE_ENABLED as _live_enabled,
@@ -5755,12 +6517,15 @@ class BotEngine:
             )
             from core.live_gate import (
                 enforce_controlled_live_gate,
+                enforce_live_runtime_invariants,
+                enforce_model_gate_readiness,
                 enforce_strategy_readiness_gate,
             )
             enforce_controlled_live_gate(
                 _op_mode,
                 controlled_live_enabled=_live_enabled,
             )
+            enforce_live_runtime_invariants(_op_mode)
             _strategy_family = (
                 "machine" if _live_signal_source == "machine"
                 else ("tsmom" if _live_signal_source == "tsmom" else None)
@@ -5769,6 +6534,7 @@ class BotEngine:
                 _op_mode,
                 strategy_family=_strategy_family,
             )
+            enforce_model_gate_readiness(_op_mode)
             # Codex preflight port (2026-07-12): ADDITIONAL live-latch
             # condition — venue capability preflight (clock skew, position
             # mode, margin mode, protective-order path, min-notional floors).
@@ -5791,9 +6557,18 @@ class BotEngine:
                         for _exn in self.active_exchanges
                     },
                 )
+                # Reconciliation may place protection for imported positions,
+                # so it is strictly after every authorization check and the
+                # read-only venue preflight above.
+                self._complete_authorized_live_startup_reconciliation(_op_mode)
         except SystemExit:
             raise
         except Exception as _e:
+            if ((_op_mode or "").upper() == "CONTROLLED_LIVE") or not DRY_RUN:
+                raise SystemExit(
+                    "[LiveGate] REFUSING TO START: live safety checks errored: "
+                    f"{_e}"
+                ) from _e
             logger.warning(f"[LiveGate] check error (non-fatal): {_e}")
 
         logger.info("[Engine] Bot started — Ctrl+C to stop")
@@ -5852,8 +6627,8 @@ class BotEngine:
             schedule.every(15).minutes.do(self._run_capital_allocation)
 
         # Daily self-check at midnight UTC
-        schedule.every().day.at("00:00").do(self._daily_self_check)
-        schedule.every().day.at("00:00").do(self._daily_summary)
+        schedule.every().day.at("00:00", "UTC").do(self._daily_self_check)
+        schedule.every().day.at("00:00", "UTC").do(self._daily_summary)
         # Health watchdog tick — once per minute. Cheap, in-process.
         if self.watchdog is not None:
             schedule.every(60).seconds.do(self.watchdog.tick)
@@ -5986,10 +6761,16 @@ class BotEngine:
 
                 self._print_live_status()
                 time.sleep(5)
-        except (KeyboardInterrupt, SystemExit):
+        except KeyboardInterrupt:
             logger.info("[Engine] Shutdown received")
             self._stop_event.set()
             self._shutdown()
+        except SystemExit as exc:
+            logger.info(f"[Engine] SystemExit received (code={exc.code!r})")
+            self._stop_event.set()
+            self._shutdown()
+            if exc.code not in (None, 0):
+                raise
         except Exception as e:
             logger.critical(f"[Engine] FATAL ERROR in main loop: {e}", exc_info=True)
             self._stop_event.set()
@@ -6043,6 +6824,11 @@ class BotEngine:
             pass
         self._run_learning()
         self._print_full_summary()
+        if self.realtime_streams is not None:
+            try:
+                self.realtime_streams.close()
+            except Exception as exc:
+                logger.debug(f"[Realtime] shutdown failed: {exc}")
         logger.info("[Engine] Stopped.")
 
     def _daily_summary(self):
