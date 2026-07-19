@@ -17,7 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # direct-script runs (scheduled task) need repo root
     sys.path.insert(0, str(ROOT))
-RESOLVED_FLOOR = 30  # per-lane promotion floor (>=30 resolved, owner-signed)
+from scripts.report_goal_progress import RESOLVED_FLOOR, build_report  # noqa: E402
+
 FUNNEL_JSON = ROOT / "data" / "promotion_funnel.json"
 DOSSIER_DIR = ROOT / "reports" / "promotion_dossiers"
 
@@ -25,7 +26,7 @@ DOSSIER_DIR = ROOT / "reports" / "promotion_dossiers"
 @dataclass
 class LaneState:
     lane: str
-    state: str  # ACCRUING|STARVED|GATE_READY|STAGED|IDLE|ERROR
+    state: str  # ACCRUING|STARVED|GATE_READY|GATE_BLOCKED|STAGED|IDLE|ERROR
     resolved: int = 0
     wins: int = 0
     wr: float | None = None
@@ -61,6 +62,21 @@ PROBE_LANES: dict[str, tuple[str, str | None]] = {
     "rsi2_4h_cfg226": ("Rsi2TrackerProbeAgent", "4h"),
 }
 
+# Universe-widening disclosure (owner-approved 2026-07-20): both bundle-MR
+# lanes' accrual universes changed from the frozen 5-major basket to the
+# spec-derived MCP_DIRECTIONAL_PAPER x bybit universe. Pre-widening rows are
+# KEPT (gates pool per-arm), so any promotion dossier must disclose the
+# cohort change — probe_lane_states stamps this into detail.universe_widened_utc.
+# STATIC deploy-date stamp, chosen over a runtime marker as the simpler honest
+# option per docs/superpowers/specs/2026-07-20-probe-universe-widening-design.md:
+# the widened wiring and this stamp ship in the same deploy/restart, so the
+# deploy date IS the widening date (date precision); the exact boot moment is
+# journaled (journal/2026-07-20.md) and in logs/bot_2026-07-20.log.
+UNIVERSE_WIDENED_UTC = {
+    "zfade_4h_cfg365": "2026-07-20T00:00:00+00:00",
+    "rsi2_4h_cfg226": "2026-07-20T00:00:00+00:00",
+}
+
 
 def _accrual(resolved_ts: list[float], now: float) -> tuple[float, float | None, int]:
     """(rate_per_day over 7d, eta_days to floor, resolved_count)."""
@@ -89,10 +105,14 @@ def probe_lane_states(conn: sqlite3.Connection, now: float) -> list[LaneState]:
             rate, eta, n = _accrual([t for _, t in rows if t], now)
             state = ("IDLE" if n_prop == 0 else
                      "GATE_READY" if n >= RESOLVED_FLOOR else "ACCRUING")
+            detail = {"proposals": n_prop, "agent_id": agent}
+            widened = UNIVERSE_WIDENED_UTC.get(lane)
+            if widened:
+                detail["universe_widened_utc"] = widened
             out.append(LaneState(lane, state, n, wins, (wins / n) if n else None,
                                  f"{n}/{RESOLVED_FLOOR}", round(rate, 3),
                                  round(eta, 1) if eta is not None else None,
-                                 {"proposals": n_prop, "agent_id": agent}))
+                                 detail))
         except sqlite3.Error as exc:
             out.append(LaneState(lane, "ERROR", detail={"error": str(exc)}))
     return out
@@ -115,27 +135,56 @@ def classify_base(base: str) -> str:
     b = (base or "").upper()
     if b in _STOCK_BASES or b in _COMMODITY_BASES or b in _ETF_EXPLICIT:
         return "tokenized"
-    return "crypto"
+    # A ticker alone cannot prove an asset is crypto. Unknown names stay
+    # unclassified instead of inflating the crypto-native opportunity count.
+    return "unclassified"
 
 
 def listing_lane_state(conn: sqlite3.Connection, now: float) -> LaneState:
     try:
         rows = conn.execute(
-            "SELECT base, decision, created_ts FROM shadow_listing_probe"
+            "SELECT proposal_id, base, decision, created_ts FROM shadow_listing_probe"
             " WHERE created_ts >= ?", (now - 30 * 86400,)).fetchall()
-        resolved = conn.execute(
-            "SELECT COUNT(*) FROM shadow_listing_probe WHERE decision NOT LIKE 'SKIP%'"
-        ).fetchone()[0]
-        native = sum(1 for b, _, _ in rows if classify_base(b) == "crypto")
-        tokenized = len(rows) - native
-        state = ("STARVED" if rows and native == 0 else
-                 "GATE_READY" if resolved >= RESOLVED_FLOOR else
-                 "ACCRUING" if resolved else "STARVED" if rows else "IDLE")
-        return LaneState("listing_short", state, resolved, 0, None,
-                         f"{resolved}/{RESOLVED_FLOOR}", 0.0, None,
-                         {"crypto_native_listings_30d": native,
-                          "tokenized_listings_30d": tokenized,
-                          "note": "starved while venue listing flow is tokenized-equity"})
+        outcomes = conn.execute(
+            "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
+            "FROM shadow_listing_probe p JOIN shadow_outcomes o "
+            "ON o.proposal_id=p.proposal_id"
+        ).fetchall()
+        unique = {str(proposal_id): (float(net_pnl or 0), resolved_ts)
+                  for proposal_id, net_pnl, resolved_ts in outcomes}
+        resolved = len(unique)
+        wins = sum(net_pnl > 0 for net_pnl, _ in unique.values())
+        rate, eta, _ = _accrual(
+            [float(resolved_ts) for _, resolved_ts in unique.values()
+             if resolved_ts is not None], now
+        )
+        tokenized = sum(1 for _, base, _, _ in rows
+                        if classify_base(base) == "tokenized")
+        unclassified = len(rows) - tokenized
+        actionable = sum(1 for _, _, decision, _ in rows
+                         if not str(decision or "").startswith("SKIP"))
+        if not rows:
+            state, starvation_reason = "IDLE", None
+        elif actionable == 0:
+            state, starvation_reason = "STARVED", "no_actionable_shortable_listing"
+        elif resolved >= RESOLVED_FLOOR:
+            state, starvation_reason = "GATE_READY", None
+        else:
+            state, starvation_reason = "ACCRUING", None
+        return LaneState(
+            "listing_short", state, resolved, wins,
+            (wins / resolved) if resolved else None,
+            f"{resolved}/{RESOLVED_FLOOR}", round(rate, 3),
+            round(eta, 1) if eta is not None else None,
+            {
+                "recent_proposals_30d": len(rows),
+                "actionable_proposals_30d": actionable,
+                "known_tokenized_listings_30d": tokenized,
+                "unclassified_listings_30d": unclassified,
+                "starvation_reason": starvation_reason,
+                "note": "unknown tickers are not asserted to be crypto from name alone",
+            },
+        )
     except sqlite3.Error as exc:
         return LaneState("listing_short", "ERROR", detail={"error": str(exc)})
 
@@ -193,22 +242,55 @@ def f1_lane_state(gate_log: Path, now: float) -> LaneState:
         "note": "alert = net_edge_bps>0 on >=3 consecutive gate evals (hysteresis)"})
 
 
-def band_lane_state(goal_json: Path) -> LaneState:
+def directional_paper_lane_state(goal_json: Path) -> LaneState:
     try:
         data = json.loads(goal_json.read_text(encoding="utf-8"))
-        boot = next(l for l in data.get("lanes", []) if l.get("lane") == "current_boot")
+        cohort = next(
+            lane for lane in data.get("lanes", [])
+            if lane.get("lane") == "current_profile_directional"
+        )
     except (OSError, json.JSONDecodeError, StopIteration) as exc:
-        return LaneState("band_cohort", "ERROR", detail={"error": str(exc)})
-    n, w = int(boot.get("closed_trades") or 0), int(boot.get("wins") or 0)
-    return LaneState("band_cohort", "ACCRUING" if n else "IDLE", n, w,
-                     boot.get("wr"), f"{n}/{RESOLVED_FLOOR}",
-                     detail={"net_pnl": boot.get("net_pnl"),
-                             "note": "tuning protocol owned by band program, funnel reports only"})
+        return LaneState("directional_paper_cohort", "ERROR", detail={"error": str(exc)})
+    n = int(cohort.get("closed_outcomes") or 0)
+    wins = int(cohort.get("wins") or 0)
+    target_status = cohort.get("target_status")
+    state = (
+        "IDLE" if n == 0 else
+        "ACCRUING" if n < RESOLVED_FLOOR else
+        "GATE_READY" if target_status == "TARGET_MET" else
+        "GATE_BLOCKED"
+    )
+    return LaneState(
+        "directional_paper_cohort",
+        state,
+        n,
+        wins,
+        cohort.get("win_rate"),
+        f"{n}/{RESOLVED_FLOOR}",
+        detail={
+            "net_after_cost_pnl": cohort.get("net_after_cost_pnl"),
+            "profit_factor": cohort.get("profit_factor"),
+            "expectancy_per_outcome": cohort.get("expectancy_per_outcome"),
+            "target_status": target_status,
+            "profile": cohort.get("profile"),
+            "note": "directional PAPER research; no accuracy-band geometry is claimed",
+        },
+    )
+
+
+# Backward-compatible function name for external read-only callers. The returned
+# lane is intentionally no longer labeled as a band cohort.
+band_lane_state = directional_paper_lane_state
 
 
 import math  # noqa: E402
 
-from core.promotion_gate import MAX_PBO, MIN_AUC, MIN_DSR, MIN_OOS_WR  # noqa: E402  # constants only
+from core.promotion_gate import (  # noqa: E402  # constants only
+    MAX_PBO,
+    MIN_AUC,
+    MIN_DSR,
+    MIN_OOS_WR,
+)
 
 
 def _auc(scores_pos: list[float], scores_neg: list[float]) -> float:
@@ -238,22 +320,48 @@ def run_gate(outcomes: list[dict], market: str = "futures") -> dict:
     pnls = [float(o.get("net_pnl") or 0) for o in outcomes]
     wins = [o for o in outcomes if float(o.get("net_pnl") or 0) > 0]
     wr = len(wins) / n if n else 0.0
+    net = sum(pnls)
+    expectancy = net / n if n else 0.0
+    gross_profit = sum(value for value in pnls if value > 0)
+    gross_loss = abs(sum(value for value in pnls if value < 0))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
     pos = [float(o.get("p_win")) for o in wins if o.get("p_win") is not None]
     neg = [float(o.get("p_win")) for o in outcomes
            if float(o.get("net_pnl") or 0) <= 0 and o.get("p_win") is not None]
     auc = _auc(pos, neg)
-    dsr = _dsr(pnls)
+    dsr_proxy = _dsr(pnls)
     gates = {
         "n_resolved": {"value": n, "threshold": RESOLVED_FLOOR, "ok": n >= RESOLVED_FLOOR},
         "oos_wr": {"value": round(wr, 4), "threshold": MIN_OOS_WR, "ok": wr >= MIN_OOS_WR},
         "auc": {"value": round(auc, 4), "threshold": MIN_AUC, "ok": auc >= MIN_AUC},
-        "dsr": {"value": round(dsr, 4), "threshold": MIN_DSR, "ok": dsr >= MIN_DSR},
-        # PBO needs fold structure a single forward stream lacks; informational —
-        # the dossier flags it for the owner's sign-off review.
-        "pbo": {"value": None, "threshold": MAX_PBO, "ok": True,
-                "note": "not computable on single forward stream"},
+        "net_after_cost_pnl": {"value": round(net, 6), "threshold": 0.0, "ok": net > 0},
+        "expectancy": {
+            "value": round(expectancy, 6), "threshold": 0.0, "ok": expectancy > 0
+        },
+        "profit_factor": {
+            "value": round(profit_factor, 6) if profit_factor is not None else None,
+            "threshold": 1.0,
+            "ok": bool(n and (gross_loss == 0 or (profit_factor or 0) > 1.0)),
+        },
+        # A single forward stream cannot produce selection-aware DSR or PBO.
+        # Keep the zero-skill proxy diagnostic, but fail both mandatory gates
+        # closed until registered-trial and fold-matrix evidence is supplied.
+        "dsr": {
+            "value": None, "threshold": MIN_DSR, "ok": False,
+            "computable": False, "proxy_probability": round(dsr_proxy, 4),
+            "note": "selection-aware DSR requires registered trial count",
+        },
+        "pbo": {
+            "value": None, "threshold": MAX_PBO, "ok": False,
+            "computable": False,
+            "note": "PBO requires comparable strategy/fold return matrix",
+        },
     }
-    return {"passed": all(g["ok"] for g in gates.values()), "gates": gates}
+    return {
+        "passed": all(g["ok"] for g in gates.values()),
+        "fail_closed": True,
+        "gates": gates,
+    }
 
 
 def build_dossier(lane: LaneState, gate_result: dict, outcomes: list[dict],
@@ -272,15 +380,15 @@ def build_dossier(lane: LaneState, gate_result: dict, outcomes: list[dict],
         f"Gate verdict: **{'PASS' if gate_result['passed'] else 'FAIL'}** on "
         f"{lane.resolved} resolved outcomes (WR {lane.wr}).\n\n"
         f"| gate | value | threshold | verdict |\n|---|---|---|---|\n{rows}\n\n"
-        "**This dossier stages evidence only. Promotion requires OWNER SIGN-OFF: "
-        "review, then apply proposed_change.patch manually.** Re-read the lane's "
+        "**This dossier stages evidence only. Promotion requires every gate, "
+        "including computable PBO/DSR, plus OWNER SIGN-OFF.** Re-read the lane's "
         "binding caveats in its integration report "
         "(_workspace/strategy_pipeline/ 11_/12_ files) before signing.\n",
         encoding="utf-8")
     (d / "proposed_change.patch").write_text(
-        f"# PROPOSED (not applied): promote {lane.lane}\n"
-        f"# core/strategy_program.py: set the lane's StrategyProgramEntry status\n"
-        f"# SHADOW_ONLY -> PAPER_CANDIDATE (paper_eligible=True). Owner applies by hand.\n",
+        f"# NO EXECUTABLE PATCH GENERATED for {lane.lane}.\n"
+        "# This placeholder cannot be applied. A separately reviewed change is\n"
+        "# required only after all evidence gates and owner sign-off pass.\n",
         encoding="utf-8")
     return d
 
@@ -302,7 +410,7 @@ def compute_all(paths: dict, now: float) -> dict:
             if cov["starved"]:
                 ls.state = "STARVED"
     lanes.append(f1_lane_state(paths["gate_log"], now))
-    lanes.append(band_lane_state(paths["goal_json"]))
+    lanes.append(directional_paper_lane_state(paths["goal_json"]))
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     for ls in lanes:  # gate + dossier on any GATE_READY probe lane
         if ls.state == "GATE_READY" and ls.lane in PROBE_LANES:
@@ -320,6 +428,8 @@ def compute_all(paths: dict, now: float) -> dict:
             if gate["passed"]:
                 if build_dossier(ls, gate, outcomes, Path(paths["dossier_dir"]), today):
                     ls.state = "STAGED"
+            else:
+                ls.state = "GATE_BLOCKED"
     return {"generated_utc": datetime.now(timezone.utc).isoformat(),
             "resolved_floor": RESOLVED_FLOOR,
             "lanes": [ls.to_dict() for ls in lanes]}
@@ -359,6 +469,10 @@ def main() -> int:
              "cal_dir": ROOT / "data" / "unlock_calendar",
              "funnel_json": FUNNEL_JSON, "dossier_dir": DOSSIER_DIR,
              "journal_dir": ROOT / "journal"}
+    # Keep the hourly directional cohort current before the funnel consumes it.
+    # build_report is read-only against trading state; this writes monitoring
+    # output only and never touches config, orders, or promotion authority.
+    atomic_write_json(paths["goal_json"], build_report(ROOT))
     doc = compute_all(paths, time.time())
     persist(doc, paths)
     print(f"promotion funnel -> {FUNNEL_JSON}")

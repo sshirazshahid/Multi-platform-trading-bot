@@ -104,6 +104,28 @@ def test_bundle_mr_lanes_registered():
     assert len(pf.PROBE_LANES) == 6  # 4 pre-existing lanes + the 2 bundle arms
 
 
+def test_bundle_mr_lanes_carry_universe_widened_stamp(tmp_path):
+    """Owner-approved 2026-07-20 widening: both bundle-MR lanes' accrual
+    cohorts changed universe mid-stream (frozen 5 -> spec-derived), so any
+    future promotion dossier MUST disclose the widening moment via
+    detail.universe_widened_utc (ISO UTC). Cohorts NOT wiped by design."""
+    from datetime import datetime
+
+    db, c = _mk_shadow_db(tmp_path)
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    lanes = {l.lane: l for l in pf.probe_lane_states(ro, time.time())}
+    for lane in ("zfade_4h_cfg365", "rsi2_4h_cfg226"):
+        stamp = lanes[lane].detail.get("universe_widened_utc")
+        assert stamp, f"{lane} missing universe_widened_utc"
+        parsed = datetime.fromisoformat(stamp)
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset().total_seconds() == 0  # explicit UTC
+    # lanes whose accrual universe never changed are NOT stamped
+    for lane in ("tsmom_20d_1h", "tsmom_20d_4h", "breakout_60d", "unlock_short"):
+        assert "universe_widened_utc" not in lanes[lane].detail
+
+
 def test_classifier_tokenized_vs_crypto():
     assert pf.classify_base("TZA") == "tokenized"     # leveraged-ETF explicit list
     assert pf.classify_base("SOXS") == "tokenized"
@@ -117,6 +139,7 @@ def test_listing_lane_starved_when_all_recent_tokenized(tmp_path):
     c = sqlite3.connect(db)
     c.execute("CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, decision TEXT,"
               " shortable INTEGER, created_ts REAL)")
+    c.execute("CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)")
     now = time.time()
     for i, b in enumerate(["TZA", "SOXS", "NVDA"]):
         c.execute("INSERT INTO shadow_listing_probe VALUES (?,?,?,?,?)",
@@ -125,8 +148,9 @@ def test_listing_lane_starved_when_all_recent_tokenized(tmp_path):
     ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     ls = pf.listing_lane_state(ro, now)
     assert ls.state == "STARVED"
-    assert ls.detail["crypto_native_listings_30d"] == 0
-    assert ls.detail["tokenized_listings_30d"] == 3
+    assert ls.detail["known_tokenized_listings_30d"] == 3
+    assert ls.detail["unclassified_listings_30d"] == 0
+    assert ls.detail["starvation_reason"] == "no_actionable_shortable_listing"
 
 
 def test_unlock_calendar_coverage_flags_short_horizon(tmp_path):
@@ -167,14 +191,16 @@ def test_f1_idle_and_error_paths(tmp_path):
     assert pf.f1_lane_state(tmp_path / "missing.jsonl", now).state == "ERROR"
 
 
-def test_band_lane_reads_current_boot(tmp_path):
+def test_directional_lane_reads_current_profile(tmp_path):
     gp = tmp_path / "goal_progress.json"
     gp.write_text(json.dumps({"lanes": [
-        {"lane": "current_boot", "closed_trades": 3, "wins": 2, "wr": 0.667,
-         "net_pnl": 1.5}]}))
-    st = pf.band_lane_state(gp)
+        {"lane": "current_profile_directional", "closed_outcomes": 3,
+         "wins": 2, "win_rate": 0.667, "net_after_cost_pnl": 1.5,
+         "profit_factor": 2.0, "expectancy_per_outcome": 0.5,
+         "target_status": "INSUFFICIENT_SAMPLE", "profile": "STANDARD"}]}))
+    st = pf.directional_paper_lane_state(gp)
     assert (st.resolved, st.wins, st.wr) == (3, 2, 0.667)
-    assert st.state == "ACCRUING" and st.detail["net_pnl"] == 1.5
+    assert st.state == "ACCRUING" and st.detail["net_after_cost_pnl"] == 1.5
 
 
 def _outcomes(n_win, n_loss, p_hi=0.7, p_lo=0.3):
@@ -183,10 +209,12 @@ def _outcomes(n_win, n_loss, p_hi=0.7, p_lo=0.3):
             + [{"net_pnl": -1.0, "p_win": p_lo}] * n_loss)
 
 
-def test_gate_passes_on_strong_discriminating_lane():
+def test_gate_fails_closed_without_selection_aware_dsr_and_pbo():
     res = pf.run_gate(_outcomes(24, 6))   # WR 0.80, AUC 1.0
-    assert res["passed"] is True
+    assert res["passed"] is False
     assert res["gates"]["oos_wr"]["ok"] and res["gates"]["auc"]["ok"]
+    assert res["gates"]["dsr"]["ok"] is False
+    assert res["gates"]["pbo"]["ok"] is False
 
 
 def test_gate_fails_on_nondiscriminating_score():
@@ -231,8 +259,10 @@ def test_compute_all_and_journal_on_state_change(tmp_path):
              "dossier_dir": tmp_path / "dossiers", "journal_dir": tmp_path / "journal"}
     now = time.time()
     doc1 = pf.compute_all(paths, now)
-    assert {l["lane"] for l in doc1["lanes"]} >= {"tsmom_20d_1h", "listing_short",
-                                                  "f1_carry", "band_cohort", "unlock_short"}
+    assert {l["lane"] for l in doc1["lanes"]} >= {
+        "tsmom_20d_1h", "listing_short", "f1_carry",
+        "directional_paper_cohort", "unlock_short",
+    }
     pf.persist(doc1, paths)            # first run: journal written (all states new)
     files = list((tmp_path / "journal").glob("*.md"))
     assert len(files) == 1
