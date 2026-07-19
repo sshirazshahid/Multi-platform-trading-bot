@@ -126,7 +126,8 @@ def _build_probe_funding_provider(warehouse):
     per-8h funding — shadow_listing_probe.realized_funding_rate_sum (listing-short
     probe), shadow_unlock_probe (unlock-short probe, 2026-07-11),
     shadow_tsmom_probe and shadow_breakout_probe (owner-directed Codex
-    regime-watch probes, 2026-07-11). An unlock
+    regime-watch probes, 2026-07-11), and shadow_bundle_mr_probe
+    (owner-directed bundle-test MR probes, 2026-07-19). An unlock
     '-sl8' counterfactual row reads the SL-FROZEN sum (sl_cf_funding_rate_sum):
     a Guardian-stopped position pays no further funding, so giving it the full
     hold-to-T sum would misstate the counterfactual. Any row without a probe
@@ -151,6 +152,8 @@ def _build_probe_funding_provider(warehouse):
             ("SELECT realized_funding_rate_sum AS frs FROM shadow_tsmom_probe "
              "WHERE proposal_id=?", (pid,)),
             ("SELECT realized_funding_rate_sum AS frs FROM shadow_breakout_probe "
+             "WHERE proposal_id=?", (pid,)),
+            ("SELECT realized_funding_rate_sum AS frs FROM shadow_bundle_mr_probe "
              "WHERE proposal_id=?", (pid,)),
         )
         for sql, params in queries:

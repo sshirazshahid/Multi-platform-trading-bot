@@ -55,6 +55,10 @@ PROBE_LANES: dict[str, tuple[str, str | None]] = {
     "tsmom_20d_4h": ("TsmomProbeAgent", "4h"),
     "breakout_60d": ("BreakoutProbeAgent", None),
     "unlock_short": ("UnlockShortProbeAgent", None),
+    # owner-directed bundle-test MR probes (2026-07-19, NOT a pipeline GO):
+    # both arms are 4h, so lanes key on the DISTINCT agent_ids.
+    "zfade_4h_cfg365": ("ZfadeProbeAgent", "4h"),
+    "rsi2_4h_cfg226": ("Rsi2TrackerProbeAgent", "4h"),
 }
 
 

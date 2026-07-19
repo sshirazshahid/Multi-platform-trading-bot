@@ -489,6 +489,25 @@ BREAKOUT_PROBE = {
     "venue": os.getenv("SHADOW_BREAKOUT_PROBE_VENUE", "bybit"),
 }
 
+# ── Bundle-MR shadow probes (owner-directed cloud bundle test, 2026-07-19) ───
+# NOT a pipeline GO. The cloud evidence test (paper_bundle_test prereg +
+# shortlist): cfg365 (MR-C 4h z-fade, CANDIDATE) FAILED gate G2 — OOS WR 70-71%
+# sits ABOVE the frozen 63-67 band — and is a 1-of-432 sweep survivor:
+# plausible-unconfirmed. cfg226 (MR-B 4h RSI-2, TRACKER) was in/near band but
+# net NEGATIVE — kept to measure the band-vs-profit tension forward.
+# ZfadeProbeAgent + Rsi2TrackerProbeAgent propose 4h mean-reversion entries on
+# BTC/ETH/SOL/BNB/XRP bybit perps into the shadow lane (EMA200 trend-side
+# gate, ATR brackets, 12-bar time-stop, notational 3% stake). Expectation:
+# NO-PROMOTE; promotion only via the frozen gate on >=30 RESOLVED per arm plus
+# owner sign-off. They place NO orders and only run inside the (already
+# log-only) shadow lane, so they change ZERO live behaviour. Off restores the
+# pre-probe shadow lane exactly.
+BUNDLE_MR_PROBE = {
+    "enabled": os.getenv("SHADOW_BUNDLE_MR_PROBE_ENABLED", "true").lower() == "true",
+    # match the TsmomProbeAgent data venue (bybit USDT linear perps)
+    "venue": os.getenv("SHADOW_BUNDLE_MR_PROBE_VENUE", "bybit"),
+}
+
 # ── Deep-breakout ACTIVE PAPER lane (owner: "start trading aggressively", 2026-07-11)
 # ACTIVE PAPER orders (sim fills via sim_execution) for the Codex deep_breakout
 # strategy — unlike the log-only BREAKOUT_PROBE above, which stays untouched and

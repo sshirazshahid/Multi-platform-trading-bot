@@ -623,6 +623,30 @@ class BotEngine:
                 venue=str(cfg.get("venue", "bybit")),
             ),
         },
+        {
+            "config": "BUNDLE_MR_PROBE",
+            "import_path": "core.agents.bundle_mr_probe_agent:ZfadeProbeAgent",
+            "warn_label": "zfade-bundle",
+            "log": "[Engine] ZfadeProbeAgent registered (log-only shadow probe; "
+                   "owner-directed bundle-test cfg365 candidate, NOT a pipeline GO)",
+            "kwargs": lambda self, cfg: dict(
+                ohlcv_provider=self._unlock_ohlcv,
+                market_data_provider=self._unlock_market_data,
+                venue=str(cfg.get("venue", "bybit")),
+            ),
+        },
+        {
+            "config": "BUNDLE_MR_PROBE",
+            "import_path": "core.agents.bundle_mr_probe_agent:Rsi2TrackerProbeAgent",
+            "warn_label": "rsi2-bundle",
+            "log": "[Engine] Rsi2TrackerProbeAgent registered (log-only shadow probe; "
+                   "owner-directed bundle-test cfg226 tracker, NOT a pipeline GO)",
+            "kwargs": lambda self, cfg: dict(
+                ohlcv_provider=self._unlock_ohlcv,
+                market_data_provider=self._unlock_market_data,
+                venue=str(cfg.get("venue", "bybit")),
+            ),
+        },
     )
 
     def _build_probe(self, wh, spec: dict) -> list:

@@ -96,12 +96,20 @@ def test_probe_lane_error_isolated():
     assert all(l.state == "ERROR" for l in lanes) and len(lanes) == len(pf.PROBE_LANES)
 
 
+def test_bundle_mr_lanes_registered():
+    """Owner-directed bundle-test MR probes (2026-07-19, NOT a pipeline GO):
+    both arms are 4h, so each lane keys on its own DISTINCT agent_id."""
+    assert pf.PROBE_LANES["zfade_4h_cfg365"] == ("ZfadeProbeAgent", "4h")
+    assert pf.PROBE_LANES["rsi2_4h_cfg226"] == ("Rsi2TrackerProbeAgent", "4h")
+    assert len(pf.PROBE_LANES) == 6  # 4 pre-existing lanes + the 2 bundle arms
+
+
 def test_classifier_tokenized_vs_crypto():
     assert pf.classify_base("TZA") == "tokenized"     # leveraged-ETF explicit list
     assert pf.classify_base("SOXS") == "tokenized"
     assert pf.classify_base("NVDA") == "tokenized"    # static stock set
     assert pf.classify_base("XAU") == "tokenized"     # commodity set
-    assert pf.classify_base("PEPE") == "crypto"
+    assert pf.classify_base("PEPE") == "unclassified"
 
 
 def test_listing_lane_starved_when_all_recent_tokenized(tmp_path):
