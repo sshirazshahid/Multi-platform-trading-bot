@@ -565,6 +565,14 @@ ACCURACY_TARGET_MODE = {
 _MCP_ENTRY_MIN_SCORE_RAW = os.getenv("MCP_ENTRY_MIN_SCORE", "").strip()
 MCP_ENTRY_MIN_SCORE = float(_MCP_ENTRY_MIN_SCORE_RAW) if _MCP_ENTRY_MIN_SCORE_RAW else None
 
+# ── SL COOLDOWN FLAG (2026-07-19 max-flow band engine, owner-approved) ───────
+# Default TRUE = Phase 29 post-SL CooldownPeriod + StoplossGuard unchanged.
+# false -> risk_manager.is_sl_cooldown_active returns
+# (False, "sl_cooldown_disabled_by_profile") WITHOUT touching the SL ledger
+# (note_sl_hit keeps recording), so flipping back to true restores full
+# protection from persisted state. PAPER research knob for entry throughput.
+SL_COOLDOWN_ENABLED = os.getenv("SL_COOLDOWN_ENABLED", "true").lower() == "true"
+
 # ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY toxic-regime veto ───────
 # Pre-registered screen _workspace/strategy_pipeline/13_band_conditional_screen
 # .json (14,555 resolved band outcomes, 12d span, Bonferroni m=16; band

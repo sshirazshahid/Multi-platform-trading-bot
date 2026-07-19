@@ -10,6 +10,7 @@ Features:
 """
 
 import json
+import math
 import os
 import threading
 import time as _time
@@ -52,6 +53,69 @@ def exposure_breached(open_positions, new_notional: float, equity: float,
             continue
     return (gross / equity * 100.0) > float(max_pct)
 
+
+def aggregate_open_risk_breached(
+    open_positions,
+    new_notional: float,
+    new_stop_frac: float,
+    equity: float,
+    max_risk_frac: float,
+    stressed_exit_cost_frac: float = 0.0,
+) -> bool:
+    """Return whether stop loss plus stressed exit costs exceed the risk budget.
+
+    ``new_notional`` and existing ``size * entry_price`` values are gross
+    market notionals. Unknown equity or an unprotected futures position fails
+    closed because the aggregate risk cannot be bounded.
+    """
+    try:
+        cap = float(max_risk_frac)
+        equity = float(equity)
+        new_notional = abs(float(new_notional or 0.0))
+        new_stop_frac = float(new_stop_frac or 0.0)
+        exit_cost = max(0.0, float(stressed_exit_cost_frac or 0.0))
+    except (TypeError, ValueError):
+        return True
+    if cap <= 0:
+        return False
+    if equity <= 0 or (new_notional > 0 and new_stop_frac <= 0):
+        return True
+
+    total_risk = new_notional * (new_stop_frac + exit_cost)
+    for position in open_positions or ():
+        getter = position.get if isinstance(position, dict) else None
+
+        def field(name, default=None):
+            return getter(name, default) if getter else getattr(position, name, default)
+
+        market_type = str(field("market_type", "") or "").lower()
+        if market_type and market_type != "futures":
+            continue
+        try:
+            entry = float(field("entry_price", 0.0) or 0.0)
+            size = abs(float(field("size", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            return True
+        if entry <= 0 or size <= 0:
+            return True
+        stop = None
+        stop_fn = field("entry_risk_stop")
+        if callable(stop_fn):
+            try:
+                stop = stop_fn()
+            except Exception:
+                return True
+        if not stop:
+            stop = field("stop_loss", 0.0)
+        try:
+            stop = float(stop or 0.0)
+        except (TypeError, ValueError):
+            return True
+        if stop <= 0:
+            return True
+        total_risk += (size * entry) * (abs(stop - entry) / entry + exit_cost)
+    return total_risk > equity * cap
+
 # ------------------------------------------------------------------
 # Spec §12 pause policy (learning-first rebuild, 2026-04-14)
 # 2 consecutive losses on a symbol → pause that symbol 6h.
@@ -65,6 +129,9 @@ SPEC_FAMILY_LOSSES_TO_PAUSE  = 3
 SPEC_FAMILY_PAUSE_HOURS      = 12
 SPEC_GLOBAL_LOSSES_TO_REVIEW = 5
 _REVIEW_FLAG_PATH = Path("data/review_required.json")
+_INCIDENT_LATCH_PATH = Path("data/risk_incident_latch.json")
+_INCIDENT_HISTORY_PATH = Path("data/risk_incident_history.jsonl")
+RISK_STATE_PATH = Path("data/risk_state.json")
 
 # 2026-04-27: §12 streaks should reflect strategy outcomes, not infrastructure
 # artefacts. STALE / AGE_LIMIT / ghost_force_close / sl_placement_failed and
@@ -163,9 +230,15 @@ class RiskManager:
         # Stops the "peak from a higher-equity prior session haunts
         # forever, drawdown halts every restart" anti-pattern.
         self._peak_stale_flag: bool = False
+        # True only when _load_state restored today's on-disk ledger. This
+        # distinguishes a legitimate same-day restart from a fresh instance,
+        # whose default calendar date also happens to be today.
+        self._loaded_same_day_state: bool = False
         self._trading_day:   date  = _utc_today()
         self._recent_results: list = []   # last N trades: True=win, False=loss
         self._trade_history:  list = []   # Kelly: (win, pnl_pct)
+        self._last_halt_reason: str = ""
+        self._incident_memory: dict | None = None
         # Tracks the last balance reading for the 30%-down-spike guard in
         # update_current_balance. Not persisted — re-seeded by the first
         # balance update after restart.
@@ -201,11 +274,113 @@ class RiskManager:
 
     # ── State persistence for dashboard ────────────────────────────────
 
+    def _incident_reason(self) -> str:
+        payload = self._incident_memory
+        if payload is None:
+            try:
+                if not _INCIDENT_LATCH_PATH.exists():
+                    return ""
+                payload = json.loads(_INCIDENT_LATCH_PATH.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                return "incident_latch_unreadable"
+        category = str(payload.get("category") or "system")
+        reason = str(payload.get("reason") or "unspecified")
+        return f"{category}_incident:{reason}"
+
+    def _daily_loss_reason(self) -> str:
+        try:
+            from config import DAILY_LOSS_BREAKER as breaker
+        except Exception:
+            breaker = {}
+        if not breaker.get("enabled") or self._start_balance <= 0:
+            return ""
+        try:
+            max_loss_pct = abs(float(breaker.get("max_loss_pct", 0.02)))
+        except (TypeError, ValueError):
+            return "daily_loss_breaker_config_invalid"
+        budget = max_loss_pct * self._start_balance
+        with self._lock:
+            pnl = self._daily_pnl
+        if budget > 0 and pnl <= -budget:
+            return f"daily_loss:{pnl:+.2f}<=-{budget:.2f}"
+        return ""
+
+    def _persistent_breaker_reason(self, *, include_kill_switch: bool = True) -> str:
+        incident = self._incident_reason()
+        if incident:
+            return incident
+        if include_kill_switch:
+            try:
+                from core.kill_switch import entries_halted
+
+                if entries_halted():
+                    return "kill_switch_active"
+            except Exception:
+                return "kill_switch_status_unavailable"
+        return self._daily_loss_reason()
+
+    def latch_incident(self, reason: str, *, category: str = "execution",
+                       metadata: dict | None = None) -> bool:
+        """Persist a fail-closed data/execution incident until manual clearance."""
+        reason = str(reason or "").strip()
+        category = str(category or "").strip().lower()
+        if not reason or category not in {"data", "execution", "reconciliation", "system"}:
+            return False
+        payload = {
+            "category": category,
+            "reason": reason,
+            "metadata": dict(metadata or {}),
+            "latched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._incident_memory = payload
+        self._last_halt_reason = f"{category}_incident:{reason}"
+        try:
+            _INCIDENT_LATCH_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _INCIDENT_LATCH_PATH.with_name(_INCIDENT_LATCH_PATH.name + ".tmp")
+            tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            os.replace(tmp, _INCIDENT_LATCH_PATH)
+            self._save_state()
+            return True
+        except OSError as exc:
+            logger.error(f"[Risk] incident latch persistence failed; memory halt remains: {exc}")
+            return False
+
+    def clear_incident(self, operator_note: str) -> bool:
+        """Clear a manual incident latch only with an auditable operator note."""
+        note = str(operator_note or "").strip()
+        if not note:
+            return False
+        try:
+            if self._incident_memory is not None:
+                payload = dict(self._incident_memory)
+            elif _INCIDENT_LATCH_PATH.exists():
+                payload = json.loads(_INCIDENT_LATCH_PATH.read_text(encoding="utf-8"))
+            else:
+                return False
+            archive = {
+                **payload,
+                "cleared_at": datetime.now(timezone.utc).isoformat(),
+                "operator_note": note,
+            }
+            _INCIDENT_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with _INCIDENT_HISTORY_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(archive, sort_keys=True) + "\n")
+            if _INCIDENT_LATCH_PATH.exists():
+                _INCIDENT_LATCH_PATH.unlink()
+            self._incident_memory = None
+            self._last_halt_reason = ""
+            self._save_state()
+            return True
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            logger.error(f"[Risk] incident clear failed; latch remains active: {exc}")
+            return False
+
     def _save_state(self):
         """Persist risk state for dashboard + resume on restart."""
+        breaker_reason = self._persistent_breaker_reason()
         state = {
-            "is_halted": False,
-            "halt_reason": "",
+            "is_halted": bool(breaker_reason),
+            "halt_reason": breaker_reason,
             "daily_pnl": round(self._daily_pnl, 4),
             "max_drawdown_pct": round(
                 max(0.0, (self._peak_balance - ((self._start_balance or self._peak_balance) + self._daily_pnl))
@@ -229,12 +404,12 @@ class RiskManager:
             "timestamp": _time.time(),
         }
         try:
-            Path("data").mkdir(parents=True, exist_ok=True)
+            RISK_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
             # Atomic write (tmp + os.replace) — a torn risk_state.json sends
             # _load_state down the "starting fresh" path on the next boot,
             # losing daily_pnl, Spec §12 pauses AND the Phase-29 ledger
             # (2026-06-11; mirrors virtual_wallet._save).
-            target = Path("data/risk_state.json")
+            target = RISK_STATE_PATH
             tmp = target.with_name(target.name + ".tmp")
             tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
             os.replace(tmp, target)
@@ -243,7 +418,7 @@ class RiskManager:
 
     def _load_state(self):
         """Load persisted risk state on startup. Handles same-day resume vs new-day reset."""
-        path = Path("data/risk_state.json")
+        path = RISK_STATE_PATH
         if not path.exists():
             self._honour_review_flag_if_present()
             return
@@ -284,6 +459,7 @@ class RiskManager:
 
         if saved_day == _utc_today():
             # Same-day restart: restore daily PnL, peak
+            self._loaded_same_day_state = True
             self._daily_pnl = state.get("daily_pnl", 0.0)
             self._trading_day = saved_day
             self._peak_balance = state.get("peak_balance", 0.0)
@@ -303,6 +479,7 @@ class RiskManager:
                 f"trades={len(self._trade_history)}")
         else:
             # New day: reset daily counters but keep trade history
+            self._loaded_same_day_state = False
             self._daily_pnl = 0.0
             self._trading_day = _utc_today()
             self._opens_today = 0
@@ -374,7 +551,17 @@ class RiskManager:
           1. 180min hard cooldown after the last SL on this pair-side
           2. 6h escalated lock if 2+ SL on this pair-side in last 24h
         Caller refuses the trade when active=True. No state mutation.
+
+        2026-07-19 (max-flow band engine): SL_COOLDOWN_ENABLED=false makes
+        this a no-op — (False, "sl_cooldown_disabled_by_profile") — while
+        note_sl_hit keeps recording, so re-enabling restores protection.
         """
+        try:
+            from config import SL_COOLDOWN_ENABLED as _sl_cooldown_on
+        except ImportError:
+            _sl_cooldown_on = True
+        if not _sl_cooldown_on:
+            return False, "sl_cooldown_disabled_by_profile"
         if not symbol or not side:
             return False, ""
         key = self._pair_side_key(symbol, side)
@@ -443,32 +630,19 @@ class RiskManager:
         # here. Without this the daily counters never reset.
         self.roll_day_if_needed()
 
-        # 2026-05-28 — SOFT daily-loss circuit breaker (opt-in replacement for
-        # the removed global halts; config.DAILY_LOSS_BREAKER). Blocks only NEW
-        # entries once today's realized loss exceeds max_loss_pct of start-of-day
-        # balance, then auto-resets at the rollover above. NOT a halt: no mode
-        # switch, no review flag, no process stop; existing positions keep their
-        # fail-closed SLs. Fails OPEN when start balance is unknown.
-        try:
-            from config import DAILY_LOSS_BREAKER as _DLB
-        except Exception:
-            _DLB = {}
-        if _DLB.get("enabled") and self._start_balance > 0:
-            loss_budget = abs(float(_DLB.get("max_loss_pct", 0.02))) * self._start_balance
-            # Read _daily_pnl under the lock the writer (record_trade_pnl) holds, so the breaker
-            # decision sees a committed value rather than a value mid-update (audit 2026-06-06).
-            with self._lock:
-                daily_pnl_snapshot = self._daily_pnl
-            if loss_budget > 0 and daily_pnl_snapshot <= -loss_budget:
-                logger.warning(
-                    f"[Risk] Daily-loss breaker tripped: today {daily_pnl_snapshot:+.2f} USDT "
-                    f"<= -{loss_budget:.2f} ({float(_DLB.get('max_loss_pct', 0.02)) * 100:.1f}% "
-                    f"of {self._start_balance:.2f}) — refusing NEW entries until the day "
-                    f"rolls over. Existing positions keep their SLs; auto-resets next day."
-                )
-                return False
+        # Manual incidents persist until an operator clears them; the UTC
+        # daily-loss breaker is the only breaker that resets automatically.
+        breaker_reason = self._persistent_breaker_reason()
+        if breaker_reason:
+            self._last_halt_reason = breaker_reason
+            logger.warning(
+                f"[Risk] refusing NEW entry: {breaker_reason}. "
+                "Existing positions and reduce-only actions remain active."
+            )
+            return False
 
         if open_position_count >= self.max_open_positions:
+            self._last_halt_reason = "max_open_positions"
             logger.debug(
                 f"[Risk] Max open positions ({self.max_open_positions}) reached.")
             return False
@@ -476,10 +650,12 @@ class RiskManager:
         # after a successful open so this counter advances.
         max_per_day = RISK.get("max_trades_per_day", 0) or 0
         if max_per_day > 0 and self._opens_today >= max_per_day:
+            self._last_halt_reason = "daily_trade_cap"
             logger.info(
                 f"[Risk] Daily trade cap reached: {self._opens_today}/{max_per_day} "
                 f"opens today — refusing new entries until UTC midnight.")
             return False
+        self._last_halt_reason = ""
         return True
 
     def note_trade_opened(self) -> None:
@@ -835,7 +1011,49 @@ class RiskManager:
 
     def set_start_balance(self, balance: float):
         """Set starting balance on startup. Respects resumed same-day state."""
-        if self._trading_day == _utc_today() and self._peak_balance > 0:
+        try:
+            current_balance = float(balance)
+            restored_start = float(self._start_balance)
+            restored_peak = float(self._peak_balance)
+            restored_pnl = float(self._daily_pnl)
+        except (TypeError, ValueError):
+            current_balance = restored_start = restored_peak = restored_pnl = float("nan")
+
+        restored_valid = (
+            math.isfinite(restored_start) and restored_start > 0
+            and math.isfinite(restored_peak) and restored_peak > 0
+            and math.isfinite(restored_pnl)
+        )
+        if self._loaded_same_day_state and not restored_valid:
+            # A torn or test-polluted ledger must not leave start_balance=0:
+            # the percentage daily-loss breaker is undefined and disabled
+            # without a positive denominator. Reconstruct start-of-day equity
+            # from current equity and the retained daily realized PnL.
+            if math.isfinite(current_balance) and current_balance > 0:
+                daily_pnl = restored_pnl if math.isfinite(restored_pnl) else 0.0
+                reconstructed_start = current_balance - daily_pnl
+                if not math.isfinite(reconstructed_start) or reconstructed_start <= 0:
+                    logger.error(
+                        "[Risk] Invalid persisted PnL prevents start-balance reconstruction; "
+                        "resetting the corrupt daily PnL to zero.")
+                    daily_pnl = 0.0
+                    reconstructed_start = current_balance
+                self._daily_pnl = daily_pnl
+                self._start_balance = reconstructed_start
+                self._peak_balance = max(reconstructed_start, current_balance)
+                self._peak_stale_flag = False
+                self._save_state()
+                logger.warning(
+                    "[Risk] Recovered invalid same-day risk ledger: "
+                    f"start=${self._start_balance:.4f}, daily_pnl={self._daily_pnl:+.4f}, "
+                    f"peak=${self._peak_balance:.4f}.")
+            else:
+                logger.error(
+                    "[Risk] Invalid same-day risk ledger and no positive startup balance; "
+                    "percentage daily-loss breaker remains unavailable.")
+            return
+
+        if self._loaded_same_day_state and self._peak_balance > 0:
             # Same-day restart: keep the disk-restored _start_balance, daily PnL and peak.
             # Audit 2026-06-03: do NOT overwrite _start_balance with `balance` here —
             # `balance` is CURRENT equity (already has today's realized PnL baked in), so
@@ -1189,11 +1407,22 @@ class RiskManager:
 
     @property
     def is_halted(self) -> bool:
-        return False
+        self.roll_day_if_needed()
+        reason = self._persistent_breaker_reason()
+        if reason:
+            self._last_halt_reason = reason
+        else:
+            self._last_halt_reason = ""
+        return bool(reason)
 
     @property
     def halt_reason(self) -> str:
-        return ""
+        self.roll_day_if_needed()
+        reason = self._persistent_breaker_reason()
+        if reason:
+            self._last_halt_reason = reason
+            return reason
+        return self._last_halt_reason
 
     @property
     def daily_pnl(self) -> float:
