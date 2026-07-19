@@ -528,12 +528,37 @@ DEEP_BREAKOUT_LANE = {
 # posture. The CONTROLLED_LIVE promotion gate is untouched and still requires
 # after-cost expectancy. SL authority (ATR/DistFit floors) is NOT modified —
 # only the TP leg compresses; min_tp_pct keeps TP above round-trip costs.
+def _accuracy_geometry_enabled(
+    requested: bool, operating_mode: str, paper_profile: str
+) -> bool:
+    """Profile-gated reactivation guard for the accuracy-band geometry.
+
+    History: the strategy program rejected hit-rate optimization as an
+    entry/exit policy and a prior session hardcoded ``enabled: False`` so a
+    stale env toggle could not reactivate it. On 2026-07-19 the owner
+    explicitly approved reversing that disable for the MAX_FLOW_BAND paper
+    cohort (docs/superpowers/specs/2026-07-19-max-flow-band-engine-design.md).
+    The guard is therefore GATED, not deleted: ``requested_enabled`` is
+    honored ONLY under OPERATING_MODE=PAPER + PAPER_TRADING_PROFILE=
+    MAX_FLOW_BAND. Every other profile/mode keeps the disable, and
+    CONTROLLED_LIVE can never see the geometry (stronger than before).
+    HONESTY (binding): the WR band is delivered by geometry, not edge."""
+    return (
+        bool(requested)
+        and operating_mode == "PAPER"
+        and paper_profile == "MAX_FLOW_BAND"
+    )
+
+
+_ACC_GEOMETRY_REQUESTED = os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true"
 ACCURACY_TARGET_MODE = {
-    # Retained only so historical replay/tests can decode old positions. The
-    # strategy program rejects hit-rate optimization as an entry/exit policy;
-    # runtime cannot reactivate it through an environment toggle.
-    "enabled": False,
-    "requested_enabled": os.getenv("ACCURACY_TARGET_MODE", "false").lower() == "true",
+    # Profile-gated (2026-07-19): see _accuracy_geometry_enabled docstring —
+    # the env toggle alone still cannot reactivate the hit-rate geometry;
+    # the owner-approved MAX_FLOW_BAND PAPER profile must also be selected.
+    "enabled": _accuracy_geometry_enabled(
+        _ACC_GEOMETRY_REQUESTED, OPERATING_MODE, PAPER_TRADING_PROFILE
+    ),
+    "requested_enabled": _ACC_GEOMETRY_REQUESTED,
     "tp_frac_of_sl": float(os.getenv("ACCURACY_TP_FRAC_OF_SL", "0.5")),
     # Per-side frac overrides (2026-07-10 geometry sweep, 8,878 entries +
     # adversarial audit): at frac 0.50 longs realized 67.0% WR vs shorts
