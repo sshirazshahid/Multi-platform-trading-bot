@@ -18,6 +18,19 @@ import pytest
 from core.risk_manager import RiskManager
 
 
+@pytest.fixture(autouse=True)
+def _sl_cooldown_flag_on(monkeypatch):
+    """2026-07-19 (max-flow band engine): the owner's .env may carry
+    SL_COOLDOWN_ENABLED=false. These tests exercise the cooldown mechanism
+    itself, so pin the flag ON in the live config module regardless of env."""
+    import sys
+
+    cfg = sys.modules.get("config")
+    if cfg is None:
+        import config as cfg
+    monkeypatch.setattr(cfg, "SL_COOLDOWN_ENABLED", True, raising=False)
+
+
 @pytest.fixture
 def rm(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

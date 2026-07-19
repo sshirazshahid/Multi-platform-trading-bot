@@ -36,6 +36,14 @@ def test_risk_budget_margin_math():
     assert m_spot * 1 * 0.02 == pytest.approx(25.0)
 
 
+def test_risk_budget_includes_fractional_leverage_and_stressed_exit_cost():
+    from core.vol_target import risk_budget_margin
+
+    assert risk_budget_margin(1000, 2.0, 1.5, 0.0025, 0.002) == pytest.approx(
+        2.5 / (1.5 * 0.022)
+    )
+
+
 def test_degenerate_inputs_fail_open():
     """inf on bad input so min(ceiling, budget) keeps the chain notional."""
     from core.vol_target import risk_budget_margin
@@ -58,9 +66,14 @@ def test_binding_threshold():
 
 
 def test_config_knob_present_and_on():
-    from config import VOL_TARGET_SIZING
+    # 2026-07-19: per_trade_risk_pct follows the active PAPER profile
+    # (STANDARD 0.0025; AGGRESSIVE_RESEARCH / MAX_FLOW_BAND 0.00125), so
+    # assert the wiring instead of hardcoding the STANDARD value — the old
+    # literal broke on any machine running a non-standard profile.
+    from config import MODE_PROFILE, VOL_TARGET_SIZING
     assert VOL_TARGET_SIZING.get("enabled") is True
-    assert VOL_TARGET_SIZING.get("per_trade_risk_pct") == 0.005
+    assert VOL_TARGET_SIZING.get("per_trade_risk_pct") == MODE_PROFILE.risk_per_trade_pct
+    assert VOL_TARGET_SIZING.get("per_trade_risk_pct") > 0
 
 
 def test_layer_inserted_after_pinned_notional_line():

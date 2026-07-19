@@ -7,10 +7,24 @@ ledger, so re-enabling the flag restores full protection from persisted state.
 """
 from __future__ import annotations
 
+import sys
 import time as _t
 from pathlib import Path
 
 import config
+
+
+def _cfg():
+    """The config module object risk_manager will import RIGHT NOW.
+
+    Full-suite hardening (2026-07-19): some suite neighbors replace the
+    config entry in sys.modules, so patching this file's import-time
+    binding can miss the object `from config import ...` resolves to."""
+    return sys.modules.get("config", config)
+
+
+def _set_flag(monkeypatch, value):
+    monkeypatch.setattr(_cfg(), "SL_COOLDOWN_ENABLED", value, raising=False)
 
 
 def _fresh_risk(tmp_path, monkeypatch):
@@ -27,7 +41,7 @@ def test_config_default_is_enabled():
 
 
 def test_flag_on_keeps_cooldown_blocking(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "SL_COOLDOWN_ENABLED", True, raising=False)
+    _set_flag(monkeypatch, True)
     r = _fresh_risk(tmp_path, monkeypatch)
     r.note_sl_hit("BTC/USDT:USDT", "buy")
     active, reason = r.is_sl_cooldown_active("BTC/USDT:USDT", "buy")
@@ -36,7 +50,7 @@ def test_flag_on_keeps_cooldown_blocking(tmp_path, monkeypatch):
 
 
 def test_flag_off_disables_both_layers(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "SL_COOLDOWN_ENABLED", False, raising=False)
+    _set_flag(monkeypatch, False)
     r = _fresh_risk(tmp_path, monkeypatch)
     # Layer 1 (fresh SL) AND layer 2 (2+ in lookback) would both fire.
     r.note_sl_hit("BTC/USDT:USDT", "buy")
@@ -48,11 +62,11 @@ def test_flag_off_disables_both_layers(tmp_path, monkeypatch):
 
 def test_flag_off_does_not_erase_ledger(tmp_path, monkeypatch):
     """Disabling must not mutate state: re-enabling restores protection."""
-    monkeypatch.setattr(config, "SL_COOLDOWN_ENABLED", False, raising=False)
+    _set_flag(monkeypatch, False)
     r = _fresh_risk(tmp_path, monkeypatch)
     r.note_sl_hit("BTC/USDT:USDT", "buy")
     r.is_sl_cooldown_active("BTC/USDT:USDT", "buy")
     assert len(r._recent_sl_by_pair_side.get("BTC/USDT|buy", [])) == 1
-    monkeypatch.setattr(config, "SL_COOLDOWN_ENABLED", True, raising=False)
+    _set_flag(monkeypatch, True)
     active, _ = r.is_sl_cooldown_active("BTC/USDT:USDT", "buy")
     assert active is True
