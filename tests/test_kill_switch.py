@@ -59,6 +59,22 @@ def test_empty_file_also_halts(tmp_path, monkeypatch):
     assert ks.entries_halted() is True
 
 
+def test_filesystem_error_fails_closed(monkeypatch):
+    import core.kill_switch as ks
+
+    class BrokenPath:
+        def exists(self):
+            raise OSError("storage unavailable")
+
+        def __str__(self):
+            return "broken/KILL_SWITCH"
+
+    monkeypatch.setattr(ks, "KILL_SWITCH_PATH", BrokenPath())
+    monkeypatch.setattr(ks._default, "_path", None)
+    monkeypatch.setattr(ks._default, "_last", None)
+    assert ks.entries_halted() is True
+
+
 # ── 2. log once per state change ─────────────────────────────────────────
 def _capture_logs(monkeypatch):
     records = []

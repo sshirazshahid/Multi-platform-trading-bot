@@ -1,639 +1,937 @@
-"""
-core/pair_discovery.py — Dynamic Trading Pair Discovery
+"""Metadata-driven trading-pair discovery and runtime universe checks.
 
-Queries each exchange for ALL available USDT-margined markets,
-filters by minimum 24h volume, returns the best pairs.
-
-Includes UniverseFilter for runtime filtering:
-  - Spread thresholds (bid-ask spread check)
-  - Volatility thresholds (ATR-based: too high or too low)
-  - Order book depth validation
-  - Trading halt / maintenance detection
+Discovery and UniverseFilter deliberately fail closed. A venue contributes no
+new symbols when its current market metadata cannot be loaded, while position
+monitoring remains independent and can continue from persisted positions.
 """
+
+from __future__ import annotations
+
+import math
+import os
+import re
+import time
+from collections.abc import Mapping
+from typing import Optional
 
 from loguru import logger
 
-# Minimum 24h volume in USDT to include a pair
-MIN_VOLUME_SPOT    = 5_000_000    # $5M — filters out obscure tokens
-MIN_VOLUME_FUTURES = 10_000_000   # $10M — futures need strong liquidity
+# Minimum 24h quote volume in USDT to include a pair.
+MIN_VOLUME_SPOT = 5_000_000
+MIN_VOLUME_FUTURES = 10_000_000
 
-# ALL mode: lower volume thresholds to discover more pairs
-ALL_MIN_VOLUME_SPOT    = 1_000_000    # $1M — more aggressive discovery
-ALL_MIN_VOLUME_FUTURES = 2_000_000    # $2M — include more futures pairs
+# ALL mode uses lower volume thresholds and larger limits.
+ALL_MIN_VOLUME_SPOT = 1_000_000
+ALL_MIN_VOLUME_FUTURES = 2_000_000
 
-# Maximum pairs per exchange (to avoid rate-limit issues)
-MAX_SPOT_PAIRS    = 15
+MAX_SPOT_PAIRS = 15
 MAX_FUTURES_PAIRS = 12
-
-# ALL mode: higher limits — scan everything
-ALL_MAX_SPOT_PAIRS    = 30
+ALL_MAX_SPOT_PAIRS = 30
 ALL_MAX_FUTURES_PAIRS = 25
 
-# Always include these core symbols regardless of volume ranking
 CORE_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "AVAX"}
+EXTENDED_CRYPTO = {
+    "LINK",
+    "DOT",
+    "MATIC",
+    "UNI",
+    "AAVE",
+    "ATOM",
+    "FIL",
+    "APT",
+    "ARB",
+    "OP",
+    "SUI",
+    "SEI",
+    "TIA",
+    "JUP",
+    "NEAR",
+    "FTM",
+    "INJ",
+    "TRX",
+    "LTC",
+    "BCH",
+    "ETC",
+    "HBAR",
+    "VET",
+    "ALGO",
+    "SAND",
+    "MANA",
+    "AXS",
+    "RENDER",
+    "FET",
+    "TAO",
+}
 
-# Commodity symbols to look for on futures
-# DISABLED 2026-06-01: owner pruned commodities from the traded universe (this is a
-# crypto bot; XAU/XAG/WTI/CL are not listed uniformly across Binance/Bybit/Bitget).
-# Force-including them pulled gold/oil into the ALL-mode universe; they were then
-# fetched on every exchange — incl. ones that don't list them — logging
-# "XAU/USDT not available — skipped" / "CL/USDT does not have market symbol" every
-# cycle for zero benefit (no validated commodity edge). Mirrors the STOCK_BASES
-# disable below. To re-enable, restore _COMMODITY_BASES_DISABLED into COMMODITY_BASES.
+# These asset classes are intentionally disabled for this crypto-only universe.
 COMMODITY_BASES = set()
-_COMMODITY_BASES_DISABLED = {"XAU", "XAG", "WTI", "CL"}
-
-# Stock / equity token bases available on some exchanges (Bitget, Bybit)
-# DISABLED 2026-05-30: the bot has NO stock-specific strategy (only crypto +
-# COMMODITIES metadata). Force-including these pulled equity tickers into the
-# universe; they were then fetched on every exchange (incl. ones that don't list
-# them), logging "not available" every cycle and wasting scan cycles. Emptied so
-# ALL-mode discovery no longer force-adds stocks. To re-enable deliberate stock
-# trading, restore _STOCK_BASES_DISABLED into STOCK_BASES below.
+_COMMODITY_BASES_DISABLED = {
+    "XAU",
+    "XAG",
+    "WTI",
+    "CL",
+    "BRENT",
+    "UKOIL",
+    "USOIL",
+    "GOLD",
+    "SILVER",
+    "COPPER",
+    "NATGAS",
+}
 STOCK_BASES = set()
 _STOCK_BASES_DISABLED = {
-    "AAPL", "TSLA", "GOOG", "GOOGL", "AMZN", "MSFT", "META", "NVDA",
-    "NFLX", "AMD", "COIN", "MSTR", "GME", "AMC", "PLTR", "BABA",
-    "TSM", "INTC", "PYPL", "SQ", "SHOP", "UBER", "ABNB", "SNAP",
+    "AAPL",
+    "TSLA",
+    "GOOG",
+    "GOOGL",
+    "AMZN",
+    "MSFT",
+    "META",
+    "NVDA",
+    "NFLX",
+    "AMD",
+    "COIN",
+    "MSTR",
+    "GME",
+    "AMC",
+    "PLTR",
+    "BABA",
+    "TSM",
+    "INTC",
+    "PYPL",
+    "SQ",
+    "SHOP",
+    "UBER",
+    "ABNB",
+    "SNAP",
+    "SPY",
+    "QQQ",
 }
-
-# Extended crypto symbols for ALL mode discovery
-EXTENDED_CRYPTO = {
-    "LINK", "DOT", "MATIC", "UNI", "AAVE", "ATOM", "FIL", "APT",
-    "ARB", "OP", "SUI", "SEI", "TIA", "JUP", "WIF", "PEPE", "SHIB",
-    "NEAR", "FTM", "INJ", "TRX", "LTC", "BCH", "ETC", "HBAR",
-    "VET", "ALGO", "SAND", "MANA", "AXS", "RENDER", "FET", "TAO",
+# Symbols quarantined after data incidents (e.g. recurring mark-price feed
+# failures) until the underlying path is fixed — env-driven so the quarantine
+# is reversible without code changes (added 2026-07-18, first use: AXS).
+_INCIDENT_QUARANTINE_BASES = {
+    b.strip().upper()
+    for b in os.getenv("INCIDENT_QUARANTINE_BASES", "").split(",")
+    if b.strip()
 }
+_DISABLED_BASES = (
+    _COMMODITY_BASES_DISABLED | _STOCK_BASES_DISABLED | _INCIDENT_QUARANTINE_BASES
+)
 
-# Skip stablecoins and wrapped tokens
-_SKIP_BASES = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDP",
-               "UST", "WBTC", "WETH", "WBNB", "STETH", "HBTC"}
+_STABLE_BASES = {
+    "USDT",
+    "USDC",
+    "BUSD",
+    "DAI",
+    "TUSD",
+    "FDUSD",
+    "USDP",
+    "UST",
+    "USTC",
+    "USDE",
+    "USDS",
+    "PYUSD",
+    "GUSD",
+    "FRAX",
+    "LUSD",
+    "USDD",
+    "CRVUSD",
+    "USD1",
+    "SUSDE",
+    "SDAI",
+}
+_WRAPPED_BASES = {
+    "WBTC",
+    "WETH",
+    "WBNB",
+    "STETH",
+    "WSTETH",
+    "WEETH",
+    "HBTC",
+    "BTCB",
+    "CBETH",
+    "RETH",
+    "WBETH",
+    "BETH",
+}
+_SKIP_BASES = _STABLE_BASES | _WRAPPED_BASES
 
-# Meme coins — excluded from trading (low predictability, high noise)
 try:
     from config import MEME_COINS
 except ImportError:
     MEME_COINS = {"DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "TURBO", "LOOM"}
 
+_MEME_BASES = {str(base).upper() for base in MEME_COINS}
+_LEVERAGED_BASE_RE = re.compile(r"^[A-Z0-9]{2,}(?:UP|DOWN|BULL|BEAR|[235](?:L|S))$")
+_STATUS_FIELDS = (
+    "status",
+    "tradingStatus",
+    "state",
+    "marketStatus",
+    "symbolStatus",
+    "contractStatus",
+)
+_TRADING_FLAG_FIELDS = (
+    "isTrading",
+    "tradingEnabled",
+    "enableTrading",
+    "apiTradeEnabled",
+)
 
-def discover_pairs(exchange, exchange_name: str) -> dict:
-    """
-    Discover USDT spot + futures pairs on an exchange.
-    Applies volume filter — only returns pairs with sufficient liquidity.
-    Returns {"spot": [...], "futures": [...]} sorted by volume descending.
-    """
-    spot_pairs    = []
-    futures_pairs = []
 
+def _upper(value) -> str:
+    return str(value or "").strip().upper()
+
+
+def _status_token(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _false_flag(value) -> bool:
+    if value is False or value == 0:
+        return True
+    return str(value).strip().lower() in {"false", "0", "no", "off", "disabled"}
+
+
+def _status_rejection_reason(market: Mapping) -> Optional[str]:
+    info = market.get("info")
+    if not isinstance(info, Mapping):
+        info = {}
+
+    statuses = [market.get("status")]
+    statuses.extend(info.get(field) for field in _STATUS_FIELDS)
+    for status in statuses:
+        token = _status_token(status)
+        if not token:
+            continue
+        if any(
+            marker in token for marker in ("prelaunch", "premarket", "prelisting", "pretrading")
+        ):
+            return "prelaunch_or_premarket"
+        if any(marker in token for marker in ("delist", "expired", "settled")):
+            return "delisted_market"
+        if any(
+            marker in token
+            for marker in (
+                "halt",
+                "suspend",
+                "maintenance",
+                "nottrading",
+                "posttrading",
+                "endofday",
+                "auctionmatch",
+                "break",
+                "inactive",
+                "offline",
+                "closed",
+                "disabled",
+                "restricted",
+                "pending",
+                "cancelonly",
+                "limitonly",
+                "reduceonly",
+                "settling",
+            )
+        ):
+            return "inactive_market"
+
+    for field in _TRADING_FLAG_FIELDS:
+        if field in info and _false_flag(info[field]):
+            return "inactive_market"
+    return None
+
+
+def _is_leveraged_token(base: str, market: Mapping) -> bool:
+    if market.get("leveraged") is True:
+        return True
+
+    info = market.get("info")
+    if not isinstance(info, Mapping):
+        info = {}
+    for field in ("isLeveragedToken", "leveragedToken"):
+        value = info.get(field)
+        if value is True or str(value).strip().lower() in {"true", "1", "yes"}:
+            return True
+    for field in ("symbolType", "type", "category", "productType"):
+        if "leveraged" in str(info.get(field, "")).lower():
+            return True
+    return bool(_LEVERAGED_BASE_RE.fullmatch(base))
+
+
+def _asset_rejection_reason(base: str, market: Mapping) -> Optional[str]:
+    if not base:
+        return "invalid_market_metadata"
+    if base in _DISABLED_BASES:
+        return f"disabled_asset:{base}"
+    if base in _SKIP_BASES:
+        return f"stable_or_wrapped:{base}"
+    if base in _MEME_BASES:
+        return f"meme_token:{base}"
+    if _is_leveraged_token(base, market):
+        return f"leveraged_token:{base}"
+    return None
+
+
+def _market_has_lane_shape(market: Mapping, market_type: str) -> bool:
+    venue_type = str(market.get("type") or "").lower()
+    if market_type == "spot":
+        return market.get("spot") is True or venue_type == "spot"
+    return (
+        market.get("swap") is True
+        or market.get("future") is True
+        or market.get("contract") is True
+        or venue_type in {"swap", "future", "delivery"}
+    )
+
+
+def _market_rejection_reason(market: Mapping, market_type: str) -> Optional[str]:
+    if not isinstance(market, Mapping):
+        return "invalid_market_metadata"
+
+    base = _upper(market.get("base"))
+    quote = _upper(market.get("quote"))
+    if quote != "USDT":
+        return "unsupported_quote"
+
+    asset_reason = _asset_rejection_reason(base, market)
+    if asset_reason:
+        return asset_reason
+
+    status_reason = _status_rejection_reason(market)
+    if status_reason:
+        return status_reason
+    if market.get("active") is not True:
+        return "inactive_market"
+
+    venue_type = str(market.get("type") or "").lower()
+    if market_type == "spot":
+        if not _market_has_lane_shape(market, "spot"):
+            return "wrong_market_type"
+        if (
+            market.get("contract") is True
+            or market.get("swap") is True
+            or market.get("future") is True
+        ):
+            return "wrong_market_type"
+        return None
+
+    expiry = market.get("expiry")
+    expiry_datetime = market.get("expiryDatetime")
+    if market.get("future") is True or venue_type in {"future", "delivery"}:
+        return "dated_future"
+    if expiry not in (None, "", 0) or expiry_datetime not in (None, ""):
+        return "dated_future"
+    if not (market.get("swap") is True or venue_type == "swap"):
+        return "not_perpetual_swap"
+    settle = _upper(market.get("settle"))
+    if settle and settle != "USDT":
+        return "unsupported_settle"
+    return None
+
+
+def _market_symbol(market_key, market: Mapping) -> str:
+    symbol = market.get("symbol") or market_key
+    return str(symbol).strip() if isinstance(symbol, str) else ""
+
+
+def _load_current_markets(exchange) -> Mapping:
+    raw_exchange = getattr(exchange, "exchange", None)
+    if raw_exchange is None:
+        raise RuntimeError("exchange client is unavailable")
+    load_markets = getattr(raw_exchange, "load_markets", None)
+    if not callable(load_markets):
+        raise RuntimeError("venue does not expose load_markets")
+
+    markets = load_markets(reload=True)
+    if not isinstance(markets, Mapping):
+        raise RuntimeError("load_markets returned invalid metadata")
+    return markets
+
+
+def _quote_volume(market: Mapping) -> float:
+    """Read only quote-denominated volume; base volume is not comparable to USD."""
+    info = market.get("info")
+    if not isinstance(info, Mapping):
+        info = {}
+
+    values = []
+    for source in (market, info):
+        for key in (
+            "quoteVolume",
+            "quoteVolume24h",
+            "turnover24h",
+            "turnover24hUsd",
+            "vol24hUsd",
+            "volumeUsd24h",
+            "turnover",
+        ):
+            value = source.get(key)
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(parsed) and parsed >= 0:
+                values.append(parsed)
+    return max(values, default=0.0)
+
+
+def _discover_with_limits(
+    exchange,
+    exchange_name: str,
+    *,
+    min_spot_volume: float,
+    min_futures_volume: float,
+    max_spot_pairs: int,
+    max_futures_pairs: int,
+    all_mode: bool,
+) -> dict:
+    label = "Discovery-ALL" if all_mode else "Discovery"
     try:
-        if not hasattr(exchange, 'exchange') or exchange.exchange is None:
-            return {"spot": [], "futures": []}
-        markets = exchange.exchange.markets or exchange.exchange.load_markets()
-    except Exception as e:
-        logger.warning(f"[Discovery] {exchange_name}: load_markets failed: {e}")
+        markets = _load_current_markets(exchange)
+    except Exception as exc:
+        logger.warning(f"[{label}] {exchange_name}: current market metadata failed: {exc}")
         return {"spot": [], "futures": []}
 
-    for symbol, market in markets.items():
-        try:
-            quote  = market.get("quote", "")
-            base   = market.get("base", "")
-            active = market.get("active", True)
-            mtype  = market.get("type", "")
+    if not markets:
+        logger.warning(f"[{label}] {exchange_name}: venue returned no market metadata")
+        return {"spot": [], "futures": []}
 
-            # Only active USDT pairs
-            if quote != "USDT" or not active:
-                continue
+    spot_pairs = []
+    futures_pairs = []
+    priority_bases = CORE_SYMBOLS | (EXTENDED_CRYPTO if all_mode else set())
 
-            # Skip stablecoins, wrapped tokens, and meme coins
-            if base in _SKIP_BASES:
-                continue
-            if base in MEME_COINS:
-                continue
-
-            # Extract 24h volume from market info (varies by exchange)
-            vol = 0.0
-            info = market.get("info", {}) or {}
-            for vol_key in ("quoteVolume", "volume24h", "turnover24h",
-                            "vol24hUsd", "turnover", "baseVolume"):
-                raw = info.get(vol_key)
-                if raw:
-                    try:
-                        v = float(raw)
-                        if v > vol:
-                            vol = v
-                    except (TypeError, ValueError):
-                        pass
-
-            # Fallback: use market-level volume if info doesn't have it
-            if vol == 0:
-                raw = market.get("quoteVolume") or market.get("baseVolume")
-                if raw:
-                    try:
-                        vol = float(raw)
-                    except (TypeError, ValueError):
-                        pass
-
-            is_future = mtype in ("swap", "future", "delivery", "linear", "inverse")
-            is_spot   = mtype == "spot" or (not is_future and "/" in symbol and ":" not in symbol)
-
-            if is_spot and ":" not in symbol:
-                # Apply volume filter — always include CORE symbols
-                if base in CORE_SYMBOLS or vol >= MIN_VOLUME_SPOT:
-                    spot_pairs.append((symbol, base, vol))
-
-            elif is_future and ":USDT" in symbol:
-                # Apply volume filter — always include CORE + COMMODITY symbols
-                if base in CORE_SYMBOLS or base in COMMODITY_BASES or vol >= MIN_VOLUME_FUTURES:
-                    futures_pairs.append((symbol, base, vol))
-
-        except Exception:
+    for market_key, market in markets.items():
+        if not isinstance(market, Mapping):
+            continue
+        symbol = _market_symbol(market_key, market)
+        if not symbol:
             continue
 
-    # Sort: core symbols first (maintain order), then by volume descending
-    def _sort_key(item):
-        sym, base, vol = item
-        is_core      = base in CORE_SYMBOLS
-        is_commodity = base in COMMODITY_BASES
-        priority     = 0 if is_core else (1 if is_commodity else 2)
-        return (priority, -vol)
+        base = _upper(market.get("base"))
+        volume = _quote_volume(market)
+        if _market_rejection_reason(market, "spot") is None:
+            if base in priority_bases or volume >= min_spot_volume:
+                spot_pairs.append((symbol, base, volume))
+        elif _market_rejection_reason(market, "futures") is None:
+            if base in priority_bases or volume >= min_futures_volume:
+                futures_pairs.append((symbol, base, volume))
 
-    spot_pairs.sort(key=_sort_key)
-    futures_pairs.sort(key=_sort_key)
+    def sort_key(item):
+        _symbol, base, volume = item
+        if base in CORE_SYMBOLS:
+            priority = 0
+        elif all_mode and base in EXTENDED_CRYPTO:
+            priority = 1
+        else:
+            priority = 2
+        return (priority, -volume)
 
-    # Take top N
-    spot_result    = [s for s, _, _ in spot_pairs[:MAX_SPOT_PAIRS]]
-    futures_result = [s for s, _, _ in futures_pairs[:MAX_FUTURES_PAIRS]]
+    spot_pairs.sort(key=sort_key)
+    futures_pairs.sort(key=sort_key)
+    spot_result = [symbol for symbol, _, _ in spot_pairs[:max_spot_pairs]]
+    futures_result = [symbol for symbol, _, _ in futures_pairs[:max_futures_pairs]]
 
     logger.info(
-        f"[Discovery] {exchange_name}: {len(spot_result)} spot "
-        f"+ {len(futures_result)} futures  "
-        f"(from {len(spot_pairs)} + {len(futures_pairs)} passing volume filter)")
-
-    if spot_result:
-        logger.debug(f"[Discovery] {exchange_name} spot top5: {spot_result[:5]}")
-    if futures_result:
-        logger.debug(f"[Discovery] {exchange_name} futures top5: {futures_result[:5]}")
-
+        f"[{label}] {exchange_name}: {len(spot_result)} spot + "
+        f"{len(futures_result)} futures from current venue metadata"
+    )
     return {"spot": spot_result, "futures": futures_result}
 
 
+def discover_pairs(exchange, exchange_name: str) -> dict:
+    """Discover eligible USDT spot markets and USDT perpetual swaps."""
+    return _discover_with_limits(
+        exchange,
+        exchange_name,
+        min_spot_volume=MIN_VOLUME_SPOT,
+        min_futures_volume=MIN_VOLUME_FUTURES,
+        max_spot_pairs=MAX_SPOT_PAIRS,
+        max_futures_pairs=MAX_FUTURES_PAIRS,
+        all_mode=False,
+    )
+
+
 def discover_all(active_exchanges: dict) -> dict:
-    """
-    Discover pairs for all connected exchanges.
-    Returns {exchange_name: {"spot": [...], "futures": [...]}}
-
-    Falls back to hardcoded TRADING_PAIRS if discovery yields no results
-    for an exchange, preventing the bot from running with an empty pair list.
-    """
-    from config import TRADING_PAIRS
-
+    """Discover each connected venue without static-pair fallbacks."""
     all_pairs = {}
-
     for name, exchange in active_exchanges.items():
         if not getattr(exchange, "_connected", False):
             continue
         try:
             pairs = discover_pairs(exchange, name)
-
-            # If futures geo-blocked on this exchange, clear futures
             if getattr(exchange, "_futures_blocked", False):
                 pairs["futures"] = []
                 logger.info(f"[Discovery] {name}: futures disabled (geo-blocked)")
-
-            # Fallback: if discovery found nothing, use hardcoded config
-            if not pairs["spot"] and not pairs["futures"]:
-                config_pairs = TRADING_PAIRS.get(name, {})
-                pairs = {
-                    "spot":    config_pairs.get("spot", []),
-                    "futures": config_pairs.get("futures", []),
-                }
-                logger.warning(
-                    f"[Discovery] {name}: discovery returned nothing — "
-                    f"using hardcoded config ({len(pairs['spot'])} spot, "
-                    f"{len(pairs['futures'])} futures)")
-            elif not pairs["spot"]:
-                # At least merge in hardcoded core spot pairs
-                config_spot = TRADING_PAIRS.get(name, {}).get("spot", [])
-                merged = list(dict.fromkeys(config_spot + pairs["spot"]))
-                pairs["spot"] = merged[:MAX_SPOT_PAIRS]
-
             all_pairs[name] = pairs
+        except Exception as exc:
+            logger.warning(f"[Discovery] {name}: failed closed: {exc}")
+            all_pairs[name] = {"spot": [], "futures": []}
 
-        except Exception as e:
-            logger.warning(f"[Discovery] {name}: failed: {e}")
-            # Fall back to hardcoded config on exception
-            config_pairs = TRADING_PAIRS.get(name, {})
-            all_pairs[name] = {
-                "spot":    config_pairs.get("spot", []),
-                "futures": config_pairs.get("futures", []),
-            }
-
-    total_spot = sum(len(p["spot"]) for p in all_pairs.values())
-    total_fut  = sum(len(p["futures"]) for p in all_pairs.values())
+    total_spot = sum(len(pairs["spot"]) for pairs in all_pairs.values())
+    total_futures = sum(len(pairs["futures"]) for pairs in all_pairs.values())
     logger.info(
-        f"[Discovery] Final: {total_spot} spot + {total_fut} futures "
-        f"across {len(all_pairs)} exchanges")
-
+        f"[Discovery] Final: {total_spot} spot + {total_futures} futures "
+        f"across {len(all_pairs)} exchanges"
+    )
     return all_pairs
 
 
 def _discover_pairs_all_mode(exchange, exchange_name: str) -> dict:
-    """
-    ALL mode discovery — scans every USDT market with lower volume thresholds
-    and higher pair limits. Includes stocks, commodities, and extended crypto.
-    """
-    spot_pairs    = []
-    futures_pairs = []
-
-    try:
-        markets = exchange.exchange.markets or exchange.exchange.load_markets()
-    except Exception as e:
-        logger.warning(f"[Discovery-ALL] {exchange_name}: load_markets failed: {e}")
-        return {"spot": [], "futures": []}
-
-    # ALL mode priority symbols: core + extended + commodities + stocks
-    priority_bases = CORE_SYMBOLS | EXTENDED_CRYPTO | COMMODITY_BASES | STOCK_BASES
-
-    for symbol, market in markets.items():
-        try:
-            quote  = market.get("quote", "")
-            base   = market.get("base", "")
-            active = market.get("active", True)
-            mtype  = market.get("type", "")
-
-            if quote != "USDT" or not active:
-                continue
-            if base in _SKIP_BASES:
-                continue
-
-            # Extract 24h volume
-            vol = 0.0
-            info = market.get("info", {}) or {}
-            for vol_key in ("quoteVolume", "volume24h", "turnover24h",
-                            "vol24hUsd", "turnover", "baseVolume"):
-                raw = info.get(vol_key)
-                if raw:
-                    try:
-                        v = float(raw)
-                        if v > vol:
-                            vol = v
-                    except (TypeError, ValueError):
-                        pass
-            if vol == 0:
-                raw = market.get("quoteVolume") or market.get("baseVolume")
-                if raw:
-                    try:
-                        vol = float(raw)
-                    except (TypeError, ValueError):
-                        pass
-
-            is_future = mtype in ("swap", "future", "delivery", "linear", "inverse")
-            is_spot   = mtype == "spot" or (not is_future and "/" in symbol and ":" not in symbol)
-
-            if is_spot and ":" not in symbol:
-                if base in priority_bases or vol >= ALL_MIN_VOLUME_SPOT:
-                    spot_pairs.append((symbol, base, vol))
-
-            elif is_future and ":USDT" in symbol:
-                if base in priority_bases or vol >= ALL_MIN_VOLUME_FUTURES:
-                    futures_pairs.append((symbol, base, vol))
-
-        except Exception:
-            continue
-
-    # Sort: core first, then commodities/stocks, then by volume
-    def _sort_key(item):
-        sym, base, vol = item
-        if base in CORE_SYMBOLS:
-            priority = 0
-        elif base in COMMODITY_BASES:
-            priority = 1
-        elif base in STOCK_BASES:
-            priority = 2
-        elif base in EXTENDED_CRYPTO:
-            priority = 3
-        else:
-            priority = 4
-        return (priority, -vol)
-
-    spot_pairs.sort(key=_sort_key)
-    futures_pairs.sort(key=_sort_key)
-
-    spot_result    = [s for s, _, _ in spot_pairs[:ALL_MAX_SPOT_PAIRS]]
-    futures_result = [s for s, _, _ in futures_pairs[:ALL_MAX_FUTURES_PAIRS]]
-
-    # Log what we found by category
-    spot_bases    = {s.split("/")[0] for s in spot_result}
-    futures_bases = {s.split("/")[0] for s in futures_result}
-    commodities   = (spot_bases | futures_bases) & COMMODITY_BASES
-    stocks        = (spot_bases | futures_bases) & STOCK_BASES
-
-    logger.info(
-        f"[Discovery-ALL] {exchange_name}: "
-        f"{len(spot_result)} spot + {len(futures_result)} futures")
-    if commodities:
-        logger.info(f"[Discovery-ALL] {exchange_name} commodities: {commodities}")
-    if stocks:
-        logger.info(f"[Discovery-ALL] {exchange_name} stocks: {stocks}")
-
-    return {"spot": spot_result, "futures": futures_result}
+    """Discover a larger crypto universe under the same strict eligibility rules."""
+    return _discover_with_limits(
+        exchange,
+        exchange_name,
+        min_spot_volume=ALL_MIN_VOLUME_SPOT,
+        min_futures_volume=ALL_MIN_VOLUME_FUTURES,
+        max_spot_pairs=ALL_MAX_SPOT_PAIRS,
+        max_futures_pairs=ALL_MAX_FUTURES_PAIRS,
+        all_mode=True,
+    )
 
 
 def discover_all_mode(active_exchanges: dict) -> dict:
-    """
-    ALL mode discovery for all connected exchanges.
-    Uses lower volume thresholds, higher pair limits, includes
-    stocks/commodities/extended crypto.
-    """
-    from config import TRADING_PAIRS
-
+    """Run ALL-mode discovery without falling back to configured symbols."""
     all_pairs = {}
-
     for name, exchange in active_exchanges.items():
         if not getattr(exchange, "_connected", False):
             continue
         try:
             pairs = _discover_pairs_all_mode(exchange, name)
-
             if getattr(exchange, "_futures_blocked", False):
                 pairs["futures"] = []
                 logger.info(f"[Discovery-ALL] {name}: futures disabled (geo-blocked)")
-
-            # Fallback to hardcoded if nothing found
-            if not pairs["spot"] and not pairs["futures"]:
-                config_pairs = TRADING_PAIRS.get(name, {})
-                pairs = {
-                    "spot":    config_pairs.get("spot", []),
-                    "futures": config_pairs.get("futures", []),
-                }
-
             all_pairs[name] = pairs
+        except Exception as exc:
+            logger.warning(f"[Discovery-ALL] {name}: failed closed: {exc}")
+            all_pairs[name] = {"spot": [], "futures": []}
 
-        except Exception as e:
-            logger.warning(f"[Discovery-ALL] {name}: failed: {e}")
-            config_pairs = TRADING_PAIRS.get(name, {})
-            all_pairs[name] = {
-                "spot":    config_pairs.get("spot", []),
-                "futures": config_pairs.get("futures", []),
-            }
-
-    total_spot = sum(len(p["spot"]) for p in all_pairs.values())
-    total_fut  = sum(len(p["futures"]) for p in all_pairs.values())
+    total_spot = sum(len(pairs["spot"]) for pairs in all_pairs.values())
+    total_futures = sum(len(pairs["futures"]) for pairs in all_pairs.values())
     logger.info(
-        f"[Discovery-ALL] Total: {total_spot} spot + {total_fut} futures "
-        f"across {len(all_pairs)} exchanges")
-
+        f"[Discovery-ALL] Total: {total_spot} spot + {total_futures} futures "
+        f"across {len(all_pairs)} exchanges"
+    )
     return all_pairs
 
 
-# ── Universe Filter: runtime quality checks before trading a symbol ────
-
 class UniverseFilter:
-    """
-    Runtime filter applied BEFORE a signal is acted on.
-    Checks spread, volatility, order book depth, and trading halts.
-    """
+    """Fail-closed runtime quality checks before opening a new position."""
 
-    # Configurable thresholds
-    # 2026-04-11: relaxed after 12h of log-observed rejections during a
-    # quiet weekend session. BTC was being rejected at ATR=0.27% and most
-    # mid-cap perpetual books show $2-3k at top 5 levels even in normal
-    # conditions. Previous thresholds were tuned for active trending hours.
-    MAX_SPREAD_PCT     = 0.005     # 0.5% max bid-ask spread
-    MIN_ATR_PCT        = 0.0015    # 0.15% (was 0.3%) — allow BTC in quiet sessions
-    MAX_ATR_PCT        = 0.12      # 12% max ATR (too volatile = too risky)
-    MIN_DEPTH_USD      = 2_000     # $2k (was $5k) — fits typical USDT perp book depth
-    ATR_PERIOD         = 14        # periods for ATR calculation
+    MAX_SPREAD_PCT = 0.005
+    MIN_ATR_PCT = 0.0015
+    MAX_ATR_PCT = 0.12
+    MIN_DEPTH_USD = 2_000
+    ATR_PERIOD = 14
 
-    # 2026-05-25 — Range-stability / chop filter (freqtrade-inspired, no-edge
-    # forensics). The bot is a trend engine; the existing instantaneous ATR
-    # check cannot distinguish a trending market from chop with the same ATR.
-    # The forensics found the bot bleeds in chop (its EMA/ADX gates pass in
-    # whipsaw that still loses). These two DAILY-candle measures filter chop
-    # at the universe stage — a dynamic quality gate (UNBLOCK_ALL-safe: no
-    # symbol/hour blacklist, just a property test on current market state).
-    #   - Kaufman efficiency ratio: |net move| / sum(|bar moves|) over N days.
-    #     ~1.0 = clean trend, ~0 = chop. Reject below MIN_TREND_EFFICIENCY.
-    #   - Range-of-change: (HH-LL)/LL over N days. Reject dead/flat coins
-    #     below MIN_RANGE_OF_CHANGE (a trend engine has nothing to grab).
-    # Conservative floors — only remove the worst chop/dead coins so trade
-    # frequency isn't gutted. Tunable; disable via RANGE_STABILITY_FILTER off.
-    RANGE_LOOKBACK_DAYS   = 10
-    MIN_RANGE_OF_CHANGE   = 0.02   # <2% span over 10d = dead/rangebound
-    MIN_TREND_EFFICIENCY  = 0.20   # <0.20 ER = severe chop (no net direction)
+    RANGE_LOOKBACK_DAYS = 10
+    MIN_RANGE_OF_CHANGE = 0.02
+    MIN_TREND_EFFICIENCY = 0.20
 
     def __init__(self):
-        self._cache: dict[str, dict] = {}   # symbol -> {result, ts}
-        self._cache_ttl = 300               # 5 min cache
-        self._reject_counts: dict[str, int] = {}  # tracking rejects
-        # Owner-tunable chop-gate floor (2026-06-18): override the class default
-        # from centralized config so the ER threshold can be lowered without a
-        # code edit. Keeps check()'s comparison and its log message in sync.
+        # (venue, market lane, canonical exchange symbol) -> cached result.
+        self._cache: dict[tuple[str, str, str], dict] = {}
+        self._cache_ttl = 300
+        self._reject_counts: dict[str, int] = {}
         try:
-            from config import MIN_TREND_EFFICIENCY as _min_eff
-            self.MIN_TREND_EFFICIENCY = float(_min_eff)
+            from config import MIN_TREND_EFFICIENCY as configured_min_efficiency
+
+            self.MIN_TREND_EFFICIENCY = float(configured_min_efficiency)
         except Exception:
-            pass  # config unavailable → keep the class default (0.20)
+            pass
 
-    def check(self, exchange, symbol: str, market_type: str = "spot") -> dict:
-        """
-        Run all universe quality checks on a symbol.
-        Returns {"ok": bool, "reasons": [...], "spread": float, "atr": float, "depth": float}
-        """
-        import time as _t
+    @staticmethod
+    def _normalise_market_type(market_type: str) -> Optional[str]:
+        value = str(market_type or "").strip().lower()
+        if value == "spot":
+            return "spot"
+        if value in {"future", "futures", "swap", "perpetual"}:
+            return "futures"
+        return None
 
-        # Check cache
-        cache_key = f"{exchange.name}:{symbol}:{market_type}"
-        cached = self._cache.get(cache_key)
-        if cached and (_t.time() - cached["ts"]) < self._cache_ttl:
-            return cached["result"]
-
-        reasons = []
-        spread_pct = 0.0
-        atr_pct = 0.0
-        depth_usd = 0.0
-
-        # 1. Trading halt / active check
-        if not self._check_active(exchange, symbol):
-            reasons.append("halted_or_inactive")
-
-        # 2. Spread check
-        spread_pct = self._check_spread(exchange, symbol, market_type)
-        if spread_pct > self.MAX_SPREAD_PCT:
-            reasons.append(f"spread_too_wide:{spread_pct*100:.2f}%>{self.MAX_SPREAD_PCT*100:.1f}%")
-
-        # 3. Order book depth
-        depth_usd = self._check_depth(exchange, symbol, market_type)
-        if 0 < depth_usd < self.MIN_DEPTH_USD:
-            reasons.append(f"thin_book:${depth_usd:.0f}<${self.MIN_DEPTH_USD}")
-
-        # 4. Volatility check (ATR-based)
-        atr_pct = self._check_volatility(exchange, symbol, market_type)
-        if 0 < atr_pct < self.MIN_ATR_PCT:
-            reasons.append(f"too_calm:ATR={atr_pct*100:.2f}%<{self.MIN_ATR_PCT*100:.1f}%")
-        elif atr_pct > self.MAX_ATR_PCT:
-            reasons.append(f"too_volatile:ATR={atr_pct*100:.1f}%>{self.MAX_ATR_PCT*100:.0f}%")
-
-        # 5. Range-stability / chop check (2026-05-25, daily candles).
-        # Gated so it can be disabled in one place if it over-filters.
+    @staticmethod
+    def _venue_name(exchange) -> str:
         try:
-            from config import RANGE_STABILITY_FILTER_ENABLED as _rsf
-        except ImportError:
-            _rsf = True
-        if _rsf:
-            roc, eff = self._check_range_stability(exchange, symbol, market_type)
-            # roc==0 / eff==0 means no data → neutral (don't reject on missing data)
-            if 0 < roc < self.MIN_RANGE_OF_CHANGE:
-                reasons.append(
-                    f"dead_range:{roc*100:.1f}%<{self.MIN_RANGE_OF_CHANGE*100:.0f}%")
-            if 0 < eff < self.MIN_TREND_EFFICIENCY:
-                reasons.append(
-                    f"chop:ER={eff:.2f}<{self.MIN_TREND_EFFICIENCY:.2f}")
+            name = getattr(exchange, "name", "")
+        except Exception:
+            name = ""
+        raw_exchange = getattr(exchange, "exchange", None)
+        raw_id = getattr(raw_exchange, "id", "") if raw_exchange is not None else ""
+        return str(name or raw_id or exchange.__class__.__name__).strip().lower()
 
-        ok = len(reasons) == 0
-        result = {
+    def _market_catalog(self, exchange) -> Optional[Mapping]:
+        raw_exchange = getattr(exchange, "exchange", None)
+        markets = getattr(raw_exchange, "markets", None) if raw_exchange is not None else None
+        if isinstance(markets, Mapping) and markets:
+            return markets
+        try:
+            markets = _load_current_markets(exchange)
+        except Exception as exc:
+            logger.warning(f"[UniverseFilter] market metadata unavailable: {exc}")
+            return None
+        return markets if markets else None
+
+    def _resolve_market(self, exchange, symbol: str, market_type: str):
+        markets = self._market_catalog(exchange)
+        if not markets or not isinstance(symbol, str) or not symbol.strip():
+            return None
+
+        requested = symbol.strip()
+        candidate_keys = [requested]
+        if market_type == "futures" and ":" not in requested and "/" in requested:
+            candidate_keys.insert(0, f"{requested}:USDT")
+
+        for key in candidate_keys:
+            market = markets.get(key)
+            if isinstance(market, Mapping) and _market_has_lane_shape(market, market_type):
+                return key, market
+
+        requested_folded = requested.casefold()
+        requested_plain = requested.split(":", 1)[0].casefold()
+        for key, market in markets.items():
+            if not isinstance(market, Mapping) or not _market_has_lane_shape(market, market_type):
+                continue
+            identifiers = {
+                str(key).casefold(),
+                str(market.get("symbol") or "").casefold(),
+                str(market.get("id") or "").casefold(),
+            }
+            canonical = _market_symbol(key, market)
+            canonical_plain = canonical.split(":", 1)[0].casefold()
+            if requested_folded in identifiers or requested_plain == canonical_plain:
+                return key, market
+        return None
+
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        reasons: list[str],
+        exchange_symbol: Optional[str],
+        spread_pct: Optional[float] = None,
+        atr_pct: Optional[float] = None,
+        depth_usd: Optional[float] = None,
+        range_of_change: Optional[float] = None,
+        trend_efficiency: Optional[float] = None,
+    ) -> dict:
+        return {
             "ok": ok,
             "reasons": reasons,
+            "exchange_symbol": exchange_symbol,
             "spread_pct": spread_pct,
             "atr_pct": atr_pct,
             "depth_usd": depth_usd,
+            "range_of_change": range_of_change,
+            "trend_efficiency": trend_efficiency,
         }
 
-        if not ok:
-            self._reject_counts[symbol] = self._reject_counts.get(symbol, 0) + 1
-            logger.info(
-                f"[UniverseFilter] {symbol} REJECTED: {', '.join(reasons)}")
+    def _record_rejection(self, symbol: str, reasons: list[str]) -> None:
+        self._reject_counts[symbol] = self._reject_counts.get(symbol, 0) + 1
+        logger.info(f"[UniverseFilter] {symbol} REJECTED: {', '.join(reasons)}")
 
-        self._cache[cache_key] = {"result": result, "ts": _t.time()}
+    def check(self, exchange, symbol: str, market_type: str = "spot") -> dict:
+        """Run metadata, book, volatility, and range checks for one market."""
+        lane = self._normalise_market_type(market_type)
+        if lane is None:
+            reasons = ["invalid_market_type"]
+            self._record_rejection(symbol, reasons)
+            return self._result(ok=False, reasons=reasons, exchange_symbol=None)
+
+        resolved = self._resolve_market(exchange, symbol, lane)
+        if resolved is None:
+            reasons = ["unknown_market"]
+            self._record_rejection(symbol, reasons)
+            return self._result(ok=False, reasons=reasons, exchange_symbol=None)
+
+        market_key, market = resolved
+        exchange_symbol = _market_symbol(market_key, market)
+        metadata_reason = _market_rejection_reason(market, lane)
+        if metadata_reason:
+            reasons = [metadata_reason]
+            self._record_rejection(exchange_symbol or symbol, reasons)
+            return self._result(
+                ok=False,
+                reasons=reasons,
+                exchange_symbol=exchange_symbol or None,
+            )
+
+        cache_key = (self._venue_name(exchange), lane, exchange_symbol)
+        now = time.time()
+        cached = self._cache.get(cache_key)
+        if cached and (now - cached["ts"]) < self._cache_ttl:
+            return cached["result"]
+
+        reasons = []
+        spread_pct, depth_usd, book_reason = self._fetch_book_metrics(
+            exchange, exchange_symbol, lane, market
+        )
+        if book_reason:
+            reasons.append(book_reason)
+        else:
+            if spread_pct > self.MAX_SPREAD_PCT:
+                reasons.append(
+                    f"spread_too_wide:{spread_pct * 100:.2f}%>{self.MAX_SPREAD_PCT * 100:.1f}%"
+                )
+            if depth_usd < self.MIN_DEPTH_USD:
+                reasons.append(f"thin_book:${depth_usd:.0f}<${self.MIN_DEPTH_USD}")
+
+        atr_pct = self._check_volatility(exchange, exchange_symbol, lane)
+        if atr_pct is None:
+            reasons.append("missing_volatility_data")
+        elif atr_pct < self.MIN_ATR_PCT:
+            reasons.append(f"too_calm:ATR={atr_pct * 100:.2f}%<{self.MIN_ATR_PCT * 100:.1f}%")
+        elif atr_pct > self.MAX_ATR_PCT:
+            reasons.append(f"too_volatile:ATR={atr_pct * 100:.1f}%>{self.MAX_ATR_PCT * 100:.0f}%")
+
+        range_of_change = None
+        trend_efficiency = None
+        try:
+            from config import RANGE_STABILITY_FILTER_ENABLED as range_filter_enabled
+        except ImportError:
+            range_filter_enabled = True
+        if range_filter_enabled:
+            range_of_change, trend_efficiency = self._check_range_stability(
+                exchange, exchange_symbol, lane
+            )
+            if range_of_change is None or trend_efficiency is None:
+                reasons.append("missing_range_data")
+            else:
+                if range_of_change < self.MIN_RANGE_OF_CHANGE:
+                    reasons.append(
+                        f"dead_range:{range_of_change * 100:.1f}%<"
+                        f"{self.MIN_RANGE_OF_CHANGE * 100:.0f}%"
+                    )
+                if trend_efficiency < self.MIN_TREND_EFFICIENCY:
+                    reasons.append(
+                        f"chop:ER={trend_efficiency:.2f}<{self.MIN_TREND_EFFICIENCY:.2f}"
+                    )
+
+        result = self._result(
+            ok=not reasons,
+            reasons=reasons,
+            exchange_symbol=exchange_symbol,
+            spread_pct=spread_pct,
+            atr_pct=atr_pct,
+            depth_usd=depth_usd,
+            range_of_change=range_of_change,
+            trend_efficiency=trend_efficiency,
+        )
+        if reasons:
+            self._record_rejection(exchange_symbol, reasons)
+        self._cache[cache_key] = {"result": result, "ts": now}
         return result
 
-    def _check_active(self, exchange, symbol: str) -> bool:
-        """Check if the symbol is currently active/tradable on the exchange."""
+    def _check_active(self, exchange, symbol: str, market_type: str = "spot") -> bool:
+        """Return False for unknown, ineligible, or inactive venue markets."""
+        lane = self._normalise_market_type(market_type)
+        if lane is None:
+            return False
+        resolved = self._resolve_market(exchange, symbol, lane)
+        if resolved is None:
+            return False
+        _market_key, market = resolved
+        return _market_rejection_reason(market, lane) is None
+
+    @staticmethod
+    def _positive_float(value) -> Optional[float]:
+        if value is None or isinstance(value, bool):
+            return None
         try:
-            markets = exchange.exchange.markets or {}
-            market = markets.get(symbol, {})
-            if not market:
-                return True  # unknown, assume ok
-            active = market.get("active", True)
-            info = market.get("info", {}) or {}
-            # Check exchange-specific halt/maintenance flags
-            status = info.get("status") or info.get("tradingStatus") or ""
-            if isinstance(status, str) and status.lower() in (
-                "halt", "halted", "break", "maintenance", "suspended"
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+    def _derive_book_metrics(self, order_book, market: Mapping):
+        if not isinstance(order_book, Mapping):
+            return None, None, "missing_order_book"
+        bids = order_book.get("bids")
+        asks = order_book.get("asks")
+        if not bids or not asks:
+            return None, None, "missing_order_book"
+        if not isinstance(bids, (list, tuple)) or not isinstance(asks, (list, tuple)):
+            return None, None, "invalid_order_book"
+
+        def normalise(levels):
+            output = []
+            for level in levels:
+                if not isinstance(level, (list, tuple)) or len(level) < 2:
+                    return None
+                price = self._positive_float(level[0])
+                amount = self._positive_float(level[1])
+                if price is None or amount is None:
+                    return None
+                output.append((price, amount))
+            return output
+
+        normalised_bids = normalise(bids)
+        normalised_asks = normalise(asks)
+        if not normalised_bids or not normalised_asks:
+            return None, None, "invalid_order_book"
+
+        normalised_bids.sort(key=lambda level: level[0], reverse=True)
+        normalised_asks.sort(key=lambda level: level[0])
+        best_bid = normalised_bids[0][0]
+        best_ask = normalised_asks[0][0]
+        if best_bid >= best_ask:
+            return None, None, "crossed_order_book"
+
+        mid = (best_bid + best_ask) / 2.0
+        spread_pct = (best_ask - best_bid) / mid
+        contract_size = 1.0
+        raw_contract_size = market.get("contractSize")
+        if raw_contract_size is not None:
+            parsed_contract_size = self._positive_float(raw_contract_size)
+            if parsed_contract_size is None:
+                return None, None, "invalid_market_metadata"
+            contract_size = parsed_contract_size
+
+        bid_depth = sum(price * amount * contract_size for price, amount in normalised_bids[:5])
+        ask_depth = sum(price * amount * contract_size for price, amount in normalised_asks[:5])
+        depth_usd = min(bid_depth, ask_depth)
+        if not math.isfinite(spread_pct) or not math.isfinite(depth_usd) or depth_usd <= 0:
+            return None, None, "invalid_order_book"
+        return spread_pct, depth_usd, None
+
+    def _fetch_book_metrics(self, exchange, symbol: str, market_type: str, market: Mapping):
+        try:
+            order_book = exchange.fetch_order_book(symbol, limit=10, market_type=market_type)
+        except Exception:
+            return None, None, "missing_order_book"
+        return self._derive_book_metrics(order_book, market)
+
+    def _check_spread(self, exchange, symbol: str, market_type: str) -> Optional[float]:
+        lane = self._normalise_market_type(market_type)
+        resolved = self._resolve_market(exchange, symbol, lane) if lane else None
+        if resolved is None:
+            return None
+        market_key, market = resolved
+        spread, _depth, _reason = self._fetch_book_metrics(
+            exchange, _market_symbol(market_key, market), lane, market
+        )
+        return spread
+
+    def _check_depth(self, exchange, symbol: str, market_type: str) -> Optional[float]:
+        lane = self._normalise_market_type(market_type)
+        resolved = self._resolve_market(exchange, symbol, lane) if lane else None
+        if resolved is None:
+            return None
+        market_key, market = resolved
+        _spread, depth, _reason = self._fetch_book_metrics(
+            exchange, _market_symbol(market_key, market), lane, market
+        )
+        return depth
+
+    def _check_volatility(self, exchange, symbol: str, market_type: str) -> Optional[float]:
+        """Return 14-period 1h ATR/price, or None when data is unusable."""
+        try:
+            candles = exchange.fetch_ohlcv(
+                symbol,
+                timeframe="1h",
+                limit=self.ATR_PERIOD + 5,
+                market_type=market_type,
+            )
+        except Exception:
+            return None
+        if not isinstance(candles, (list, tuple)) or len(candles) < self.ATR_PERIOD + 1:
+            return None
+
+        window = candles[-(self.ATR_PERIOD + 1) :]
+        true_ranges = []
+        for index in range(1, len(window)):
+            current = window[index]
+            previous = window[index - 1]
+            if (
+                not isinstance(current, (list, tuple))
+                or not isinstance(previous, (list, tuple))
+                or len(current) < 5
+                or len(previous) < 5
             ):
-                return False
-            return bool(active)
-        except Exception:
-            return True
+                return None
+            high = self._positive_float(current[2])
+            low = self._positive_float(current[3])
+            previous_close = self._positive_float(previous[4])
+            if high is None or low is None or previous_close is None or high < low:
+                return None
+            true_ranges.append(
+                max(high - low, abs(high - previous_close), abs(low - previous_close))
+            )
 
-    def _check_spread(self, exchange, symbol: str,
-                      market_type: str) -> float:
-        """Return bid-ask spread as fraction of mid price."""
-        try:
-            ob = exchange.fetch_order_book(symbol, limit=5, market_type=market_type)
-            if not ob or not ob.get("bids") or not ob.get("asks"):
-                return 0.0
-            best_bid = float(ob["bids"][0][0])
-            best_ask = float(ob["asks"][0][0])
-            mid = (best_bid + best_ask) / 2
-            return (best_ask - best_bid) / mid if mid > 0 else 0.0
-        except Exception:
-            return 0.0
+        last_close = self._positive_float(window[-1][4])
+        if last_close is None or len(true_ranges) != self.ATR_PERIOD:
+            return None
+        atr_pct = (sum(true_ranges) / self.ATR_PERIOD) / last_close
+        return atr_pct if math.isfinite(atr_pct) and atr_pct >= 0 else None
 
-    def _check_depth(self, exchange, symbol: str,
-                     market_type: str) -> float:
-        """Return total USD liquidity at top 5 order book levels (min of bid/ask side)."""
-        try:
-            ob = exchange.fetch_order_book(symbol, limit=10, market_type=market_type)
-            if not ob or not ob.get("bids") or not ob.get("asks"):
-                return 0.0
-            bid_depth = sum(float(b[0]) * float(b[1]) for b in ob["bids"][:5])
-            ask_depth = sum(float(a[0]) * float(a[1]) for a in ob["asks"][:5])
-            return min(bid_depth, ask_depth)
-        except Exception:
-            return 0.0
-
-    def _check_volatility(self, exchange, symbol: str,
-                          market_type: str) -> float:
-        """Return ATR as percentage of price (14-period on 1h candles)."""
+    def _check_range_stability(
+        self, exchange, symbol: str, market_type: str
+    ) -> tuple[Optional[float], Optional[float]]:
+        """Return range-of-change and efficiency, or explicit None values."""
+        required = self.RANGE_LOOKBACK_DAYS + 1
         try:
             candles = exchange.fetch_ohlcv(
-                symbol, timeframe="1h", limit=self.ATR_PERIOD + 5,
-                market_type=market_type)
-            if not candles or len(candles) < self.ATR_PERIOD:
-                return 0.0
-            trs = []
-            for i in range(1, len(candles)):
-                h = float(candles[i][2])
-                l = float(candles[i][3])
-                c_prev = float(candles[i-1][4])
-                tr = max(h - l, abs(h - c_prev), abs(l - c_prev))
-                trs.append(tr)
-            atr = sum(trs[-self.ATR_PERIOD:]) / self.ATR_PERIOD
-            last_close = float(candles[-1][4])
-            return atr / last_close if last_close > 0 else 0.0
+                symbol,
+                timeframe="1d",
+                limit=required,
+                market_type=market_type,
+            )
         except Exception:
-            return 0.0
+            return None, None
+        if not isinstance(candles, (list, tuple)) or len(candles) < required:
+            return None, None
 
-    def _check_range_stability(self, exchange, symbol: str,
-                               market_type: str) -> tuple:
-        """Return (range_of_change, trend_efficiency) over RANGE_LOOKBACK_DAYS
-        daily candles. (0.0, 0.0) on missing data → caller treats as neutral.
+        highs = []
+        lows = []
+        closes = []
+        for candle in candles[-required:]:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 5:
+                return None, None
+            high = self._positive_float(candle[2])
+            low = self._positive_float(candle[3])
+            close = self._positive_float(candle[4])
+            if high is None or low is None or close is None or high < low:
+                return None, None
+            highs.append(high)
+            lows.append(low)
+            closes.append(close)
 
+        highest_high = max(highs)
+        lowest_low = min(lows)
         range_of_change = (highest_high - lowest_low) / lowest_low
-            freqtrade RangeStabilityFilter — small = dead/flat coin.
-        trend_efficiency = |close[-1]-close[0]| / sum(|close[i]-close[i-1]|)
-            Kaufman efficiency ratio — ~0 = chop, ~1 = clean trend.
-        """
-        try:
-            candles = exchange.fetch_ohlcv(
-                symbol, timeframe="1d", limit=self.RANGE_LOOKBACK_DAYS + 1,
-                market_type=market_type)
-            if not candles or len(candles) < 3:
-                return (0.0, 0.0)
-            highs = [float(c[2]) for c in candles]
-            lows = [float(c[3]) for c in candles]
-            closes = [float(c[4]) for c in candles]
-            hh, ll = max(highs), min(lows)
-            roc = (hh - ll) / ll if ll > 0 else 0.0
-            net = abs(closes[-1] - closes[0])
-            path = sum(abs(closes[i] - closes[i - 1])
-                       for i in range(1, len(closes)))
-            eff = (net / path) if path > 0 else 0.0
-            return (roc, eff)
-        except Exception:
-            return (0.0, 0.0)
+        net_move = abs(closes[-1] - closes[0])
+        path = sum(abs(closes[index] - closes[index - 1]) for index in range(1, len(closes)))
+        trend_efficiency = net_move / path if path > 0 else 0.0
+        if not math.isfinite(range_of_change) or not math.isfinite(trend_efficiency):
+            return None, None
+        return range_of_change, trend_efficiency
 
     def rank(self, exchange, symbol: str, market_type: str = "spot") -> float:
-        """Composite score 0-100 for symbol quality.
-        Components: liquidity(25) + spread(25) + volatility(25) + funding(25).
-
-        2026-04-14 learning-first pivot: any symbol outside
-        config.UNIVERSE_WHITELIST scores 0 so the meta-filter/engine never
-        considers it. Spec §13 — narrow to BTC/ETH until edge is proven.
-        """
+        """Return a 0-100 quality score, using the cached one-book check."""
         try:
-            from config import UNIVERSE_WHITELIST as _WL
+            from config import UNIVERSE_WHITELIST as whitelist
         except ImportError:
-            _WL = None
-        if _WL is not None and symbol not in _WL:
+            whitelist = None
+        if whitelist is not None and symbol not in whitelist:
             return 0.0
 
+        result = self.check(exchange, symbol, market_type)
+        if not result["ok"]:
+            return 0.0
+
+        spread = result["spread_pct"]
+        depth = result["depth_usd"]
+        atr = result["atr_pct"]
         score = 0.0
 
-        # Spread score (25 pts): tighter = better
-        spread = self._check_spread(exchange, symbol, market_type)
-        if spread <= 0:
-            score += 25  # no data = assume ok
-        elif spread < 0.001:
+        if spread < 0.001:
             score += 25
         elif spread < 0.003:
             score += 15
         elif spread < self.MAX_SPREAD_PCT:
             score += 5
 
-        # Depth / liquidity score (25 pts)
-        depth = self._check_depth(exchange, symbol, market_type)
         if depth >= 50_000:
             score += 25
         elif depth >= 10_000:
@@ -641,19 +939,16 @@ class UniverseFilter:
         elif depth >= self.MIN_DEPTH_USD:
             score += 10
 
-        # Volatility score (25 pts): prefer 0.3%-3% ATR sweet spot
-        atr = self._check_volatility(exchange, symbol, market_type)
         if 0.003 <= atr <= 0.03:
             score += 25
         elif 0.0015 <= atr <= 0.05:
             score += 15
-        elif atr > 0:
+        else:
             score += 5
 
-        # Funding score (25 pts, futures only): prefer near-zero funding
-        if market_type == "futures":
+        if self._normalise_market_type(market_type) == "futures":
             try:
-                funding = exchange.exchange.fetch_funding_rate(symbol)
+                funding = exchange.exchange.fetch_funding_rate(result["exchange_symbol"])
                 rate = abs(float(funding.get("fundingRate", 0)))
                 if rate < 0.0001:
                     score += 25
@@ -662,12 +957,11 @@ class UniverseFilter:
                 elif rate < 0.001:
                     score += 5
             except Exception:
-                score += 12  # unknown = neutral
+                score += 12
         else:
-            score += 25  # spot doesn't have funding
-
+            score += 25
         return score
 
     def get_reject_stats(self) -> dict:
-        """Return reject counts per symbol for monitoring."""
+        """Return reject counts per canonical exchange symbol."""
         return dict(self._reject_counts)

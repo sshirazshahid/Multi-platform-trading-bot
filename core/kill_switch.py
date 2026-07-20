@@ -46,8 +46,12 @@ class KillSwitch:
         """True while the switch file exists. Logs only on state change."""
         try:
             present = self.path.exists()
-        except OSError:
-            present = False  # unreadable FS: treat as absent (no silent freeze)
+        except OSError as exc:
+            # Entry authorization cannot be proven when the control filesystem
+            # is unavailable. Fail closed while monitoring/exits keep running.
+            present = True
+            if self._last is not True:
+                logger.error(f"[KillSwitch] control-path check failed: {exc}")
         if present != self._last:
             if present:
                 logger.warning(
