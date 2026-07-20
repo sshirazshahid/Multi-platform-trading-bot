@@ -48,10 +48,33 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from loguru import logger
+
+
+def _decision_ts_epoch(raw) -> Optional[float]:
+    """Parse an mcp_decisions.jsonl ``ts`` value to epoch seconds.
+
+    Accepts legacy float/int epochs AND the current ISO-8601 strings
+    (e.g. ``2026-07-20T01:13:35.644077+00:00``); returns None when
+    unparseable so one bad record cannot silently kill a whole check
+    (F6, 2026-07-20 audit)."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
 
 HEARTBEAT_PATH        = Path("data/heartbeat.json")
 CARRY_HEARTBEAT_PATH  = Path("data/carry_heartbeat.json")
@@ -210,7 +233,17 @@ class HealthWatchdog:
         logger.warning(f"{title} — {message}")
         if self._notifier is not None:
             try:
-                self._notifier.alert(message, title=title, context=context or {})
+                delivered = self._notifier.alert(
+                    message,
+                    title=title,
+                    context=context or {},
+                )
+                # Legacy/test notifiers return None on success. The concrete
+                # EmailNotifier returns False only when an enabled transport
+                # actually failed. Do not mute that incident.
+                if delivered is False and getattr(self._notifier, "enabled", True):
+                    logger.debug("[Watchdog] notifier did not deliver; retry remains armed")
+                    return
             except Exception as e:
                 # Do NOT latch on a failed send (audit 2026-07-07): leaving
                 # last_alert unset means the next tick retries this safety
@@ -507,8 +540,11 @@ class HealthWatchdog:
                         rec = json.loads(line)
                     except Exception:
                         continue
-                    ts = float(rec.get("ts") or 0)
-                    if ts < cutoff:
+                    # F6 (2026-07-20 audit): mcp_decisions.jsonl carries ISO
+                    # "ts" strings now; float() raised on every line and the
+                    # outer except swallowed it, so this alert NEVER fired.
+                    ts = _decision_ts_epoch(rec.get("ts"))
+                    if ts is None or ts < cutoff:
                         continue
                     if (rec.get("type") or rec.get("action") or "").upper() == "OPEN":
                         opens_recent += 1

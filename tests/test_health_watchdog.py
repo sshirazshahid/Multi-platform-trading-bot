@@ -364,3 +364,40 @@ def test_carry_milestone_silent_without_file_or_cycles(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "CARRY_STATE_PATH", _carry_state_file(tmp_path, 0, 0))
     hw.HealthWatchdog(_make_engine(), notifier=n)._check_carry_sample_milestones()
     assert n.calls == []
+
+
+# ── F6 (2026-07-20 deep audit): ISO timestamps in mcp_decisions.jsonl ────────
+# The log now carries ISO 'ts' strings ("2026-07-20T01:13:35.644077+00:00");
+# float(rec["ts"]) raised on every line and the swallow-all except returned
+# early, so the 6h zero-OPENs starvation alert could NEVER fire.
+
+def test_model_starving_alert_fires_with_iso_timestamps(tmp_path):
+    from datetime import datetime, timezone
+    n = _FakeNotifier()
+    risk = SimpleNamespace(daily_pnl=0.0)
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n, risk_manager=risk,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    old_iso = datetime.fromtimestamp(
+        time.time() - hw.MODEL_STARVE_HOURS * 3600 - 10, tz=timezone.utc
+    ).isoformat()
+    (tmp_path / "mcp_decisions.jsonl").write_text(
+        json.dumps({"ts": old_iso, "type": "OPEN"}) + "\n"
+        + json.dumps({"ts": "not-a-timestamp", "type": "OPEN"}) + "\n"  # tolerated
+    )
+    wd.tick()
+    assert any("model_gate_starving" in c["title"] for c in n.calls), (
+        "6h-starvation alert must fire on an ISO-timestamped log")
+
+
+def test_model_starving_suppressed_by_recent_iso_open(tmp_path):
+    """A RECENT ISO-format OPEN must be recognized (parsed, not skipped)."""
+    from datetime import datetime, timezone
+    n = _FakeNotifier()
+    risk = SimpleNamespace(daily_pnl=0.0)
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n, risk_manager=risk,
+                           warehouse_path=tmp_path / "wh.sqlite")
+    recent_iso = datetime.now(timezone.utc).isoformat()
+    (tmp_path / "mcp_decisions.jsonl").write_text(
+        json.dumps({"ts": recent_iso, "type": "OPEN"}) + "\n")
+    wd.tick()
+    assert not any("model_gate_starving" in c["title"] for c in n.calls)
