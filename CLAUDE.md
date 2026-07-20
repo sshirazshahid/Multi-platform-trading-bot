@@ -192,7 +192,7 @@ The legacy `DRY_RUN` flag is derived: `DRY_RUN = (OPERATING_MODE != "CONTROLLED_
 ### Core Modules (`core/`)
 
 **Decision Pipeline:**
-- `mcp_brain.py` — Algorithmic scoring engine. 4 required conditions (4h EMA gap >= 0.15%, 1h EMA alignment, RSI sweet spot, ADX >= 20) + 6 bonus conditions (MACD, slope, 15m timing, volume, structure, microstructure). Base score 50 on all-required pass, +5-12 per bonus, max theoretical 101. Entry requires score >= 65. ATR-based SL (1.5x ATR, clamped 1.5-3.5%) with 2.5:1 R:R. Two modes: Portfolio Analysis (5 min) and Position Monitor (90s).
+- `mcp_brain.py` — Algorithmic scoring engine. 4 required conditions (4h EMA gap >= 0.15%, 1h EMA alignment, RSI sweet spot, ADX >= 20) + 6 bonus conditions (MACD, slope, 15m timing, volume, structure, microstructure). Base score 50 on all-required pass, +5-12 per bonus, max theoretical 101. Entry score floor is env-driven (`MCP_ENTRY_MIN_SCORE`; legacy 66/65 when unset, currently 50 under MAX_FLOW_BAND). ATR-based SL (1.5x ATR, clamped 1.5-3.5%) with 2.5:1 R:R — under `ACCURACY_TARGET_MODE` (profile-gated) the TP is geometry-compressed instead (band WR by construction). Two modes: Portfolio Analysis (5 min) and Position Monitor (90s).
 - `features.py` — Unified `FeatureVector` for meta-filter inputs. Percentile-based (vs 30-day window).
 - `meta_filter.py` — Rule-based quality gate. Returns ALLOW/SKIP/REVIEW. Orthogonal to risk engine.
 - `claude_advisor.py` — Claude CLI advisory (advisory-only, not decision authority).
@@ -249,6 +249,13 @@ Note: live SCALP behavior is the SCALP *leverage tier* in `mcp_brain`/`bot_engin
 `SupertrendStrategy`. The standalone `strategy_selector`/`arbitrage` strategies run only via the
 separate `multi_profile_main.py` entry point (DRY_RUN-required), not via `main.py`.
 
+**Shadow-probe fleet (`core/agents/`, log-only forward research — the "strategy building" lanes):**
+six probes registered at boot via `bot_engine._PROBE_SPECS` / ShadowRunner, each writing warehouse
+rows the promotion funnel tracks toward the ≥30-resolved frozen gate: `ListingShortProbeAgent`,
+`UnlockShortProbeAgent`, `TsmomProbeAgent` (2 arms), `BreakoutProbeAgent`, and the bundle-MR pair
+`ZfadeProbeAgent` (cfg365 candidate) + `Rsi2TrackerProbeAgent` (cfg226 tracker) on a 40-symbol
+spec-derived universe. None can place orders; promotion is owner-signed only.
+
 ### Environment Setup
 
 Requires `.env` with exchange API keys (Binance, Bybit, Bitget). Copy from template:
@@ -266,20 +273,25 @@ All settings centralized. Loaded from `.env` via `python-dotenv`. Key sections:
 - Fee structure per exchange
 - Sim-live realism settings (slippage, wick SL/TP, funding)
 - Risk management — five `LEVERAGE_TIERS` (config.py): STANDARD 3x / STRONG 4x / CONVICTION 5x / AGGRESSIVE 10x / SCALP 3x. **As of 2026-06-06 (`CONFIDENCE_LEVERAGE_ESCALATION=False`), confidence cannot escalate leverage above STANDARD** — the MCP score is anti-predictive, so STRONG/CONVICTION/AGGRESSIVE are blocked; only STANDARD/SCALP are reachable. SCALP is dropped from the dict when `SCALP_TIER_ENABLED=false`.
-- Trading pairs: `TRADING_MODE=all` (in `.env`) runs `pair_discovery.discover_all_mode` against every liquid USDT perp on each exchange. The static `UNIVERSE_WHITELIST` gate in `bot_engine._execute_open` is SKIPPED when `TRADING_MODE=all` — quality is enforced by MCP score ≥65, meta-filter, universe_filter (spread/vol/depth), and risk gates. `WHITELIST_SYMBOLS` (16 high-WR symbols) is retained as a leverage-tier hint, not as an entry gate
+- Trading pairs: `TRADING_MODE=all` (in `.env`) runs `pair_discovery.discover_all_mode` against every liquid USDT perp on each exchange. The static `UNIVERSE_WHITELIST` gate in `bot_engine._execute_open` is SKIPPED when `TRADING_MODE=all` — quality is enforced by the MCP score floor (env `MCP_ENTRY_MIN_SCORE`; legacy default 66/65, **currently 50 under the MAX_FLOW_BAND profile**), meta-filter, universe_filter (spread/vol/depth), and risk gates. `WHITELIST_SYMBOLS` (16 high-WR symbols) is retained as a leverage-tier hint, not as an entry gate
 - Trading gates (whitelist/blacklist/allowed hours from knowledge_model data)
 - Strategy parameters (legacy, kept for DCA/rebalance reference)
 
 ### Runtime Data (`data/`)
 
 - `positions.json` — Active/closed position tracking
-- `warehouse.sqlite` — Historical trade + candidate warehouse
+- `warehouse.sqlite` — Historical trade + candidate warehouse (+ shadow_decisions/shadow_outcomes/shadow_listing_probe/shadow_bundle_mr_probe probe tables)
 - `knowledge_model.json` — Learned patterns (hour scores, symbol stats)
 - `mcp_decisions.jsonl` — MCP Brain decision log
 - `mcp_state.json` — MCP Brain state
-- `risk_state.json` — Risk manager state (drawdown, pauses)
+- `risk_state.json` — Risk manager state (drawdown, pauses); **incident halts persist separately in `risk_incident_latch.json`** (see Gotchas)
 - `capital_allocator.json` — Capital allocation state
 - `spot_portfolio.json` — Spot holdings state
+- `promotion_funnel.json` — hourly funnel snapshot: per-lane state/floor-progress toward the frozen promotion gate (written by `scripts/promotion_funnel.py`)
+- `strategy_specs/*.json` — StrategySpec artifacts; an `active-paper` futures spec here IS the route-gate authorization for directional paper OPENs (cached at boot)
+- `goal_progress.json` — daily goal report lanes (UTC-day WR/profitability vs the 63–67% target, `target_status` field)
+- `carry_positions.json` / `carry_gate_log.jsonl` — F1 carry runner state + per-check net-edge log (the funnel's F1 regime-watch reads the latter)
+- `heartbeat.json` — includes `paper_trading_profile` + `paper_profile_started_at` (cohort epoch)
 
 ### Dashboard (`dashboard.py`)
 
