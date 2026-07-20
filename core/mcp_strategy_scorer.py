@@ -10,7 +10,8 @@ It reuses the existing deterministic scoring in ``MCPBrain._algorithmic_portfoli
 / ``_score_coin`` — the code that already "works without Claude" — so behavior is
 identical to the algorithmic fallback path, minus the Claude blend entirely. The
 action-dict contract and the SIGNAL_SOURCE seam are preserved: bot_engine routes
-``SIGNAL_SOURCE=mcp_det`` here; the default ``mcp`` path (MCPBrain) is untouched.
+``SIGNAL_SOURCE=mcp`` and ``mcp_det`` both route here. ``mcp`` is retained as a
+configuration compatibility alias; neither path grants an LLM order authority.
 """
 from __future__ import annotations
 
@@ -21,6 +22,10 @@ from loguru import logger
 
 from core.mcp_brain import ENTRY_COOLDOWN, MCPBrain
 
+# F5 (2026-07-20 deep audit): loud empty-universe warning fires once per
+# process, not once per construction, so restart loops cannot spam the log.
+_EMPTY_UNIVERSE_WARNED = False
+
 
 class MCPStrategyScorer:
     """Deterministic, LLM-free portfolio scorer over approved StrategySpec(s)."""
@@ -28,22 +33,82 @@ class MCPStrategyScorer:
     def __init__(self, brain: MCPBrain | None = None, *, specs=None, warehouse=None):
         # Reuse the existing brain's data-fetch + deterministic scoring stack.
         self.brain = brain or MCPBrain()
-        self.specs = list(specs or [])
+        supplied_specs = specs if specs is not None else []
+        self.spec_load_errors = tuple(getattr(supplied_specs, "errors", ()) or ())
+        self.specs = list(supplied_specs)
         self.warehouse = warehouse
         self._last_trade_actions: list = []
+        self._last_research_actions: list = []
+        self._warn_if_universe_empty()
+
+    def _warn_if_universe_empty(self) -> None:
+        """F5 (2026-07-20 audit): loud one-time startup check for the
+        silent-idle class. 2026-07-19 incident: the mcp/mcp_det lane produced
+        zero entries for 8h because approved_paper_futures_routes() was empty
+        and nothing said so. This scorer is only constructed on the
+        mcp/mcp_det signal path, so construction IS the startup moment."""
+        global _EMPTY_UNIVERSE_WARNED
+        routes, reason = self._execution_routes()
+        if routes:
+            logger.info(
+                f"[MCPScorer] startup universe check OK — {len(routes)} "
+                "approved PAPER-futures base(s) route to execution")
+            return
+        if not _EMPTY_UNIVERSE_WARNED:
+            _EMPTY_UNIVERSE_WARNED = True
+            logger.warning(
+                "[MCPScorer] STARTUP UNIVERSE EMPTY — "
+                "approved_paper_futures_routes() returned NO routes "
+                f"(reason: {reason or 'strategy_spec_no_active_paper_futures_universe'}). "
+                "Every OPEN this scorer emits will be blocked and the "
+                "mcp/mcp_det lane will sit SILENTLY IDLE (this class cost 8h "
+                "on 2026-07-19). Check the StrategySpec catalog "
+                "(promotion_status / market_type / venues) before trusting a "
+                "quiet bot.")
 
     # ── universe ────────────────────────────────────────────────────────
-    def _restrict_universe(self, coins: list) -> list:
-        """Restrict to approved-spec base symbols; pass through when none approved."""
+    def _execution_routes(self) -> tuple[dict, str]:
+        """Return approved PAPER-futures routes or a fail-closed reason."""
+        if self.spec_load_errors:
+            return {}, "strategy_spec_parse_error"
         try:
-            from core.strategy_spec import approved_symbols
+            from core.strategy_spec import approved_paper_futures_routes
 
-            allowed = approved_symbols(self.specs)
-        except Exception:
-            allowed = set()
-        if not allowed:
-            return list(coins)
-        return [c for c in coins if str(c).split("/")[0].upper() in allowed]
+            routes = approved_paper_futures_routes(self.specs)
+        except Exception as exc:
+            logger.warning(f"[MCPScorer] invalid executable strategy spec: {exc}")
+            return {}, "strategy_spec_invalid"
+        if not routes:
+            return {}, "strategy_spec_no_active_paper_futures_universe"
+        return routes, ""
+
+    def _filter_executable_opens(self, actions: list) -> list:
+        """Keep research proposals broad, but return only approved OPEN routes."""
+        routes, gate_reason = self._execution_routes()
+        executable: list = []
+        blocked = 0
+        futures_types = {"futures", "future", "perpetual", "perp", "swap"}
+        for action in actions:
+            if not isinstance(action, dict) or str(action.get("type") or "").upper() != "OPEN":
+                executable.append(action)
+                continue
+            symbol = str(action.get("symbol") or "").strip().upper()
+            base = symbol.split("/", 1)[0].split(":", 1)[0]
+            venue = str(action.get("exchange") or "").strip().lower()
+            market_type = str(action.get("market_type") or "").strip().lower()
+            allowed_venues = routes.get(base, frozenset())
+            if (not gate_reason and market_type in futures_types
+                    and venue in allowed_venues):
+                executable.append(action)
+            else:
+                blocked += 1
+        if blocked:
+            reason = gate_reason or "strategy_spec_route_not_approved"
+            logger.warning(
+                f"[MCPScorer] execution spec gate blocked {blocked} OPEN "
+                f"action(s): {reason}; research candidates remain available"
+            )
+        return executable
 
     # ── main entry point (action-dict contract) ─────────────────────────
     def analyze_portfolio(self, coins: list, open_positions: list,
@@ -63,8 +128,9 @@ class MCPStrategyScorer:
             return []
         b._last_entry_run = now
 
-        coins = self._restrict_universe(coins)
-
+        # Score the full research universe so candidate/shadow evidence keeps
+        # accumulating. Only the returned OPEN actions are execution-filtered.
+        coins = list(coins)
         data = b._fetch_all_data(coins)
         if data.get("sources_ok", 0) < 2:
             logger.warning("[MCPScorer] < 2 data sources — no actions")
@@ -74,15 +140,18 @@ class MCPStrategyScorer:
 
         exchange_indicators = b._fetch_exchange_indicators(coins)
 
-        actions: list = []
+        research_actions: list = []
         if risk_envelope.get("max_new_positions", 0) > 0:
             try:
-                actions = b._algorithmic_portfolio(
+                research_actions = b._algorithmic_portfolio(
                     coins, data, exchange_indicators,
                     open_positions, exchange_balances, risk_envelope) or []
             except Exception as e:
                 logger.error(f"[MCPScorer] deterministic scoring failed: {e}")
-                actions = []
+                research_actions = []
+
+        self._last_research_actions = list(research_actions)
+        actions = self._filter_executable_opens(research_actions)
 
         # Provenance backstop: fresh decision_id + deterministic source tag.
         for a in actions:
@@ -92,7 +161,7 @@ class MCPStrategyScorer:
                 a["source"] = "algo_det"
 
         # LLM demoted to research-only: log a note, never blend it back in.
-        self._log_research_note(actions)
+        self._log_research_note(research_actions)
 
         self._last_trade_actions = actions
         try:
