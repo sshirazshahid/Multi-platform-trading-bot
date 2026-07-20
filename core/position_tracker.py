@@ -181,6 +181,7 @@ class Position:
     entry_mid:    float           = 0.0
     exit_mid:     float           = 0.0
     funding_paid: float           = 0.0
+    last_funding_ts: float        = 0.0
     # ── Mode tag — this is the key field for learning separation ──────
     paper_trade:  bool            = field(default_factory=_is_dry_run)
     # ── Exchange-side SL/TP registration flags ────────────────────────
@@ -195,6 +196,10 @@ class Position:
     # Defaults to 0.0 so old positions in JSON load fine; calibrator
     # skips trades with confidence == 0.
     confidence:   float           = 0.0
+    # Restart-stable scalp routing metadata. These were dynamic attributes,
+    # so dataclasses.asdict silently omitted them from positions.json.
+    _scalp:        bool            = False
+    tp_pct:        float           = 0.0
     # ── Booking-completeness fields (audit 2026-06-04) ────────────────
     # entry_stop_loss: the IMMUTABLE entry-time stop. r_multiple MUST be
     # measured against this, not the trailed/breakeven-moved stop_loss —
@@ -660,7 +665,15 @@ class PositionTracker:
                 if getattr(exchange, "_last_positions_fetch_ok", True) is False:
                     raise ValueError("fetch_positions() failed")
                 for ep in positions:
-                    size = float(ep.get("contracts") or ep.get("contractSize") or 0)
+                    # Ghost-exclusion (2026-07-20 AXS forensics): position size
+                    # is `contracts` ONLY. `contractSize` is the per-contract
+                    # multiplier (a market constant, ~1.0), NOT a size — the
+                    # old fallback turned FLAT rows (contracts=0/None, served
+                    # by Binance positionRisk / Bybit v5 with side+avgPrice
+                    # still populated) into phantom snapshot entries that both
+                    # imported as MANUAL ghosts and shielded real ghosts from
+                    # closure. Pinned by tests/test_ghost_position_exclusion.py.
+                    size = float(ep.get("contracts") or 0)
                     if size == 0:
                         continue
                     side_raw = (ep.get("side") or "").lower()
@@ -689,7 +702,7 @@ class PositionTracker:
             if key in tracked_keys:
                 continue
             ex_name, sym, side = key
-            size = float(ep.get("contracts") or ep.get("contractSize") or 0)
+            size = float(ep.get("contracts") or 0)  # contracts ONLY — see snapshot loop
             entry = float(ep.get("entryPrice") or ep.get("info", {}).get("avgPrice") or 0)
             if size <= 0 or entry <= 0:
                 continue

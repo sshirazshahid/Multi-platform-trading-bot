@@ -8,12 +8,11 @@ core/order_manager.py — Order lifecycle with:
 """
 
 import json
-import os
-import re
 import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 from loguru import logger
 
@@ -29,6 +28,8 @@ from core.smart_executor import SmartExecutor
 from core.trailing_stop_manager import TrailingStopManager
 from core.virtual_wallet import VirtualWallet
 from exchanges.base import BaseExchange
+from utils.atomic_io import atomic_write_json
+from utils.http_redaction import redact_http_debug as _redact_http_debug
 from utils.notifier import TelegramNotifier
 
 # Permission-denied error patterns
@@ -54,49 +55,6 @@ _SKIP_PAIR_ERRORS = (
     "not supported", "symbol not found",
     "does not have market symbol",
 )
-
-_SENSITIVE_HTTP_FIELD = (
-    r"api[_-]?key|apikey|secret(?:key)?|signature|authorization|"
-    r"access[_-]?token|refresh[_-]?token|token|passphrase|password|"
-    r"x-bapi-api-key|x-mbx-apikey|ok-access-key|ok-access-passphrase"
-)
-_SENSITIVE_HTTP_ASSIGNMENT_RE = re.compile(
-    rf"(?i)((?:[\"']?(?:{_SENSITIVE_HTTP_FIELD})[\"']?)\s*[:=]\s*)"
-    r"(\"[^\"]*\"|'[^']*'|[^&,\s}\]]+)"
-)
-_BEARER_TOKEN_RE = re.compile(r"(?i)(\bbearer\s+)[^\s,}\]]+")
-
-
-def _redact_http_debug(value, *, max_chars: int = 4000) -> str:
-    """Return bounded HTTP diagnostics with credentials removed."""
-    if value is None:
-        return "None"
-    try:
-        if isinstance(value, (dict, list, tuple)):
-            rendered = json.dumps(value, default=str, sort_keys=True)
-        else:
-            rendered = str(value)
-    except Exception:
-        rendered = f"<{type(value).__name__}>"
-
-    rendered = _SENSITIVE_HTTP_ASSIGNMENT_RE.sub(
-        lambda match: f"{match.group(1)}[REDACTED]", rendered
-    )
-    rendered = _BEARER_TOKEN_RE.sub(r"\1[REDACTED]", rendered)
-
-    # SDK error shapes are not stable, so also remove configured credential
-    # values wherever they occur, even if their field names were discarded.
-    for key, secret in os.environ.items():
-        if not re.search(_SENSITIVE_HTTP_FIELD, key, re.IGNORECASE):
-            continue
-        if len(secret) >= 4:
-            rendered = rendered.replace(secret, "[REDACTED]")
-
-    limit = max(128, int(max_chars))
-    if len(rendered) > limit:
-        rendered = rendered[:limit] + "...[truncated]"
-    return rendered
-
 
 def _is_permission_error(e: Exception) -> bool:
     msg = str(e).lower()
@@ -151,6 +109,16 @@ def _should_fire_partial_tp(position, price: float, partial_tp_config: dict):
 # signal price. 0.3% per the design blueprint.
 _MAKER_CHASE_GUARD_PCT = 0.003
 
+# Mutable runtime artifacts are module-level so test harnesses can redirect
+# every default constructor away from the production ``data/`` directory.
+# Keeping these paths inline in ``__init__`` previously let ordinary unit tests
+# load and overwrite the running bot's close counters and execution state.
+ORDER_MODE_STATE_PATH = Path("data/order_mode_state.json")
+SL_WIDENED_STATE_PATH = Path("data/sl_widened.json")
+PAPER_FUNDING_WINDOWS_PATH = Path("data/paper_funding_windows.json")
+PENDING_MAKER_ENTRIES_PATH = Path("data/pending_maker_entries.json")
+CLOSE_FAIL_COUNT_PATH = Path("data/close_fail_count.json")
+
 
 def _maker_first_cfg() -> dict:
     """Live view of config.MAKER_FIRST_PAPER (lazy so tests can monkeypatch)."""
@@ -186,6 +154,32 @@ def _mid_from_ticker(ticker: dict) -> float:
     return 0.0
 
 
+def _position_age_minutes(open_time, *, now: float | None = None) -> float:
+    """Return a non-negative age for epoch or legacy ISO/datetime values."""
+
+    current = time.time() if now is None else float(now)
+    if open_time in (None, ""):
+        return 0.0
+    try:
+        opened = float(open_time)
+    except (TypeError, ValueError):
+        try:
+            from datetime import datetime, timezone
+
+            if isinstance(open_time, datetime):
+                parsed = open_time
+            else:
+                parsed = datetime.fromisoformat(str(open_time).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            opened = parsed.timestamp()
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+    if not (opened > 0):
+        return 0.0
+    return max(0.0, (current - opened) / 60.0)
+
+
 def _mark_from_ticker(ticker: dict, *, now: float | None = None) -> float:
     """Return a fresh positive mark price from a ccxt-shaped ticker."""
     ticker = ticker or {}
@@ -204,16 +198,17 @@ def _mark_from_ticker(ticker: dict, *, now: float | None = None) -> float:
         if mark <= 0:
             continue
         timestamp = ticker.get("timestamp")
-        if timestamp is not None:
-            try:
-                event_ts = float(timestamp)
-                if event_ts > 100_000_000_000:
-                    event_ts /= 1000.0
-                age = (time.time() if now is None else float(now)) - event_ts
-                if age > 15.0 or age < -2.0:
-                    return 0.0
-            except (TypeError, ValueError):
+        if timestamp is None:
+            return 0.0
+        try:
+            event_ts = float(timestamp)
+            if event_ts > 100_000_000_000:
+                event_ts /= 1000.0
+            age = (time.time() if now is None else float(now)) - event_ts
+            if age > 15.0 or age < -2.0:
                 return 0.0
+        except (TypeError, ValueError):
+            return 0.0
         return mark
     return 0.0
 
@@ -344,12 +339,12 @@ class OrderManager:
         # Track exchanges where futures is disabled (don't retry)
         # Track exchanges using One-Way Mode (no positionSide param)
         # Bitget is ALWAYS one-way — pre-populate to avoid first-order 40774 error
-        self._order_mode_path = Path("data/order_mode_state.json")
+        self._order_mode_path = ORDER_MODE_STATE_PATH
         saved = self._load_order_mode_state()
         self._futures_disabled = saved.get("futures_disabled", set())
         self._oneway_mode = saved.get("oneway_mode", {"bitget"})
         # Track positions where SL was already widened once (prevent infinite widening)
-        self._sl_widened_path = Path("data/sl_widened.json")
+        self._sl_widened_path = SL_WIDENED_STATE_PATH
         self._sl_widened = self._load_sl_widened()
 
         # Idempotency: track recently placed client order IDs to avoid duplicates
@@ -364,7 +359,7 @@ class OrderManager:
         # only that venue accrued funding (audit 2026-07-07).
         # A5 (2026-07-16): persisted — in-memory only, a restart inside a
         # settled window forgot it and charged funding a second time.
-        self._funding_windows_path = Path("data/paper_funding_windows.json")
+        self._funding_windows_path = PAPER_FUNDING_WINDOWS_PATH
         self._last_funding_hour: dict = self._load_funding_windows()
 
         # MAKER-FIRST PAPER ENTRIES (2026-07-10): pending virtual post-only
@@ -373,17 +368,22 @@ class OrderManager:
         # (never ghost-opens). Boot is lazy (first enabled use) so the file is
         # untouched while the flag is off.
         self._pending_maker: dict = {}
+        # Registration and resolver ticks can run on different threads.  The
+        # lock makes the conflict check + reservation insert atomic, and keeps
+        # a resolving intent reserved until it has a terminal outcome.
+        self._pending_maker_lock = threading.RLock()
+        self._maker_resolving: set[str] = set()
         self._maker_counters: dict = {
             "maker": 0, "taker_fallback": 0, "abandoned": 0}
         # Per-maker-fill measurement rows (signal_px vs fill_px delta) for
         # the soak readout; persisted alongside the counters, capped at 200.
         self._maker_fills: list = []
-        self._pending_maker_path = Path("data/pending_maker_entries.json")
+        self._pending_maker_path = PENDING_MAKER_ENTRIES_PATH
         self._maker_first_booted = False
 
         # Close failure counter: {position_id: fail_count}
         # After 3 failures, force-close in tracker to break infinite loops
-        self._close_fail_path = Path("data/close_fail_count.json")
+        self._close_fail_path = CLOSE_FAIL_COUNT_PATH
         self._close_fail_count: dict = self._load_close_fail_count()
 
         # B7-P2 (audit 2026-06-21) — per-position close/SL-mutation lock.
@@ -519,9 +519,22 @@ class OrderManager:
         try:
             payload = exchange.fetch_mark_index(pos.symbol, "futures") or {}
             mark = float(payload.get("mark") or 0)
-            stamp = float(payload.get("ts") or time.time())
+            stamp = float(payload.get("mark_ts") or payload.get("ts") or 0)
+            # Unit-skew hardening (2026-07-20, AXS follow-up): a producer
+            # regression to millisecond stamps would compute a hugely negative
+            # age and silently zero the mark every cycle — the exact failure
+            # class behind the 07-18 latch. Mirrors _mark_from_ticker.
+            if stamp > 100_000_000_000:
+                stamp /= 1000.0
             age = time.time() - stamp
-            if mark > 0 and -2.0 <= age <= 15.0:
+            # 2026-07-18: window widened 15s -> 90s. fetch_mark_index's
+            # mark-OHLCV fallback serves the last CLOSED 1m candle, so ages
+            # of 30-120s are structural, not a fault; the 15s bound made
+            # this helper return 0 for EVERY futures paper position (first
+            # hit: AXS — latched a data incident + halted the engine on the
+            # first band trade). 90s still bounds trigger staleness; the
+            # exchange-side conditionals remain the primary trigger (C3).
+            if mark > 0 and -2.0 <= age <= 90.0:
                 return mark
         except (AttributeError, TypeError, ValueError):
             pass
@@ -795,6 +808,12 @@ class OrderManager:
         strategy: str,
         candidate_id: int | None,
         leverage: float,
+        *,
+        order_type: str = "market",
+        limit_price: float | None = None,
+        post_only: bool = False,
+        parent_decision_id: str | None = None,
+        confidence: float | None = None,
     ):
         """Write the logical order intent before any exposure can be created."""
         if not getattr(self, "enforce_event_provenance", False):
@@ -822,13 +841,21 @@ class OrderManager:
                 instrument=instrument,
                 created_at=datetime.now(timezone.utc),
                 side=side,
-                order_type="market",
+                order_type=order_type,
                 quantity=size,
+                limit_price=limit_price,
+                post_only=post_only,
                 context={
                     "strategy_id": str(strategy or "unassigned"),
                     "candidate_id": candidate_id,
                     "leverage": float(leverage),
-                    "execution_policy": "limit_then_market_or_paper_l2",
+                    "execution_policy": (
+                        "paper_virtual_post_only"
+                        if post_only
+                        else "limit_then_market_or_paper_l2"
+                    ),
+                    "parent_decision_id": str(parent_decision_id or ""),
+                    "confidence": confidence,
                 },
             )
             get_warehouse().append_order_intent(intent)
@@ -1256,10 +1283,13 @@ class OrderManager:
                       sl: float, tp: float, leverage: int = 1,
                       order_type: str = "market", price: float = None,
                       candidate_id: int = None, mcp_score: float = None,
-                      model_version: str = None,
-                      decision_id: str | None = None,
-                      execution_snapshot: dict | None = None,
-                      _maker_first_ctx: dict | None = None):
+                       model_version: str = None,
+                       decision_id: str | None = None,
+                       execution_snapshot: dict | None = None,
+                       authorization_strategy_id: str | None = None,
+                       decision_confidence: float | None = None,
+                       decision_parent_id: str | None = None,
+                       _maker_first_ctx: dict | None = None):
 
         # Provenance: reset per attempt; every internal reject stashes a
         # reason here before returning None.
@@ -1269,13 +1299,14 @@ class OrderManager:
             from core.entry_policy import authorize_runtime_entry
 
             authorization = authorize_runtime_entry(
-                strategy,
+                authorization_strategy_id or strategy,
                 strategy_version=model_version,
             )
             if not authorization.allowed:
                 self.last_open_reject = authorization.reason
                 logger.warning(
-                    f"[EntryPolicy] blocked {strategy}:{symbol} open: "
+                    f"[EntryPolicy] blocked "
+                    f"{authorization_strategy_id or strategy}:{symbol} open: "
                     f"{authorization.reason}"
                 )
                 return None
@@ -1333,7 +1364,17 @@ class OrderManager:
             self.last_open_reject = "blacklisted"
             return None
 
-        if not self.risk.can_trade(self.tracker.count_open()):
+        # Pending maker intents are exposure reservations, not free slots.
+        # During resolution the current intent remains in the pending map to
+        # prevent a concurrent candidate stealing its headroom, so exclude
+        # only that one reservation from this fill-time recheck.
+        _reservation_key = (
+            _maker_first_ctx.get("reservation_key")
+            if isinstance(_maker_first_ctx, dict)
+            else None
+        )
+        _reserved_count = self._pending_maker_count(exclude_key=_reservation_key)
+        if not self.risk.can_trade(self.tracker.count_open() + _reserved_count):
             self.last_open_reject = "risk_can_trade_block"
             return None
 
@@ -1565,7 +1606,7 @@ class OrderManager:
             _mf_ref = float(price) if (price and float(price) > 0) else fill_price
             if _mf_bid > 0 and _mf_ask > 0 and _mf_ref > 0:
                 _mf_limit = _mf_bid if side == "buy" else _mf_ask
-                self._pending_maker[_mf_key] = {
+                _mf_intent = {
                     "exchange": exchange.name, "symbol": symbol, "side": side,
                     "market_type": market_type, "strategy": strategy,
                     "size": float(size), "leverage": int(leverage),
@@ -1580,7 +1621,20 @@ class OrderManager:
                     "execution_snapshot": execution_snapshot,
                     "created_ts": time.time(),
                 }
-                self._persist_pending_maker()
+                _mf_intent.update({
+                    "strategy_id": authorization_strategy_id or strategy,
+                    "parent_decision_id": str(
+                        decision_id or f"direct-{uuid.uuid4()}"
+                    ),
+                    "resolution_decision_id": f"maker-resolution-{uuid.uuid4()}",
+                    "decision_confidence": decision_confidence,
+                })
+                _mf_registered, _mf_reason = self._register_pending_maker(
+                    exchange, _mf_key, _mf_intent
+                )
+                if not _mf_registered:
+                    self.last_open_reject = _mf_reason
+                    return None
                 logger.info(
                     f"[MakerFirst] {symbol} {side.upper()}: virtual post-only "
                     f"limit @ {_mf_limit:.6g} (last={fill_price:.6g}) — "
@@ -1694,17 +1748,25 @@ class OrderManager:
                     market_type, exchange.name, "maker")
                 pos.total_fees = pos.entry_fee + pos.exit_fee
 
-        _provenance_intent = self._append_order_intent(
-            exchange,
-            symbol,
-            market_type,
-            side,
-            size,
-            decision_id,
-            strategy,
-            candidate_id,
-            leverage,
+        _provenance_intent = (
+            _maker_first_ctx.get("provenance_intent")
+            if isinstance(_maker_first_ctx, dict)
+            else None
         )
+        if _provenance_intent is None:
+            _provenance_intent = self._append_order_intent(
+                exchange,
+                symbol,
+                market_type,
+                side,
+                size,
+                decision_id,
+                strategy,
+                candidate_id,
+                leverage,
+                parent_decision_id=decision_parent_id,
+                confidence=decision_confidence,
+            )
         if _provenance_intent is False:
             return None
 
@@ -1957,6 +2019,22 @@ class OrderManager:
                     )
                     return None
 
+        # Maker-first is resolved outside BotEngine, so BotEngine cannot write
+        # the later FILLED terminal decision.  Persist the child resolution
+        # immediately after the paper wallet/executor has accepted the fill and
+        # before the position/trade row is registered.  The parent candidate
+        # remains immutable DEFERRED; the trade points at this child decision.
+        if _maker_first_ctx is not None:
+            _maker_first_ctx["terminal_recorded"] = (
+                self._record_maker_resolution_decision(
+                    _maker_first_ctx.get("maker_intent") or {},
+                    outcome="filled",
+                    reason=f"maker_first_{_fill_type or 'taker'}_fill",
+                    execution_snapshot=execution_snapshot,
+                    filled_position=pos,
+                )
+            )
+
         if self.dry_run:
             self._append_execution_event(
                 _provenance_intent,
@@ -2000,8 +2078,6 @@ class OrderManager:
                     context={"fill_type": _fill_type or "taker"},
                 )
 
-        self.tracker.add(pos)
-
         # Tag scalp positions for downstream routing (time wall, stale close,
         # trailing skip). Derived from TP distance vs entry; no caller changes
         # needed. Also stores tp_pct so the time-wall fallback check can match.
@@ -2015,6 +2091,9 @@ class OrderManager:
                     pos.tp_pct = round(_tp_dist_pct, 3)
         except Exception:
             pass
+        finally:
+            # Attach/save routing metadata atomically with the position.
+            self.tracker.add(pos)
 
         # Daily open counter — feeds RiskManager.can_trade()'s per-day cap.
         # Wired here (and not earlier) so failed orders don't burn the
@@ -3691,78 +3770,366 @@ class OrderManager:
                 return be
         return effective_sl
 
-    def accrue_paper_funding(self, exchange: BaseExchange):
-        """
-        DRY_RUN-only: at each 8h UTC funding boundary, charge funding on
-        every held futures position for this exchange. LIVE futures accrue
-        funding on the exchange side and settle automatically — paper
-        previously ignored it entirely, making carry-heavy longs look free.
+    @staticmethod
+    def _paper_funding_mark_at(exchange: BaseExchange, pos: Position,
+                               settlement_ts: float) -> float:
+        """Historical mark nearest one realized settlement, or zero."""
+        try:
+            fetcher = getattr(exchange.exchange, "fetch_mark_ohlcv", None)
+            if not callable(fetcher):
+                return 0.0
+            since_ms = int((float(settlement_ts) - 60.0) * 1000.0)
+            rows = fetcher(pos.symbol, "1m", since=since_ms, limit=3) or []
+            candidates = []
+            for row in rows:
+                row_ts = float(row[0]) / 1000.0
+                mark = float(row[4])
+                if mark > 0 and abs(row_ts - float(settlement_ts)) <= 120.0:
+                    candidates.append((abs(row_ts - float(settlement_ts)), mark))
+            return min(candidates)[1] if candidates else 0.0
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return 0.0
 
-        We check once per call; the first call landing in a funding hour
-        (00/08/16 UTC) after the last settlement triggers the charge.
-        Idempotent: only one settlement per 8h window.
+    def accrue_paper_funding(self, exchange: BaseExchange):
+        """Accrue authoritative realized funding settlements exactly once.
+
+        Settlement timestamps and rates come from the per-venue realized
+        history, so variable intervals and monitor/restart gaps are handled
+        without inventing rates.  Missing history or a missing historical mark
+        defers the charge and leaves the cursor unchanged.
         """
         if not self.dry_run or not self.sim.funding_on:
             return
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        hour = now.hour
-        if hour not in (0, 8, 16):
-            return
-        # Settled this window already? Tracked per-venue: each exchange gets its
-        # own 8h window so one venue settling first no longer suppresses the
-        # others (audit 2026-07-07).
-        window_key = hour + now.day * 100 + now.month * 10000
-        venue = exchange.name
-        if self._last_funding_hour.get(venue) == window_key:
-            return
-        self._last_funding_hour[venue] = window_key
-        self._save_funding_windows()
+        from core.funding_history import load_realized_settlements
 
-        positions = [p for p in self.tracker.get_open(exchange=exchange.name)
-                     if p.market_type == "futures"]
-        if not positions:
-            return
+        now_ts = time.time()
+        positions = [
+            pos for pos in self.tracker.get_open(exchange=exchange.name)
+            if pos.market_type == "futures"
+        ]
+        dirty = False
         for pos in positions:
-            try:
-                # Current mark + funding rate in one shot
-                rate = 0.0
-                try:
-                    fr = exchange.exchange.fetch_funding_rate(pos.symbol)
-                    rate = float(fr.get("fundingRate") or 0.0)
-                except Exception:
-                    # Fallback median: 0.01% per 8h for BTC/ETH-class perps
-                    rate = 0.0001
-                try:
-                    tk = exchange.fetch_ticker(pos.symbol, "futures")
-                    mark = float(tk.get("last") or tk.get("close") or pos.entry_price)
-                except Exception:
-                    mark = pos.entry_price
-                cost = self.sim.funding_payment(pos, mark, rate)
-                if abs(cost) < 0.0001:
-                    continue
-                # Accumulate onto the position so attribution.record sees
-                # total funding paid over the hold (positive = we paid).
-                try:
-                    pos.funding_paid = float(getattr(pos, "funding_paid", 0.0) or 0.0) + float(cost)
-                except Exception:
-                    pass
-                # Apply to wallet: +cost = debit (wallet shrinks), -cost = credit.
-                # Use the wallet's LOCKED apply_funding (audit 2026-06-04) instead of
-                # mutating self.wallet._balances directly — the direct RMW raced the
-                # on_open/on_close RMW on the same per-exchange key under the SL/TP daemon.
-                name = exchange.name.lower()
-                prev = self.wallet.balance(name)
-                new_bal = self.wallet.apply_funding(name, cost)
-                logger.info(
-                    f"[SimFund] {exchange.name} {pos.symbol} {pos.side.upper()}: "
-                    f"rate={rate*100:.4f}% cost={cost:+.4f} USDT "
-                    f"→ bal {prev:.2f} → {new_bal:.2f}"
+            base = str(pos.symbol).split("/", 1)[0].upper()
+            cursor = float(getattr(pos, "last_funding_ts", 0.0) or 0.0)
+            start_ts = max(float(pos.open_time or 0.0), cursor) + 0.001
+            settlements = load_realized_settlements(
+                str(exchange.name),
+                base,
+                start_ts=start_ts,
+                end_ts=now_ts,
+            )
+            if settlements is None:
+                logger.warning(
+                    f"[SimFund] {exchange.name} {pos.symbol}: realized funding "
+                    "history unavailable; no rate fabricated"
                 )
-            except Exception as e:
-                logger.debug(f"[SimFund] {pos.symbol}: {e}")
+                continue
+            for settlement in settlements:
+                mark = self._paper_funding_mark_at(
+                    exchange, pos, settlement.settlement_ts
+                )
+                if mark <= 0:
+                    logger.warning(
+                        f"[SimFund] {exchange.name} {pos.symbol}: historical mark "
+                        f"unavailable at {settlement.settlement_ts:.3f}; accrual deferred"
+                    )
+                    break
+                cost = float(self.sim.funding_payment(pos, mark, settlement.rate))
+                if abs(cost) >= 0.0001:
+                    name = str(exchange.name).lower()
+                    previous = self.wallet.balance(name)
+                    new_balance = self.wallet.apply_funding(name, cost)
+                    pos.funding_paid = (
+                        float(getattr(pos, "funding_paid", 0.0) or 0.0) + cost
+                    )
+                    logger.info(
+                        f"[SimFund] {exchange.name} {pos.symbol} {pos.side.upper()}: "
+                        f"settled={settlement.settlement_ts:.3f} "
+                        f"rate={settlement.rate * 100:.4f}% cost={cost:+.4f} USDT "
+                        f"-> bal {previous:.2f} -> {new_balance:.2f}"
+                    )
+                pos.last_funding_ts = settlement.settlement_ts
+                dirty = True
+        if dirty:
+            save = getattr(self.tracker, "_save", None)
+            if callable(save):
+                save()
 
     # ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ──────────────────────────────
+
+    @staticmethod
+    def _maker_base(symbol: str | None) -> str:
+        """Canonical base key used by position and pending-intent exclusivity."""
+        return str(symbol or "").split("/")[0].split(":")[0].upper()
+
+    def _pending_maker_count(self, *, exclude_key: str | None = None) -> int:
+        """Number of live reservations, optionally excluding one resolver."""
+        with self._pending_maker_lock:
+            return sum(
+                1 for key in self._pending_maker
+                if not exclude_key or key != exclude_key
+            )
+
+    def pending_maker_reservations(self) -> list:
+        """Return Position-shaped immutable views of pending PAPER exposure.
+
+        A maker intent has no Position yet, but it has consumed the same scarce
+        portfolio resources: one slot, one base asset, gross notional and
+        stop-risk headroom.  The conservative entry price includes the maximum
+        allowed chase distance so a taker fallback cannot exceed its booking.
+        """
+        if _maker_first_cfg().get("enabled", False) or self._pending_maker:
+            self._maker_first_boot()
+        reservations = []
+        with self._pending_maker_lock:
+            rows = list(self._pending_maker.items())
+        for key, intent in rows:
+            try:
+                limit_px = float(intent.get("limit_px") or 0.0)
+                signal_px = float(intent.get("signal_px") or limit_px)
+                size = abs(float(intent.get("size") or 0.0))
+                stop_frac = float(intent.get("sl_pct") or 0.0)
+                if limit_px <= 0 or size <= 0 or stop_frac <= 0:
+                    # Malformed reservations remain visible and therefore fail
+                    # aggregate-risk closed instead of silently disappearing.
+                    entry_px = max(limit_px, signal_px, 0.0)
+                    stop_loss = 0.0
+                else:
+                    entry_px = max(limit_px, signal_px) * (
+                        1.0 + _MAKER_CHASE_GUARD_PCT
+                    )
+                    stop_loss = (
+                        entry_px * (1.0 - stop_frac)
+                        if intent.get("side") == "buy"
+                        else entry_px * (1.0 + stop_frac)
+                    )
+                reservations.append(SimpleNamespace(
+                    id=f"pending-maker:{key}",
+                    reservation_key=key,
+                    exchange=str(intent.get("exchange") or ""),
+                    symbol=str(intent.get("symbol") or ""),
+                    side=str(intent.get("side") or ""),
+                    market_type=str(intent.get("market_type") or "futures"),
+                    strategy=str(intent.get("strategy") or ""),
+                    size=size,
+                    entry_price=entry_px,
+                    stop_loss=stop_loss,
+                    is_pending_maker_reservation=True,
+                ))
+            except (TypeError, ValueError):
+                reservations.append(SimpleNamespace(
+                    id=f"pending-maker:{key}",
+                    reservation_key=key,
+                    exchange=str(intent.get("exchange") or ""),
+                    symbol=str(intent.get("symbol") or ""),
+                    side=str(intent.get("side") or ""),
+                    market_type="futures",
+                    strategy=str(intent.get("strategy") or ""),
+                    size=0.0,
+                    entry_price=0.0,
+                    stop_loss=0.0,
+                    is_pending_maker_reservation=True,
+                ))
+        return reservations
+
+    @staticmethod
+    def _stable_maker_resolution_id(intent: dict) -> str:
+        """Return the persisted child id, deriving a stable id for legacy state."""
+        existing = str(intent.get("resolution_decision_id") or "").strip()
+        if existing:
+            return existing
+        seed = "|".join((
+            str(intent.get("parent_decision_id") or intent.get("decision_id") or "direct"),
+            str(intent.get("exchange") or ""),
+            str(intent.get("symbol") or ""),
+            str(intent.get("side") or ""),
+            str(intent.get("created_ts") or ""),
+        ))
+        derived = f"maker-resolution-{uuid.uuid5(uuid.NAMESPACE_URL, seed)}"
+        intent["resolution_decision_id"] = derived
+        return derived
+
+    @staticmethod
+    def _maker_confidence(intent: dict) -> float | None:
+        raw = intent.get("decision_confidence")
+        if raw is None:
+            raw = intent.get("mcp_score")
+            try:
+                raw = float(raw) / 100.0 if raw is not None else None
+            except (TypeError, ValueError):
+                return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if 0.0 <= value <= 1.0 else None
+
+    def _maker_provenance_intent(self, intent: dict):
+        payload = intent.get("provenance_intent")
+        if not isinstance(payload, dict):
+            return None
+        try:
+            from core.contracts import OrderIntent
+
+            return OrderIntent.from_dict(payload)
+        except Exception as exc:
+            logger.error(f"[Provenance] invalid persisted maker order intent: {exc}")
+            return None
+
+    def _record_maker_resolution_decision(
+        self,
+        intent: dict,
+        *,
+        outcome: str,
+        reason: str,
+        execution_snapshot: dict | None = None,
+        filled_position=None,
+    ) -> bool:
+        """Append one child terminal decision; never mutate the parent row."""
+        if not getattr(self, "enforce_event_provenance", False):
+            return True
+        try:
+            from core.decision_provenance import record_terminal_decision
+            from core.warehouse import get_warehouse
+
+            parent_id = str(
+                intent.get("parent_decision_id")
+                or intent.get("decision_id")
+                or ""
+            )
+            action = {
+                "type": "OPEN",
+                "symbol": intent.get("symbol"),
+                "exchange": intent.get("exchange"),
+                "market_type": intent.get("market_type", "futures"),
+                "side": intent.get("side"),
+                "strategy_id": (
+                    intent.get("strategy_id")
+                    or intent.get("strategy")
+                    or "unassigned"
+                ),
+                "strategy_version": intent.get("model_version"),
+                "model_version": intent.get("model_version"),
+                "confidence": self._maker_confidence(intent),
+                "candidate_id": intent.get("candidate_id"),
+                "decision_id": self._stable_maker_resolution_id(intent),
+                "parent_decision_id": parent_id,
+                "resolution_kind": "paper_maker_first",
+                "execution_snapshot": execution_snapshot,
+            }
+            if filled_position is not None:
+                action.update({
+                    "exchange_symbol": intent.get("symbol"),
+                    "filled_quantity": float(filled_position.size),
+                    "filled_price": float(filled_position.entry_price),
+                })
+            record_terminal_decision(
+                get_warehouse(),
+                action,
+                outcome=outcome,
+                reason=reason,
+                stage="maker_resolution",
+            )
+            return True
+        except Exception as exc:
+            logger.error(
+                f"[Provenance] maker resolution write failed for "
+                f"{intent.get('symbol')}: {exc}"
+            )
+            try:
+                self.risk.latch_incident(
+                    f"maker resolution provenance failed: {exc}",
+                    category="execution",
+                )
+            except Exception:
+                pass
+            return False
+
+    def _register_pending_maker(
+        self, exchange: BaseExchange, key: str, intent: dict
+    ) -> tuple[bool, str]:
+        """Atomically reserve and durably persist one virtual maker intent."""
+        base = self._maker_base(intent.get("symbol"))
+        with self._pending_maker_lock:
+            if key in self._pending_maker:
+                return False, "maker_first_pending"
+            if any(
+                self._maker_base(existing.get("symbol")) == base
+                for existing in self._pending_maker.values()
+            ):
+                return False, "maker_first_base_reserved"
+
+            resolution_id = self._stable_maker_resolution_id(intent)
+            provenance = self._append_order_intent(
+                exchange,
+                str(intent["symbol"]),
+                str(intent.get("market_type") or "futures"),
+                str(intent["side"]),
+                float(intent["size"]),
+                resolution_id,
+                str(intent.get("strategy_id") or intent.get("strategy") or "unassigned"),
+                intent.get("candidate_id"),
+                float(intent.get("leverage") or 1),
+                order_type="limit",
+                limit_price=float(intent["limit_px"]),
+                post_only=True,
+                parent_decision_id=str(intent.get("parent_decision_id") or ""),
+                confidence=self._maker_confidence(intent),
+            )
+            if provenance is False:
+                return False, "order_intent_persistence_failed"
+            intent["provenance_intent"] = (
+                provenance.to_dict() if provenance is not None else None
+            )
+            self._pending_maker[key] = intent
+            if provenance is not None:
+                self._append_execution_event(
+                    provenance,
+                    "acknowledged",
+                    quantity=float(intent["size"]),
+                    price=float(intent["limit_px"]),
+                    context={"paper": True, "virtual_post_only": True},
+                )
+            if self._persist_pending_maker():
+                return True, "maker_first_pending"
+
+            self._pending_maker.pop(key, None)
+            if provenance is not None:
+                self._append_execution_event(
+                    provenance,
+                    "error",
+                    reason="maker_pending_persistence_failed",
+                )
+            self._record_maker_resolution_decision(
+                intent,
+                outcome="error",
+                reason="maker_pending_persistence_failed",
+            )
+            return False, "maker_pending_persistence_failed"
+
+    def _record_maker_nonfill(
+        self,
+        intent: dict,
+        *,
+        outcome: str,
+        reason: str,
+        event_type: str = "cancelled",
+        execution_snapshot: dict | None = None,
+    ) -> None:
+        provenance = self._maker_provenance_intent(intent)
+        if provenance is not None:
+            self._append_execution_event(
+                provenance,
+                event_type,
+                reason=reason,
+                context={"paper": True, "virtual_post_only": True},
+            )
+        self._record_maker_resolution_decision(
+            intent,
+            outcome=outcome,
+            reason=reason,
+            execution_snapshot=execution_snapshot,
+        )
 
     def _maker_first_boot(self):
         """One-time boot sweep for maker-first paper entries.
@@ -3787,6 +4154,17 @@ class OrderManager:
             self._maker_fills = list(state.get("fills") or [])[-200:]
             stale = state.get("pending") or {}
             if stale:
+                # A restart cancels the virtual orders, but cancellation is a
+                # real terminal resolution.  Emit a distinct append-only child
+                # decision for each one before clearing the state; never turn
+                # the parent's DEFERRED row into a fabricated rejection/fill.
+                for stale_intent in stale.values():
+                    if isinstance(stale_intent, dict):
+                        self._record_maker_nonfill(
+                            stale_intent,
+                            outcome="cancelled",
+                            reason="maker_restart_cancelled",
+                        )
                 logger.warning(
                     f"[MakerFirst] boot sweep: cancelled {len(stale)} stale "
                     f"pending intent(s) from a prior process "
@@ -3799,16 +4177,18 @@ class OrderManager:
         """Persist pending intents + soak counters so a restart cancels
         cleanly (the boot sweep discards whatever is pending here)."""
         try:
-            self._pending_maker_path.parent.mkdir(parents=True, exist_ok=True)
-            self._pending_maker_path.write_text(
-                json.dumps({
+            with self._pending_maker_lock:
+                payload = {
                     "pending": self._pending_maker,
                     "counters": self._maker_counters,
                     "fills": self._maker_fills[-200:],
-                }, indent=2),
-                encoding="utf-8")
+                }
+            self._pending_maker_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(self._pending_maker_path, payload, indent=2)
+            return True
         except Exception as e:
             logger.warning(f"[MakerFirst] persist failed: {e}")
+            return False
 
     def _maker_wick_through(self, exchange: BaseExchange, intent: dict) -> bool:
         """True when a CLOSED 1m bar that opened AFTER the intent printed
@@ -4278,14 +4658,9 @@ class OrderManager:
                 )
                 if _is_scalp:
                     _tw_min = _SM_tw.get("time_wall_min", 60)
-                    _pos_age_min = 0
-                    try:
-                        if hasattr(pos, "open_time") and pos.open_time:
-                            from datetime import datetime, timezone
-                            _ot = pos.open_time if isinstance(pos.open_time, datetime) else datetime.fromisoformat(str(pos.open_time))
-                            _pos_age_min = (datetime.now(timezone.utc) - _ot.replace(tzinfo=timezone.utc if _ot.tzinfo is None else _ot.tzinfo)).total_seconds() / 60
-                    except Exception:
-                        pass
+                    _pos_age_min = _position_age_minutes(
+                        getattr(pos, "open_time", None)
+                    )
                     # ACCURACY band (2026-07-10 leak fix): band positions
                     # defer ALL scalp time exits inside max_hold_hours so
                     # first-touch SL/TP governs. False when the flag is off
