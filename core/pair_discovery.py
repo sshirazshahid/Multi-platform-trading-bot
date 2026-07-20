@@ -77,6 +77,11 @@ _COMMODITY_BASES_DISABLED = {
     "SILVER",
     "COPPER",
     "NATGAS",
+    # Brent crude CME ticker (binance TRADIFI_PERPETUAL, see ANALYSIS_ONLY_BASES)
+    "BZ",
+    # tokenized gold — commodity exposure despite being on-chain assets
+    "PAXG",
+    "XAUT",
 }
 STOCK_BASES = set()
 _STOCK_BASES_DISABLED = {
@@ -259,11 +264,36 @@ def _is_leveraged_token(base: str, market: Mapping) -> bool:
     return bool(_LEVERAGED_BASE_RE.fullmatch(base))
 
 
+_TRADFI_UNDERLYING_TYPES = {"COMMODITY", "EQUITY", "STOCK", "TRADFI"}
+
+
+def _is_tradfi_market(market: Mapping) -> bool:
+    """Detect venue-flagged TradFi (commodity/equity RWA) contracts from market
+    metadata — e.g. binance BZ/USDT:USDT carries contractType=TRADIFI_PERPETUAL,
+    underlyingType=COMMODITY. Metadata-driven so newly listed RWA tickers stay
+    out of this crypto-only universe without static-list maintenance."""
+    if not isinstance(market, Mapping):
+        return False
+    info = market.get("info")
+    if not isinstance(info, Mapping):
+        info = {}
+    if "tradifi" in str(info.get("contractType") or "").lower():
+        return True
+    if _upper(info.get("underlyingType")) in _TRADFI_UNDERLYING_TYPES:
+        return True
+    subtypes = info.get("underlyingSubType")
+    if not isinstance(subtypes, (list, tuple)):
+        subtypes = [subtypes]
+    return any("tradfi" in str(subtype or "").lower() for subtype in subtypes)
+
+
 def _asset_rejection_reason(base: str, market: Mapping) -> Optional[str]:
     if not base:
         return "invalid_market_metadata"
     if base in _DISABLED_BASES:
         return f"disabled_asset:{base}"
+    if _is_tradfi_market(market):
+        return f"tradfi_asset:{base}"
     if base in _SKIP_BASES:
         return f"stable_or_wrapped:{base}"
     if base in _MEME_BASES:

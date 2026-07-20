@@ -86,7 +86,7 @@ class MCPStrategyScorer:
         """Keep research proposals broad, but return only approved OPEN routes."""
         routes, gate_reason = self._execution_routes()
         executable: list = []
-        blocked = 0
+        blocked_routes: list = []
         futures_types = {"futures", "future", "perpetual", "perp", "swap"}
         for action in actions:
             if not isinstance(action, dict) or str(action.get("type") or "").upper() != "OPEN":
@@ -101,12 +101,16 @@ class MCPStrategyScorer:
                     and venue in allowed_venues):
                 executable.append(action)
             else:
-                blocked += 1
-        if blocked:
+                blocked_routes.append(f"{base or '?'}@{venue or '?'}")
+        self._last_blocked_open_routes = blocked_routes
+        if blocked_routes:
             reason = gate_reason or "strategy_spec_route_not_approved"
+            detail = ", ".join(blocked_routes[:8])
+            if len(blocked_routes) > 8:
+                detail += f" +{len(blocked_routes) - 8} more"
             logger.warning(
-                f"[MCPScorer] execution spec gate blocked {blocked} OPEN "
-                f"action(s): {reason}; research candidates remain available"
+                f"[MCPScorer] execution spec gate blocked {len(blocked_routes)} OPEN "
+                f"action(s) [{detail}]: {reason}; research candidates remain available"
             )
         return executable
 
