@@ -69,6 +69,18 @@ def _pos_float(v) -> Optional[float]:
     return f if f > 0 else None
 
 
+def iso_utc(ts) -> str:
+    """Epoch seconds -> compact UTC stamp for heartbeat lines; 'none' if absent."""
+    if ts is None:
+        return "none"
+    try:
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(int(ts), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OSError, OverflowError, TypeError, ValueError):
+        return "none"
+
+
 def unrealized_short_return(entry_px: float, mark_px: float) -> float:
     """Unrealized return of a SHORT marked at ``mark_px``: (entry - mark) / entry.
     Positive when price falls (short in profit), negative on a pump against it."""
@@ -218,6 +230,25 @@ def probe_tick(agent, units, *, log_tag: str) -> dict:
             stats["evaluated"] += 1
         except Exception as e:
             logger.debug(f"[{log_tag}] {label} eval error: {e}")
+    # ── Heartbeat (2026-07-20): probe silence must be diagnosable from the ──
+    # boot log alone (breakout/unlock sat at 0 decision rows for days with no
+    # way to tell "wiring broken" from "no trigger"). ONE line per tick.
+    try:
+        hb = getattr(agent, "_hb_totals", None)
+        if hb is None:
+            hb = agent._hb_totals = {"ticks": 0, "evaluated": 0, "entered": 0}
+        hb["ticks"] += 1
+        hb["evaluated"] += stats["evaluated"]
+        hb["entered"] += stats["entered"]
+        last_bar = max(agent._bar_seen.values(), default=None)
+        logger.info(
+            f"[{log_tag}] heartbeat: units={len(units)} "
+            f"evaluated={stats['evaluated']} entered={stats['entered']} "
+            f"mtm_rows={stats['mtm_rows']} totals(ticks={hb['ticks']} "
+            f"evaluated={hb['evaluated']} entered={hb['entered']}) "
+            f"last_bar_ts={iso_utc(last_bar)}")
+    except Exception as e:  # the lane never raises for diagnostics
+        logger.debug(f"[{log_tag}] heartbeat error: {e}")
     return stats
 
 

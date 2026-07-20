@@ -65,6 +65,7 @@ from core.agents.probe_common import (
     concurrent_account_mtm,
     ensure_schema,
     insert_row,
+    iso_utc,
     unrealized_short_return,
     write_shadow_decision,
 )
@@ -300,7 +301,53 @@ class UnlockShortProbeAgent:
             stats["mtm_rows"] = self._monitor_open(now)
         except Exception as e:
             logger.debug(f"[UnlockProbe] monitor error: {e}")
+        # ── Heartbeat (2026-07-20): probe silence must be diagnosable from ──
+        # the boot log alone. All 402 rows to date are SKIP_LATE (historical
+        # sweep) and the calendar's future events all sit below the frozen 10%
+        # ratio floor — the horizon fields make that visible per tick.
+        try:
+            hb = getattr(self, "_hb_totals", None)
+            if hb is None:
+                hb = self._hb_totals = {"ticks": 0, "entered": 0, "skipped": 0}
+            hb["ticks"] += 1
+            hb["entered"] += stats["entered"]
+            hb["skipped"] += stats["skipped"]
+            future_qual, max_unlock = self._calendar_horizon(docs, now)
+            logger.info(
+                f"[UnlockProbe] heartbeat: docs={len(docs)} "
+                f"events_pending={stats['events_seen']} "
+                f"entered={stats['entered']} skipped={stats['skipped']} "
+                f"mtm_rows={stats['mtm_rows']} totals(ticks={hb['ticks']} "
+                f"entered={hb['entered']} skipped={hb['skipped']}) "
+                f"future_qualifying={future_qual} "
+                f"max_unlock_ts={iso_utc(max_unlock)}")
+        except Exception as e:  # the lane never raises for diagnostics
+            logger.debug(f"[UnlockProbe] heartbeat error: {e}")
         return stats
+
+    @staticmethod
+    def _calendar_horizon(docs: list, now: int) -> tuple:
+        """(future qualifying events, newest unlock ts) across the calendar.
+        'Qualifying' mirrors _collect_signals' frozen filters (tokens > 0,
+        ratio >= RATIO_MIN) for events still in the future — the count that
+        tells an operator whether silence means 'nothing to trade' or
+        'calendar horizon empty/stale'."""
+        n_qual = 0
+        max_ts = None
+        for doc in docs:
+            for e in doc.get("events") or []:
+                try:
+                    ts = int(e["ts"])
+                    tokens = float(e.get("tokens") or 0.0)
+                    ratio = e.get("ratio")
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if max_ts is None or ts > max_ts:
+                    max_ts = ts
+                if ts > now and tokens > 0 and ratio is not None \
+                        and float(ratio) >= RATIO_MIN:
+                    n_qual += 1
+        return n_qual, max_ts
 
     # ── signal collection ────────────────────────────────────────────────
     def _collect_signals(self, docs: list, now: int) -> list:
