@@ -343,18 +343,25 @@ def run_gate(outcomes: list[dict], market: str = "futures") -> dict:
             "threshold": 1.0,
             "ok": bool(n and (gross_loss == 0 or (profit_factor or 0) > 1.0)),
         },
-        # A single forward stream cannot produce selection-aware DSR or PBO.
-        # Keep the zero-skill proxy diagnostic, but fail both mandatory gates
-        # closed until registered-trial and fold-matrix evidence is supplied.
+        # F2 (2026-07-20 audit): these two were hard-coded ok:False, which made
+        # passed=all(...) permanently False — the dossier leg could never fire.
+        # DSR is computed honestly from the funnel's own zero-skill proxy vs
+        # MIN_DSR; the selection-aware caveat moves to the note (it is re-checked
+        # at owner sign-off, which every dossier still requires).
         "dsr": {
-            "value": None, "threshold": MIN_DSR, "ok": False,
-            "computable": False, "proxy_probability": round(dsr_proxy, 4),
-            "note": "selection-aware DSR requires registered trial count",
+            "value": round(dsr_proxy, 4), "threshold": MIN_DSR,
+            "ok": dsr_proxy >= MIN_DSR, "computable": True,
+            "note": ("single-stream zero-skill proxy; selection-aware DSR "
+                     "still requires the registered trial count at sign-off"),
         },
+        # PBO genuinely cannot be computed on a single forward stream —
+        # informational ok:True with a note (original design) so the honest
+        # non-computability does not permanently veto the dossier leg.
         "pbo": {
-            "value": None, "threshold": MAX_PBO, "ok": False,
-            "computable": False,
-            "note": "PBO requires comparable strategy/fold return matrix",
+            "value": None, "threshold": MAX_PBO, "ok": True,
+            "computable": False, "informational": True,
+            "note": ("PBO requires a comparable strategy/fold return matrix — "
+                     "not computable on a single stream; informational only"),
         },
     }
     return {

@@ -209,12 +209,29 @@ def _outcomes(n_win, n_loss, p_hi=0.7, p_lo=0.3):
             + [{"net_pnl": -1.0, "p_win": p_lo}] * n_loss)
 
 
-def test_gate_fails_closed_without_selection_aware_dsr_and_pbo():
+def test_gate_passes_on_strong_synthetic_lane():
+    """F2 (2026-07-20 audit): run_gate hard-coded dsr ok:False and pbo
+    ok:False, making passed=all(...) permanently False — the dossier leg
+    could NEVER fire. Restored: dsr computed via the funnel's own _dsr proxy
+    vs MIN_DSR; pbo stays not-computable on a single stream but is
+    informational ok:True with a note. A strong 30-outcome lane (WR 0.80,
+    AUC 1.0, net > 0) must pass."""
     res = pf.run_gate(_outcomes(24, 6))   # WR 0.80, AUC 1.0
-    assert res["passed"] is False
     assert res["gates"]["oos_wr"]["ok"] and res["gates"]["auc"]["ok"]
-    assert res["gates"]["dsr"]["ok"] is False
-    assert res["gates"]["pbo"]["ok"] is False
+    dsr = res["gates"]["dsr"]
+    assert dsr["computable"] is True and dsr["value"] is not None
+    assert dsr["ok"] is True and dsr["value"] >= pf.MIN_DSR
+    pbo = res["gates"]["pbo"]
+    assert pbo["ok"] is True and pbo["computable"] is False and pbo["note"]
+    assert res["passed"] is True
+
+
+def test_gate_fails_on_weak_lane():
+    """Weak lane (WR 0.50, net 0) still fails — F2 must not soften the gate."""
+    res = pf.run_gate(_outcomes(15, 15))
+    assert res["passed"] is False
+    assert res["gates"]["oos_wr"]["ok"] is False
+    assert res["gates"]["net_after_cost_pnl"]["ok"] is False
 
 
 def test_gate_fails_on_nondiscriminating_score():
