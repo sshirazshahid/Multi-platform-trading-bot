@@ -98,8 +98,13 @@ class VirtualWallet:
             bal = self._balances.get(ex, self._start)
 
             notional = size * price
-            if market_type == "futures" and leverage > 1:
-                cost = notional / leverage + fee   # margin + entry fee
+            if market_type == "futures":
+                # ALL futures use the margin formula (F1 audit 2026-07-20: the
+                # old `leverage > 1` gate dropped lev-1 futures to the spot
+                # branch — same arithmetic on open, but the gate class
+                # sign-flipped shorts on close). Clamp lev<=0 to 1.
+                lev = max(1, int(leverage or 1))
+                cost = notional / lev + fee   # margin + entry fee
             else:
                 cost = notional + fee   # spot: full notional + entry fee
 
@@ -140,9 +145,14 @@ class VirtualWallet:
             ex       = exchange.lower()
             bal      = self._balances.get(ex, self._start)
 
-            if market_type == "futures" and leverage > 1:
-                # Return margin (what was originally deducted) + realized PnL
-                margin = size * entry_price / leverage
+            if market_type == "futures":
+                # Return margin (what was originally deducted) + realized PnL.
+                # F1 audit 2026-07-20: this branch must apply to ALL futures —
+                # the old `leverage > 1` gate sent lev-1 futures to the SPOT
+                # sell-proceeds formula, which SIGN-FLIPS short PnL (AXS
+                # DRY-359d8a43 booked -0.1237, wallet delta $0.00).
+                lev = max(1, int(leverage or 1))
+                margin = size * entry_price / lev
                 proceeds = margin + gross_pnl - exit_fee
             else:
                 proceeds = size * exit_price - exit_fee   # spot: sell proceeds
