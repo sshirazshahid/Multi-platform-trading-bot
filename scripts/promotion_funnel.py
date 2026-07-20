@@ -216,14 +216,27 @@ def f1_lane_state(gate_log: Path, now: float) -> LaneState:
         lines = gate_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
     except OSError as exc:
         return LaneState("f1_carry", "ERROR", detail={"error": str(exc)})
+    # F7 (2026-07-20 audit): a fixed lines[-2000:] cap silently under-counted
+    # entries_48h on busy windows. Scan newest-first (the log is append-
+    # ordered) and stop at the first record older than the window, so the
+    # full 48h is always counted without reading the whole history.
+    cutoff = now - 48 * 3600
     recent = []
-    for ln in lines[-2000:]:
+    for ln in reversed(lines):
         try:
             e = json.loads(ln)
         except json.JSONDecodeError:
             continue
-        if float(e.get("ts", 0)) >= now - 48 * 3600:
-            recent.append(e)
+        try:
+            ts = float(e.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts <= 0:
+            continue  # malformed record: skip, don't end the scan
+        if ts < cutoff:
+            break
+        recent.append(e)
+    recent.reverse()  # chronological order for the consecutive-streak logic
     streaks: dict[tuple, int] = {}
     best: dict[tuple, float] = {}
     alert = False
