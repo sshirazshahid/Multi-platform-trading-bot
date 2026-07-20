@@ -606,8 +606,39 @@ ACCURACY_TARGET_MODE = {
 # None -> exactly today's 66/65 behavior. PAPER research knob (max-flow
 # firehose, threshold 50 per owner amendment); HONESTY: a lower floor admits
 # lower-conviction entries — expectancy expected <= historical (~ -0.24R).
-_MCP_ENTRY_MIN_SCORE_RAW = os.getenv("MCP_ENTRY_MIN_SCORE", "").strip()
-MCP_ENTRY_MIN_SCORE = float(_MCP_ENTRY_MIN_SCORE_RAW) if _MCP_ENTRY_MIN_SCORE_RAW else None
+#
+# F3 (2026-07-20 deep audit): both research knobs below were plain env reads
+# with NO mode/profile gate, while the sibling geometry knob (T3,
+# _accuracy_geometry_enabled above) IS gated PAPER+MAX_FLOW_BAND. A stale env
+# entry could therefore lower the floor / disable the SL cooldown in ANY
+# mode. Both knobs now deviate from the legacy defaults ONLY under
+# OPERATING_MODE=PAPER + PAPER_TRADING_PROFILE=MAX_FLOW_BAND.
+def _max_flow_research_knob_enabled(operating_mode: str, paper_profile: str) -> bool:
+    """PAPER + MAX_FLOW_BAND gate for the max-flow research knobs (mirrors
+    the T3 _accuracy_geometry_enabled pattern)."""
+    return operating_mode == "PAPER" and paper_profile == "MAX_FLOW_BAND"
+
+
+def _profile_gated_entry_floor(raw: str, operating_mode: str, paper_profile: str):
+    """Entry-floor override: float(raw) only under the gated profile, else
+    None (legacy 66/65 floors)."""
+    raw = (raw or "").strip()
+    if not raw or not _max_flow_research_knob_enabled(operating_mode, paper_profile):
+        return None
+    return float(raw)
+
+
+def _profile_gated_sl_cooldown(raw: str, operating_mode: str, paper_profile: str) -> bool:
+    """SL-cooldown flag: the env value is honored only under the gated
+    profile, else the legacy default (enabled) is mandatory."""
+    if _max_flow_research_knob_enabled(operating_mode, paper_profile):
+        return (raw or "true").strip().lower() == "true"
+    return True
+
+
+MCP_ENTRY_MIN_SCORE = _profile_gated_entry_floor(
+    os.getenv("MCP_ENTRY_MIN_SCORE", ""), OPERATING_MODE, PAPER_TRADING_PROFILE
+)
 
 # ── SL COOLDOWN FLAG (2026-07-19 max-flow band engine, owner-approved) ───────
 # Default TRUE = Phase 29 post-SL CooldownPeriod + StoplossGuard unchanged.
@@ -615,7 +646,10 @@ MCP_ENTRY_MIN_SCORE = float(_MCP_ENTRY_MIN_SCORE_RAW) if _MCP_ENTRY_MIN_SCORE_RA
 # (False, "sl_cooldown_disabled_by_profile") WITHOUT touching the SL ledger
 # (note_sl_hit keeps recording), so flipping back to true restores full
 # protection from persisted state. PAPER research knob for entry throughput.
-SL_COOLDOWN_ENABLED = os.getenv("SL_COOLDOWN_ENABLED", "true").lower() == "true"
+# Profile-gated since 2026-07-20 (F3): see _max_flow_research_knob_enabled.
+SL_COOLDOWN_ENABLED = _profile_gated_sl_cooldown(
+    os.getenv("SL_COOLDOWN_ENABLED", "true"), OPERATING_MODE, PAPER_TRADING_PROFILE
+)
 
 # ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY toxic-regime veto ───────
 # Pre-registered screen _workspace/strategy_pipeline/13_band_conditional_screen
