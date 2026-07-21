@@ -4303,8 +4303,12 @@ class OrderManager:
             prov_sl, prov_tp = limit_px * (1 - sl_pct), limit_px * (1 + tp_pct)
         else:
             prov_sl, prov_tp = limit_px * (1 + sl_pct), limit_px * (1 - tp_pct)
+        # 2026-07-21: maker_intent MUST ride along — open_position's terminal
+        # provenance write reads ctx["maker_intent"]; an empty dict raised
+        # "candidate symbol is missing" and latched an execution-incident HALT
+        # after the very first maker fill.
         ctx = {"fill_type": fill_type, "fill_px": limit_px,
-               "sl_pct": sl_pct, "tp_pct": tp_pct}
+               "sl_pct": sl_pct, "tp_pct": tp_pct, "maker_intent": intent}
         resolved_snapshot = intent.get("execution_snapshot")
         if getattr(self, "enforce_event_provenance", False):
             try:
