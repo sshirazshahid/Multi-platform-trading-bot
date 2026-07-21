@@ -237,6 +237,9 @@ def _boot_profile_log_lines() -> list:
             ACCURACY_TARGET_MODE as _acc,
         )
         from config import (
+            MCP_DIRECTIONAL_ECONOMIC_GATE as _egate,
+        )
+        from config import (
             MCP_ENTRY_MIN_SCORE as _floor,
         )
         from config import (
@@ -262,6 +265,7 @@ def _boot_profile_log_lines() -> list:
             f"  AccBand   : {'ON' if acc_on else 'OFF'}"
             + (f" (fracs buy={frac_buy}/sell={frac_sell})" if acc_on else "")
         ),
+        f"  EconGate  : mode={_egate.get('mode', 'strict')}",
     ]
 
 
@@ -2944,6 +2948,15 @@ class BotEngine:
 
         from core.economic_entry_gate import evaluate_directional_entry
 
+        # 2026-07-21 paper_fallback: config resolves the mode to "strict"
+        # unless PAPER + MAX_FLOW_BAND (F3 gate); the operating_mode belt
+        # below is defense-in-depth for this per-call parameter.
+        gate_mode = str(gate_cfg.get("mode") or "strict").strip().lower()
+        paper_fallback = (
+            gate_mode == "paper_fallback"
+            and str(operating_mode or "").upper() == "PAPER"
+        )
+
         decision = evaluate_directional_entry(
             model_version=action.get("model_version"),
             promoted_model_version=self._validated_promoted_futures_model_version(),
@@ -2960,6 +2973,7 @@ class BotEngine:
                 "slippage_stress_multiplier"
             ),
             probability_margin=gate_cfg.get("probability_margin"),
+            paper_fallback=paper_fallback,
         )
         audit = decision.to_dict()
         audit.update({
@@ -2993,6 +3007,13 @@ class BotEngine:
             pass
 
         if decision.allowed:
+            if decision.reason == "economic_gate_paper_fallback_pass":
+                logger.info(
+                    "[EconomicGate] paper_fallback admission (no promoted "
+                    f"model): {action.get('symbol')} "
+                    f"breakeven_wr={decision.breakeven_p_win:.3f} stressed"
+                )
+                return True
             logger.info(
                 f"[EconomicGate] PASS {exchange_name}:{action.get('symbol')} "
                 f"p={decision.p_win:.3f} required={decision.required_p_win:.3f} "

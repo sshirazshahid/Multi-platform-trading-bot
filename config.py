@@ -743,7 +743,39 @@ MODEL_GATE = {
 # candidate-specific after-cost breakeven probability; it is not a target-WR
 # geometry knob and does not rewrite exits or labels. Fee/slippage stresses
 # follow the backtest robustness policy (1.5x fee tier, 2x slippage).
+#
+# MODE (2026-07-21): "strict" (default) = today's fail-closed behavior — a
+# promoted model probability is REQUIRED, and none has ever legitimately
+# passed promotion, so strict blocks 100% of MCP_DIRECTIONAL_PAPER entries
+# (reason=economic_gate_model_missing). "paper_fallback" — honored ONLY under
+# OPERATING_MODE=PAPER + PAPER_TRADING_PROFILE=MAX_FLOW_BAND (same F3 gate as
+# the entry-floor/SL-cooldown knobs) — skips the model-probability term when
+# no promoted model exists and admits iff the bracket's TP clears the SAME
+# stressed round-trip costs (geometric breakeven WR < 1.0). It never fakes a
+# model; the model path resumes automatically upon a legitimate promotion.
+def _profile_gated_economic_gate_mode(
+    raw: str, operating_mode: str, paper_profile: str
+) -> str:
+    """Resolve MCP_DIRECTIONAL_ECONOMIC_GATE_MODE with the F3 profile gate."""
+    mode = (raw or "").strip().lower() or "strict"
+    if mode not in {"strict", "paper_fallback"}:
+        raise ValueError(
+            "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE must be 'strict' or "
+            f"'paper_fallback', got {raw!r}"
+        )
+    if mode == "paper_fallback" and not _max_flow_research_knob_enabled(
+        operating_mode, paper_profile
+    ):
+        return "strict"
+    return mode
+
+
 MCP_DIRECTIONAL_ECONOMIC_GATE = {
+    "mode": _profile_gated_economic_gate_mode(
+        os.getenv("MCP_DIRECTIONAL_ECONOMIC_GATE_MODE", "strict"),
+        OPERATING_MODE,
+        PAPER_TRADING_PROFILE,
+    ),
     "probability_margin": float(os.getenv(
         "MCP_DIRECTIONAL_ECONOMIC_PROBABILITY_MARGIN", "0.03"
     )),
