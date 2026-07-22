@@ -508,6 +508,22 @@ BUNDLE_MR_PROBE = {
     "venue": os.getenv("SHADOW_BUNDLE_MR_PROBE_VENUE", "bybit"),
 }
 
+# ── Pullback-momentum shadow probe (owner-directed forward test, 2026-07-23) ─
+# NOT a pipeline GO: textbook pullback-momentum sits inside the REFUTED
+# trend/momentum families (0/40 OOS 2026-06-13). PullbackMomentumProbeAgent
+# forward paper tests the owner's OWN stated rules (SMA50>SMA200 trend gate,
+# close>SMA20, RSI14 cross above 55 entry; RSI14>70 / close<SMA20 / 1.5xATR
+# intrabar stop / 42-bar time exits; long-only 4h bybit perps on the
+# bundle-MR spec-derived universe; notational 1%-risk sizing) — the
+# TsmomProbeAgent precedent. Expectation: NO-PROMOTE. It places NO orders and
+# only runs inside the (already log-only) shadow lane, so it changes ZERO
+# live behaviour. Off restores the pre-probe shadow lane exactly.
+PULLBACK_MOMENTUM_PROBE = {
+    "enabled": os.getenv("SHADOW_PULLBACK_PROBE_ENABLED", "true").lower() == "true",
+    # match the bundle-MR probe data venue (bybit USDT linear perps)
+    "venue": os.getenv("SHADOW_PULLBACK_PROBE_VENUE", "bybit"),
+}
+
 # ── Deep-breakout ACTIVE PAPER lane (owner: "start trading aggressively", 2026-07-11)
 # ACTIVE PAPER orders (sim fills via sim_execution) for the Codex deep_breakout
 # strategy — unlike the log-only BREAKOUT_PROBE above, which stays untouched and

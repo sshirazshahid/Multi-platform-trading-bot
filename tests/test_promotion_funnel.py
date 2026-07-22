@@ -101,7 +101,8 @@ def test_bundle_mr_lanes_registered():
     both arms are 4h, so each lane keys on its own DISTINCT agent_id."""
     assert pf.PROBE_LANES["zfade_4h_cfg365"] == ("ZfadeProbeAgent", "4h")
     assert pf.PROBE_LANES["rsi2_4h_cfg226"] == ("Rsi2TrackerProbeAgent", "4h")
-    assert len(pf.PROBE_LANES) == 6  # 4 pre-existing lanes + the 2 bundle arms
+    # 4 pre-existing lanes + 2 bundle arms + pullback_ma20_4h (2026-07-23)
+    assert len(pf.PROBE_LANES) == 7
 
 
 def test_bundle_mr_lanes_carry_universe_widened_stamp(tmp_path):

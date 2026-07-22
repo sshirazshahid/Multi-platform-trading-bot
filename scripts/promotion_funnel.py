@@ -60,6 +60,8 @@ PROBE_LANES: dict[str, tuple[str, str | None]] = {
     # both arms are 4h, so lanes key on the DISTINCT agent_ids.
     "zfade_4h_cfg365": ("ZfadeProbeAgent", "4h"),
     "rsi2_4h_cfg226": ("Rsi2TrackerProbeAgent", "4h"),
+    # owner-directed pullback-momentum probe (2026-07-23, NOT a pipeline GO):
+    "pullback_ma20_4h": ("PullbackMomentumProbeAgent", "4h"),
 }
 
 # Universe-widening disclosure (owner-approved 2026-07-20): both bundle-MR

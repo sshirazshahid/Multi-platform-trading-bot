@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import config as config_module
 from core.bot_engine import BotEngine, _is_mcp_directional_paper_futures
 from core.economic_entry_gate import evaluate_directional_entry
 
@@ -186,6 +187,11 @@ def test_bot_gate_fails_closed_when_promoted_pointer_is_unavailable(monkeypatch)
         BotEngine,
         "_validated_promoted_futures_model_version",
         staticmethod(lambda: None),
+    )
+    # Strict-mode semantics under test; pin the mode so the live .env
+    # (paper_fallback under MAX_FLOW_BAND) cannot invert the assertion.
+    monkeypatch.setitem(
+        config_module.MCP_DIRECTIONAL_ECONOMIC_GATE, "mode", "strict"
     )
     engine = object.__new__(BotEngine)
     action = _action()

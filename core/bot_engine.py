@@ -661,6 +661,21 @@ class BotEngine:
                 symbols=self._bundle_probe_symbols(str(cfg.get("venue", "bybit"))),
             ),
         },
+        {
+            "config": "PULLBACK_MOMENTUM_PROBE",
+            "import_path": "core.agents.pullback_momentum_probe_agent:"
+                           "PullbackMomentumProbeAgent",
+            "warn_label": "pullback-momentum",
+            "log": "[Engine] PullbackMomentumProbeAgent registered "
+                   "(log-only shadow probe; owner-directed pullback-momentum "
+                   "forward test, NOT a pipeline GO)",
+            "kwargs": lambda self, cfg: dict(
+                ohlcv_provider=self._unlock_ohlcv,
+                market_data_provider=self._unlock_market_data,
+                venue=str(cfg.get("venue", "bybit")),
+                symbols=self._bundle_probe_symbols(str(cfg.get("venue", "bybit"))),
+            ),
+        },
     )
 
     def _venue_perp_available(self, venue: str, symbol: str) -> bool:
