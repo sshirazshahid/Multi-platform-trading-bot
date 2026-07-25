@@ -1,0 +1,31 @@
+{
+  "id": "vpin_jump_veto_v1",
+  "status": "FROZEN_PREREG",
+  "date_utc": "2026-07-24",
+  "expectation": "NO_GO",
+  "expression": "veto_overlay_only",
+  "directional_vpin": "STOP",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "venue": "binance_usdtm",
+  "vpin_N_buckets": 50,
+  "theta_grid": [
+    0.55,
+    0.6,
+    0.65,
+    0.7
+  ],
+  "n_trials": 4,
+  "primary_metric": "after_cost_delta_mean_R_vs_no_veto",
+  "gates": {
+    "delta_ev_oos_gt_0": true,
+    "mc_p_pos": 0.95,
+    "mc_maxdd_p95": 0.25,
+    "min_n_oos": 30
+  },
+  "md_path": "_workspace/strategy_pipeline/27_prereg_vpin_jump_veto.md",
+  "sha256_md": "2b880d1beaefd5f9b16b23997c15214b66489d36b4ac707432524c5d788c4406",
+  "notes": "Hash md before any harvest/screen outcomes. Harden plan Phase 4 queue only \u2014 no live install."
+}

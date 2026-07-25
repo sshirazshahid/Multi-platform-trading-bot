@@ -1,0 +1,132 @@
+{
+  "candidate": "vpin_jump_veto_v1",
+  "hypothesis": "High VPIN at AccBand decision time does not improve after-cost expectancy vs no-veto baseline (null); reject null only if gates pass.",
+  "expectation": "NO_GO",
+  "owner_override": "full_screen_skip_stage0",
+  "prereg_sha256_md": "2b880d1beaefd5f9b16b23997c15214b66489d36b4ac707432524c5d788c4406",
+  "n_baseline": 3050,
+  "n_with_vpin": 3050,
+  "baseline_mean_R": -0.26225045554285303,
+  "baseline_wr": 0.6373770491803279,
+  "baseline_mc": {
+    "p_total_positive": 0.0,
+    "max_drawdown_p95": 932.4948125018024
+  },
+  "theta_results": [
+    {
+      "theta": 0.55,
+      "n_covered": 3050,
+      "n_kept": 3050,
+      "n_skipped": 0,
+      "n_events": 3050,
+      "fire_rate": 0.0,
+      "baseline_mean_R": -0.26225045554285303,
+      "kept_mean_R": -0.26225045554285303,
+      "skipped_mean_R": NaN,
+      "baseline_wr": 0.6373770491803279,
+      "kept_wr": 0.6373770491803279,
+      "delta_mean_R": 0.0,
+      "delta_p_le_0": 0.496,
+      "mc_p_pos": 0.0,
+      "mc_maxdd_p95": 936.3435882836905,
+      "gates": {
+        "delta_ev_gt_0": false,
+        "mc_p_pos": false,
+        "mc_maxdd_p95": false,
+        "min_n": true,
+        "bleed_mask": false
+      },
+      "verdict": "NO_GO",
+      "holm_reject_H0": false
+    },
+    {
+      "theta": 0.6,
+      "n_covered": 3050,
+      "n_kept": 3050,
+      "n_skipped": 0,
+      "n_events": 3050,
+      "fire_rate": 0.0,
+      "baseline_mean_R": -0.26225045554285303,
+      "kept_mean_R": -0.26225045554285303,
+      "skipped_mean_R": NaN,
+      "baseline_wr": 0.6373770491803279,
+      "kept_wr": 0.6373770491803279,
+      "delta_mean_R": 0.0,
+      "delta_p_le_0": 0.496,
+      "mc_p_pos": 0.0,
+      "mc_maxdd_p95": 936.3435882836905,
+      "gates": {
+        "delta_ev_gt_0": false,
+        "mc_p_pos": false,
+        "mc_maxdd_p95": false,
+        "min_n": true,
+        "bleed_mask": false
+      },
+      "verdict": "NO_GO",
+      "holm_reject_H0": false
+    },
+    {
+      "theta": 0.65,
+      "n_covered": 3050,
+      "n_kept": 3050,
+      "n_skipped": 0,
+      "n_events": 3050,
+      "fire_rate": 0.0,
+      "baseline_mean_R": -0.26225045554285303,
+      "kept_mean_R": -0.26225045554285303,
+      "skipped_mean_R": NaN,
+      "baseline_wr": 0.6373770491803279,
+      "kept_wr": 0.6373770491803279,
+      "delta_mean_R": 0.0,
+      "delta_p_le_0": 0.496,
+      "mc_p_pos": 0.0,
+      "mc_maxdd_p95": 936.3435882836905,
+      "gates": {
+        "delta_ev_gt_0": false,
+        "mc_p_pos": false,
+        "mc_maxdd_p95": false,
+        "min_n": true,
+        "bleed_mask": false
+      },
+      "verdict": "NO_GO",
+      "holm_reject_H0": false
+    },
+    {
+      "theta": 0.7,
+      "n_covered": 3050,
+      "n_kept": 3050,
+      "n_skipped": 0,
+      "n_events": 3050,
+      "fire_rate": 0.0,
+      "baseline_mean_R": -0.26225045554285303,
+      "kept_mean_R": -0.26225045554285303,
+      "skipped_mean_R": NaN,
+      "baseline_wr": 0.6373770491803279,
+      "kept_wr": 0.6373770491803279,
+      "delta_mean_R": 0.0,
+      "delta_p_le_0": 0.496,
+      "mc_p_pos": 0.0,
+      "mc_maxdd_p95": 936.3435882836905,
+      "gates": {
+        "delta_ev_gt_0": false,
+        "mc_p_pos": false,
+        "mc_maxdd_p95": false,
+        "min_n": true,
+        "bleed_mask": false
+      },
+      "verdict": "NO_GO",
+      "holm_reject_H0": false
+    }
+  ],
+  "verdict": "NO_GO",
+  "gates": {
+    "delta_ev_oos_gt_0": true,
+    "mc_p_pos": 0.95,
+    "mc_maxdd_p95": 0.25,
+    "min_n_oos": 30,
+    "n_trials": 4,
+    "multiplicity": "holm",
+    "adjacent_theta_same_sign": true
+  },
+  "generated_utc": "2026-07-25T01:19:53.313309+00:00"
+}

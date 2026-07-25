@@ -1,0 +1,44 @@
+# DOCUMENTATION MIRROR ONLY — not authoritative.
+# Binding values live in config.py and .env (supervisor restart required after .env edits).
+# Investment committee agents must summarize risk against THIS FILE only as a checklist;
+# they must read config.py / boot banner for ground truth.
+#
+# Educational illustrative structure (seb.ai-style). Not personalized advice.
+
+live_trading: false
+allow_withdrawals: false
+require_human_approval: true
+kill_switch: true  # maps to risk incident latch + process halt semantics
+
+operating_mode: PAPER  # OBSERVATION | PAPER | CONTROLLED_LIVE — see config.OPERATING_MODE
+signal_source: mcp     # config.SIGNAL_SOURCE
+
+# Portfolio rails (CLAUDE.md / risk_manager — verify in config.py)
+max_risk_per_trade_pct: 3.0
+max_total_exposure_pct: 12.0
+max_leverage: 2.5  # charter soft rail; live tier dict may differ — check config
+
+# Soft daily-loss circuit breaker (config.DAILY_LOSS_BREAKER)
+daily_loss_breaker:
+  enabled: true
+  max_loss_pct: 2.0  # of start-of-day balance; refuses NEW entries only
+
+# Paper research profile (when PAPER + MAX_FLOW_BAND)
+paper_trading_profile: MAX_FLOW_BAND
+band_regime_filter_enabled: true
+smart_money_entry_gate_enabled: true
+economic_gate_mode: paper_fallback
+
+# Promotion (core/promotion_gate.py) — not loosened by this file
+promotion_gate:
+  min_dsr: 0.10
+  max_pbo: 0.5
+  min_oos_wr: 0.55
+  min_auc: 0.60
+  min_resolved: 30
+
+# Notes for committee risk review
+# - BLOCK if live_trading would be required
+# - BLOCK if ledger REFUTED without reopen bar
+# - BLOCK if prereg not hashed before outcomes
+# - APPROVE for screen/paper soak only after debate APPROVE + pipeline handoff
