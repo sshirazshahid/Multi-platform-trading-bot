@@ -1,0 +1,612 @@
+{
+ "note": "Coverage/indicator blobs copied VERBATIM out of _workspace/strategy_pipeline/27_pair_indicator_dossier.json (2026-07-23 provenance run) so these tests never depend on that untracked artifact. Cases: 1INCH = 52.8d stale 1h cache + missing bybit funding CSV + zero warehouse rows; ADA = DATA_OK; APT = DATA_OK with an unlock-calendar artifact; BTC = DATA_OK with both liquidity artifacts; DASH/TAO = BACKFILL_FIRST with essentially nothing local (TAO is used as the all-absent case by passing indicators=None, i.e. no local 4h parquet).",
+ "source": "_workspace/strategy_pipeline/27_pair_indicator_dossier.json",
+ "source_generated_utc": "2026-07-23T17:12:45Z",
+ "recorded_verdict_counts": {
+  "DATA_OK": 18,
+  "PARTIAL": 0,
+  "BACKFILL_FIRST": 25
+ },
+ "pairs": [
+  {
+   "symbol": "1INCH/USDT:USDT",
+   "base": "1INCH",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 0.08513,
+    "sma": {
+     "sma20": 0.079585,
+     "sma50": 0.075624,
+     "sma200": 0.072026,
+     "price_vs_sma20": "above",
+     "price_vs_sma50": "above",
+     "price_vs_sma200": "above",
+     "sma50_vs_sma200": "golden"
+    },
+    "ema": {
+     "ema20": 0.080264,
+     "ema50": 0.076945,
+     "price_vs_ema20": "above",
+     "price_vs_ema50": "above"
+    },
+    "macd": {
+     "line": 0.002679,
+     "signal": 0.002321,
+     "hist": 0.000358,
+     "line_sign": "pos",
+     "signal_sign": "pos",
+     "hist_sign": "pos"
+    },
+    "rsi14": 75.04,
+    "bollinger": {
+     "pct_b": 0.8477,
+     "bandwidth": 0.200396,
+     "bandwidth_pctl": 0.975
+    },
+    "psar_side": "long",
+    "supertrend_10_3": "up",
+    "volume_20": {
+     "trend": "rising",
+     "zscore": 0.28
+    },
+    "kdj_9_3_3": {
+     "k": 79.55,
+     "d": 75.16,
+     "j": 88.32
+    },
+    "obv_slope_20": "pos",
+    "williams_r14": -4.95
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 8760,
+     "last_bar_utc": "2026-05-31T21:00Z",
+     "staleness_days": 52.8
+    },
+    "ohlcv_cache_4h": {
+     "present": false,
+     "rows": null,
+     "last_bar_utc": null,
+     "staleness_days": null
+    },
+    "funding_history": {
+     "bybit": {
+      "present": false
+     },
+     "binance": {
+      "present": false
+     },
+     "bitget": {
+      "present": false
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 0,
+     "last_ts": null
+    },
+    "orderbook_depth": "ABSENT",
+    "trades": "ABSENT",
+    "onchain": "ABSENT"
+   },
+   "verdict": "BACKFILL_FIRST",
+   "verdict_reasons": {
+    "bybit_funding_csv": false,
+    "local_1h_fresh": false,
+    "local_4h_fresh": false,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  },
+  {
+   "symbol": "ADA/USDT:USDT",
+   "base": "ADA",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 0.1705,
+    "sma": {
+     "sma20": 0.172535,
+     "sma50": 0.167662,
+     "sma200": 0.16283,
+     "price_vs_sma20": "below",
+     "price_vs_sma50": "above",
+     "price_vs_sma200": "above",
+     "sma50_vs_sma200": "golden"
+    },
+    "ema": {
+     "ema20": 0.172016,
+     "ema50": 0.169253,
+     "price_vs_ema20": "below",
+     "price_vs_ema50": "above"
+    },
+    "macd": {
+     "line": 0.001668,
+     "signal": 0.002118,
+     "hist": -0.000451,
+     "line_sign": "pos",
+     "signal_sign": "pos",
+     "hist_sign": "neg"
+    },
+    "rsi14": 48.54,
+    "bollinger": {
+     "pct_b": 0.3381,
+     "bandwidth": 0.072862,
+     "bandwidth_pctl": 0.3107
+    },
+    "psar_side": "short",
+    "supertrend_10_3": "up",
+    "volume_20": {
+     "trend": "falling",
+     "zscore": 1.48
+    },
+    "kdj_9_3_3": {
+     "k": 32.02,
+     "d": 40.99,
+     "j": 14.08
+    },
+    "obv_slope_20": "pos",
+    "williams_r14": -80.31
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 27591,
+     "last_bar_utc": "2026-07-19T07:00Z",
+     "staleness_days": 4.4
+    },
+    "ohlcv_cache_4h": {
+     "present": true,
+     "rows": 2468,
+     "last_bar_utc": "2026-07-19T08:00Z",
+     "staleness_days": 4.4
+    },
+    "funding_history": {
+     "bybit": {
+      "present": true,
+      "rows": 5840,
+      "last": "1784217600"
+     },
+     "binance": {
+      "present": true,
+      "rows": 6069,
+      "last": "1784217600"
+     },
+     "bitget": {
+      "present": true,
+      "rows": 124,
+      "last": "1784217600"
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 12563,
+     "last_ts": "1784826661.4648886"
+    },
+    "orderbook_depth": "l2_history.jsonl",
+    "trades": "ABSENT",
+    "onchain": "ABSENT"
+   },
+   "verdict": "DATA_OK",
+   "verdict_reasons": {
+    "bybit_funding_csv": true,
+    "local_1h_fresh": true,
+    "local_4h_fresh": true,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  },
+  {
+   "symbol": "APT/USDT:USDT",
+   "base": "APT",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 0.6159,
+    "sma": {
+     "sma20": 0.61085,
+     "sma50": 0.609756,
+     "sma200": 0.615162,
+     "price_vs_sma20": "above",
+     "price_vs_sma50": "above",
+     "price_vs_sma200": "above",
+     "sma50_vs_sma200": "death"
+    },
+    "ema": {
+     "ema20": 0.612686,
+     "ema50": 0.610943,
+     "price_vs_ema20": "above",
+     "price_vs_ema50": "above"
+    },
+    "macd": {
+     "line": 0.003603,
+     "signal": 0.002459,
+     "hist": 0.001145,
+     "line_sign": "pos",
+     "signal_sign": "pos",
+     "hist_sign": "pos"
+    },
+    "rsi14": 54.59,
+    "bollinger": {
+     "pct_b": 0.6394,
+     "bandwidth": 0.059314,
+     "bandwidth_pctl": 0.2036
+    },
+    "psar_side": "long",
+    "supertrend_10_3": "up",
+    "volume_20": {
+     "trend": "rising",
+     "zscore": 1.77
+    },
+    "kdj_9_3_3": {
+     "k": 57.92,
+     "d": 62.13,
+     "j": 49.51
+    },
+    "obv_slope_20": "neg",
+    "williams_r14": -52.29
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 27591,
+     "last_bar_utc": "2026-07-19T07:00Z",
+     "staleness_days": 4.4
+    },
+    "ohlcv_cache_4h": {
+     "present": true,
+     "rows": 818,
+     "last_bar_utc": "2026-07-19T08:00Z",
+     "staleness_days": 4.4
+    },
+    "funding_history": {
+     "bybit": {
+      "present": true,
+      "rows": 3592,
+      "last": "1783756800"
+     },
+     "binance": {
+      "present": true,
+      "rows": 3593,
+      "last": "1783756800"
+     },
+     "bitget": {
+      "present": true,
+      "rows": 100,
+      "last": "1783756800"
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 13218,
+     "last_ts": "1784826661.4648886"
+    },
+    "orderbook_depth": "ABSENT",
+    "trades": "ABSENT",
+    "onchain": "ABSENT"
+   },
+   "verdict": "DATA_OK",
+   "verdict_reasons": {
+    "bybit_funding_csv": true,
+    "local_1h_fresh": true,
+    "local_4h_fresh": true,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  },
+  {
+   "symbol": "BTC/USDT:USDT",
+   "base": "BTC",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 64927.2,
+    "sma": {
+     "sma20": 65795.755,
+     "sma50": 64889.26,
+     "sma200": 62887.0765,
+     "price_vs_sma20": "below",
+     "price_vs_sma50": "above",
+     "price_vs_sma200": "above",
+     "sma50_vs_sma200": "golden"
+    },
+    "ema": {
+     "ema20": 65558.071463,
+     "ema50": 64995.97825,
+     "price_vs_ema20": "below",
+     "price_vs_ema50": "below"
+    },
+    "macd": {
+     "line": 181.160307,
+     "signal": 350.891565,
+     "hist": -169.731258,
+     "line_sign": "pos",
+     "signal_sign": "pos",
+     "hist_sign": "neg"
+    },
+    "rsi14": 43.27,
+    "bollinger": {
+     "pct_b": 0.074,
+     "bandwidth": 0.030987,
+     "bandwidth_pctl": 0.1321
+    },
+    "psar_side": "short",
+    "supertrend_10_3": "up",
+    "volume_20": {
+     "trend": "falling",
+     "zscore": 1.95
+    },
+    "kdj_9_3_3": {
+     "k": 18.37,
+     "d": 27.62,
+     "j": -0.13
+    },
+    "obv_slope_20": "pos",
+    "williams_r14": -89.21
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 27592,
+     "last_bar_utc": "2026-07-19T08:00Z",
+     "staleness_days": 4.4
+    },
+    "ohlcv_cache_4h": {
+     "present": true,
+     "rows": 2468,
+     "last_bar_utc": "2026-07-19T08:00Z",
+     "staleness_days": 4.4
+    },
+    "funding_history": {
+     "bybit": {
+      "present": true,
+      "rows": 6068,
+      "last": "1784217600"
+     },
+     "binance": {
+      "present": true,
+      "rows": 6069,
+      "last": "1784217600"
+     },
+     "bitget": {
+      "present": true,
+      "rows": 124,
+      "last": "1784217600"
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 22094,
+     "last_ts": "1784826661.4648886"
+    },
+    "orderbook_depth": "l2_history.jsonl",
+    "trades": "aggtrades_qh",
+    "onchain": "ABSENT"
+   },
+   "verdict": "DATA_OK",
+   "verdict_reasons": {
+    "bybit_funding_csv": true,
+    "local_1h_fresh": true,
+    "local_4h_fresh": true,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  },
+  {
+   "symbol": "DASH/USDT:USDT",
+   "base": "DASH",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 33.11,
+    "sma": {
+     "sma20": 34.036,
+     "sma50": 34.0806,
+     "sma200": 34.33475,
+     "price_vs_sma20": "below",
+     "price_vs_sma50": "below",
+     "price_vs_sma200": "below",
+     "sma50_vs_sma200": "death"
+    },
+    "ema": {
+     "ema20": 33.850185,
+     "ema50": 34.029872,
+     "price_vs_ema20": "below",
+     "price_vs_ema50": "below"
+    },
+    "macd": {
+     "line": -0.219642,
+     "signal": -0.113465,
+     "hist": -0.106177,
+     "line_sign": "neg",
+     "signal_sign": "neg",
+     "hist_sign": "neg"
+    },
+    "rsi14": 35.99,
+    "bollinger": {
+     "pct_b": 0.0792,
+     "bandwidth": 0.064655,
+     "bandwidth_pctl": 0.325
+    },
+    "psar_side": "short",
+    "supertrend_10_3": "down",
+    "volume_20": {
+     "trend": "rising",
+     "zscore": 4.42
+    },
+    "kdj_9_3_3": {
+     "k": 20.15,
+     "d": 22.43,
+     "j": 15.58
+    },
+    "obv_slope_20": "neg",
+    "williams_r14": -85.2
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 8763,
+     "last_bar_utc": "2026-05-31T21:00Z",
+     "staleness_days": 52.8
+    },
+    "ohlcv_cache_4h": {
+     "present": false,
+     "rows": null,
+     "last_bar_utc": null,
+     "staleness_days": null
+    },
+    "funding_history": {
+     "bybit": {
+      "present": false
+     },
+     "binance": {
+      "present": false
+     },
+     "bitget": {
+      "present": false
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 0,
+     "last_ts": null
+    },
+    "orderbook_depth": "ABSENT",
+    "trades": "ABSENT",
+    "onchain": "ABSENT"
+   },
+   "verdict": "BACKFILL_FIRST",
+   "verdict_reasons": {
+    "bybit_funding_csv": false,
+    "local_1h_fresh": false,
+    "local_4h_fresh": false,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  },
+  {
+   "symbol": "TAO/USDT:USDT",
+   "base": "TAO",
+   "live_fetch": {
+    "bars_4h": 300,
+    "closed_4h_used": 299,
+    "bars_1h": 300,
+    "err_4h": null,
+    "err_1h": null
+   },
+   "indicators_4h": {
+    "asof_closed_4h_utc": "2026-07-23T12:00Z",
+    "close": 193.57,
+    "sma": {
+     "sma20": 197.1825,
+     "sma50": 196.2382,
+     "sma200": 208.5293,
+     "price_vs_sma20": "below",
+     "price_vs_sma50": "below",
+     "price_vs_sma200": "below",
+     "sma50_vs_sma200": "death"
+    },
+    "ema": {
+     "ema20": 196.760917,
+     "ema50": 197.954774,
+     "price_vs_ema20": "below",
+     "price_vs_ema50": "below"
+    },
+    "macd": {
+     "line": -0.412274,
+     "signal": 0.034857,
+     "hist": -0.447131,
+     "line_sign": "neg",
+     "signal_sign": "pos",
+     "hist_sign": "neg"
+    },
+    "rsi14": 42.99,
+    "bollinger": {
+     "pct_b": 0.1196,
+     "bandwidth": 0.048157,
+     "bandwidth_pctl": 0.1643
+    },
+    "psar_side": "short",
+    "supertrend_10_3": "down",
+    "volume_20": {
+     "trend": "rising",
+     "zscore": 0.4
+    },
+    "kdj_9_3_3": {
+     "k": 21.16,
+     "d": 29.09,
+     "j": 5.3
+    },
+    "obv_slope_20": "pos",
+    "williams_r14": -89.17
+   },
+   "coverage": {
+    "ohlcv_cache_1h": {
+     "present": true,
+     "rows": 8763,
+     "last_bar_utc": "2026-05-31T21:00Z",
+     "staleness_days": 52.8
+    },
+    "ohlcv_cache_4h": {
+     "present": false,
+     "rows": null,
+     "last_bar_utc": null,
+     "staleness_days": null
+    },
+    "funding_history": {
+     "bybit": {
+      "present": false
+     },
+     "binance": {
+      "present": false
+     },
+     "bitget": {
+      "present": false
+     }
+    },
+    "warehouse_candidates": {
+     "rows": 0,
+     "last_ts": null
+    },
+    "orderbook_depth": "ABSENT",
+    "trades": "ABSENT",
+    "onchain": "ABSENT"
+   },
+   "verdict": "BACKFILL_FIRST",
+   "verdict_reasons": {
+    "bybit_funding_csv": false,
+    "local_1h_fresh": false,
+    "local_4h_fresh": false,
+    "live_4h_computable": true,
+    "live_1h_ok": true
+   }
+  }
+ ]
+}
