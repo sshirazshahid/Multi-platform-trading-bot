@@ -527,8 +527,12 @@ F1_MIN_LIQ_BUFFER_X = MIN_MARGIN_BUFFER_X      # reuse S1 maintenance floor (3x)
 F1_MAX_FUNDING_AGE_SEC = DEFAULT_MAX_HEDGE_STALENESS_SEC  # 300s funding freshness
 # Pipeline acceptance gates (plan): cycles / stress / one-leg / concentration.
 F1_MIN_CYCLES = 60
-F1_MAX_PNL_CONCENTRATION_PCT = 60.0  # Rev 5: 40 -> 60, per symbol AND per venue
+F1_MAX_PNL_CONCENTRATION_PCT = 35.0  # acceptance plan: symbol/venue/regime cap
 F1_STRESS_COST_MULT = 2.0
+F1_TRAILING_SETTLEMENTS = 21
+F1_LOWER_BOUND_CONFIDENCE = 0.95
+F1_BOOTSTRAP_PATHS = 2_000
+F1_BOOTSTRAP_BLOCK = 3
 # Rev 5 entry additions: per-leg spread caps + funding-window timing.
 F1_MAX_LEG_SPREAD_BPS = 5.0            # spot AND perp leg spread caps
 F1_MIN_TIME_TO_FUNDING_MIN = 20.0      # too close to settlement -> skip
@@ -537,7 +541,7 @@ F1_MAX_TIME_TO_FUNDING_MIN = 180.0     # too far from settlement -> skip
 F1_MAX_SYMBOL_EQUITY_PCT = 5.0         # max 5% paper equity per symbol
 F1_MAX_TOTAL_CARRY_PCT = 20.0          # max 20% total carry notional
 F1_INITIAL_LEVERAGE_MAX = 1.0          # 1x on the initial entry
-F1_LEVERAGE_MAX = 2.0                  # 2x hard cap thereafter
+F1_LEVERAGE_MAX = 1.0                  # strategy remains unlevered; no later adds
 # Rev 5 universe: BTC/ETH on binance (same-venue hedge) unless explicitly opted in.
 F1_DEFAULT_SYMBOLS = ("BTC/USDT", "ETH/USDT")
 F1_DEFAULT_VENUES = ("binance",)
@@ -571,6 +575,53 @@ def f1_net_expected_edge_bps(
     return (gross_frac - float(round_trip_cost_frac)) * 1e4
 
 
+def f1_net_funding_lower_bound_bps(
+    funding_rates,
+    *,
+    hold_settlements: int,
+    round_trip_cost_frac: float,
+    confidence: float = F1_LOWER_BOUND_CONFIDENCE,
+    n_paths: int = F1_BOOTSTRAP_PATHS,
+    block: int = F1_BOOTSTRAP_BLOCK,
+    seed: int = 0,
+) -> float:
+    """One-sided moving-block-bootstrap lower bound for cumulative net carry.
+
+    Funding is serially dependent, so individual observations are not sampled
+    independently.  Circular blocks preserve short funding regimes.  Every
+    path pays the complete spot+perp entry/exit cost supplied by the caller.
+    The fixed seed makes entry decisions replayable.
+    """
+    rates = tuple(float(rate) for rate in funding_rates)
+    if not rates or any(not math.isfinite(rate) for rate in rates):
+        raise ValueError("funding_rates must contain finite values")
+    if hold_settlements <= 0:
+        raise ValueError("hold_settlements must be > 0")
+    if not 0.5 < float(confidence) < 1.0:
+        raise ValueError("confidence must be between 0.5 and 1")
+    if n_paths < 100:
+        raise ValueError("n_paths must be >= 100")
+    if block <= 0:
+        raise ValueError("block must be > 0")
+    cost = float(round_trip_cost_frac)
+    if not math.isfinite(cost) or cost < 0:
+        raise ValueError("round_trip_cost_frac must be finite and non-negative")
+
+    rng = random.Random(seed)
+    outcomes: list[float] = []
+    n = len(rates)
+    for _ in range(n_paths):
+        sampled: list[float] = []
+        while len(sampled) < hold_settlements:
+            start = rng.randrange(n)
+            sampled.extend(rates[(start + offset) % n] for offset in range(block))
+        outcomes.append((sum(sampled[:hold_settlements]) - cost) * 1e4)
+    outcomes.sort()
+    tail_probability = 1.0 - float(confidence)
+    index = max(0, min(n_paths - 1, math.ceil(tail_probability * n_paths) - 1))
+    return outcomes[index]
+
+
 def f1_entry_gate(
     *,
     funding_per_settlement: float,
@@ -585,11 +636,12 @@ def f1_entry_gate(
     min_depth_ratio: float = F1_MIN_DEPTH_RATIO,
     min_liq_buffer_x: float = F1_MIN_LIQ_BUFFER_X,
     max_funding_age_sec: float = F1_MAX_FUNDING_AGE_SEC,
+    trailing_funding_rates=None,
     avg_funding_7d: float | None = None,
     perp_mark: float | None = None,
     spot_mid: float | None = None,
-    spot_spread_bps: float = 0.0,
-    perp_spread_bps: float = 0.0,
+    spot_spread_bps: float | None = None,
+    perp_spread_bps: float | None = None,
     time_to_next_funding_min: float | None = None,
     feeds_fresh: bool = True,
     max_leg_spread_bps: float = F1_MAX_LEG_SPREAD_BPS,
@@ -611,14 +663,33 @@ def f1_entry_gate(
       * funding quote fresher than ``max_funding_age_sec`` (freshness),
       * BOTH legs are atomically fillable now (no one-leg legging exposure).
 
-    Rev 5 inputs default to pass-through values so pre-Rev-5 call sites keep
-    their behavior; feeds that HAVE the data should always supply it.
+    Execution-sensitive inputs are mandatory. Missing history, basis, spread,
+    timing, freshness, depth, or fillability fails closed.
     """
     cost_bps = float(round_trip_cost_frac) * 1e4
+    raw_trailing = () if trailing_funding_rates is None else trailing_funding_rates
+    trailing = tuple(float(rate) for rate in raw_trailing)
+    trailing_complete = len(trailing) >= F1_TRAILING_SETTLEMENTS
+    trailing = trailing[-F1_TRAILING_SETTLEMENTS:]
+    trailing_mean = (
+        sum(trailing) / len(trailing)
+        if trailing and all(math.isfinite(rate) for rate in trailing)
+        else float("nan")
+    )
+    projection_rate = min(float(funding_per_settlement), trailing_mean)
     edge_bps = f1_net_expected_edge_bps(
-        funding_per_settlement=funding_per_settlement,
+        funding_per_settlement=projection_rate,
         hold_settlements=hold_settlements,
         round_trip_cost_frac=round_trip_cost_frac,
+    )
+    lower_bound_bps = (
+        f1_net_funding_lower_bound_bps(
+            trailing,
+            hold_settlements=hold_settlements,
+            round_trip_cost_frac=round_trip_cost_frac,
+        )
+        if trailing_complete and math.isfinite(trailing_mean)
+        else float("-inf")
     )
     threshold = max(float(min_edge_bps), float(cost_mult) * cost_bps)
     det = {
@@ -629,25 +700,49 @@ def f1_entry_gate(
         "liq_buffer_x": float(liq_buffer_x),
         "funding_age_sec": float(funding_age_sec),
         "both_legs_fillable": bool(both_legs_fillable),
+        "trailing_settlements": len(trailing),
+        "trailing_funding_mean": trailing_mean,
+        "funding_lower_bound_bps": lower_bound_bps,
         "avg_funding_7d": avg_funding_7d,
         "perp_mark": perp_mark,
         "spot_mid": spot_mid,
-        "spot_spread_bps": float(spot_spread_bps),
-        "perp_spread_bps": float(perp_spread_bps),
+        "spot_spread_bps": spot_spread_bps,
+        "perp_spread_bps": perp_spread_bps,
         "time_to_next_funding_min": time_to_next_funding_min,
         "feeds_fresh": bool(feeds_fresh),
     }
     if funding_per_settlement <= 0:
         return False, f"funding_rate {funding_per_settlement:+.6f} <= 0", det
+    if not trailing_complete or not math.isfinite(trailing_mean):
+        return False, (
+            f"trailing_funding_history {len(trailing)}/"
+            f"{F1_TRAILING_SETTLEMENTS} authoritative settlements"
+        ), det
+    if trailing_mean <= 0:
+        return False, f"trailing_funding_mean {trailing_mean:+.6f} <= 0", det
     if avg_funding_7d is not None and avg_funding_7d <= 0:
         return False, f"avg_funding_7d {avg_funding_7d:+.6f} <= 0", det
-    if perp_mark is not None and spot_mid is not None and perp_mark < spot_mid:
+    if perp_mark is None or spot_mid is None:
+        return False, "contango_data_unavailable", det
+    if not all(math.isfinite(float(value)) and float(value) > 0
+               for value in (perp_mark, spot_mid)):
+        return False, "contango_data_invalid", det
+    if perp_mark < spot_mid:
         return False, f"perp_mark {perp_mark:.4f} < spot_mid {spot_mid:.4f}", det
+    if spot_spread_bps is None or perp_spread_bps is None:
+        return False, "leg_spread_unavailable", det
+    if not all(math.isfinite(float(value)) and float(value) >= 0
+               for value in (spot_spread_bps, perp_spread_bps)):
+        return False, "leg_spread_invalid", det
     if spot_spread_bps > max_leg_spread_bps:
         return False, f"spot_spread {spot_spread_bps:.1f}bps > {max_leg_spread_bps:.0f}bps", det
     if perp_spread_bps > max_leg_spread_bps:
         return False, f"perp_spread {perp_spread_bps:.1f}bps > {max_leg_spread_bps:.0f}bps", det
-    if time_to_next_funding_min is not None and not (
+    if time_to_next_funding_min is None or not math.isfinite(
+        float(time_to_next_funding_min)
+    ):
+        return False, "time_to_next_funding unavailable", det
+    if not (
         min_time_to_funding_min <= time_to_next_funding_min <= max_time_to_funding_min
     ):
         return False, (
@@ -658,6 +753,8 @@ def f1_entry_gate(
         return False, "feeds_stale (data feeds not fresh)", det
     if edge_bps < threshold:
         return False, f"edge {edge_bps:.1f}bps < {threshold:.1f}bps", det
+    if lower_bound_bps <= 0:
+        return False, f"funding_95pct_lower_bound {lower_bound_bps:.1f}bps <= 0", det
     if depth_ratio < min_depth_ratio:
         return False, f"depth {depth_ratio:.1f}x < {min_depth_ratio:.0f}x", det
     if liq_buffer_x < min_liq_buffer_x:
@@ -698,7 +795,7 @@ def f1_sizing_gate(
     """Rev 5 F1 sizing caps (PAPER equity). Returns (ok, reason).
 
     Caps: <= 5% of paper equity per symbol, <= 20% total carry notional,
-    leverage 1x on the initial entry / 2x hard max, and NO averaging down.
+    leverage 1x throughout, and NO averaging down.
     """
     if paper_equity <= 0:
         return False, "paper_equity must be > 0"
@@ -761,6 +858,9 @@ def build_f1_spec(
             "atomic_two_leg_fill": True,
             "funding_rate_positive": True,
             "avg_funding_7d_positive": True,
+            "trailing_authoritative_settlements": F1_TRAILING_SETTLEMENTS,
+            "funding_lower_bound_confidence": F1_LOWER_BOUND_CONFIDENCE,
+            "funding_lower_bound_after_four_crossing_costs_bps": 0.0,
             "perp_mark_at_or_above_spot_mid": True,
             "max_leg_spread_bps": F1_MAX_LEG_SPREAD_BPS,
             "time_to_next_funding_min_window": [

@@ -14,7 +14,10 @@ from core.entry_policy import (
     parse_allowlist,
 )
 
-load_dotenv()
+# Test isolation hook: subprocess-based safety-default tests must be able to
+# validate SOURCE defaults without the operator's real .env leaking in.
+if os.getenv("PYTHON_DOTENV_DISABLED", "").strip().lower() not in ("1", "true", "yes"):
+    load_dotenv()
 
 # ==============================================================
 # EXCHANGE CREDENTIALS
@@ -65,10 +68,11 @@ if OPERATING_MODE not in _VALID_MODES:
 PAPER_TRADING_PROFILE = normalize_paper_profile(
     os.getenv("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
 )
+# Research profiles are PAPER-only. Coerce (don't raise) so a menu switch to
+# OBSERVATION leaves PAPER_TRADING_PROFILE=MAX_FLOW_BAND in .env but still boots —
+# F3/geometry knobs stay inert because they require OPERATING_MODE=PAPER.
 if OPERATING_MODE != "PAPER" and PAPER_TRADING_PROFILE != STANDARD_PAPER_PROFILE:
-    raise ValueError(
-        f"PAPER_TRADING_PROFILE={PAPER_TRADING_PROFILE} requires OPERATING_MODE=PAPER"
-    )
+    PAPER_TRADING_PROFILE = STANDARD_PAPER_PROFILE
 PAPER_PROFILE_STARTED_AT = os.getenv("PAPER_PROFILE_STARTED_AT", "").strip()
 _AGGRESSIVE_PAPER_RESEARCH = (
     OPERATING_MODE == "PAPER"
@@ -684,6 +688,39 @@ SL_COOLDOWN_ENABLED = _profile_gated_sl_cooldown(
 # NOT edge — every screen bucket kept a NEGATIVE after-cost expectancy;
 # PnL-positive still requires the evidence lanes.
 BAND_REGIME_FILTER_ENABLED = os.getenv("BAND_REGIME_FILTER_ENABLED", "false").lower() == "true"
+
+# ── SMART-MONEY HARD ENTRY GATE (2026-07-24, owner Approach 1) ───────────────
+# Escalates Binance Web3 smart-money inflow ranks from MCP bonus B13 into a
+# HARD directional entry filter. Honored ONLY under PAPER + MAX_FLOW_BAND
+# (same profile gate as AccBand / max-flow knobs). CONTROLLED_LIVE never sees
+# this gate as enabled.
+# Rules when enabled + feed fresh:
+#   buy  → require smart_money_inflow (top-N accumulation list)
+#   sell → reject if smart_money_inflow (do not short SM accumulation)
+# Stale/missing feed: fail-OPEN by default (aggressive PAPER continues).
+# HONESTY: unscreened snapshot; does not create after-cost edge / profit band.
+def _smart_money_entry_gate_enabled(
+    requested: bool, operating_mode: str, paper_profile: str
+) -> bool:
+    return bool(requested) and _max_flow_research_knob_enabled(
+        operating_mode, paper_profile
+    )
+
+
+_SMART_MONEY_ENTRY_REQUESTED = (
+    os.getenv("SMART_MONEY_ENTRY_GATE_ENABLED", "false").lower() == "true"
+)
+SMART_MONEY_ENTRY_GATE = {
+    "enabled": _smart_money_entry_gate_enabled(
+        _SMART_MONEY_ENTRY_REQUESTED, OPERATING_MODE, PAPER_TRADING_PROFILE
+    ),
+    "requested_enabled": _SMART_MONEY_ENTRY_REQUESTED,
+    "fail_open_stale": os.getenv(
+        "SMART_MONEY_ENTRY_FAIL_OPEN_STALE", "true"
+    ).lower()
+    == "true",
+}
+
 
 # ── MAKER-FIRST PAPER ENTRIES (2026-07-10) ───────────────────────────────────
 # Fees were 25.4% of the last-500-trade loss ($39.63 of -$156.28) and the
@@ -2653,13 +2690,16 @@ DATA_FEEDS = {
     "b12_oi_conviction_min": 0.3,  # minimum conviction to award
     # B13: Smart money alignment bonus
     #   Coin in top-20 smart money inflow AND proposed side = buy
-    # ⚠ DISABLED 2026-05-30 (owner directive): UNSCREENABLE with available data —
-    #   smart_money_feed POSTs Binance Web3 for a CURRENT top-30 inflow ranking
-    #   (BSC chain, 24h window): a live snapshot with NO historical time-series,
-    #   so it cannot be validated against forward returns. Owner chose to disable
-    #   the unproven +5 bonus rather than let it gate entries ungated. Mechanism
-    #   kept; to revisit, log the daily ranking forward ~60-90d then screen.
-    "b13_smart_money_enabled": False,
+    # 2026-05-30: disabled (unscreenable snapshot). 2026-07-24: owner Approach 1
+    # hard entry gate — when SMART_MONEY_ENTRY_GATE is active, B13 bonus is
+    # re-enabled by default (override with B13_SMART_MONEY_ENABLED=false).
+    "b13_smart_money_enabled": (
+        os.getenv(
+            "B13_SMART_MONEY_ENABLED",
+            "true" if SMART_MONEY_ENTRY_GATE.get("enabled") else "false",
+        ).lower()
+        == "true"
+    ),
     "b13_smart_money_points": 5,  # points when smart money confirms
     # ── VETO gates (block entry, not just reduce score) ────────────
     # V1: OI exhaustion veto — price up + OI down with high conviction

@@ -15,13 +15,21 @@ the full engine (which drags in `schedule`, exchanges, etc.).
 
 from __future__ import annotations
 
+import json
 import math
 import re
+from collections.abc import Mapping
 from datetime import date, timedelta
 from pathlib import Path
 
 CHECKLIST_PATH = Path("docs/CONTROLLED_LIVE_CHECKLIST.md")
 MAX_SIGNATURE_AGE_DAYS = 30
+MODEL_POINTER_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "models"
+    / "ensemble_futures_latest.json"
+)
 
 # Matches `Signed-By: Owner Name 2026-12-31`, allowing a leading `<!-- ` /
 # trailing ` -->` pair so the repo can ship an example signature that is
@@ -121,6 +129,103 @@ def enforce_controlled_live_gate(operating_mode: str,
         )
 
 
+def enforce_live_runtime_invariants(
+    operating_mode: str,
+    *,
+    config_module: object | None = None,
+) -> None:
+    """Reject CONTROLLED_LIVE when a safety-critical runtime rail is weakened."""
+    if (operating_mode or "").upper() != "CONTROLLED_LIVE":
+        return
+
+    try:
+        if config_module is None:
+            import config as config_module
+        from core.entry_policy import mode_profile_for
+    except Exception as exc:
+        raise SystemExit(
+            "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: "
+            f"live safety configuration unavailable: {exc}"
+        ) from exc
+
+    failures: list[str] = []
+
+    def value(name: str, default=None):
+        if isinstance(config_module, dict):
+            return config_module.get(name, default)
+        return getattr(config_module, name, default)
+
+    def number(name: str) -> float | None:
+        try:
+            result = float(value(name))
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None
+
+    if value("SL_FAIL_EMERGENCY_CLOSE_ENABLED") is not True:
+        failures.append("stop-loss emergency close must be enabled")
+    if value("OHLCV_VALIDATION_ENABLED") is not True:
+        failures.append("OHLCV validation must be enabled")
+    if value("PER_POSITION_LOCK_ENABLED") is not True:
+        failures.append("per-position lock must be enabled")
+
+    profile = mode_profile_for("CONTROLLED_LIVE")
+    exposure_pct = number("MAX_PORTFOLIO_EXPOSURE_PCT")
+    max_exposure_pct = profile.gross_exposure_pct * 100.0
+    if exposure_pct is None or not 0 < exposure_pct <= max_exposure_pct:
+        failures.append(
+            f"portfolio exposure cap must be in (0, {max_exposure_pct:g}] percent"
+        )
+
+    aggregate_risk = number("MAX_AGGREGATE_OPEN_RISK_PCT")
+    if aggregate_risk is None or not 0 < aggregate_risk <= profile.aggregate_open_risk_pct:
+        failures.append(
+            "aggregate open-risk cap must be positive and no greater than "
+            f"{profile.aggregate_open_risk_pct:.4f}"
+        )
+
+    stressed_exit_cost = number("STRESSED_EXIT_COST_FRAC")
+    if stressed_exit_cost is None or stressed_exit_cost < 0.002:
+        failures.append("stressed exit-cost fraction must be at least 0.002")
+
+    book_age = number("EXECUTION_BOOK_MAX_AGE_SEC")
+    if book_age is None or not 0 < book_age <= 5.0:
+        failures.append("execution-book age limit must be in (0, 5] seconds")
+
+    slippage_bps = number("MAX_ENTRY_SLIPPAGE_BPS")
+    if slippage_bps is None or not 0 <= slippage_bps <= 30.0:
+        failures.append("entry-slippage cap must be between 0 and 30 bps")
+
+    daily_breaker = value("DAILY_LOSS_BREAKER")
+    try:
+        daily_loss_pct = float(daily_breaker.get("max_loss_pct"))
+        daily_enabled = daily_breaker.get("enabled") is True
+    except (AttributeError, TypeError, ValueError):
+        daily_loss_pct, daily_enabled = math.nan, False
+    if (
+        not daily_enabled
+        or not math.isfinite(daily_loss_pct)
+        or not 0 < daily_loss_pct <= 0.02
+    ):
+        failures.append("daily-loss breaker must be enabled at no more than 2 percent")
+
+    risk = value("RISK")
+    try:
+        leverage = float(risk.get("futures_max_leverage"))
+    except (AttributeError, TypeError, ValueError):
+        leverage = math.nan
+    if not math.isfinite(leverage) or not 0 < leverage <= profile.max_leverage:
+        failures.append(
+            f"leverage cap must be positive and no greater than {profile.max_leverage:g}x"
+        )
+
+    if failures:
+        raise SystemExit(
+            "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: unsafe live "
+            "configuration: " + "; ".join(failures)
+        )
+
+
 def enforce_strategy_readiness_gate(
     operating_mode: str,
     *,
@@ -146,6 +251,96 @@ def enforce_strategy_readiness_gate(
         "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: "
         f"{name} evidence gate failed: {reasons}"
     )
+
+
+def enforce_model_gate_readiness(
+    operating_mode: str,
+    *,
+    config_module: object | None = None,
+    pointer_path: Path | str | None = None,
+) -> None:
+    """Require a valid promoted futures model for an active live MCP gate.
+
+    MCP intentionally falls back to rules when no model bundle can be loaded.
+    That is useful for PAPER research, but must not silently turn an explicitly
+    active CONTROLLED_LIVE model gate into a rule-only strategy.  Live startup
+    therefore revalidates the pointer, ModelManifest, component checksums,
+    promotion diagnostics, and freshness at the authorization boundary.
+
+    The check is dormant outside CONTROLLED_LIVE and when the gate is disabled
+    or shadow-only.
+    """
+    if (operating_mode or "").upper() != "CONTROLLED_LIVE":
+        return
+
+    try:
+        if config_module is None:
+            import config as config_module
+
+        def value(name: str, default=None):
+            if isinstance(config_module, Mapping):
+                return config_module.get(name, default)
+            return getattr(config_module, name, default)
+
+        signal_source = str(value("SIGNAL_SOURCE", "") or "").strip().lower()
+        if signal_source != "mcp":
+            return
+
+        model_gate = value("MODEL_GATE")
+        if not isinstance(model_gate, Mapping):
+            raise ValueError("MODEL_GATE must be a mapping")
+        if model_gate.get("enabled") is not True or model_gate.get("shadow_only") is True:
+            return
+
+        path = Path(pointer_path) if pointer_path is not None else MODEL_POINTER_PATH
+        try:
+            pointer = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ValueError(f"latest model pointer is missing: {path}") from exc
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"latest model pointer is unreadable: {path}: {exc}") from exc
+        if not isinstance(pointer, dict):
+            raise ValueError("latest model pointer is not a JSON object")
+
+        # Promotion normally records an absolute path. Support relocatable
+        # bundles too by resolving a relative artifact before validation.
+        diag = pointer.get("diag")
+        raw_artifact = pointer.get("artifact_path")
+        if not raw_artifact and isinstance(diag, Mapping):
+            raw_artifact = diag.get("artifact_path")
+        if isinstance(raw_artifact, str) and raw_artifact.strip():
+            artifact = Path(raw_artifact)
+            if not artifact.is_absolute():
+                project_candidate = Path(__file__).resolve().parents[1] / artifact
+                pointer_candidate = path.resolve().parent / artifact
+                resolved = next(
+                    (
+                        candidate
+                        for candidate in (project_candidate, pointer_candidate)
+                        if candidate.is_file()
+                    ),
+                    project_candidate,
+                )
+                pointer = dict(pointer)
+                pointer["artifact_path"] = str(resolved)
+                if isinstance(diag, Mapping):
+                    pointer["diag"] = {**diag, "artifact_path": str(resolved)}
+
+        from core.promotion_gate import validate_model_pointer
+
+        ok, reason, _diagnostics = validate_model_pointer(
+            pointer,
+            market_type="futures",
+        )
+        if not ok:
+            raise ValueError(reason or "model pointer validation failed")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(
+            "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: active MCP "
+            f"model gate is not production-ready: {exc}"
+        ) from exc
 
 
 # ── CONTROLLED_LIVE capability preflight (Codex preflight.py port, 2026-07-12) ──

@@ -120,6 +120,14 @@ def _is_timestamp_error(e: Exception) -> bool:
     return any(s in msg for s in _TIMESTAMP_ERRORS)
 
 
+class OrderSubmissionUncertain(RuntimeError):
+    """Order placement may have reached the venue and needs reconciliation."""
+
+    def __init__(self, message: str, client_order_id: str):
+        super().__init__(message)
+        self.client_order_id = client_order_id
+
+
 # ── OHLCV integrity validation (Codex port, 2026-07-12) ────────────────
 # Reference semantics: Codex/bot/engine.py::_validate_candles, adapted to the
 # ccxt list-of-lists contract. Deliberate differences:
@@ -178,10 +186,36 @@ def _ohlcv_defect(candles: list, timeframe: str, now_s: float) -> Optional[str]:
     tf_s = _timeframe_seconds(timeframe)
     if tf_s:
         age_s = now_s - float(candles[-1][0]) / 1000.0  # ccxt ts are ms
+        if age_s < -2.0:
+            return f"future-dated series: last candle open {-age_s:.1f}s ahead"
         if age_s > OHLCV_MAX_STALE_BARS * tf_s:
             return (f"stale series: last candle open {int(age_s)}s ago "
                     f"(> {OHLCV_MAX_STALE_BARS} x {timeframe})")
     return None
+
+
+def closed_ohlcv(candles, timeframe: str, *, now_s: Optional[float] = None) -> list:
+    """Return only candles whose full interval has elapsed.
+
+    Exchange OHLCV APIs normally include the currently-forming candle.  Shared
+    validation keeps that transport contract intact; decision callers use this
+    helper before computing indicators so an unfinished candle cannot repaint a
+    signal.  Unknown timeframes fail closed because closure cannot be proven.
+    """
+    if not candles:
+        return []
+    tf_s = _timeframe_seconds(timeframe)
+    if not tf_s:
+        return []
+    cutoff_ms = (_time.time() if now_s is None else float(now_s)) * 1000.0
+    closed = []
+    for row in candles:
+        try:
+            if float(row[0]) + tf_s * 1000.0 <= cutoff_ms:
+                closed.append(row)
+        except (TypeError, ValueError, IndexError):
+            return []
+    return closed
 
 
 def validate_ohlcv(candles, timeframe: str, *, symbol: str = "",
@@ -223,6 +257,22 @@ def _first_float(*vals) -> Optional[float]:
             continue
         if f > 0:
             return f
+    return None
+
+
+def _first_epoch_seconds(*vals) -> Optional[float]:
+    """First plausible epoch timestamp normalized to seconds, else None."""
+    for value in vals:
+        if value is None or value == "":
+            continue
+        try:
+            stamp = float(value)
+        except (TypeError, ValueError):
+            continue
+        while stamp >= 100_000_000_000:
+            stamp /= 1000.0
+        if 1_000_000_000 <= stamp <= 10_000_000_000:
+            return stamp
     return None
 
 
@@ -377,10 +427,16 @@ class BaseExchange(ABC):
         the caller (MarketDataLedger) never raises. Guarded — no call when the
         client is not connected.
         """
-        out = {"mark": None, "index": None, "ts": None}
+        out = {
+            "mark": None,
+            "index": None,
+            "ts": None,
+            "mark_ts": None,
+            "index_ts": None,
+        }
         if not self._ready():
             return out
-        mark = index = None
+        mark = index = mark_ts = index_ts = None
         try:
             params = self._futures_params() if market_type == "futures" else {}
             tkr = self.exchange.fetch_ticker(symbol, params=params) or {}
@@ -393,30 +449,73 @@ class BaseExchange(ABC):
                 tkr.get("indexPrice"), info.get("indexPrice"),
                 info.get("indexPx"), info.get("index_price"),
             )
+            ticker_ts = _first_epoch_seconds(
+                tkr.get("timestamp"),
+                info.get("timestamp"),
+                info.get("time"),
+                info.get("ts"),
+                info.get("updateTime"),
+                info.get("nextFundingTime"),
+            )
+            if mark is not None:
+                mark_ts = ticker_ts
+            if index is not None:
+                index_ts = ticker_ts
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[{self.name}] fetch_mark_index ticker {symbol}: {e}")
         if mark is None:
-            mark = self._last_ohlcv_close(
+            mark, mark_ts = self._last_ohlcv_point(
                 getattr(self.exchange, "fetch_mark_ohlcv", None), symbol)
         if index is None:
-            index = self._last_ohlcv_close(
+            index, index_ts = self._last_ohlcv_point(
                 getattr(self.exchange, "fetch_index_ohlcv", None), symbol)
-        out["mark"], out["index"] = mark, index
-        if mark is not None or index is not None:
-            out["ts"] = _time.time()
+        out.update(
+            mark=mark,
+            index=index,
+            ts=mark_ts,
+            mark_ts=mark_ts,
+            index_ts=index_ts,
+        )
         return out
+
+    def fetch_mark_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "1m",
+        limit: int = 3,
+    ) -> list:
+        """Return mark-price candles for PAPER SL/TP barrier replay.
+
+        An empty result is distinct from trade-price OHLCV: callers must not
+        silently substitute last-trade candles for mark-triggered orders.
+        """
+        if not self._ready():
+            return []
+        fetcher = getattr(self.exchange, "fetch_mark_ohlcv", None)
+        if not callable(fetcher):
+            return []
+        try:
+            return fetcher(symbol, timeframe, limit=limit) or []
+        except Exception as exc:
+            logger.debug(f"[{self.name}] fetch_mark_ohlcv {symbol}: {exc}")
+            return []
 
     def _last_ohlcv_close(self, fn, symbol: str) -> Optional[float]:
         """Last close of a mark/index OHLCV series, or None (fail-open seam)."""
+        close, _ = self._last_ohlcv_point(fn, symbol)
+        return close
+
+    def _last_ohlcv_point(self, fn, symbol: str) -> tuple[Optional[float], Optional[float]]:
+        """Last close and exchange candle timestamp, or ``(None, None)``."""
         if fn is None:
-            return None
+            return None, None
         try:
             rows = fn(symbol, "1m", limit=1)
             if rows:
-                return float(rows[-1][4])
+                return float(rows[-1][4]), _first_epoch_seconds(rows[-1][0])
         except Exception:  # noqa: BLE001
-            return None
-        return None
+            return None, None
+        return None, None
 
     def fetch_order_book(self, symbol: str, limit: int = 20,
                          market_type: str = "spot") -> dict:
@@ -553,12 +652,22 @@ class BaseExchange(ABC):
                     symbol, _params[_k], fallback=_params[_k],
                     market_type=market_type)
         import uuid as _uuid
-        _params.setdefault("clientOrderId", _uuid.uuid4().hex[:24])
+        client_order_id = str(
+            _params.get("clientOrderId")
+            or _params.get("newClientOrderId")
+            or _uuid.uuid4().hex[:24]
+        )
+        _params["clientOrderId"] = client_order_id
         last_err = None
         for attempt in range(MAX_RETRIES):
             try:
                 order = self.exchange.create_order(
                     symbol, order_type, side, amount, price, _params)
+                if not isinstance(order, dict):
+                    raise RuntimeError(
+                        "exchange returned a non-object order acknowledgement"
+                    )
+                order.setdefault("_client_order_id", client_order_id)
                 logger.info(
                     f"[{self.name}] ORDER {side.upper()} {amount} {symbol} "
                     f"@ {price or 'MARKET'} | id={order.get('id')}")
@@ -573,14 +682,47 @@ class BaseExchange(ABC):
                 # the same or a different client id can duplicate or desync
                 # the position. Let the caller reconcile/skip instead.
                 if _is_transient_error(e):
+                    reconciled = self._fetch_order_by_client_id(
+                        client_order_id, symbol, _params
+                    )
+                    if reconciled is not None:
+                        reconciled.setdefault("_client_order_id", client_order_id)
+                        reconciled["_submission_reconciled"] = True
+                        logger.warning(
+                            f"[{self.name}] create_order {symbol}: recovered "
+                            f"ambiguous acknowledgement by clientOrderId"
+                        )
+                        return reconciled
                     logger.warning(
                         f"[{self.name}] create_order {symbol}: transient network error "
                         f"— NOT retrying to avoid duplicate fill: {str(e)[:80]}")
-                    raise
+                    raise OrderSubmissionUncertain(
+                        f"{self.name} order submission outcome unknown",
+                        client_order_id,
+                    ) from e
                 logger.error(f"[{self.name}] create_order {symbol}: {e}")
                 raise
         logger.error(f"[{self.name}] create_order {symbol}: failed after {MAX_RETRIES} attempts")
         raise last_err
+
+    def _fetch_order_by_client_id(
+        self, client_order_id: str, symbol: str, params: dict | None = None
+    ) -> dict | None:
+        """Best-effort reconciliation after an ambiguous create response."""
+        fn = getattr(self.exchange, "fetch_order_by_client_order_id", None)
+        if not callable(fn):
+            return None
+        query_params = dict(params or {})
+        try:
+            order = fn(client_order_id, symbol, query_params)
+        except TypeError:
+            try:
+                order = fn(client_order_id, symbol)
+            except Exception:
+                return None
+        except Exception:
+            return None
+        return order if isinstance(order, dict) and order else None
 
     # Known race-condition error markers — the order was already filled or
     # cancelled between our last observation and our cancel call. Returning
