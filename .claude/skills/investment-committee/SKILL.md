@@ -52,6 +52,13 @@ Model for Agent calls: `fable` (harness policy).
 8. **Risk summary** — read binding values from `config.py` / `.env`; use `config/risk_committee.yaml` as documentation mirror only.
 9. **Paper status** — `data/heartbeat.json`, `data/promotion_funnel.json` if present; else UNKNOWN.
 10. **Final verdict** — spawn final-verdict; state HumanActionRequired.
+11. **AI Review (added 2026-07-26, owner directive)** — spawn `ai-reviewer` (Opus 5) on the full
+    artifact set. It holds APPROVE/REJECT authority for everything PAPER-scope: the brief, both
+    theses, the debate, the screen verdict, and any log-only probe integration. Its APPROVE is
+    final — no human confirmation required for PAPER. It CANNOT sign
+    `docs/CONTROLLED_LIVE_CHECKLIST.md`, enable CONTROLLED_LIVE, override the frozen gate, or
+    approve promotion to order flow; those emit `ESCALATE_TO_HUMAN`. The human's one remaining
+    authorization is the live signature, at the money line only.
 11. **Stop** — report to owner. No orders.
 
 ## Partial re-runs
