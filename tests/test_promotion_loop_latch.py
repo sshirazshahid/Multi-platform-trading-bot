@@ -83,7 +83,7 @@ def test_tick_noise_registers_shadow_never_active(monkeypatch, tmp_path):
     assert not ada.exists()   # no adaptive config written for a non-promotion
 
 
-def test_tick_promotes_to_active_paper_when_gate_passes(monkeypatch, tmp_path):
+def test_tick_keeps_gate_winner_shadow_until_manual_approval(monkeypatch, tmp_path):
     _set_mode(monkeypatch, "PAPER")
     reg = tmp_path / "active_strategies.json"
     ada = tmp_path / "adaptive.json"
@@ -92,28 +92,43 @@ def test_tick_promotes_to_active_paper_when_gate_passes(monkeypatch, tmp_path):
     cand = _candidate(rets=list(np.full(150, 0.012)))
     report = pl.tick([cand], live_returns=list(np.full(150, -0.005)),
                      registry_path=reg, adaptive_path=ada, gate=gate)
-    assert report["n_promoted"] == 1
+    assert report["n_promoted"] == 0
+    assert report["results"][0]["promotion_candidate"] is True
+    assert report["results"][0]["action"]["reason"] == (
+        "manual_paper_approval_required"
+    )
     data = json.loads(reg.read_text())
-    assert data["variants"]["mut_x"]["status"] == "active-paper"
-    # active-paper writes the winning config to the MachineSignal-polled adaptive path.
-    ada_payload = json.loads(ada.read_text())
-    assert ada_payload["apply_scope"] == "paper"
-    assert ada_payload["source"] == "promotion_loop"
+    assert data["variants"]["mut_x"]["status"] == "shadow"
+    assert not ada.exists()
 
 
 def test_auto_demote_flips_back_to_shadow(monkeypatch, tmp_path):
     _set_mode(monkeypatch, "PAPER")
     reg = tmp_path / "active_strategies.json"
-    ada = tmp_path / "adaptive.json"
-    gate = _FakeGate(GateVerdict.PROMOTE)
-    cand = _candidate(rets=list(np.full(150, 0.012)))
-    pl.tick([cand], live_returns=list(np.full(150, -0.005)),
-            registry_path=reg, adaptive_path=ada, gate=gate)
+    reg.write_text(
+        json.dumps(
+            {"variants": {"mut_x": {"status": "active-paper"}}}
+        ),
+        encoding="utf-8",
+    )
     out = pl.auto_demote("mut_x", path=reg)
     assert out["demoted"] is True
     data = json.loads(reg.read_text())
     assert data["variants"]["mut_x"]["status"] == "shadow"
     assert data["variants"]["mut_x"]["demotions"] == 1
+
+
+def test_direct_paper_promotion_requires_approval_file(monkeypatch, tmp_path):
+    _set_mode(monkeypatch, "PAPER")
+    out = pl.promote_to_active_paper(
+        _candidate(),
+        path=tmp_path / "registry.json",
+        adaptive_path=tmp_path / "adaptive.json",
+    )
+    assert out == {
+        "promoted": False,
+        "reason": "manual_paper_approval_required",
+    }
 
 
 def test_should_demote_rule():

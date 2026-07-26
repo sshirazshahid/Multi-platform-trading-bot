@@ -24,6 +24,7 @@ Fix B — CapitalAllocator circuit-breaker:
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,6 +60,13 @@ def _mock_bybit_exchange(transfer_side_effect=None, transfer_return=None):
     else:
         ex.transfer.return_value = transfer_return if transfer_return is not None else True
     return ex
+
+
+def _authorize_live_entry(monkeypatch):
+    monkeypatch.setattr(
+        "core.entry_policy.authorize_runtime_entry",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True, reason="test_authorized"),
+    )
 
 
 # ===========================================================================
@@ -213,6 +221,7 @@ class TestCapitalAllocatorCircuitBreaker:
 
     def test_execute_accumulate_calls_bybit_transfer(self, monkeypatch):
         """Live happy path: execute_allocation calls exchange.transfer() and returns True."""
+        _authorize_live_entry(monkeypatch)
         ex = _mock_bybit_exchange(transfer_return=True)
         alloc = _build_allocator(monkeypatch, exchanges={"bybit": ex})
         # Seed a known baseline so profit is detectable
@@ -241,6 +250,7 @@ class TestCapitalAllocatorCircuitBreaker:
 
     def test_transfer_failure_recorded_in_breaker(self, monkeypatch):
         """A failed transfer must increment the breaker counter."""
+        _authorize_live_entry(monkeypatch)
         ex = _mock_bybit_exchange(transfer_return=False)
         alloc = _build_allocator(monkeypatch, exchanges={"bybit": ex})
         alloc._state.setdefault("baselines", {})["bybit"] = 100.0

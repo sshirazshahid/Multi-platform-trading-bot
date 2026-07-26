@@ -98,8 +98,22 @@ def test_per_side_override_applied_by_side(acc_on_per_side):
 
 
 def test_per_side_override_respects_cost_floor(acc_on_per_side):
-    # SL 1.0% x sell-frac 0.35 = 0.35 -> floored at min_tp_pct 0.5
+    # SL 1.0% x sell-frac 0.35 = 0.35 -> floored at min_tp_pct 0.5 (still < SL)
     assert mb._apply_accuracy_target(1.0, 2.0, side="sell") == pytest.approx(0.5)
+
+
+def test_cost_floor_must_not_invert_band_geometry(acc_on_per_side):
+    """Warehouse 2026-07-24: SL≈0.48% + min_tp=0.5% floored TP≥SL → WR≈37%.
+
+    When the cost floor would put TP >= SL, prefer frac-compressed TP so
+    theoretical hit-rate SL/(SL+TP) stays in the AccBand regime.
+    """
+    # SL 0.48% x sell 0.35 = 0.168; floor 0.5 would invert — use raw 0.168
+    assert mb._apply_accuracy_target(0.48, 1.2, side="sell") == pytest.approx(0.168)
+    # SL 0.48% x buy 0.45 = 0.216; same conflict
+    assert mb._apply_accuracy_target(0.48, 1.2, side="buy") == pytest.approx(0.216)
+    # Floor still applies when it does NOT invert (SL 2.0% x 0.35 = 0.7 >= 0.5)
+    assert mb._apply_accuracy_target(2.0, 4.0, side="sell") == pytest.approx(0.7)
 
 
 def test_unset_per_side_falls_back_to_global(acc_on):

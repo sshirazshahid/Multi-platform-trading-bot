@@ -83,10 +83,24 @@ def test_only_tp_wicked_returns_take_profit_long():
     assert res == "take_profit" and px == 105.0
 
 
+def test_limit_tp_exact_touch_is_not_assumed_filled_long():
+    ex = _FakeCandleExchange(high=105.0, low=99.0)
+    assert _model().check_wick_trigger(
+        ex, "X", "futures", "buy", sl=95.0, tp=105.0
+    ) == (None, None)
+
+
 def test_both_wicked_returns_stop_loss_first_short():
     ex = _FakeCandleExchange(high=110.0, low=90.0)  # short: SL=105 above, TP=95 below
     res, px = _model().check_wick_trigger(ex, "X", "futures", "sell", sl=105.0, tp=95.0)
     assert res == "stop_loss" and px == 105.0
+
+
+def test_limit_tp_exact_touch_is_not_assumed_filled_short():
+    ex = _FakeCandleExchange(high=101.0, low=95.0)
+    assert _model().check_wick_trigger(
+        ex, "X", "futures", "sell", sl=105.0, tp=95.0
+    ) == (None, None)
 
 
 # ── wick trigger must ignore bars that pre-date the position (trade 2539) ──

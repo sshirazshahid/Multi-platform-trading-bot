@@ -10,6 +10,8 @@ costs. Fail-open: any error must fall back to the legacy selection.
 
 from __future__ import annotations
 
+import pytest
+
 from core.bot_engine import BotEngine
 
 
@@ -24,6 +26,17 @@ def _cfg():
     import config
 
     return config
+
+
+@pytest.fixture(autouse=True)
+def _exercise_legacy_selector(monkeypatch):
+    """This file pins the pre-broad 24h selector's compatibility behavior.
+
+    Broad point-in-time wiring has its own isolated SQLite tests in
+    test_universe_monitor.py; disabling it here also prevents these legacy
+    unit tests from touching the production research database.
+    """
+    monkeypatch.setitem(_cfg().BROAD_UNIVERSE_MONITOR, "enabled", False)
 
 
 class _StubExchange:

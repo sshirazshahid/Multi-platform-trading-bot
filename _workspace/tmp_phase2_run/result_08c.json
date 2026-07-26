@@ -1,0 +1,49 @@
+{
+  "candidate": "08c \u2014 ETH quarterly basis leg-swap (conditional leg-swap vs perp)",
+  "costs": {
+    "cost_qtr_frac": 0.0045,
+    "cost_perp_frac": 0.005
+  },
+  "n_decision_points": 64,
+  "n_resolved_events": 64,
+  "n_conditional": 31,
+  "exclusions": {
+    "no_entry_bar": 0,
+    "dte_below_14d": 0,
+    "no_exit_bar": 0,
+    "no_trailing_funding": 0,
+    "unresolved": 0
+  },
+  "n_trials_dsr": 1,
+  "unconditional_diagnostic": {
+    "delta_mean": -0.0007330294438930748,
+    "delta_win_rate": 0.546875,
+    "apr_basis_mean": 0.07794947595339577,
+    "apr_funding_mean": 0.08394406060267856
+  },
+  "conditional_stats": {
+    "delta_mean": 0.0009218576925654055,
+    "delta_median": 0.0017713239636975506,
+    "win_rate": 0.5806451612903226,
+    "dsr_prob": 0.46346091689407165,
+    "pbo_basis_vs_perp": 0.0,
+    "oos_wr_walk_forward": 0.625,
+    "monte_carlo": {
+      "n_trades": 31,
+      "p_total_positive": 0.6825,
+      "max_drawdown_p95": 0.11448116495730891,
+      "passes": false
+    }
+  },
+  "gates": {
+    "mean_delta>0": true,
+    "wr>=0.55": true,
+    "oos_wr>=0.55": true,
+    "dsr>=0.10": true,
+    "pbo<=0.5": true,
+    "mc_P>0>=0.95": false,
+    "mc_maxDD_p95<=0.25": true
+  },
+  "verdict": "NO_GO",
+  "reason": "Failed: mc_P>0>=0.95"
+}

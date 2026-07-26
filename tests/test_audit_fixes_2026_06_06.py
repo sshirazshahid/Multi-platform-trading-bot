@@ -64,8 +64,8 @@ def test_partial_close_sets_positionside_for_hedge_mode():
 
 # ── #2: daily-loss breaker must read _daily_pnl under the lock (hygiene) ────────
 def test_daily_loss_breaker_reads_pnl_under_lock():
-    m = re.search(r"def can_trade\(self[\s\S]+?(?=\n    def |\Z)", _RM_SRC)
-    assert m, "can_trade not found"
+    m = re.search(r"def _daily_loss_reason\(self[\s\S]+?(?=\n    def |\Z)", _RM_SRC)
+    assert m, "_daily_loss_reason not found"
     body = m.group(0)
     # The breaker read of _daily_pnl must be serialized with the locked writer (record_trade_pnl).
     assert re.search(r'with self\._lock:[\s\S]{0,160}?_daily_pnl', body), (

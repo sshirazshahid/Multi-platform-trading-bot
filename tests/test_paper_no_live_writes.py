@@ -90,18 +90,13 @@ def test_auto_transfer_gated_by_dry_run():
         "when not DRY_RUN; PAPER simulates in-memory")
 
 
-def test_bitget_set_position_mode_gated_by_dry_run():
-    """Audit 2026-06-04: BitgetClient._init_exchange called set_position_mode (a real
-    authenticated private POST to the LIVE account) at construction time on EVERY start,
-    regardless of OPERATING_MODE — the only init-time live write among the 3 clients. It
-    must be DRY_RUN-gated so PAPER/research runs never mutate the owner's live account-wide
-    position mode. Source-level pin (the write fires at __init__ before any caller logic, so
-    it cannot be gated by a caller)."""
+def test_bitget_constructor_never_sets_position_mode():
+    """Bitget construction must remain read-only in every operating mode.
+
+    CONTROLLED_LIVE verifies the existing account mode in its read-only venue
+    preflight. It must never silently change this account-wide setting while
+    exchange clients are being constructed.
+    """
     from pathlib import Path
     src = Path("exchanges/bitget_client.py").read_text(encoding="utf-8")
-    i = src.index("set_position_mode(hedged=False")
-    # the gate must appear on the lines immediately preceding the call
-    preceding = src[max(0, i - 400):i]
-    assert "if not DRY_RUN:" in preceding, (
-        "Bitget set_position_mode (live private POST) must be guarded by `if not DRY_RUN:` "
-        "so it never fires in PAPER")
+    assert "set_position_mode(" not in src

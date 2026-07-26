@@ -27,6 +27,8 @@ against future ccxt upgrades.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import config
@@ -144,8 +146,12 @@ def test_default_reads_config_flag_off(monkeypatch):
 
 def test_config_flag_exists_and_defaults_on():
     # The flag must exist in config (env-overridable) and default ON per the
-    # approved plan; PAPER keeps all venue orders dormant regardless.
-    assert getattr(config, "SLTP_TRIGGER_MARK_PRICE", None) is True
+    # approved plan. Inspect the declared fallback rather than the imported
+    # runtime value because a developer's .env may deliberately exercise the
+    # documented revert switch.
+    source = Path(config.__file__).read_text(encoding="utf-8")
+    assert 'os.getenv("SLTP_TRIGGER_MARK_PRICE", "true")' in source
+    assert isinstance(getattr(config, "SLTP_TRIGGER_MARK_PRICE", None), bool)
 
 
 @pytest.mark.parametrize("venue", ["binance", "bybit", "bitget"])

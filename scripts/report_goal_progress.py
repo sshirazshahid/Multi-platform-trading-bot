@@ -1,6 +1,6 @@
 """Honest PAPER futures goal-progress reporting.
 
-The owner's 63-67% daily win-rate request is a target, never a promised or
+The owner's 59-67% daily win-rate request is a target, never a promised or
 manufactured result. This reporter counts deduplicated, fully closed PAPER
 futures outcomes with entry provenance, uses whole-trade after-cost PnL
 (runner plus partial realization), and requires both a mature sample and
@@ -29,11 +29,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 GOAL_LINE = (
-    "Target: mature PAPER futures WR 63-67% with positive after-cost "
+    "Target: mature PAPER futures WR 59-67% with positive after-cost "
     "expectancy and profit factor > 1.0 (not guaranteed)"
 )
 RESOLVED_FLOOR = 30
-TARGET_WR_LOW = 0.63
+TARGET_WR_LOW = 0.59  # owner directive 2026-07-20: band widened 63-67 -> 59-67
 TARGET_WR_HIGH = 0.67
 
 _DIRECTIONAL_FAMILIES = (

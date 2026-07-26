@@ -217,7 +217,8 @@ def test_bybit_builder_keeps_trigger_direction():
 
 def test_binance_builder_uses_stop_market():
     order_type, params = build_sl_tp_order_params(
-        "binance", side="buy", oneway=True, trigger_price=95.0, is_sl=True)
+        "binance", side="buy", oneway=True, trigger_price=95.0, is_sl=True,
+        mark_trigger=True)
     assert order_type == "STOP_MARKET"
     # C3 (2026-07-08): SLTP_TRIGGER_MARK_PRICE defaults ON, adding
     # workingType — flag-off byte-identity is pinned in
@@ -225,7 +226,8 @@ def test_binance_builder_uses_stop_market():
     assert params == {"stopPrice": 95.0, "reduceOnly": True,
                       "workingType": "MARK_PRICE"}
     order_type, params = build_sl_tp_order_params(
-        "binance", side="buy", oneway=True, trigger_price=110.0, is_sl=False)
+        "binance", side="buy", oneway=True, trigger_price=110.0, is_sl=False,
+        mark_trigger=True)
     assert order_type == "TAKE_PROFIT_MARKET"
 
 

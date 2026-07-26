@@ -63,14 +63,20 @@ def find_latest_report(
 
     # Most recent = last in sorted list (filenames contain timestamps)
     for path in reversed(matches):
+        base = os.path.basename(path)
+        # Skip sidecar/history files that share the prefix but are not skill runs
+        if base.endswith("_history.json") or "_history." in base:
+            continue
         if max_age_hours > 0:
             mtime = os.path.getmtime(path)
             file_age_hours = (datetime.now().timestamp() - mtime) / 3600
             if file_age_hours > max_age_hours:
                 continue
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                continue
             return (path, data)
         except (json.JSONDecodeError, OSError):
             continue

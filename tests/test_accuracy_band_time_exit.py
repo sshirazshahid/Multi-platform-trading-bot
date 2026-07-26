@@ -332,3 +332,40 @@ def test_partial_tp_unchanged_when_flag_off(acc_off):
                                               "first_take_at_pct": 0.5,
                                               "first_take_size": 0.5})
     assert fire is True, "flag off must stay byte-identical"
+
+
+def test_accuracy_band_field_persists_via_asdict(acc_on):
+    """Declared Position._accuracy_band survives asdict/JSON reload."""
+    from dataclasses import asdict
+
+    from core.order_manager import _is_accuracy_band_position, _should_fire_partial_tp
+    from core.position_tracker import Position
+
+    p = Position(
+        id="t1",
+        exchange="bybit",
+        symbol="BTC/USDT:USDT",
+        side="sell",
+        market_type="futures",
+        strategy="algo_det",
+        entry_price=100.0,
+        size=1.0,
+        stop_loss=100.48,
+        take_profit=99.832,
+        _accuracy_band=True,
+    )
+    d = asdict(p)
+    assert d["_accuracy_band"] is True
+    p2 = Position(**{k: v for k, v in d.items() if k in Position.__dataclass_fields__})
+    assert p2._accuracy_band is True
+    assert _is_accuracy_band_position(p2) is True
+    fire, _, _ = _should_fire_partial_tp(
+        p2,
+        price=100.2,
+        partial_tp_config={
+            "enabled": True,
+            "first_take_at_pct": 0.5,
+            "first_take_size": 0.5,
+        },
+    )
+    assert fire is False

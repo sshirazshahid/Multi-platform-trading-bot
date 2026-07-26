@@ -38,46 +38,102 @@ from statsmodels.tsa.stattools import adfuller
 # =============================================================================
 
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+
 def get_api_key(args_api_key):
-    """Get API key from args or environment variable"""
-    if args_api_key:
-        return args_api_key
-    api_key = os.environ.get("FMP_API_KEY")
+    """Get API key from args, environment variable, or repo-root .env"""
+    api_key = resolve_fmp_key(args_api_key)
     if not api_key:
         print("ERROR: FMP_API_KEY not found. Set environment variable or use --api-key")
         sys.exit(1)
     return api_key
 
 
-def fetch_historical_prices(symbol, api_key, lookback_days=365):
-    """Fetch historical adjusted close prices for a symbol"""
-    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}"
+def fetch_historical_prices(symbol, api_key, lookback_days=365, *, mode="auto"):
+    """Fetch EOD closes via FMP stable endpoints (free-tier compatible).
 
-    try:
-        response = requests.get(url, headers={"apikey": api_key}, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        if "historical" not in data:
-            print(f"ERROR: No data found for {symbol}")
-            return None
-
-        # Extract historical prices
-        historical = data["historical"][:lookback_days]
-        historical = historical[::-1]  # Reverse to chronological order
-
-        # Convert to pandas Series
-        prices = pd.Series(
-            [item["adjClose"] for item in historical],
-            index=[pd.to_datetime(item["date"]) for item in historical],
-            name=symbol,
+    Returns ``(series, mode_used)`` or ``(None, None)``. See find_pairs.py —
+    pair legs must share ``mode`` (``adj`` or ``close``).
+    """
+    endpoints = []
+    if mode in ("auto", "adj"):
+        endpoints.append(
+            (
+                "adj",
+                "https://financialmodelingprep.com/stable/historical-price-eod/dividend-adjusted",
+                "adjClose",
+            )
+        )
+    if mode in ("auto", "close"):
+        endpoints.append(
+            (
+                "close",
+                "https://financialmodelingprep.com/stable/historical-price-eod/full",
+                "close",
+            )
         )
 
-        return prices
+    last_err = None
+    for used_mode, url, price_key in endpoints:
+        try:
+            response = requests.get(
+                url, params={"symbol": symbol, "apikey": api_key}, timeout=30
+            )
+            if response.status_code == 402:
+                last_err = "402 plan-restricted symbol"
+                continue
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, list) or not data:
+                last_err = "empty response"
+                continue
+            sample = data[0]
+            if not isinstance(sample, dict) or "date" not in sample:
+                last_err = "non-bar response"
+                continue
+            if sample.get(price_key) is None:
+                last_err = f"missing {price_key}"
+                continue
 
-    except requests.exceptions.RequestException as e:
-        print(f"ERROR: Failed to fetch data for {symbol}: {e}")
-        return None
+            historical = data[:lookback_days][::-1]
+            return (
+                pd.Series(
+                    [item[price_key] for item in historical],
+                    index=[pd.to_datetime(item["date"]) for item in historical],
+                    name=symbol,
+                ),
+                used_mode,
+            )
+        except (requests.exceptions.RequestException, KeyError, TypeError, ValueError) as e:
+            last_err = e
+            continue
+
+    print(f"ERROR: No data found for {symbol}" + (f" ({last_err})" if last_err else ""))
+    return None, None
+
+
+def fetch_pair_prices(stock_a, stock_b, api_key, lookback_days=365):
+    """Fetch both legs under the same adjustment mode (adj preferred)."""
+    for mode in ("adj", "close"):
+        prices_a, mode_a = fetch_historical_prices(
+            stock_a, api_key, lookback_days, mode=mode
+        )
+        prices_b, mode_b = fetch_historical_prices(
+            stock_b, api_key, lookback_days, mode=mode
+        )
+        if prices_a is not None and prices_b is not None and mode_a == mode_b == mode:
+            return prices_a, prices_b, mode
+    return None, None, None
 
 
 # =============================================================================
@@ -382,15 +438,16 @@ def main():
     # Get API key
     api_key = get_api_key(args.api_key)
 
-    # Fetch price data
+    # Fetch price data (same adj/close mode for both legs)
     print(f"\nFetching price data for {args.stock_a} and {args.stock_b}...")
 
-    prices_a = fetch_historical_prices(args.stock_a, api_key, args.lookback_days)
-    time.sleep(0.3)  # Rate limiting
-    prices_b = fetch_historical_prices(args.stock_b, api_key, args.lookback_days)
+    prices_a, prices_b, price_mode = fetch_pair_prices(
+        args.stock_a, args.stock_b, api_key, args.lookback_days
+    )
 
     if prices_a is None or prices_b is None:
         sys.exit(1)
+    print(f"  → Price mode: {price_mode}")
 
     # Calculate hedge ratio
     beta_result = calculate_hedge_ratio(prices_a, prices_b)

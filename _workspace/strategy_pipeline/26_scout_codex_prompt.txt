@@ -1,0 +1,11 @@
+﻿Read FIRST: .claude/skills/refuted-families-ledger/SKILL.md
+Also read: _workspace/strategy_pipeline/24_deep_research_futures_2026-07-23.md, 25_deep_research_bot_methodology_2026-07-23.md, 23_candidate_queue_2026-07-23.md
+
+Owner ask: deep-research MA EMA MACD RSI BOLL SAR AVL SUPER VOL KDJ OBV WR + Order-Book Depth + Trades + Network for each pair/coin; then plan strategies for an autonomous futures bot.
+
+BINDING: REFUTED families STOP with row cite. Do NOT reopen RSI-MR, indicator-confluence, textbook trend/breakout (SuperTrend), candlesticks, formulaic alphas, scalping without quoting reopen bar verbatim.
+
+Write: _workspace/strategy_pipeline/26_scout_codex_indicators_ob_network_2026-07-23.md
+Include: per-family novelty table (REFUTED/ADJACENT/OPEN/INFEASIBLE); for ADJACENT/OPEN: mechanism, local data path, cost@$420, expectation, harvest if starved; max 3 screen-worthy; honest autonomous-bot fitness after costs.
+
+Research/scout only. No code. No probes.

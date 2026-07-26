@@ -1,0 +1,42 @@
+{
+  "candidate": "C1_cftc_options_pressure",
+  "prereg_path": "_workspace\\strategy_pipeline\\20_prereg_c1_cftc_options_pressure.md",
+  "prereg_sha256": "2765e26912747c008bd9b97605bfc5b5b7676b2c40ffe9c26a5f9f6e73ec5732",
+  "prereg_frozen_utc": "2026-07-23T02:36:22.352203+00:00",
+  "n_trials": 6,
+  "horizons": [
+    "H1",
+    "H2",
+    "H3"
+  ],
+  "directions": [
+    "long_on_pos",
+    "short_on_pos"
+  ],
+  "expectation": "NO_GO",
+  "harvest_manifest_sha256": "19a3d990ea4a7075248e9b4e06582a59e62bb159d7881ad41176e526d0e5d89c",
+  "harvest_artifacts": [
+    {
+      "dataset_id": "gpe5-46if",
+      "label": "fut_only",
+      "markets": [
+        "BITCOIN - CHICAGO MERCANTILE EXCHANGE",
+        "MICRO BITCOIN - CHICAGO MERCANTILE EXCHANGE"
+      ],
+      "n_rows": 704,
+      "path": "data/cftc_cot/tff_fut_only_btc_raw.json",
+      "sha256": "f82b949ae2ee41f8020816357e1f61ac90b9c07bb5253e1dd281880d700235a2"
+    },
+    {
+      "dataset_id": "yw9f-hn96",
+      "label": "combined",
+      "markets": [
+        "BITCOIN - CHICAGO MERCANTILE EXCHANGE",
+        "MICRO BITCOIN - CHICAGO MERCANTILE EXCHANGE"
+      ],
+      "n_rows": 704,
+      "path": "data/cftc_cot/tff_combined_btc_raw.json",
+      "sha256": "2504c8c32243e26d4bb54b30eb22f87792b6ce75f2c23615f6b9971a1a3d2077"
+    }
+  ]
+}

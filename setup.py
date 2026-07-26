@@ -6,7 +6,10 @@ Usage: python setup.py
 """
 
 import shutil
+import sys
 from pathlib import Path
+
+from setuptools import setup as setuptools_setup
 
 
 def main():
@@ -57,4 +60,12 @@ build/
 
 
 if __name__ == "__main__":
-    main()
+    # setuptools' PEP 517 backend executes setup.py with a build command in
+    # sys.argv. The historical file was only an interactive first-run wizard,
+    # so editable/wheel builds executed the wizard and then failed because no
+    # distribution was produced. Preserve ``python setup.py`` for operators,
+    # while delegating actual build commands to setuptools.
+    if len(sys.argv) == 1:
+        main()
+    else:
+        setuptools_setup()

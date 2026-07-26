@@ -1,0 +1,238 @@
+{
+  "candidate": "15c stablecoin depeg micro-reversion (USDC/USDT, FDUSD/USDT Binance spot)",
+  "hypothesis": "long the discounted stable leg beyond a fixed deviation threshold; exit at re-peg / -8% stop / 48h timeout; after-cost positive at retail",
+  "prereg": "_workspace/strategy_pipeline/15c_screen_depeg.md (frozen before run)",
+  "sample": {
+    "utc": [
+      "2024-07-16",
+      "2026-07-16"
+    ],
+    "grid": "1m closes, next-bar-open fills"
+  },
+  "coverage": {
+    "USDC": {
+      "bars": 1051200,
+      "first": "2024-07-16T00:00:00+00:00",
+      "last": "2026-07-15T23:59:00+00:00",
+      "bar_completeness": 1.0,
+      "min_close": 0.9947
+    },
+    "FDUSD": {
+      "bars": 1051200,
+      "first": "2024-07-16T00:00:00+00:00",
+      "last": "2026-07-15T23:59:00+00:00",
+      "bar_completeness": 1.0,
+      "min_close": 0.8806
+    }
+  },
+  "fee_truth": {
+    "source": "authenticated sapi/v1/asset/tradeFee via ccxt, pulled 2026-07-16",
+    "USDC/USDT": {
+      "maker": 0.0,
+      "taker": 0.0
+    },
+    "FDUSD/USDT": {
+      "maker": 0.0,
+      "taker": 0.0
+    },
+    "binding_fee_per_side": 0.0,
+    "condition": "zero-fee promo is revocable; GO would be conditional on re-pull"
+  },
+  "costs_binding": {
+    "fee_side": 0.0,
+    "slip_side": 0.0005,
+    "stop_slip": 0.001
+  },
+  "sizing": {
+    "per_event_weight": 1.0,
+    "leverage": "none (spot)"
+  },
+  "n_trials_dsr": 3,
+  "variants": {
+    "theta_10bps": {
+      "theta_bps": 10.0,
+      "n_events": 75,
+      "n_by_pair": {
+        "USDC": 19,
+        "FDUSD": 56
+      },
+      "exclusions": {
+        "entry_fill_gap": 0,
+        "exit_fill_gap": 0,
+        "unresolved_at_end": 0
+      },
+      "exit_reasons": {
+        "REPEG": 30,
+        "STOP": 0,
+        "TIMEOUT": 45
+      },
+      "cross_pair_overlap_events": 4,
+      "independent_market_episodes_24h": 65,
+      "mean_net": -0.0008288217518392482,
+      "median_net": -0.0006995000997999101,
+      "win_rate": 0.06666666666666667,
+      "worst_event": -0.0025996612265495322,
+      "best_event": 0.0009006909099258387,
+      "total_compounded": -0.06031251617285627,
+      "realized_maxdd_descriptive": 0.05956063475944522,
+      "median_hold_min": 2881.0,
+      "dsr_prob": 1.2302617648872798e-71,
+      "oos_wr_walk_forward": 0.06666666666666667,
+      "auc_frozen_score": 0.9857142857142858,
+      "monte_carlo": {
+        "n_trades": 75,
+        "p_total_positive": 0.0,
+        "max_drawdown_p95": 0.07206210008404414,
+        "passes": false
+      },
+      "sensitivity_nonbinding": {
+        "std_fee_10bps": {
+          "mean_net": -0.00282516925808979,
+          "win_rate": 0.0
+        },
+        "slip_1bp_zero_fee": {
+          "mean_net": -2.916490651985626e-05,
+          "win_rate": 0.5733333333333334
+        }
+      }
+    },
+    "theta_20bps": {
+      "theta_bps": 20.0,
+      "n_events": 32,
+      "n_by_pair": {
+        "USDC": 5,
+        "FDUSD": 27
+      },
+      "exclusions": {
+        "entry_fill_gap": 0,
+        "exit_fill_gap": 0,
+        "unresolved_at_end": 0
+      },
+      "exit_reasons": {
+        "REPEG": 6,
+        "STOP": 1,
+        "TIMEOUT": 25
+      },
+      "cross_pair_overlap_events": 3,
+      "independent_market_episodes_24h": 29,
+      "mean_net": -0.0028961868684974044,
+      "median_net": -0.0006491694313696117,
+      "win_rate": 0.25,
+      "worst_event": -0.08273185318972609,
+      "best_event": 0.003920200703668497,
+      "total_compounded": -0.09182801722678835,
+      "realized_maxdd_descriptive": 0.09274091709879188,
+      "median_hold_min": 2881.0,
+      "dsr_prob": 8.376490257361914e-06,
+      "oos_wr_walk_forward": 0.20833333333333334,
+      "auc_frozen_score": 0.7395833333333334,
+      "monte_carlo": {
+        "n_trades": 32,
+        "p_total_positive": 0.0115,
+        "max_drawdown_p95": 0.25686984944735236,
+        "passes": false
+      },
+      "sensitivity_nonbinding": {
+        "std_fee_10bps": {
+          "mean_net": -0.004888418111525513,
+          "win_rate": 0.03125
+        },
+        "slip_1bp_zero_fee": {
+          "mean_net": -0.0020866969137070222,
+          "win_rate": 0.625
+        }
+      }
+    },
+    "theta_30bps": {
+      "theta_bps": 30.0,
+      "n_events": 11,
+      "n_by_pair": {
+        "USDC": 1,
+        "FDUSD": 10
+      },
+      "exclusions": {
+        "entry_fill_gap": 0,
+        "exit_fill_gap": 0,
+        "unresolved_at_end": 0
+      },
+      "exit_reasons": {
+        "REPEG": 3,
+        "STOP": 1,
+        "TIMEOUT": 7
+      },
+      "cross_pair_overlap_events": 0,
+      "independent_market_episodes_24h": 11,
+      "mean_net": -0.0064241128567379905,
+      "median_net": 0.0002029075732945529,
+      "win_rate": 0.6363636363636364,
+      "worst_event": -0.08153557651350873,
+      "best_event": 0.003920200703668497,
+      "total_compounded": -0.07151444041510191,
+      "realized_maxdd_descriptive": 0.0815355765135087,
+      "median_hold_min": 2881.0,
+      "dsr_prob": 0.003859811083291652,
+      "oos_wr_walk_forward": 0.625,
+      "auc_frozen_score": 0.6071428571428571,
+      "monte_carlo": {
+        "n_trades": 11,
+        "p_total_positive": 0.2575,
+        "max_drawdown_p95": 0.16126280008201,
+        "passes": false
+      },
+      "sensitivity_nonbinding": {
+        "std_fee_10bps": {
+          "mean_net": -0.008409322721135542,
+          "win_rate": 0.2727272727272727
+        },
+        "slip_1bp_zero_fee": {
+          "mean_net": -0.005595471794650303,
+          "win_rate": 0.8181818181818182
+        }
+      }
+    }
+  },
+  "pbo_weekly_across_variants": 0.0,
+  "gate_detail": {
+    "n_by_variant": {
+      "theta_10bps": 75,
+      "theta_20bps": 32,
+      "theta_30bps": 11
+    },
+    "pbo_weekly_across_variants": 0.0,
+    "theta_10bps": {
+      "mean>0": false,
+      "wr>=0.55": false,
+      "oos_wr>=0.55": false,
+      "dsr>=0.10": false,
+      "pbo<=0.5": true,
+      "auc>=0.60": true,
+      "mc_P>0>=0.95": false,
+      "mc_maxDD_p95<=0.25": true
+    },
+    "theta_20bps": {
+      "mean>0": false,
+      "wr>=0.55": false,
+      "oos_wr>=0.55": false,
+      "dsr>=0.10": false,
+      "pbo<=0.5": true,
+      "auc>=0.60": true,
+      "mc_P>0>=0.95": false,
+      "mc_maxDD_p95<=0.25": false
+    },
+    "theta_30bps": {
+      "evaluable": false
+    }
+  },
+  "verdict": "NO_GO",
+  "reason": "No theta variant clears all frozen gates. theta_10bps: failed ['mean>0', 'wr>=0.55', 'oos_wr>=0.55', 'dsr>=0.10', 'mc_P>0>=0.95'] | theta_20bps: failed ['mean>0', 'wr>=0.55', 'oos_wr>=0.55', 'dsr>=0.10', 'mc_P>0>=0.95', 'mc_maxDD_p95<=0.25']",
+  "thresholds": {
+    "MIN_N": 30,
+    "MIN_DSR": 0.1,
+    "MAX_PBO": 0.5,
+    "MIN_OOS_WR": 0.55,
+    "MIN_AUC": 0.6,
+    "MC_P>0>=": 0.95,
+    "MC_maxDD_p95<=": 0.25,
+    "MC_MIN_TRADES": 30
+  }
+}

@@ -191,8 +191,22 @@ def _apply_accuracy_target(sl_pct: float, tp_pct: float, side: str = None) -> fl
             frac = float(_acc["tp_frac_buy"])
         elif _side in ("sell", "short") and _acc.get("tp_frac_sell"):
             frac = float(_acc["tp_frac_sell"])
+        if frac <= 0 or frac >= 1.0:
+            return tp_pct  # cannot form inverted band shape
+        raw = sl_pct * frac
         floor = float(_acc.get("min_tp_pct", 0.5))
-        return max(floor, sl_pct * frac)
+        tp = max(floor, raw)
+        # Cost floor must NEVER put TP >= SL: that collapses theoretical WR
+        # to ≤50% and breaks restart band detection (tp_frac < sl_frac).
+        # Warehouse 2026-07-24: SL≈0.48% + min_tp=0.5% → measured TP/SL≈1.0
+        # and daily WR≈37% instead of the 63-67% geometry band. Prefer the
+        # frac-compressed TP (may sit below min_tp_pct); stressed-cost entry
+        # gate still refuses hopeless brackets.
+        if tp >= sl_pct:
+            if raw > 0 and raw < sl_pct:
+                return raw
+            return tp_pct
+        return tp
     except Exception:
         return tp_pct
 

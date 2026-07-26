@@ -15,6 +15,8 @@ from loguru import logger
 from config import DRY_RUN
 from utils.logger import setup_logger
 
+WATCHDOG_EXHAUSTED_EXIT_CODE = 75
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Crypto Trading Bot")
@@ -88,8 +90,64 @@ def _classify_exit(exc: BaseException) -> str:
     return "crash"  # any other Exception is a crash
 
 
+def _enforce_preconstruction_live_gates() -> None:
+    """Authorize CONTROLLED_LIVE before exchange clients are constructed.
+
+    This boundary is intentionally outside the in-process restart loop. A
+    missing signature, unsafe configuration, unproven strategy, or invalid
+    active model is an operator-actionable refusal, not a transient crash to
+    retry eleven times.
+    """
+    import config as runtime_config
+    from core.live_gate import (
+        enforce_controlled_live_gate,
+        enforce_live_runtime_invariants,
+        enforce_model_gate_readiness,
+        enforce_strategy_readiness_gate,
+    )
+
+    operating_mode = getattr(runtime_config, "OPERATING_MODE", "")
+    try:
+        enforce_controlled_live_gate(
+            operating_mode,
+            controlled_live_enabled=getattr(
+                runtime_config, "CONTROLLED_LIVE_ENABLED", False
+            ),
+        )
+        enforce_live_runtime_invariants(
+            operating_mode,
+            config_module=runtime_config,
+        )
+        signal_source = str(
+            getattr(runtime_config, "SIGNAL_SOURCE", "") or ""
+        ).lower()
+        strategy_family = (
+            "machine" if signal_source == "machine"
+            else ("tsmom" if signal_source == "tsmom" else None)
+        )
+        enforce_strategy_readiness_gate(
+            operating_mode,
+            strategy_family=strategy_family,
+        )
+        enforce_model_gate_readiness(
+            operating_mode,
+            config_module=runtime_config,
+        )
+    except SystemExit:
+        raise
+    except Exception as exc:
+        if (operating_mode or "").upper() == "CONTROLLED_LIVE":
+            raise SystemExit(
+                "[LiveGate] REFUSING TO START in CONTROLLED_LIVE: "
+                f"pre-construction authorization errored: {exc}"
+            ) from exc
+        logger.warning(f"[LiveGate] pre-construction check skipped: {exc}")
+
+
 def run_with_watchdog():
     """Watchdog wrapper — restarts the bot on crashes for 24/7 operation."""
+    _enforce_preconstruction_live_gates()
+
     from core.bot_engine import BotEngine
 
     max_restarts = 10
@@ -131,7 +189,7 @@ def run_with_watchdog():
                         f"Last error: {e}")
                 except Exception:
                     pass
-                break
+                raise SystemExit(WATCHDOG_EXHAUSTED_EXIT_CODE)
             cooldown = min(300, 30 * len(restart_times))  # 30s, 60s, 90s, ..., max 300s
             logger.info(
                 f"[Watchdog] Restarting in {cooldown}s "
@@ -144,9 +202,9 @@ def _acquire_single_instance_lock():
 
     Two live processes each load positions.json / warehouse / the paper wallet
     independently and corrupt shared state (a duplicate instance once left a
-    +913 phantom paper balance). Best-effort and fail-SAFE: any failure of the
-    lock *mechanism* must never block a legitimate start; only a genuinely-held
-    lock aborts this (second) instance. Returns the handle to keep alive for the
+    +913 phantom paper balance). PAPER can continue for data collection when
+    the lock mechanism is unavailable. CONTROLLED_LIVE fails closed because an
+    exclusive writer cannot be proven. Returns the handle to keep alive for the
     process lifetime.
     """
     import os
@@ -156,7 +214,15 @@ def _acquire_single_instance_lock():
         fh = open(lock_path, "a+")
         fh.seek(0)
     except OSError as e:
-        logger.warning(f"[Lock] cannot open {lock_path}: {e}; single-instance guard disabled")
+        if not DRY_RUN:
+            logger.critical(
+                f"[Lock] cannot open {lock_path}: {e}; refusing CONTROLLED_LIVE "
+                "startup because singleton ownership cannot be proven"
+            )
+            raise SystemExit(1) from e
+        logger.warning(
+            f"[Lock] cannot open {lock_path}: {e}; PAPER single-instance guard disabled"
+        )
         return None
     try:
         if os.name == "nt":
@@ -174,8 +240,20 @@ def _acquire_single_instance_lock():
         except Exception:
             pass
         sys.exit(1)
-    except Exception as e:  # lock mechanism unavailable — do NOT block startup
-        logger.warning(f"[Lock] single-instance check unavailable ({e}); continuing")
+    except Exception as e:
+        if not DRY_RUN:
+            logger.critical(
+                f"[Lock] single-instance check unavailable ({e}); refusing "
+                "CONTROLLED_LIVE startup"
+            )
+            try:
+                fh.close()
+            except Exception:
+                pass
+            raise SystemExit(1) from e
+        logger.warning(
+            f"[Lock] single-instance check unavailable ({e}); continuing in PAPER"
+        )
     return fh
 
 

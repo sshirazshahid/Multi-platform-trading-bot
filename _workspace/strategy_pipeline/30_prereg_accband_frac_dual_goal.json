@@ -1,0 +1,115 @@
+{
+  "prereg_id": "accband_frac_dual_goal_2026-07-23",
+  "frozen_before_outcomes": true,
+  "document": "30_prereg_accband_frac_dual_goal.md",
+  "baseline_measure": "30_cohort_bel_measure_2026-07-23.json",
+  "mode_gate": [
+    "PAPER",
+    "MAX_FLOW_BAND"
+  ],
+  "min_n_per_cell": 80,
+  "bonferroni_m": 12,
+  "joint_gates": {
+    "breakeven_wr_max": 0.59,
+    "win_rate_low": 0.59,
+    "win_rate_high": 0.67,
+    "expectancy_min": 0.0,
+    "profit_factor_min": 1.0
+  },
+  "band_regime_filter_locked": true,
+  "cells": [
+    {
+      "cell_id": "G035",
+      "tp_frac_of_sl": 0.35,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G040",
+      "tp_frac_of_sl": 0.4,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G045",
+      "tp_frac_of_sl": 0.45,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G050",
+      "tp_frac_of_sl": 0.5,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G055",
+      "tp_frac_of_sl": 0.55,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G060",
+      "tp_frac_of_sl": 0.6,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G070",
+      "tp_frac_of_sl": 0.7,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G080",
+      "tp_frac_of_sl": 0.8,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "S_hi",
+      "tp_frac_of_sl": 0.5,
+      "tp_frac_buy": 0.55,
+      "tp_frac_sell": 0.45,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "S_mid",
+      "tp_frac_of_sl": 0.5,
+      "tp_frac_buy": 0.45,
+      "tp_frac_sell": 0.35,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "S_wide",
+      "tp_frac_of_sl": 0.6,
+      "tp_frac_buy": 0.65,
+      "tp_frac_sell": 0.55,
+      "min_tp_pct": 0.5
+    },
+    {
+      "cell_id": "G050_m40",
+      "tp_frac_of_sl": 0.5,
+      "tp_frac_buy": null,
+      "tp_frac_sell": null,
+      "min_tp_pct": 0.4
+    }
+  ],
+  "forbidden": [
+    "loosen_entry_floor",
+    "economic_gate_relax_beyond_paper_fallback",
+    "indicator_entry_installs",
+    "post_hoc_cell_additions"
+  ],
+  "expectation": "NO_GO",
+  "sha256_md": "f5de9f0aff9d8e4dcfc5fb0809d17234215559392fe0b3834011411c51c4c1d3",
+  "sha256_json_body": "f2db8887aff5738265b75816037d781968f9a6aea521f0f4dccea6a3a635808b"
+}

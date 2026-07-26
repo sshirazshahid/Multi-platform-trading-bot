@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from core.live_gate import (
     enforce_controlled_live_gate,
+    enforce_live_runtime_invariants,
     is_checklist_signed,
     live_latch_permits_execution,
 )
@@ -178,3 +180,75 @@ def test_latch_observation_permitted_here():
     """OBSERVATION is blocked upstream (separate gate); this latch alone
     does not block it — documents the division of responsibility."""
     assert live_latch_permits_execution("OBSERVATION", False) is True
+
+
+def test_bot_engine_fails_closed_when_live_startup_gate_errors(monkeypatch):
+    """An unexpected gate failure must never be downgraded during live startup."""
+    import config
+    import core.bot_engine as bot_engine
+    import core.live_gate as live_gate
+
+    monkeypatch.setattr(bot_engine, "DRY_RUN", False)
+    monkeypatch.setattr(config, "OPERATING_MODE", "CONTROLLED_LIVE")
+    monkeypatch.setattr(config, "CONTROLLED_LIVE_ENABLED", True)
+
+    def broken_gate(*args, **kwargs):
+        raise RuntimeError("readiness database unavailable")
+
+    monkeypatch.setattr(live_gate, "enforce_controlled_live_gate", broken_gate)
+
+    engine = object.__new__(bot_engine.BotEngine)
+    with pytest.raises(SystemExit, match="live safety checks errored"):
+        engine.run()
+
+
+def _safe_live_config(**overrides):
+    values = {
+        "SL_FAIL_EMERGENCY_CLOSE_ENABLED": True,
+        "OHLCV_VALIDATION_ENABLED": True,
+        "PER_POSITION_LOCK_ENABLED": True,
+        "MAX_PORTFOLIO_EXPOSURE_PCT": 2.0,
+        "MAX_AGGREGATE_OPEN_RISK_PCT": 0.001,
+        "STRESSED_EXIT_COST_FRAC": 0.002,
+        "EXECUTION_BOOK_MAX_AGE_SEC": 5.0,
+        "MAX_ENTRY_SLIPPAGE_BPS": 30.0,
+        "DAILY_LOSS_BREAKER": {"enabled": True, "max_loss_pct": 0.02},
+        "RISK": {"futures_max_leverage": 1.0},
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_live_runtime_invariants_accept_conservative_config():
+    enforce_live_runtime_invariants(
+        "CONTROLLED_LIVE", config_module=_safe_live_config()
+    )
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"SL_FAIL_EMERGENCY_CLOSE_ENABLED": False}, "emergency close"),
+        ({"OHLCV_VALIDATION_ENABLED": False}, "OHLCV validation"),
+        ({"PER_POSITION_LOCK_ENABLED": False}, "per-position lock"),
+        ({"MAX_PORTFOLIO_EXPOSURE_PCT": 0.0}, "portfolio exposure cap"),
+        ({"MAX_PORTFOLIO_EXPOSURE_PCT": 12.0}, "portfolio exposure cap"),
+        ({"MAX_AGGREGATE_OPEN_RISK_PCT": 0.0}, "aggregate open-risk cap"),
+        ({"STRESSED_EXIT_COST_FRAC": 0.0}, "stressed exit-cost"),
+        ({"EXECUTION_BOOK_MAX_AGE_SEC": 30.0}, "execution-book age"),
+        ({"MAX_ENTRY_SLIPPAGE_BPS": 100.0}, "entry-slippage cap"),
+        ({"DAILY_LOSS_BREAKER": {"enabled": False}}, "daily-loss breaker"),
+        ({"RISK": {"futures_max_leverage": 3.0}}, "leverage cap"),
+    ],
+)
+def test_live_runtime_invariants_reject_disabled_or_loosened_rails(override, reason):
+    with pytest.raises(SystemExit, match=reason):
+        enforce_live_runtime_invariants(
+            "CONTROLLED_LIVE", config_module=_safe_live_config(**override)
+        )
+
+
+def test_live_runtime_invariants_are_dormant_in_paper():
+    enforce_live_runtime_invariants(
+        "PAPER", config_module=_safe_live_config(SL_FAIL_EMERGENCY_CLOSE_ENABLED=False)
+    )

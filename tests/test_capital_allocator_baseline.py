@@ -11,6 +11,7 @@ not call exchange.transfer(); real transfers require explicit live mode.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -87,6 +88,10 @@ def test_no_action_when_profit_below_threshold(monkeypatch):
 def test_baseline_resets_after_successful_transfer(monkeypatch):
     """A successful ACCUMULATE must reset the baseline to the
     post-transfer free balance so the same profit isn't re-swept."""
+    monkeypatch.setattr(
+        "core.entry_policy.authorize_runtime_entry",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True, reason="test_authorized"),
+    )
     ex = _mock_exchange(usdt_free=120.0)
     alloc = _build_allocator(monkeypatch, exchanges={"binance": ex}, live=True)
     # Seed the baseline manually so accumulator detects profit on next call.

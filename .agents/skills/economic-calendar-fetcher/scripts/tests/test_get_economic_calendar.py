@@ -53,6 +53,13 @@ SAMPLE_EVENTS = [
 # ---------------------------------------------------------------------------
 
 
+def _disable_dotenv_fallback(monkeypatch):
+    """Neutralise the repo-root .env source so "no key anywhere" is testable."""
+    import _shared_fmp_yahoo_patch
+
+    monkeypatch.setattr(_shared_fmp_yahoo_patch, "find_dotenv", lambda start=None: None)
+
+
 class TestGetApiKey:
     def test_returns_key_when_set(self, monkeypatch):
         monkeypatch.setenv("FMP_API_KEY", "test_key_123")
@@ -60,6 +67,7 @@ class TestGetApiKey:
 
     def test_returns_none_when_not_set(self, monkeypatch):
         monkeypatch.delenv("FMP_API_KEY", raising=False)
+        _disable_dotenv_fallback(monkeypatch)
         assert get_api_key() is None
 
 

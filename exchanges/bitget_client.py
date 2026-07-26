@@ -13,7 +13,8 @@ import threading
 import ccxt
 from loguru import logger
 
-from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY, DRY_RUN
+from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY
+from utils.http_redaction import redact_http_debug
 
 from .base import BaseExchange, validate_ohlcv
 
@@ -126,23 +127,9 @@ class BitgetClient(BaseExchange):
                 self._connected = False
                 return
 
-        # Ensure One-Way position mode is set (prevents 40774 errors).
-        # 2026-06-04 (audit): set_position_mode is a REAL authenticated private POST
-        # (mix/v1/account/setPositionMode) to the LIVE Bitget account. It ran at
-        # construction time on EVERY start regardless of mode — the only init-time
-        # write among the 3 clients (Binance/Bybit init is read-only). Gate it behind
-        # DRY_RUN so PAPER/research runs never mutate the owner's live account-wide
-        # position mode. In LIVE the one-way default is still applied here; in PAPER no
-        # orders are placed on Bitget so the mode is irrelevant, and LIVE's first real
-        # order still hits the existing _oneway retry path if mode were ever wrong.
-        if not DRY_RUN:
-            try:
-                self.exchange.set_position_mode(hedged=False, symbol=None)
-                logger.debug("[Bitget] Position mode set to One-Way.")
-            except Exception as e:
-                # Already in one-way mode, or endpoint not available — safe to ignore
-                if "already" not in str(e).lower() and "not modified" not in str(e).lower():
-                    logger.warning(f"[Bitget] set_position_mode failed: {e}")
+        # Construction is strictly read-only. Position mode is verified by the
+        # CONTROLLED_LIVE preflight; a mismatch blocks startup instead of
+        # mutating this account-wide setting before authorization completes.
 
         try:
             self.exchange.fetch_balance()
@@ -175,7 +162,10 @@ class BitgetClient(BaseExchange):
                 extras.append(f"body={body_str[:240]}")
         if last_req:
             extras.append(f"url={last_req}")
-        return base + ("  [" + " | ".join(extras) + "]" if extras else "")
+        return redact_http_debug(
+            base + ("  [" + " | ".join(extras) + "]" if extras else ""),
+            max_chars=1000,
+        )
 
     def _ok(self) -> bool:
         return self._connected and self.exchange is not None
@@ -409,9 +399,11 @@ class BitgetClient(BaseExchange):
                     # reduceOnly stays as-is for close operations
                     oneway_params["productType"] = "USDT-FUTURES"
                     try:
-                        # Call ccxt exchange directly to avoid base class re-adding params
-                        order = self.exchange.create_order(
-                            symbol, order_type, side, amount, price, oneway_params)
+                        # Keep the central quantization, client-id and ambiguous-
+                        # acknowledgement reconciliation boundary on retries too.
+                        order = super().create_order(
+                            symbol, order_type, side, amount,
+                            price, oneway_params, market_type)
                         logger.info(
                             f"[Bitget] ORDER {side.upper()} {amount} {symbol} "
                             f"@ {price or 'MARKET'} | id={order.get('id')} (one-way retry)")

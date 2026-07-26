@@ -47,12 +47,30 @@ class SmartExecutor:
         If spread is too wide, signals should be skipped.
         """
         try:
-            orderbook = exchange.fetch_order_book(symbol, limit=5)
+            orderbook = exchange.fetch_order_book(
+                symbol, limit=5, market_type=market_type
+            )
             if not orderbook or not orderbook.get("bids") or not orderbook.get("asks"):
-                return {"ok": True, "spread_pct": 0, "bid": 0, "ask": 0}
+                return {
+                    "ok": False,
+                    "reason": "order_book_unavailable",
+                    "spread_pct": 0,
+                    "bid": 0,
+                    "ask": 0,
+                    "mid": 0,
+                }
 
             best_bid = float(orderbook["bids"][0][0])
             best_ask = float(orderbook["asks"][0][0])
+            if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
+                return {
+                    "ok": False,
+                    "reason": "order_book_invalid",
+                    "spread_pct": 0,
+                    "bid": best_bid,
+                    "ask": best_ask,
+                    "mid": 0,
+                }
             mid = (best_bid + best_ask) / 2
             spread_pct = (best_ask - best_bid) / mid if mid > 0 else 0
 
@@ -73,7 +91,14 @@ class SmartExecutor:
             }
         except Exception as e:
             logger.debug(f"[Executor] Spread check {symbol}: {e}")
-            return {"ok": True, "spread_pct": 0, "bid": 0, "ask": 0}
+            return {
+                "ok": False,
+                "reason": "order_book_fetch_failed",
+                "spread_pct": 0,
+                "bid": 0,
+                "ask": 0,
+                "mid": 0,
+            }
 
     def get_entry_price(self, exchange, symbol: str, side: str,
                         market_type: str = "spot") -> float:
@@ -84,8 +109,13 @@ class SmartExecutor:
         This is used for limit order placement.
         """
         try:
-            orderbook = exchange.fetch_order_book(symbol, limit=5)
+            orderbook = exchange.fetch_order_book(
+                symbol, limit=5, market_type=market_type
+            )
             if not orderbook:
+                return 0
+
+            if not orderbook.get("bids") or not orderbook.get("asks"):
                 return 0
 
             if side == "buy":
@@ -326,6 +356,7 @@ class SmartExecutor:
                         "_executor_warning": "maker_only_place_failed"}
             return {"status": "uncertain", "id": None,
                     "symbol": symbol, "amount": amount,
+                    "_client_order_id": getattr(e, "client_order_id", None),
                     "_executor_warning": "limit_place_failed_unknown"}
 
     def execute_twap(self, exchange, symbol: str, side: str,

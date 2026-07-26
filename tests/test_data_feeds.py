@@ -104,12 +104,11 @@ class TestOrderBookDepthFeed:
         asks = [
             ["100.0", "0.5"],   # $50 at 100.0
             ["100.5", "0.5"],   # $50.25 at 100.5
-            ["101.0", "1.0"],   # $101 at 101.0
+            ["101.0", "1.1"],   # enough base quantity to complete the order
         ]
         mid = 99.9  # mid below best ask (realistic: mid = (bid+ask)/2)
         slip = feed._estimate_slippage(asks, 200, mid, "buy")
-        # Walking the book: 0.5 @ 100, 0.5 @ 100.5, 1.0 @ 101 for $201.5
-        # We need $200 notional which is 200/99.9 = 2.002 qty
+        # We need 200/99.9 = 2.002 base units, valued at each ask level.
         # Avg fill > mid, so slippage should be positive
         assert slip >= 0
         # Thin book should show meaningful slippage but not extreme
@@ -271,6 +270,8 @@ class TestDataCoordinator:
             "refresh() blocked on a hung feed — shutdown(wait=True) regression")
         assert box["result"].get("funding") is False, (
             "a feed that never completed must be reported stale (False)")
+        assert coord._funding_time == 0.0
+        assert coord.get_market_context("BTC").any_stale is True
 
 
 # ── Config section tests ──────────────────────────────────────────────

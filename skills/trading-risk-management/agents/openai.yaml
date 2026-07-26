@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trading Risk Management"
+  short_description: "Audit fail-closed futures risk controls"
+  default_prompt: "Use $trading-risk-management to audit this change against the repository's CONTROLLED_LIVE risk contract."

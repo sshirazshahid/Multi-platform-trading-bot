@@ -97,6 +97,13 @@ class DataCoordinator:
         self._orderbook_time: float = 0.0
         self._news_time: float = 0.0
         self._smart_money_time: float = 0.0
+        self._feed_times: dict[str, dict[str, float]] = {
+            "funding": {},
+            "oi": {},
+            "orderbook": {},
+            "news": {},
+            "smart_money": {},
+        }
 
         # Config (can be overridden via set_config)
         self._config = {
@@ -133,6 +140,95 @@ class DataCoordinator:
     def set_price_changes(self, changes: dict[str, float]) -> None:
         """Set 6h price change % per coin (for OI divergence computation)."""
         self._price_changes = changes
+
+    @staticmethod
+    def _entry_is_fresh(entry: Any) -> bool:
+        """Require a non-empty payload that explicitly declares itself fresh."""
+        return (
+            isinstance(entry, dict)
+            and any(key != "stale" for key in entry)
+            and entry.get("stale") is False
+        )
+
+    def _instrument_time(self, feed_name: str, coin: str) -> float:
+        """Return an instrument timestamp without leaking another coin's age."""
+        per_instrument = self._feed_times[feed_name]
+        if coin in per_instrument:
+            return per_instrument[coin]
+        if per_instrument:
+            return 0.0
+        return float(getattr(self, f"_{feed_name}_time"))
+
+    def _instrument_is_current(
+        self,
+        feed_name: str,
+        coin: str,
+        now: float,
+        max_age: float,
+    ) -> bool:
+        data = getattr(self, f"_{feed_name}_data")
+        entry = data.get(coin, {})
+        updated_at = self._instrument_time(feed_name, coin)
+        return (
+            self._entry_is_fresh(entry)
+            and updated_at > 0
+            and now - updated_at < max_age
+        )
+
+    def _apply_refresh_payload(
+        self,
+        feed_name: str,
+        requested_coins: list[str],
+        payload: Any,
+        updated_at: float,
+    ) -> bool:
+        """Merge a feed response and advance only fresh instrument clocks."""
+        normalized = payload if isinstance(payload, dict) else {}
+        fresh_count = 0
+
+        with self._lock:
+            cache = getattr(self, f"_{feed_name}_data")
+            for key, entry in normalized.items():
+                if isinstance(key, str) and isinstance(entry, dict):
+                    cache[key] = entry
+
+            for coin in requested_coins:
+                entry = normalized.get(coin)
+                if self._entry_is_fresh(entry):
+                    self._feed_times[feed_name][coin] = updated_at
+                    fresh_count += 1
+                    continue
+
+                # A completed request with no usable observation invalidates
+                # this instrument without erasing its last known values.
+                stale_entry = entry if isinstance(entry, dict) else cache.get(coin, {})
+                stale_entry = stale_entry.copy()
+                stale_entry["stale"] = True
+                cache[coin] = stale_entry
+
+            if fresh_count:
+                setattr(self, f"_{feed_name}_time", updated_at)
+
+        return bool(requested_coins) and fresh_count == len(requested_coins)
+
+    def _fetch_with_deadline(
+        self,
+        feed_name: str,
+        feed: Any,
+        coins: list[str],
+        deadline: float,
+        cancel_event: threading.Event,
+    ) -> Any:
+        """Run a feed with a thread-local CoinDesk deadline/cancel context."""
+        from core.data_feeds._coindesk_caller import coindesk_call_context
+
+        with coindesk_call_context(
+            deadline=deadline,
+            cancel_event=cancel_event,
+        ):
+            if feed_name == "oi":
+                return feed.fetch(coins, price_changes=self._price_changes)
+            return feed.fetch(coins)
 
     def _ensure_feeds(self) -> None:
         """Lazy-initialize feed instances."""
@@ -191,69 +287,83 @@ class DataCoordinator:
 
         # Determine which feeds need refresh
         feed_specs = [
-            ("funding", self._funding_feed, self._funding_time,
+            ("funding", self._funding_feed,
              self._config["funding_ttl"], self._config["funding_enabled"]),
-            ("oi", self._oi_feed, self._oi_time,
+            ("oi", self._oi_feed,
              self._config["oi_ttl"], self._config["oi_enabled"]),
-            ("orderbook", self._orderbook_feed, self._orderbook_time,
+            ("orderbook", self._orderbook_feed,
              self._config["orderbook_ttl"], self._config["orderbook_enabled"]),
-            ("news", self._news_feed, self._news_time,
+            ("news", self._news_feed,
              self._config["news_ttl"], self._config["news_enabled"]),
-            ("smart_money", self._smart_money_feed, self._smart_money_time,
+            ("smart_money", self._smart_money_feed,
              self._config["smart_money_ttl"], self._config["smart_money_enabled"]),
         ]
 
-        deadline = self._config.get("refresh_deadline_sec", 20.0)
+        deadline_seconds = max(
+            0.0, float(self._config.get("refresh_deadline_sec", 20.0))
+        )
+        deadline_at = time.monotonic() + deadline_seconds
+        cancel_event = threading.Event()
         pool = ThreadPoolExecutor(max_workers=self._config["max_workers"])
         try:
             futures = {}
-            for name, feed, last_time, ttl, enabled in feed_specs:
+            processed_futures = set()
+            for name, feed, ttl, enabled in feed_specs:
                 if not enabled or feed is None:
                     results[name] = False
                     continue
-                if not force and (now - last_time) < ttl:
+
+                due_coins = [
+                    coin for coin in coins
+                    if force or not self._instrument_is_current(
+                        name, coin, now, ttl
+                    )
+                ]
+                if not due_coins:
                     results[name] = True  # still fresh
                     continue
-                # Submit refresh
-                if name == "oi":
-                    fut = pool.submit(
-                        feed.fetch, coins,
-                        price_changes=self._price_changes)
-                else:
-                    fut = pool.submit(feed.fetch, coins)
-                futures[fut] = name
+
+                fut = pool.submit(
+                    self._fetch_with_deadline,
+                    name,
+                    feed,
+                    due_coins,
+                    deadline_at,
+                    cancel_event,
+                )
+                futures[fut] = (name, due_coins)
                 results[name] = False  # stale until this feed completes below
 
-            for fut in as_completed(futures, timeout=deadline):
-                name = futures[fut]
-                try:
-                    data = fut.result(timeout=1)
-                    with self._lock:
-                        if name == "funding":
-                            self._funding_data = data or {}
-                            self._funding_time = now
-                        elif name == "oi":
-                            self._oi_data = data or {}
-                            self._oi_time = now
-                        elif name == "orderbook":
-                            self._orderbook_data = data or {}
-                            self._orderbook_time = now
-                        elif name == "news":
-                            self._news_data = data or {}
-                            self._news_time = now
-                        elif name == "smart_money":
-                            self._smart_money_data = data or {}
-                            self._smart_money_time = now
-                    results[name] = True
-                except Exception as e:
-                    logger.warning(f"[DataCoord] {name} refresh failed: {e}")
-                    results[name] = False
+            if futures:
+                wait_timeout = max(0.0, deadline_at - time.monotonic())
+                for fut in as_completed(futures, timeout=wait_timeout):
+                    processed_futures.add(fut)
+                    name, requested_coins = futures[fut]
+                    try:
+                        data = fut.result()
+                        results[name] = self._apply_refresh_payload(
+                            name, requested_coins, data, time.time()
+                        )
+                    except Exception as e:
+                        self._apply_refresh_payload(
+                            name, requested_coins, {}, time.time()
+                        )
+                        logger.warning(f"[DataCoord] {name} refresh failed: {e}")
+                        results[name] = False
         except FuturesTimeout:
-            pending = [n for f, n in futures.items() if not f.done()]
+            cancel_event.set()
+            pending = []
+            for future, (name, requested_coins) in futures.items():
+                if future not in processed_futures:
+                    pending.append(name)
+                    self._apply_refresh_payload(
+                        name, requested_coins, {}, time.time()
+                    )
             logger.warning(
-                f"[DataCoord] refresh deadline ({deadline}s) hit; feeds still "
+                f"[DataCoord] refresh deadline ({deadline_seconds}s) hit; feeds still "
                 f"pending kept stale: {pending} (not blocking the scheduler)")
         finally:
+            cancel_event.set()
             # NEVER block the single-threaded scheduler on a slow feed. The old
             # `with ThreadPoolExecutor(...)` exit called shutdown(wait=True),
             # which awaited EVERY submitted fetch regardless of the deadline —
@@ -275,51 +385,31 @@ class DataCoordinator:
         stale_mult = self._config["staleness_multiplier"]
 
         with self._lock:
-            funding = self._funding_data.get(cu, {})
-            oi = self._oi_data.get(cu, {})
-            ob = self._orderbook_data.get(cu, {})
-            news = self._news_data.get(cu, {})
-            smart = self._smart_money_data.get(cu, {})
-
-            # Check staleness
             any_stale = False
-            if self._config["funding_enabled"]:
-                if (now - self._funding_time >
-                        self._config["funding_ttl"] * stale_mult):
+            snapshots = {}
+            for feed_name in (
+                "funding", "oi", "orderbook", "news", "smart_money"
+            ):
+                data = getattr(self, f"_{feed_name}_data")
+                entry = data.get(cu, {})
+                enabled = self._config[f"{feed_name}_enabled"]
+                if enabled and not self._instrument_is_current(
+                    feed_name,
+                    cu,
+                    now,
+                    self._config[f"{feed_name}_ttl"] * stale_mult,
+                ):
+                    entry = entry.copy()
+                    entry["stale"] = True
                     any_stale = True
-                    funding = funding.copy()
-                    funding["stale"] = True
-            if self._config["oi_enabled"]:
-                if (now - self._oi_time >
-                        self._config["oi_ttl"] * stale_mult):
-                    any_stale = True
-                    oi = oi.copy()
-                    oi["stale"] = True
-            if self._config["orderbook_enabled"]:
-                if (now - self._orderbook_time >
-                        self._config["orderbook_ttl"] * stale_mult):
-                    any_stale = True
-                    ob = ob.copy()
-                    ob["stale"] = True
-            if self._config["news_enabled"]:
-                if (now - self._news_time >
-                        self._config["news_ttl"] * stale_mult):
-                    any_stale = True
-                    news = news.copy()
-                    news["stale"] = True
-            if self._config["smart_money_enabled"]:
-                if (now - self._smart_money_time >
-                        self._config["smart_money_ttl"] * stale_mult):
-                    any_stale = True
-                    smart = smart.copy()
-                    smart["stale"] = True
+                snapshots[feed_name] = entry
 
         return MarketContext(
-            funding=funding,
-            open_interest=oi,
-            orderbook=ob,
-            news=news,
-            smart_money=smart,
+            funding=snapshots["funding"],
+            open_interest=snapshots["oi"],
+            orderbook=snapshots["orderbook"],
+            news=snapshots["news"],
+            smart_money=snapshots["smart_money"],
             any_stale=any_stale,
         )
 
@@ -327,59 +417,42 @@ class DataCoordinator:
         """Get MarketContext for all tracked coins."""
         return {coin: self.get_market_context(coin) for coin in self._coins}
 
+    def _feed_status(self, feed_name: str, now: float) -> dict[str, Any]:
+        ttl = self._config[f"{feed_name}_ttl"]
+        max_age = ttl * self._config["staleness_multiplier"]
+        tracked = self._coins[:15]
+        timestamps = [
+            self._instrument_time(feed_name, coin) for coin in tracked
+        ]
+        oldest = min(timestamps) if timestamps else float(
+            getattr(self, f"_{feed_name}_time")
+        )
+        stale = any(
+            not self._instrument_is_current(feed_name, coin, now, max_age)
+            for coin in tracked
+        ) if tracked else oldest <= 0 or now - oldest >= max_age
+        data = getattr(self, f"_{feed_name}_data")
+        return {
+            "enabled": self._config[f"{feed_name}_enabled"],
+            "age_sec": round(now - oldest, 1),
+            "ttl": ttl,
+            "n_coins": len(data),
+            "stale": stale,
+        }
+
     def status(self) -> dict[str, Any]:
         """Return feed health status for monitoring/dashboard."""
         now = time.time()
-        return {
-            "coins_tracked": len(self._coins),
-            "feeds": {
-                "funding": {
-                    "enabled": self._config["funding_enabled"],
-                    "age_sec": round(now - self._funding_time, 1),
-                    "ttl": self._config["funding_ttl"],
-                    "n_coins": len(self._funding_data),
-                    "stale": (now - self._funding_time >
-                              self._config["funding_ttl"] *
-                              self._config["staleness_multiplier"]),
+        with self._lock:
+            return {
+                "coins_tracked": len(self._coins),
+                "feeds": {
+                    name: self._feed_status(name, now)
+                    for name in (
+                        "funding", "oi", "orderbook", "news", "smart_money"
+                    )
                 },
-                "oi": {
-                    "enabled": self._config["oi_enabled"],
-                    "age_sec": round(now - self._oi_time, 1),
-                    "ttl": self._config["oi_ttl"],
-                    "n_coins": len(self._oi_data),
-                    "stale": (now - self._oi_time >
-                              self._config["oi_ttl"] *
-                              self._config["staleness_multiplier"]),
-                },
-                "orderbook": {
-                    "enabled": self._config["orderbook_enabled"],
-                    "age_sec": round(now - self._orderbook_time, 1),
-                    "ttl": self._config["orderbook_ttl"],
-                    "n_coins": len(self._orderbook_data),
-                    "stale": (now - self._orderbook_time >
-                              self._config["orderbook_ttl"] *
-                              self._config["staleness_multiplier"]),
-                },
-                "news": {
-                    "enabled": self._config["news_enabled"],
-                    "age_sec": round(now - self._news_time, 1),
-                    "ttl": self._config["news_ttl"],
-                    "n_coins": len(self._news_data),
-                    "stale": (now - self._news_time >
-                              self._config["news_ttl"] *
-                              self._config["staleness_multiplier"]),
-                },
-                "smart_money": {
-                    "enabled": self._config["smart_money_enabled"],
-                    "age_sec": round(now - self._smart_money_time, 1),
-                    "ttl": self._config["smart_money_ttl"],
-                    "n_coins": len(self._smart_money_data),
-                    "stale": (now - self._smart_money_time >
-                              self._config["smart_money_ttl"] *
-                              self._config["staleness_multiplier"]),
-                },
-            },
-        }
+            }
 
 
 def get_coordinator() -> DataCoordinator:

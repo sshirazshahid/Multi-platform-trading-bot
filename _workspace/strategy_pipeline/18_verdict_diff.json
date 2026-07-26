@@ -1,0 +1,137 @@
+{
+ "n_pairs": 44,
+ "n_agree": 28,
+ "agree": {
+  "1INCH/USDT:USDT": "DATA_STARVED",
+  "AAVE/USDT:USDT": "FIT_WITH_GAPS",
+  "ALGO/USDT:USDT": "FIT_BAND_PAPER",
+  "ARB/USDT:USDT": "FIT_BAND_PAPER",
+  "AVAX/USDT:USDT": "FIT_BAND_PAPER",
+  "BCH/USDT:USDT": "FIT_WITH_GAPS",
+  "BNB/USDT:USDT": "COST_UNFIT",
+  "COMP/USDT:USDT": "DATA_STARVED",
+  "CRV/USDT:USDT": "DATA_STARVED",
+  "DASH/USDT:USDT": "DATA_STARVED",
+  "ENA/USDT:USDT": "DATA_STARVED",
+  "ETH/USDT:USDT": "FIT_BAND_PAPER",
+  "GALA/USDT:USDT": "DATA_STARVED",
+  "GRT/USDT:USDT": "DATA_STARVED",
+  "HBAR/USDT:USDT": "DATA_STARVED",
+  "JUP/USDT:USDT": "DATA_STARVED",
+  "LINK/USDT:USDT": "FIT_BAND_PAPER",
+  "MANA/USDT:USDT": "FIT_WITH_GAPS",
+  "NEAR/USDT:USDT": "FIT_WITH_GAPS",
+  "ONDO/USDT:USDT": "DATA_STARVED",
+  "RENDER/USDT:USDT": "FIT_WITH_GAPS",
+  "SAND/USDT:USDT": "FIT_WITH_GAPS",
+  "SEI/USDT:USDT": "FIT_WITH_GAPS",
+  "SNX/USDT:USDT": "DATA_STARVED",
+  "TAO/USDT:USDT": "DATA_STARVED",
+  "TIA/USDT:USDT": "FIT_WITH_GAPS",
+  "TRX/USDT:USDT": "COST_UNFIT",
+  "ZEC/USDT:USDT": "DATA_STARVED"
+ },
+ "disputes": {
+  "ADA/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 47.0% (n=298), far below 63-67% at frac 0.35.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: geometry \u2014 band 0.470/n=298 well below 63-67; coverage full; forward retune only"
+  },
+  "APT/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 50.3% (n=356), far below 63-67% at frac 0.35.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: geometry \u2014 band 0.503/n=356 below band; coverage full"
+  },
+  "ATOM/USDT:USDT": {
+   "codex": "FIT_WITH_GAPS",
+   "codex_note": "Band store has only n=90; backfill outcomes before trusting near-band WR 62.2%.",
+   "fable": "FIT_BAND_PAPER",
+   "fable_note": "Full coverage; band 0.622/n=90 just below band, thin n \u2014 note only"
+  },
+  "BTC/USDT:USDT": {
+   "codex": "COST_UNFIT",
+   "codex_note": "1h move/cost is 0.985 below 1x, despite a deep n=1471 band cache.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: cost margin move/cost 0.98; band 0.612/n=1471 marginally below band; anchor pair"
+  },
+  "DOT/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 74.2% (n=407); funding stores are also absent.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: funding absent all venues; band 0.742/n=407 above band \u2014 outlier-high"
+  },
+  "ETC/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 83.9% (n=112), far above 63-67%; funding is absent.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: funding absent; band 0.839/n=112 + sole positive meanR = 1-of-44 order-stat, NOT edge"
+  },
+  "FET/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "2026-07-20 incident: runtime found no live Bybit USDT perp; static route is not executable.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: funding absent + bybit route dead at 07-20 boot \u2014 verify route liveness"
+  },
+  "FIL/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 79.9% (n=234), far above 63-67%; funding is absent.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: funding absent; band 0.799/n=234 above band; meanR -0.033 near flat"
+  },
+  "INJ/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 76.4% (n=742), well above 63-67% at frac 0.35.",
+   "fable": "FIT_BAND_PAPER",
+   "fable_note": "Full coverage; band 0.764/n=742 above band (retune note); first econ-gate fill 07-21"
+  },
+  "LTC/USDT:USDT": {
+   "codex": "DATA_STARVED",
+   "codex_note": "Only n=78 band outcomes; robust geometry store is missing (observed WR 51.3%).",
+   "fable": "FIT_BAND_PAPER",
+   "fable_note": "Full coverage; band 0.513/n=78 below band but sub-robust n \u2014 note only"
+  },
+  "OP/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 53.2% (n=402); stale OHLCV compounds the mismatch.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gaps: stale OHLCV; band 0.532/n=402 below band; funding OK"
+  },
+  "SOL/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 12.7% (n=158), catastrophically below 63-67%.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: geometry BROKEN \u2014 0.127/n=158, meanR -1.117, worst bleed -$81; halt until retune"
+  },
+  "SUI/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 39.2% (n=120), far below 63-67% at frac 0.35.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: geometry \u2014 band 0.392/n=120 far below band; coverage full"
+  },
+  "UNI/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 75.5% (n=789); OHLCV and funding stores are stale/missing.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gaps: stale OHLCV + funding absent; band 0.755/n=789 above band"
+  },
+  "VET/USDT:USDT": {
+   "codex": "EXCLUDE",
+   "codex_note": "Geometry-tuning outlier: WR 40.5% (n=294); OHLCV and funding stores are stale/missing.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gaps: geometry (0.405/n=294 far below band) + stale OHLCV + funding absent"
+  },
+  "XRP/USDT:USDT": {
+   "codex": "DATA_STARVED",
+   "codex_note": "Band-outcome store has n=1; no honest geometry verdict is possible.",
+   "fable": "FIT_WITH_GAPS",
+   "fable_note": "Gap: band evidence n=1 \u2014 cache never sampled XRP; full coverage otherwise"
+  }
+ },
+ "codex_on_fable_candidate": "MODIFY",
+ "fable_on_codex": {
+  "c1": "SCREEN",
+  "c2": "DATA_GATED"
+ }
+}

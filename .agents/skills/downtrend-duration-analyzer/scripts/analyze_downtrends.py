@@ -44,11 +44,23 @@ DEFAULT_SECTORS = [
 ]
 
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+
 def get_api_key(api_key_arg: str | None) -> str:
     """Get FMP API key from argument or environment variable."""
     if api_key_arg:
         return api_key_arg
-    api_key = os.environ.get("FMP_API_KEY")
+    api_key = resolve_fmp_key()
     if not api_key:
         print(
             "Error: FMP API key required. Set FMP_API_KEY environment variable or use --api-key",

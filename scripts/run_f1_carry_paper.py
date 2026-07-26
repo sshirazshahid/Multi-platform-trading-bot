@@ -19,9 +19,11 @@ directional fallback. Read-only w.r.t. the live bot.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +43,7 @@ from core.carry_runner import (  # noqa: E402
     DEFAULT_SLIP_FRAC,
     DEFAULT_STATE_PATH,
     CarryRunner,
+    acquire_carry_state_lock,
     write_report,
 )
 from core.funding_history import (  # noqa: E402
@@ -57,7 +60,11 @@ VENUES = ("binance", "bybit", "bitget")
 # selection-bias-free. Env escape hatch: F1_UNIVERSE=legacy reverts to the
 # Rev-5 BTC/ETH pair without a code change. Symbols missing on a venue are
 # gate-skipped per symbol (snapshot unavailable -> no entry), fail-closed.
-from research.funding_carry_lab import F1_EXPANDED_UNIVERSE_2026_07_05  # noqa: E402
+from research.funding_carry_lab import (  # noqa: E402
+    DEFAULT_MAX_HEDGE_STALENESS_SEC,
+    F1_EXPANDED_UNIVERSE_2026_07_05,
+    F1_MAX_FUNDING_AGE_SEC,
+)
 
 SYMBOLS = (
     ("BTC/USDT", "ETH/USDT")
@@ -97,13 +104,86 @@ def carry_round_trip_cost_frac(venue: str) -> float:
     )
 
 
-def _bbo_depth(book: dict) -> tuple[float, float, float] | None:
-    """(bid, ask, top5_notional) from a ccxt order book; None if unusable."""
+def _epoch_seconds(value) -> float | None:
+    """Normalize a source timestamp to epoch seconds without using receipt time."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            return None
+        return value.astimezone(timezone.utc).timestamp()
+    if isinstance(value, str):
+        encoded = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            parsed = datetime.fromisoformat(encoded)
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                return None
+            return parsed.astimezone(timezone.utc).timestamp()
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(timestamp) or timestamp < 0.0:
+        return None
+    if timestamp >= 100_000_000_000.0:
+        timestamp /= 1000.0
+    return timestamp
+
+
+def _record_observed_at(record: dict) -> float | None:
+    for field in (
+        "observed_at", "exchange_ts", "source_ts", "timestamp", "datetime", "ts",
+    ):
+        observed_at = _epoch_seconds(record.get(field))
+        if observed_at is not None:
+            return observed_at
+    return None
+
+
+def _observed_age_sec(observed_at: float | None, received_at: float) -> float:
+    if observed_at is None or observed_at > received_at:
+        return float("inf")
+    return received_at - observed_at
+
+
+def _bbo_depth(
+    book: dict,
+    *,
+    executable_side: str,
+) -> tuple[float, float, float, float | None] | None:
+    """Return BBO plus top-5 depth for the side this carry leg executes.
+
+    Spot entry buys consume asks; the perp hedge sells into bids. Opposite-side
+    liquidity must never make an unfillable leg look deep.
+    """
+    if executable_side not in {"buy", "sell"}:
+        raise ValueError("executable_side must be buy or sell")
     bids, asks = book.get("bids") or [], book.get("asks") or []
     if not bids or not asks:
         return None
-    top5 = sum(p * q for p, q in bids[:5]) + sum(p * q for p, q in asks[:5])
-    return float(bids[0][0]), float(asks[0][0]), float(top5)
+    try:
+        bid = float(bids[0][0])
+        ask = float(asks[0][0])
+        levels = asks if executable_side == "buy" else bids
+        executable_notional = sum(
+            float(price) * float(quantity)
+            for price, quantity, *_ in levels[:5]
+            if float(price) > 0.0 and float(quantity) > 0.0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        not math.isfinite(bid)
+        or not math.isfinite(ask)
+        or not math.isfinite(executable_notional)
+        or bid <= 0.0
+        or ask <= bid
+    ):
+        return None
+    return bid, ask, executable_notional, _record_observed_at(book)
 
 
 def build_live_snapshot_provider(venue: str):
@@ -130,13 +210,17 @@ def build_live_snapshot_provider(venue: str):
 
     def provider(symbol: str) -> dict | None:
         coin = symbol.split("/")[0]
-        now = time.time()
+        received_at = time.time()
         try:
             spot = _bbo_depth(
-                client.fetch_order_book(symbol, limit=5, market_type="spot"))
+                client.fetch_order_book(symbol, limit=5, market_type="spot"),
+                executable_side="buy",
+            )
             perp = _bbo_depth(
                 client.fetch_order_book(f"{symbol}:USDT", limit=5,
-                                        market_type="futures"))
+                                        market_type="futures"),
+                executable_side="sell",
+            )
             mi = ledger.mark_index(symbol).get(venue) or {}
             funding = dict((ledger.funding([coin]).get(coin) or {}).get(venue) or {})
         except Exception:  # noqa: BLE001 - fail-open: runner logs no_snapshot
@@ -147,11 +231,47 @@ def build_live_snapshot_provider(venue: str):
             perp_exchange_symbol = client.exchange.market_id(f"{symbol}:USDT")
         except Exception:  # noqa: BLE001 - identity must be venue-derived
             return None
+
+        funding_observed_at = _record_observed_at(funding)
+        funding_age = _observed_age_sec(funding_observed_at, received_at)
+        funding.update({
+            "observed_at": funding_observed_at,
+            "received_at": received_at,
+            "age_sec": funding_age,
+            "stale": (
+                bool(funding.get("stale", True))
+                or funding_age > F1_MAX_FUNDING_AGE_SEC
+            ),
+        })
+
+        mark_observed_at = _record_observed_at(dict(mi))
+        try:
+            perp_mark = float(mi.get("mark"))
+            if not math.isfinite(perp_mark) or perp_mark <= 0.0:
+                raise ValueError("invalid mark")
+        except (TypeError, ValueError, OverflowError):
+            perp_mark = (perp[0] + perp[1]) / 2.0
+            mark_observed_at = perp[3]
+
+        market_observations = (spot[3], perp[3], mark_observed_at)
+        observed_at = (
+            min(market_observations)
+            if all(value is not None for value in market_observations)
+            else None
+        )
+        market_stale = any(
+            _observed_age_sec(value, received_at)
+            > DEFAULT_MAX_HEDGE_STALENESS_SEC
+            for value in market_observations
+        )
+        spot_buy_depth = spot[2]
+        perp_sell_depth = perp[2]
+        executable_depth = min(spot_buy_depth, perp_sell_depth)
         trailing = load_recent_realized_settlements(
             venue,
             coin,
             limit=21,
-            before_ts=now,
+            before_ts=received_at,
             base_dir=ROOT / "data" / "funding_history",
         )
         return {
@@ -159,11 +279,13 @@ def build_live_snapshot_provider(venue: str):
             "spot_ask": spot[1],
             "perp_bid": perp[0],
             "perp_ask": perp[1],
-            "perp_mark": mi.get("mark") or (perp[0] + perp[1]) / 2.0,
+            "perp_mark": perp_mark,
             "perp_exchange_symbol": perp_exchange_symbol,
-            "depth_ratio": min(spot[2], perp[2]) / PAPER_NOTIONAL_HINT,
+            "spot_buy_depth_notional": spot_buy_depth,
+            "perp_sell_depth_notional": perp_sell_depth,
+            "depth_ratio": executable_depth / PAPER_NOTIONAL_HINT,
             "liq_buffer_x": PAPER_LIQ_BUFFER_X,
-            "both_legs_fillable": True,
+            "both_legs_fillable": executable_depth >= PAPER_NOTIONAL_HINT,
             # 7d funding regime from the hourly harvester's rolling history;
             # honest None (gate pass-through, exactly as before) until >=6
             # periods exist in the window (core/funding_history).
@@ -174,7 +296,13 @@ def build_live_snapshot_provider(venue: str):
             ),
             "round_trip_cost_frac": rt_cost,
             "funding": funding,
-            "ts": now,
+            "spot_observed_at": spot[3],
+            "perp_observed_at": perp[3],
+            "mark_observed_at": mark_observed_at,
+            "observed_at": observed_at,
+            "received_at": received_at,
+            "stale": market_stale,
+            "ts": observed_at,
         }
 
     return provider
@@ -195,6 +323,23 @@ def run_report_only(
 
 def clear_recovery(*, state_path: Path | str = STATE_PATH,
                    heartbeat_path: Path | str = HEARTBEAT_PATH) -> bool:
+    """Clear the recovery latch while excluding every carry state writer."""
+
+    state_lock = acquire_carry_state_lock(state_path)
+    if state_lock is None:
+        print("[f1_carry_paper] carry state is busy — recovery was not cleared")
+        return False
+    try:
+        return _clear_recovery_locked(
+            state_path=state_path,
+            heartbeat_path=heartbeat_path,
+        )
+    finally:
+        state_lock.close()
+
+
+def _clear_recovery_locked(*, state_path: Path | str,
+                           heartbeat_path: Path | str) -> bool:
     """Operator latch-clear for Rev 5.2 reduce-only recovery.
 
     Prints the latched record, archives it (with an added ``cleared_ts``) to

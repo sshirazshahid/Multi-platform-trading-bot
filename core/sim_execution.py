@@ -96,6 +96,7 @@ class SimExecutionModel:
         self, exchange, symbol: str, side: str, market_type: str,
         base_price: Optional[float] = None, phase: str = "open",
         size: float = 0.0,
+        execution_snapshot: Optional[dict] = None,
     ) -> float:
         """
         Compute a realistic paper fill price.
@@ -111,6 +112,16 @@ class SimExecutionModel:
           "close" → self.close_slip
           "stop"  → self.sl_slip  (wider — fast-move fills are worse)
         """
+        snapshot_vwap = 0.0
+        snapshot_mid = 0.0
+        try:
+            if execution_snapshot and execution_snapshot.get("allowed") is True:
+                snapshot_vwap = float(execution_snapshot.get("vwap") or 0.0)
+                snapshot_mid = float(execution_snapshot.get("mid") or 0.0)
+        except (TypeError, ValueError):
+            snapshot_vwap = 0.0
+            snapshot_mid = 0.0
+
         try:
             ticker = exchange.fetch_ticker(symbol, market_type) or {}
         except Exception:
@@ -119,7 +130,9 @@ class SimExecutionModel:
         bid  = _safe_float(ticker.get("bid"))
         ask  = _safe_float(ticker.get("ask"))
         last = _safe_float(ticker.get("last") or ticker.get("close"))
-        if not last and base_price:
+        if snapshot_mid > 0:
+            last = snapshot_mid
+        elif not last and base_price:
             last = float(base_price)
         if not last or last <= 0:
             return float(base_price or 0.0)
@@ -137,17 +150,30 @@ class SimExecutionModel:
         # live signature of a thin/stressed market, where fills walk deeper than
         # the flat constant assumes. Uses bid/ask already fetched above — no extra
         # call — and never lowers slip (mult>=0, spread>=0).
-        if self.spread_slip_mult > 0 and bid > 0 and ask > 0:
+        if (
+            snapshot_vwap <= 0
+            and self.spread_slip_mult > 0
+            and bid > 0
+            and ask > 0
+        ):
             mid = 0.5 * (bid + ask)
             if mid > 0:
                 spread_frac = max(0.0, (ask - bid) / mid)
                 slip += self.spread_slip_mult * spread_frac
 
         if side == "buy":
-            ref = ask if (self.prefer_book and ask > 0) else last
+            ref = (
+                snapshot_vwap
+                if snapshot_vwap > 0
+                else (ask if (self.prefer_book and ask > 0) else last)
+            )
             fill = ref * (1.0 + slip)
         else:  # sell / short-open / long-close
-            ref = bid if (self.prefer_book and bid > 0) else last
+            ref = (
+                snapshot_vwap
+                if snapshot_vwap > 0
+                else (bid if (self.prefer_book and bid > 0) else last)
+            )
             fill = ref * (1.0 - slip)
 
         # Diagnostics: cost paid = (fill - last) * size, signed by direction
@@ -167,6 +193,7 @@ class SimExecutionModel:
         self, exchange, symbol: str, market_type: str, side: str,
         sl: float, tp: float, now: Optional[float] = None,
         entry_ts: Optional[float] = None,
+        price_basis: str = "trade",
     ) -> Tuple[Optional[str], Optional[float]]:
         """
         Did the last 1m candle's high/low cross SL or TP?
@@ -185,8 +212,11 @@ class SimExecutionModel:
 
         try:
             # Fetch 3 so a closed bar survives after dropping the forming one.
-            candles = exchange.fetch_ohlcv(
-                symbol, "1m", limit=3, market_type=market_type)
+            if str(price_basis).lower() == "mark":
+                candles = exchange.fetch_mark_ohlcv(symbol, "1m", limit=3)
+            else:
+                candles = exchange.fetch_ohlcv(
+                    symbol, "1m", limit=3, market_type=market_type)
         except Exception:
             return (None, None)
         if not candles:
@@ -218,14 +248,17 @@ class SimExecutionModel:
 
         if side == "buy":
             hit_sl = sl > 0 and low  <= sl
-            hit_tp = tp > 0 and high >= tp
+            # A reduce-only LIMIT target touching the high is not a fill:
+            # require strict trade-through by at least the observable price
+            # ordering. Exact-touch orders remain queued/non-filled.
+            hit_tp = tp > 0 and high > tp
             if hit_sl:   # pessimistic
                 return ("stop_loss",   sl)
             if hit_tp:
                 return ("take_profit", tp)
         else:
             hit_sl = sl > 0 and high >= sl
-            hit_tp = tp > 0 and low  <= tp
+            hit_tp = tp > 0 and low < tp
             if hit_sl:
                 return ("stop_loss",   sl)
             if hit_tp:

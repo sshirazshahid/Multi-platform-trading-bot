@@ -1,0 +1,175 @@
+{
+  "candidate": "C3_quarter_hour_imbalance",
+  "generated_utc": "2026-07-23T11:13:55.038732+00:00",
+  "prereg_sha256": "7b33c63914c44a749b2cb57d3bec0dd1a1c33e593577d9eea3dc57e0fb2f1787",
+  "harvest_manifest_sha256": "d3b5632d6bbc07fb5d371d9086e85d1de6cb434db1fa420914eedd54a8604186",
+  "n_trials": 6,
+  "n_trade_rows": 5088,
+  "oos_cut_boundary_ms": 1778936400000,
+  "joint_pbo": 0.07847707847707848,
+  "best_aligned_mean_bps_oos": -18.549553398160757,
+  "expansion_bar_bps": 20.0,
+  "go_variant_keys": [],
+  "delta_drift_kill_any": false,
+  "variants": {
+    "H4_aligned": {
+      "residual": {
+        "n_oos": 436,
+        "n_is": 438,
+        "mean": -0.0023258402091368975,
+        "mean_bps": -23.258402091368975,
+        "wr": 0.3830275229357798,
+        "gates": {
+          "dsr": 1.2407076324219945e-07,
+          "oos_wr": 0.3830275229357798,
+          "mc_pass": false,
+          "p_total_positive": 0.001,
+          "max_drawdown_p95": 1.5183809219104019
+        },
+        "verdict": "NO_GO"
+      },
+      "delta_drift_kill": false
+    },
+    "H4_aligned_raw": {
+      "raw": {
+        "n_oos": 436,
+        "n_is": 438,
+        "mean": -0.0026084249075833893,
+        "mean_bps": -26.084249075833892,
+        "wr": 0.3967889908256881,
+        "gates": {
+          "dsr": 2.474499320486935e-09,
+          "oos_wr": 0.3967889908256881,
+          "mc_pass": false,
+          "p_total_positive": 0.0005,
+          "max_drawdown_p95": 1.63052368894849
+        },
+        "verdict": "NO_GO"
+      }
+    },
+    "H4_contrarian": {
+      "residual": {
+        "n_oos": 436,
+        "n_is": 438,
+        "mean": -0.0016741597908631026,
+        "mean_bps": -16.741597908631025,
+        "wr": 0.3922018348623853,
+        "gates": {
+          "dsr": 3.799398748180975e-05,
+          "oos_wr": 0.3922018348623853,
+          "mc_pass": false,
+          "p_total_positive": 0.005,
+          "max_drawdown_p95": 1.2403584869482804
+        },
+        "verdict": "NO_GO"
+      }
+    },
+    "H8_aligned": {
+      "residual": {
+        "n_oos": 242,
+        "n_is": 244,
+        "mean": -0.0033030639154639587,
+        "mean_bps": -33.03063915463959,
+        "wr": 0.3925619834710744,
+        "gates": {
+          "dsr": 1.037484113907403e-06,
+          "oos_wr": 0.3925619834710744,
+          "mc_pass": false,
+          "p_total_positive": 0.0,
+          "max_drawdown_p95": 1.2230993523237
+        },
+        "verdict": "NO_GO"
+      },
+      "delta_drift_kill": false
+    },
+    "H8_aligned_raw": {
+      "raw": {
+        "n_oos": 242,
+        "n_is": 244,
+        "mean": -0.000700484452658128,
+        "mean_bps": -7.00484452658128,
+        "wr": 0.4380165289256198,
+        "gates": {
+          "dsr": 0.02553553735727977,
+          "oos_wr": 0.4380165289256198,
+          "mc_pass": false,
+          "p_total_positive": 0.2595,
+          "max_drawdown_p95": 0.6749104720900224
+        },
+        "verdict": "NO_GO"
+      }
+    },
+    "H8_contrarian": {
+      "residual": {
+        "n_oos": 242,
+        "n_is": 244,
+        "mean": -0.0006969360845360411,
+        "mean_bps": -6.969360845360411,
+        "wr": 0.44214876033057854,
+        "gates": {
+          "dsr": 0.02378407151559361,
+          "oos_wr": 0.44214876033057854,
+          "mc_pass": false,
+          "p_total_positive": 0.2445,
+          "max_drawdown_p95": 0.635399883581894
+        },
+        "verdict": "NO_GO"
+      }
+    },
+    "H12_aligned": {
+      "residual": {
+        "n_oos": 168,
+        "n_is": 168,
+        "mean": -0.0018549553398160758,
+        "mean_bps": -18.549553398160757,
+        "wr": 0.47023809523809523,
+        "gates": {
+          "dsr": 0.0031192797242146036,
+          "oos_wr": 0.47023809523809523,
+          "mc_pass": false,
+          "p_total_positive": 0.08,
+          "max_drawdown_p95": 0.7576243345371932
+        },
+        "verdict": "NO_GO"
+      },
+      "delta_drift_kill": false
+    },
+    "H12_aligned_raw": {
+      "raw": {
+        "n_oos": 166,
+        "n_is": 170,
+        "mean": -0.0029336795453666115,
+        "mean_bps": -29.336795453666113,
+        "wr": 0.40963855421686746,
+        "gates": {
+          "dsr": 0.001048441242598926,
+          "oos_wr": 0.40963855421686746,
+          "mc_pass": false,
+          "p_total_positive": 0.0235,
+          "max_drawdown_p95": 0.9090739914818824
+        },
+        "verdict": "NO_GO"
+      }
+    },
+    "H12_contrarian": {
+      "residual": {
+        "n_oos": 168,
+        "n_is": 168,
+        "mean": -0.002145044660183925,
+        "mean_bps": -21.45044660183925,
+        "wr": 0.4107142857142857,
+        "gates": {
+          "dsr": 0.003017338350246311,
+          "oos_wr": 0.4107142857142857,
+          "mc_pass": false,
+          "p_total_positive": 0.067,
+          "max_drawdown_p95": 0.7589018597165629
+        },
+        "verdict": "NO_GO"
+      }
+    }
+  },
+  "verdict": "NO_GO",
+  "expectation": "NO_GO",
+  "harvest_cmd": "python scripts/harvest_binance_aggtrades_qh.py"
+}

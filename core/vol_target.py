@@ -131,7 +131,9 @@ class VolTarget:
         return notional
 
 
-def risk_budget_margin(balance_usd, sl_pct, leverage, risk_pct):
+def risk_budget_margin(
+    balance_usd, sl_pct, leverage, risk_pct, stressed_exit_cost_frac=0.0
+):
     """Margin (USD) such that loss at the planned SL == risk_pct of balance.
 
     2026-06-11 (Task A — vol-target entry sizing): used by
@@ -153,10 +155,11 @@ def risk_budget_margin(balance_usd, sl_pct, leverage, risk_pct):
     try:
         balance_usd = float(balance_usd)
         sl_frac = float(sl_pct) / 100.0
-        lev = max(1, int(leverage))
+        lev = max(1.0, float(leverage))
         risk_pct = float(risk_pct)
+        exit_cost = max(0.0, float(stressed_exit_cost_frac or 0.0))
     except (TypeError, ValueError):
         return float("inf")
     if balance_usd <= 0 or sl_frac <= 0 or risk_pct <= 0:
         return float("inf")
-    return (risk_pct * balance_usd) / (lev * sl_frac)
+    return (risk_pct * balance_usd) / (lev * (sl_frac + exit_cost))

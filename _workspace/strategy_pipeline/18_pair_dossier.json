@@ -1,0 +1,3520 @@
+{
+ "generated_utc": "2026-07-22T11:27:26Z",
+ "script": "research/pair_evidence_dossier.py",
+ "universe_spec": "data\\strategy_specs\\MCP_DIRECTIONAL_PAPER.json",
+ "n_pairs": 44,
+ "heartbeat_profile": {
+  "profile": "AGGRESSIVE_RESEARCH",
+  "epoch": 1784665448.8840065,
+  "epoch_utc": "2026-07-21T20:24:08Z"
+ },
+ "band_cache_total_resolved": 14555,
+ "band_cache_frac": 0.35,
+ "cost_model": {
+  "fee_side_frac": 0.0005,
+  "slip_side_frac": 0.0005,
+  "roundtrip_cost_bps": 20.0,
+  "provenance": "config.py FEE['futures_taker'] + SLIPPAGE['pct_open'] x2 sides (binance taker; band cache is 14,551/14,555 binance)"
+ },
+ "quarantine_source": ".env",
+ "quarantine_bases": [
+  "AXS"
+ ],
+ "non_directional_families_excluded": [
+  "reconcile",
+  "reconciled_exchange",
+  "manual"
+ ],
+ "pairs": {
+  "1INCH/USDT:USDT": {
+   "symbol": "1INCH/USDT:USDT",
+   "base": "1INCH",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.0,
+     "rows": 8760,
+     "first_utc": "2025-05-31T22:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 30.83,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.541,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "AAVE/USDT:USDT": {
+   "symbol": "AAVE/USDT:USDT",
+   "base": "AAVE",
+   "warehouse": {
+    "all_time": {
+     "n": 90,
+     "wr": 0.3103,
+     "net_pnl_usd": -21.1613,
+     "fees_usd": 5.8106
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 15,
+     "wr": 0.5333,
+     "net_pnl_usd": -1.6441,
+     "fees_usd": 1.7002
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 789,
+    "wr": 0.6946,
+    "mean_r": -0.1835,
+    "mean_net_pnl_usd": -0.6692,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 48.17,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.409,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "ADA/USDT:USDT": {
+   "symbol": "ADA/USDT:USDT",
+   "base": "ADA",
+   "warehouse": {
+    "all_time": {
+     "n": 151,
+     "wr": 0.2848,
+     "net_pnl_usd": -47.8623,
+     "fees_usd": 13.2416
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 6,
+     "wr": 0.1667,
+     "net_pnl_usd": -0.9942,
+     "fees_usd": 0.2017
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 298,
+    "wr": 0.4698,
+    "mean_r": -0.5284,
+    "mean_net_pnl_usd": -1.0113,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1946.3,
+      "first_utc": "2021-03-18T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5840
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 36.99,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.85,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "ALGO/USDT:USDT": {
+   "symbol": "ALGO/USDT:USDT",
+   "base": "ALGO",
+   "warehouse": {
+    "all_time": {
+     "n": 72,
+     "wr": 0.3913,
+     "net_pnl_usd": -14.3449,
+     "fees_usd": 3.0431
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 141,
+    "wr": 0.6525,
+    "mean_r": -0.258,
+    "mean_net_pnl_usd": -0.3869,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1757.3,
+      "first_utc": "2021-09-23T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5273
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 35.29,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.764,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "APT/USDT:USDT": {
+   "symbol": "APT/USDT:USDT",
+   "base": "APT",
+   "warehouse": {
+    "all_time": {
+     "n": 83,
+     "wr": 0.3253,
+     "net_pnl_usd": -38.3635,
+     "fees_usd": 6.1578
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 3,
+     "wr": 0.3333,
+     "net_pnl_usd": -1.0805,
+     "fees_usd": 0.1809
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 356,
+    "wr": 0.5028,
+    "mean_r": -0.4763,
+    "mean_net_pnl_usd": -1.0703,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 47.06,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.353,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "ARB/USDT:USDT": {
+   "symbol": "ARB/USDT:USDT",
+   "base": "ARB",
+   "warehouse": {
+    "all_time": {
+     "n": 114,
+     "wr": 0.2818,
+     "net_pnl_usd": -29.174,
+     "fees_usd": 7.4456
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 19,
+     "wr": 0.4211,
+     "net_pnl_usd": -3.7077,
+     "fees_usd": 0.7919
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 655,
+    "wr": 0.6626,
+    "mean_r": -0.2209,
+    "mean_net_pnl_usd": -0.7054,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 43.15,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.157,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "ATOM/USDT:USDT": {
+   "symbol": "ATOM/USDT:USDT",
+   "base": "ATOM",
+   "warehouse": {
+    "all_time": {
+     "n": 88,
+     "wr": 0.425,
+     "net_pnl_usd": -18.7984,
+     "fees_usd": 7.1566
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -1.6278,
+     "fees_usd": 0.089
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 90,
+    "wr": 0.6222,
+    "mean_r": -0.2925,
+    "mean_net_pnl_usd": -0.4896,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1739.3,
+      "first_utc": "2021-10-11T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5219
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 31.28,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.564,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "AVAX/USDT:USDT": {
+   "symbol": "AVAX/USDT:USDT",
+   "base": "AVAX",
+   "warehouse": {
+    "all_time": {
+     "n": 148,
+     "wr": 0.3129,
+     "net_pnl_usd": -47.6541,
+     "fees_usd": 12.7577
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 3,
+     "wr": 0.0,
+     "net_pnl_usd": -0.6447,
+     "fees_usd": 0.1087
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 479,
+    "wr": 0.6305,
+    "mean_r": -0.2705,
+    "mean_net_pnl_usd": -0.565,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 36.31,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.816,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "BCH/USDT:USDT": {
+   "symbol": "BCH/USDT:USDT",
+   "base": "BCH",
+   "warehouse": {
+    "all_time": {
+     "n": 28,
+     "wr": 0.4231,
+     "net_pnl_usd": -6.9385,
+     "fees_usd": 2.3399
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 2,
+     "wr": 0.0,
+     "net_pnl_usd": -2.7728,
+     "fees_usd": 0.2708
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 340,
+    "wr": 0.6382,
+    "mean_r": -0.2722,
+    "mean_net_pnl_usd": -0.5647,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 35.12,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.756,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "BNB/USDT:USDT": {
+   "symbol": "BNB/USDT:USDT",
+   "base": "BNB",
+   "warehouse": {
+    "all_time": {
+     "n": 157,
+     "wr": 0.3161,
+     "net_pnl_usd": -36.5035,
+     "fees_usd": 11.9677
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -0.0301,
+     "fees_usd": 0.0488
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 11,
+    "wr": 0.0,
+    "mean_r": -1.5745,
+    "mean_net_pnl_usd": -1.2255,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1843.3,
+      "first_utc": "2021-06-29T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5531
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 19.12,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 0.956,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "BTC/USDT:USDT": {
+   "symbol": "BTC/USDT:USDT",
+   "base": "BTC",
+   "warehouse": {
+    "all_time": {
+     "n": 149,
+     "wr": 0.3356,
+     "net_pnl_usd": -29.0785,
+     "fees_usd": 13.7033
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 4,
+     "wr": 0.75,
+     "net_pnl_usd": 0.5457,
+     "fees_usd": 0.2371
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 1471,
+    "wr": 0.6118,
+    "mean_r": -0.2937,
+    "mean_net_pnl_usd": -0.374,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27592,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T08:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 2022.3,
+      "first_utc": "2021-01-01T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6068
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": true,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 19.7,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 0.985,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "COMP/USDT:USDT": {
+   "symbol": "COMP/USDT:USDT",
+   "base": "COMP",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.0,
+     "rows": 8760,
+     "first_utc": "2025-05-31T22:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 38.19,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.909,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "CRV/USDT:USDT": {
+   "symbol": "CRV/USDT:USDT",
+   "base": "CRV",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.0,
+     "rows": 8762,
+     "first_utc": "2025-05-31T20:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 40.54,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.027,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "DASH/USDT:USDT": {
+   "symbol": "DASH/USDT:USDT",
+   "base": "DASH",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 63.37,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 3.168,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "DOT/USDT:USDT": {
+   "symbol": "DOT/USDT:USDT",
+   "base": "DOT",
+   "warehouse": {
+    "all_time": {
+     "n": 130,
+     "wr": 0.315,
+     "net_pnl_usd": -36.1457,
+     "fees_usd": 9.8074
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 6,
+     "wr": 0.5,
+     "net_pnl_usd": -0.1121,
+     "fees_usd": 0.5089
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 407,
+    "wr": 0.742,
+    "mean_r": -0.1429,
+    "mean_net_pnl_usd": -0.236,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 35.34,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.767,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "ENA/USDT:USDT": {
+   "symbol": "ENA/USDT:USDT",
+   "base": "ENA",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 49.09,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.455,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "ETC/USDT:USDT": {
+   "symbol": "ETC/USDT:USDT",
+   "base": "ETC",
+   "warehouse": {
+    "all_time": {
+     "n": 4,
+     "wr": 0.25,
+     "net_pnl_usd": -13.3476,
+     "fees_usd": 0.2616
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 112,
+    "wr": 0.8393,
+    "mean_r": 0.1124,
+    "mean_net_pnl_usd": 0.2009,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 28.45,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.422,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "ETH/USDT:USDT": {
+   "symbol": "ETH/USDT:USDT",
+   "base": "ETH",
+   "warehouse": {
+    "all_time": {
+     "n": 69,
+     "wr": 0.2754,
+     "net_pnl_usd": -29.7938,
+     "fees_usd": 5.3342
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 2,
+     "wr": 0.5,
+     "net_pnl_usd": 0.1635,
+     "fees_usd": 0.1158
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 1583,
+    "wr": 0.6601,
+    "mean_r": -0.2346,
+    "mean_net_pnl_usd": -0.4228,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 2022.3,
+      "first_utc": "2021-01-01T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6068
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": true,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 23.15,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.157,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "FET/USDT:USDT": {
+   "symbol": "FET/USDT:USDT",
+   "base": "FET",
+   "warehouse": {
+    "all_time": {
+     "n": 16,
+     "wr": 0.4,
+     "net_pnl_usd": -2.7076,
+     "fees_usd": 0.5431
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -0.4517,
+     "fees_usd": 0.0577
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 237,
+    "wr": 0.616,
+    "mean_r": -0.3018,
+    "mean_net_pnl_usd": -0.9217,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": false,
+    "bundle_mr_note": "runtime-skipped at 2026-07-20 boot: no live bybit USDT-perp",
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 40.7,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.035,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "FIL/USDT:USDT": {
+   "symbol": "FIL/USDT:USDT",
+   "base": "FIL",
+   "warehouse": {
+    "all_time": {
+     "n": 13,
+     "wr": 0.25,
+     "net_pnl_usd": -5.5123,
+     "fees_usd": 0.9622
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 7,
+     "wr": 0.4286,
+     "net_pnl_usd": -0.8804,
+     "fees_usd": 0.342
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 234,
+    "wr": 0.7991,
+    "mean_r": -0.0329,
+    "mean_net_pnl_usd": -0.0278,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 38.31,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.916,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "GALA/USDT:USDT": {
+   "symbol": "GALA/USDT:USDT",
+   "base": "GALA",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.0,
+     "rows": 8762,
+     "first_utc": "2025-05-31T20:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 48.6,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.43,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "GRT/USDT:USDT": {
+   "symbol": "GRT/USDT:USDT",
+   "base": "GRT",
+   "warehouse": {
+    "all_time": {
+     "n": 5,
+     "wr": 0.3333,
+     "net_pnl_usd": -0.2226,
+     "fees_usd": 0.1566
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1101.2,
+     "rows": 26429,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1683.0,
+      "first_utc": "2021-12-06T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5050
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 44.61,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.231,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "HBAR/USDT:USDT": {
+   "symbol": "HBAR/USDT:USDT",
+   "base": "HBAR",
+   "warehouse": {
+    "all_time": {
+     "n": 4,
+     "wr": 0.0,
+     "net_pnl_usd": -3.8104,
+     "fees_usd": 0.4596
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -0.6001,
+     "fees_usd": 0.0572
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 413.5,
+     "rows": 9925,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 30.95,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.547,
+    "window_bars": 720
+   },
+   "flags": [
+    "band_cache_no_outcomes"
+   ]
+  },
+  "INJ/USDT:USDT": {
+   "symbol": "INJ/USDT:USDT",
+   "base": "INJ",
+   "warehouse": {
+    "all_time": {
+     "n": 25,
+     "wr": 0.4783,
+     "net_pnl_usd": -5.8812,
+     "fees_usd": 1.825
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 21,
+     "wr": 0.4762,
+     "net_pnl_usd": -6.5948,
+     "fees_usd": 1.67
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 742,
+    "wr": 0.7642,
+    "mean_r": -0.106,
+    "mean_net_pnl_usd": -0.2345,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 50.42,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.521,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "JUP/USDT:USDT": {
+   "symbol": "JUP/USDT:USDT",
+   "base": "JUP",
+   "warehouse": {
+    "all_time": {
+     "n": 16,
+     "wr": 0.375,
+     "net_pnl_usd": -1.4867,
+     "fees_usd": 1.0244
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 2,
+     "wr": 0.0,
+     "net_pnl_usd": -1.288,
+     "fees_usd": 0.1304
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 413.5,
+     "rows": 9924,
+     "first_utc": "2025-05-31T20:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 891.3,
+      "first_utc": "2024-02-01T04:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 5348
+     },
+     "bybit": {
+      "days": 891.8,
+      "first_utc": "2024-01-31T16:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 4303
+     },
+     "bitget": {
+      "days": 16.5,
+      "first_utc": "2026-06-25T00:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 56.76,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.838,
+    "window_bars": 720
+   },
+   "flags": [
+    "band_cache_no_outcomes"
+   ]
+  },
+  "LINK/USDT:USDT": {
+   "symbol": "LINK/USDT:USDT",
+   "base": "LINK",
+   "warehouse": {
+    "all_time": {
+     "n": 249,
+     "wr": 0.3621,
+     "net_pnl_usd": -59.7972,
+     "fees_usd": 19.5678
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 4,
+     "wr": 0.25,
+     "net_pnl_usd": -0.1633,
+     "fees_usd": 0.2735
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 246,
+    "wr": 0.6463,
+    "mean_r": -0.2531,
+    "mean_net_pnl_usd": -0.281,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 2022.3,
+      "first_utc": "2021-01-01T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6068
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 28.79,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.44,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "LTC/USDT:USDT": {
+   "symbol": "LTC/USDT:USDT",
+   "base": "LTC",
+   "warehouse": {
+    "all_time": {
+     "n": 7,
+     "wr": 0.2857,
+     "net_pnl_usd": -2.2777,
+     "fees_usd": 0.5069
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 2,
+     "wr": 1.0,
+     "net_pnl_usd": 0.5039,
+     "fees_usd": 0.0867
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 78,
+    "wr": 0.5128,
+    "mean_r": -0.4875,
+    "mean_net_pnl_usd": -0.5216,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 2022.3,
+      "first_utc": "2021-01-01T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6068
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 27.1,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.355,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "MANA/USDT:USDT": {
+   "symbol": "MANA/USDT:USDT",
+   "base": "MANA",
+   "warehouse": {
+    "all_time": {
+     "n": 4,
+     "wr": 0.25,
+     "net_pnl_usd": 0.3441,
+     "fees_usd": 0.1641
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 541,
+    "wr": 0.6784,
+    "mean_r": -0.2075,
+    "mean_net_pnl_usd": -0.6237,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 42.28,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.114,
+    "window_bars": 720
+   },
+   "flags": [
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "NEAR/USDT:USDT": {
+   "symbol": "NEAR/USDT:USDT",
+   "base": "NEAR",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 514,
+    "wr": 0.6498,
+    "mean_r": -0.2594,
+    "mean_net_pnl_usd": -0.7029,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1101.2,
+     "rows": 26429,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 61.91,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 3.095,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "ONDO/USDT:USDT": {
+   "symbol": "ONDO/USDT:USDT",
+   "base": "ONDO",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 902.8,
+      "first_utc": "2024-01-20T16:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 5417
+     },
+     "bybit": {
+      "days": 900.2,
+      "first_utc": "2024-01-23T08:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 4328
+     },
+     "bitget": {
+      "days": 16.5,
+      "first_utc": "2026-06-25T00:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 76.05,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 3.802,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "OP/USDT:USDT": {
+   "symbol": "OP/USDT:USDT",
+   "base": "OP",
+   "warehouse": {
+    "all_time": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -3.0922,
+     "fees_usd": 0.006
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 402,
+    "wr": 0.5323,
+    "mean_r": -0.421,
+    "mean_net_pnl_usd": -1.0809,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1101.2,
+     "rows": 26429,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1197.3,
+      "first_utc": "2023-04-01T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3593
+     },
+     "bybit": {
+      "days": 1197.0,
+      "first_utc": "2023-04-01T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3592
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 41.29,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.064,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d"
+   ]
+  },
+  "RENDER/USDT:USDT": {
+   "symbol": "RENDER/USDT:USDT",
+   "base": "RENDER",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 70,
+    "wr": 0.6857,
+    "mean_r": -0.199,
+    "mean_net_pnl_usd": -0.2786,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 50.76,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.538,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "SAND/USDT:USDT": {
+   "symbol": "SAND/USDT:USDT",
+   "base": "SAND",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 257,
+    "wr": 0.6848,
+    "mean_r": -0.2044,
+    "mean_net_pnl_usd": -0.3988,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1101.2,
+     "rows": 26429,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 35.38,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.769,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "SEI/USDT:USDT": {
+   "symbol": "SEI/USDT:USDT",
+   "base": "SEI",
+   "warehouse": {
+    "all_time": {
+     "n": 2,
+     "wr": 0.0,
+     "net_pnl_usd": -0.8653,
+     "fees_usd": 0.0109
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 394,
+    "wr": 0.599,
+    "mean_r": -0.3356,
+    "mean_net_pnl_usd": -0.8051,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1059.7,
+      "first_utc": "2023-08-16T16:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3180
+     },
+     "bybit": {
+      "days": 1060.3,
+      "first_utc": "2023-08-16T00:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 3182
+     },
+     "bitget": {
+      "days": 33.0,
+      "first_utc": "2026-06-08T08:00:00Z",
+      "last_utc": "2026-07-11T08:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 45.32,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.266,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d"
+   ]
+  },
+  "SNX/USDT:USDT": {
+   "symbol": "SNX/USDT:USDT",
+   "base": "SNX",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.0,
+     "rows": 8760,
+     "first_utc": "2025-05-31T22:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 32.68,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.634,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "SOL/USDT:USDT": {
+   "symbol": "SOL/USDT:USDT",
+   "base": "SOL",
+   "warehouse": {
+    "all_time": {
+     "n": 255,
+     "wr": 0.3725,
+     "net_pnl_usd": -81.0691,
+     "fees_usd": 18.6713
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 4,
+     "wr": 0.0,
+     "net_pnl_usd": -0.5772,
+     "fees_usd": 0.2806
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 158,
+    "wr": 0.1266,
+    "mean_r": -1.1171,
+    "mean_net_pnl_usd": -1.6928,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.5,
+     "rows": 27590,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T06:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6144
+     },
+     "bybit": {
+      "days": 1843.3,
+      "first_utc": "2021-06-29T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5891
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": true,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 29.41,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.47,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "SUI/USDT:USDT": {
+   "symbol": "SUI/USDT:USDT",
+   "base": "SUI",
+   "warehouse": {
+    "all_time": {
+     "n": 7,
+     "wr": 0.3333,
+     "net_pnl_usd": -1.6861,
+     "fees_usd": 0.656
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 1.0,
+     "net_pnl_usd": 0.4721,
+     "fees_usd": 0.2198
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 120,
+    "wr": 0.3917,
+    "mean_r": -0.6498,
+    "mean_net_pnl_usd": -1.1893,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 1170.0,
+      "first_utc": "2023-05-03T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 3511
+     },
+     "bybit": {
+      "days": 1170.3,
+      "first_utc": "2023-05-03T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 3512
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 36.77,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.839,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "TAO/USDT:USDT": {
+   "symbol": "TAO/USDT:USDT",
+   "base": "TAO",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 47.49,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.375,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget",
+    "band_cache_no_outcomes"
+   ]
+  },
+  "TIA/USDT:USDT": {
+   "symbol": "TIA/USDT:USDT",
+   "base": "TIA",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 706,
+    "wr": 0.6969,
+    "mean_r": -0.1793,
+    "mean_net_pnl_usd": -0.463,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 983.7,
+      "first_utc": "2023-10-31T20:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 5902
+     },
+     "bybit": {
+      "days": 983.8,
+      "first_utc": "2023-10-31T16:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 4579
+     },
+     "bitget": {
+      "days": 16.5,
+      "first_utc": "2026-06-25T00:00:00Z",
+      "last_utc": "2026-07-11T12:00:00Z",
+      "rows": 100
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 58.89,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 2.945,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d"
+   ]
+  },
+  "TRX/USDT:USDT": {
+   "symbol": "TRX/USDT:USDT",
+   "base": "TRX",
+   "warehouse": {
+    "all_time": {
+     "n": 4,
+     "wr": 0.0,
+     "net_pnl_usd": -0.2887,
+     "fees_usd": 0.1143
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.6,
+     "rows": 27591,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T07:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1780.0,
+      "first_utc": "2021-08-31T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5341
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 9.11,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 0.455,
+    "window_bars": 720
+   },
+   "flags": [
+    "band_cache_no_outcomes"
+   ]
+  },
+  "UNI/USDT:USDT": {
+   "symbol": "UNI/USDT:USDT",
+   "base": "UNI",
+   "warehouse": {
+    "all_time": {
+     "n": 1,
+     "wr": 0.0,
+     "net_pnl_usd": -7.0229,
+     "fees_usd": 0.0261
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 789,
+    "wr": 0.7554,
+    "mean_r": -0.102,
+    "mean_net_pnl_usd": -0.3097,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 35.85,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.792,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "VET/USDT:USDT": {
+   "symbol": "VET/USDT:USDT",
+   "base": "VET",
+   "warehouse": {
+    "all_time": {
+     "n": 1,
+     "wr": 1.0,
+     "net_pnl_usd": 0.033,
+     "fees_usd": 0.006
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 294,
+    "wr": 0.4048,
+    "mean_r": -0.5984,
+    "mean_net_pnl_usd": -1.824,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1101.2,
+     "rows": 26429,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": null,
+     "bybit": null,
+     "bitget": null
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 32.13,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.607,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "funding_missing:binance",
+    "funding_missing:bybit",
+    "funding_missing:bitget"
+   ]
+  },
+  "XRP/USDT:USDT": {
+   "symbol": "XRP/USDT:USDT",
+   "base": "XRP",
+   "warehouse": {
+    "all_time": {
+     "n": 134,
+     "wr": 0.3664,
+     "net_pnl_usd": -36.2353,
+     "fees_usd": 12.3731
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 1,
+     "wr": 1.0,
+     "net_pnl_usd": 0.13,
+     "fees_usd": 0.0208
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": {
+    "n": 1,
+    "wr": 0.0,
+    "mean_r": -1.2954,
+    "mean_net_pnl_usd": -1.9187,
+    "frac": 0.35
+   },
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 1149.5,
+     "rows": 27590,
+     "first_utc": "2023-05-26T17:00:00Z",
+     "last_utc": "2026-07-19T06:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1890.0,
+      "first_utc": "2021-05-13T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5671
+     },
+     "bitget": {
+      "days": 41.0,
+      "first_utc": "2026-06-05T16:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": true,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 24.56,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 1.228,
+    "window_bars": 720
+   },
+   "flags": []
+  },
+  "ZEC/USDT:USDT": {
+   "symbol": "ZEC/USDT:USDT",
+   "base": "ZEC",
+   "warehouse": {
+    "all_time": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "profile_cohort": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "recent_14d": {
+     "n": 0,
+     "wr": null,
+     "net_pnl_usd": 0.0,
+     "fees_usd": 0.0
+    },
+    "cohort_profile": "AGGRESSIVE_RESEARCH",
+    "cohort_epoch_utc": "2026-07-21T20:24:08Z"
+   },
+   "band_cache": null,
+   "coverage": {
+    "ohlcv_1h": {
+     "days": 365.1,
+     "rows": 8763,
+     "first_utc": "2025-05-31T19:00:00Z",
+     "last_utc": "2026-05-31T21:00:00Z"
+    },
+    "funding": {
+     "binance": {
+      "days": 2022.7,
+      "first_utc": "2021-01-01T00:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 6069
+     },
+     "bybit": {
+      "days": 1695.3,
+      "first_utc": "2021-11-24T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 5087
+     },
+     "bitget": {
+      "days": 29.3,
+      "first_utc": "2026-06-17T08:00:00Z",
+      "last_utc": "2026-07-16T16:00:00Z",
+      "rows": 124
+     }
+    }
+   },
+   "routing": {
+    "venues": [
+     "binance",
+     "bitget",
+     "bybit"
+    ],
+    "source": "core.strategy_spec",
+    "quarantined": false,
+    "analysis_only_tradfi": false
+   },
+   "probes": {
+    "bundle_mr_zfade_rsi2": true,
+    "bundle_mr_note": null,
+    "tsmom": false,
+    "breakout_60d": false,
+    "listing_unlock": "event_driven_na"
+   },
+   "cost_proxy": {
+    "median_1h_move_bps": 68.02,
+    "roundtrip_cost_bps": 20.0,
+    "move_to_cost_ratio": 3.401,
+    "window_bars": 720
+   },
+   "flags": [
+    "ohlcv_1h_stale:51.6d",
+    "band_cache_no_outcomes"
+   ]
+  }
+ }
+}

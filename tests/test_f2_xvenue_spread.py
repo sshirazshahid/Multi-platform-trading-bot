@@ -21,6 +21,15 @@ from core.data_sources.cross_venue import (
 from core.decision.promotion_loop import register_evidence
 from core.strategy_spec import StrategySpec
 
+_QUALITY = {
+    "synchronized_spread_history_bps_per_hour": [2.0] * 50,
+    "long_book_age_ms": 100.0,
+    "short_book_age_ms": 120.0,
+    "intervenue_skew_ms": 20.0,
+    "long_depth_ratio": 30.0,
+    "short_depth_ratio": 30.0,
+}
+
 
 def _rec(venue, rate, interval_hours, stale=False):
     return {
@@ -75,6 +84,7 @@ class TestF2EntryGate:
             slippage_bps=5.0,
             latency_buffer_bps=2.0,
             failed_leg_buffer_bps=5.0,
+            **_QUALITY,
         )
         # net = 96 - 10 - 5 - 2 - 5 = 74 >= max(20, 40)
         assert res["net_edge_bps"] == pytest.approx(74.0)
@@ -89,6 +99,7 @@ class TestF2EntryGate:
             slippage_bps=0.0,
             latency_buffer_bps=0.0,
             failed_leg_buffer_bps=0.0,
+            **_QUALITY,
         )
         assert res["floor_bps"] == pytest.approx(20.0)
         assert res["net_edge_bps"] == pytest.approx(19.0)
@@ -102,6 +113,7 @@ class TestF2EntryGate:
             slippage_bps=0.0,
             latency_buffer_bps=0.0,
             failed_leg_buffer_bps=0.0,
+            **_QUALITY,
         )
         assert res["floor_bps"] == pytest.approx(60.0)
         assert res["enter"] is False
@@ -114,6 +126,26 @@ class TestF2EntryGate:
         )
         assert res["enter"] is False
         assert "spread" in res["reason"]
+
+    @pytest.mark.parametrize(
+        "override,reason",
+        [
+            ({"long_book_age_ms": 501.0}, "500ms"),
+            ({"intervenue_skew_ms": 251.0}, "250ms"),
+            ({"short_depth_ratio": 19.9}, "20x"),
+            ({"synchronized_spread_history_bps_per_hour": [2.0] * 49},
+             "lower bound"),
+        ],
+    )
+    def test_microstructure_and_evidence_contract_fails_closed(self, override, reason):
+        res = f2_entry_gate(
+            spread_bps_per_hour=2.0,
+            hold_hours=48.0,
+            two_leg_cost_frac=0.0010,
+            **{**_QUALITY, **override},
+        )
+        assert res["enter"] is False
+        assert reason in res["reason"]
 
 
 # ── one-leg failure sim (deterministic, repeated) ─────────────────────
@@ -147,19 +179,27 @@ class TestActivationLatch:
     def test_refuses_short_span_or_dirty_cycles(self, tmp_path):
         p = tmp_path / "reg.json"
         register_evidence(
-            "F1",
-            oos_metrics={"paper_cycles": 40, "paper_span_days": 12.0,
-                         "failed_leg_events": 0},
-            promotion_status="lab_paper",
+            "F2_XVENUE_FUNDING_SPREAD",
+            oos_metrics={
+                "strategy_version": "shadow-v1",
+                "synchronized_shadow_days": 12.0,
+                "independent_episodes": 40,
+                "unresolved_leg_failures": 0,
+            },
+            promotion_status="shadow_only",
             path=p,
         )
         assert f2_activation_allowed(registry_path=p)["allowed"] is False
 
         register_evidence(
-            "F1",
-            oos_metrics={"paper_cycles": 40, "paper_span_days": 45.0,
-                         "failed_leg_events": 2},
-            promotion_status="lab_paper",
+            "F2_XVENUE_FUNDING_SPREAD",
+            oos_metrics={
+                "strategy_version": "shadow-v1",
+                "synchronized_shadow_days": 100.0,
+                "independent_episodes": 60,
+                "unresolved_leg_failures": 2,
+            },
+            promotion_status="shadow_only",
             path=p,
         )
         res = f2_activation_allowed(registry_path=p)
@@ -170,10 +210,14 @@ class TestActivationLatch:
     def _qualifying_registry(tmp_path):
         p = tmp_path / "reg.json"
         register_evidence(
-            "F1",
-            oos_metrics={"paper_cycles": 60, "paper_span_days": 31.0,
-                         "failed_leg_events": 0},
-            promotion_status="lab_paper",
+            "F2_XVENUE_FUNDING_SPREAD",
+            oos_metrics={
+                "strategy_version": "shadow-v1",
+                "synchronized_shadow_days": 90.0,
+                "independent_episodes": 50,
+                "unresolved_leg_failures": 0,
+            },
+            promotion_status="shadow_only",
             path=p,
         )
         return p
@@ -209,7 +253,7 @@ class TestF2Spec:
         spec = build_f2_spec()
         assert isinstance(spec, StrategySpec)
         assert spec.id == "F2_XVENUE_FUNDING_SPREAD"
-        assert spec.promotion_status == "disabled_until_f1_stable"
+        assert spec.promotion_status == "shadow_only"
         assert spec.entry_rules["pre_funded_venues_assumed"] is True
         assert spec.entry_rules["min_net_edge_bps_floor"] == 20.0
         assert spec.entry_rules["cost_mult_floor"] == 4.0
@@ -222,4 +266,4 @@ class TestF2Spec:
         p = tmp_path / "reg.json"
         spec = build_f2_spec()
         rec = spec.register(registry_path=p)
-        assert rec["promotion_status"] == "disabled_until_f1_stable"
+        assert rec["promotion_status"] == "shadow_only"

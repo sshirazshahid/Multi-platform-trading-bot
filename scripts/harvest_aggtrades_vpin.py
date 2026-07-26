@@ -10,6 +10,7 @@ Construction (frozen 27_prereg_vpin_jump_veto):
   - Lee-Ready: is_buyer_maker True → sell aggressor volume
   - VPIN = rolling mean of |Vb−Vs|/V_bucket over last N=50 closed buckets
 """
+
 from __future__ import annotations
 
 import argparse
@@ -229,7 +230,7 @@ def harvest_symbol(symbol: str, months: list[str], daily: list[str]) -> Path:
         tmp, sha, nbytes = got
         try:
             sources.append({"label": label, "bytes": nbytes, "sha256": sha})
-            print(f"  [{symbol}] stream {label} ({nbytes/1e6:.1f} MB) ...", flush=True)
+            print(f"  [{symbol}] stream {label} ({nbytes / 1e6:.1f} MB) ...", flush=True)
             n = 0
             for ts_ms, qty, bm in _stream_trades_path(tmp):
                 builder.on_trade(ts_ms, qty, bm)
@@ -268,9 +269,7 @@ def harvest_symbol(symbol: str, months: list[str], daily: list[str]) -> Path:
         "sources": sources,
         "n_buckets": N_BUCKETS,
         "bucket_div": BUCKET_DIV,
-        "prereg_sha256_md": json.loads(PREREG_JSON.read_text(encoding="utf-8")).get(
-            "sha256_md"
-        ),
+        "prereg_sha256_md": json.loads(PREREG_JSON.read_text(encoding="utf-8")).get("sha256_md"),
         "harvested_utc": datetime.now(timezone.utc).isoformat(),
     }
     man_path.write_text(json.dumps(man, indent=2), encoding="utf-8")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows Bot Deployment"
+  short_description: "Run fail-closed PAPER bots 24x7"
+  default_prompt: "Use $windows-bot-deployment to audit this repository's Task Scheduler and external heartbeat-supervisor setup."

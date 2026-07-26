@@ -35,9 +35,20 @@ from utils.process_lock import acquire_process_lock
 
 HIST = ROOT / "data" / "liquidations_history.jsonl"
 STATUS = ROOT / "data" / "liquidations_status.json"
-WS_URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
+# USD-M forceOrder moved to /market/ws after Binance's 2026-04-23 WS URL split
+# (legacy wss://fstream.binance.com/ws/... retires silently: connect OK, 0 events).
+WS_URL = "wss://fstream.binance.com/market/ws/!forceOrder@arr"
 FLUSH_EVERY_SEC = 120  # check for completed hours this often
 RECONNECT_MAX_BACKOFF = 60.0
+# Binance futures WS answers its own server pings; client-originated pings
+# (websockets default ping_interval=20) commonly die with
+# "keepalive ping timeout" / WinError 121 on this host — connect looks up
+# but total_events stays 0. Disable client pings; rely on server keepalive.
+WS_PING_INTERVAL = None
+WS_PING_TIMEOUT = None
+# All-market force-orders are normally frequent; a silent "connected" socket
+# for this long is treated as half-dead and forced to reconnect.
+STALE_CONNECT_SEC = 600.0
 
 
 def _hour_key(ts_ms: float) -> int:
@@ -53,6 +64,7 @@ class _Buckets:
             lambda: defaultdict(lambda: {"long_usd": 0.0, "short_usd": 0.0, "count": 0.0})
         )
         self.total_events = 0
+        self.last_event_ts = 0.0
 
     def add(self, hour: int, symbol: str, side: str, usd: float) -> None:
         for key in (symbol, "ALL"):
@@ -107,31 +119,61 @@ def _write_status(connected: bool, buckets: _Buckets, last_evt_ts: float) -> Non
         pass
 
 
+def _parse_force_order(msg: dict) -> tuple[str, str, float, float, float] | None:
+    """Extract (symbol, side, qty, px, ts_ms) from a Binance forceOrder payload."""
+    o = msg.get("o") or {}
+    sym = o.get("s")
+    side = o.get("S")
+    qty = float(o.get("q", 0) or 0)
+    # average fill price preferred; fall back to order price
+    px = float(o.get("ap") or o.get("p") or 0) or 0.0
+    ts = float(o.get("T") or msg.get("E") or time.time() * 1000)
+    if not (sym and side and qty > 0 and px > 0):
+        return None
+    return str(sym), str(side), qty, px, ts
+
+
 async def _run_once(buckets: _Buckets) -> None:
     import websockets
 
-    async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
+    async with websockets.connect(
+        WS_URL,
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
+        open_timeout=30,
+        close_timeout=5,
+    ) as ws:
         print(f"[liq] connected {WS_URL}", flush=True)
         last_flush = time.time()
+        last_transport = time.time()
         last_evt = 0.0
         _write_status(True, buckets, last_evt)
         while True:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=FLUSH_EVERY_SEC)
-                msg = json.loads(raw)
-                o = msg.get("o") or {}
-                sym = o.get("s")
-                side = o.get("S")
-                qty = float(o.get("q", 0) or 0)
-                # average fill price preferred; fall back to order price
-                px = float(o.get("ap") or o.get("p") or 0) or 0.0
-                ts = float(o.get("T") or msg.get("E") or time.time() * 1000)
-                if sym and side and qty > 0 and px > 0:
+                last_transport = time.time()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    print("[liq] skipping malformed WS payload", flush=True)
+                    continue
+                parsed = _parse_force_order(msg)
+                if parsed is not None:
+                    sym, side, qty, px, ts = parsed
                     buckets.add(_hour_key(ts), sym, side, qty * px)
                     last_evt = ts / 1000.0
+                    buckets.last_event_ts = last_evt
             except asyncio.TimeoutError:
-                pass  # no liquidations in the window — normal during calm
+                # recv timed out cleanly — transport is alive (quiet market OK)
+                last_transport = time.time()
             now = time.time()
+            # Half-open sockets: no successful recv/timeout for STALE_CONNECT_SEC.
+            # Do NOT key off last_evt — quiet markets must not force reconnects,
+            # and a socket that delivered one event then died must still reconnect.
+            if (now - last_transport) >= STALE_CONNECT_SEC:
+                raise ConnectionError(
+                    f"stale WS: no transport progress in {STALE_CONNECT_SEC:.0f}s"
+                )
             if now - last_flush >= FLUSH_EVERY_SEC:
                 n = buckets.flush_completed(_hour_key(now * 1000))
                 if n:
@@ -154,22 +196,29 @@ async def main() -> None:
     buckets = _Buckets()
     backoff = 2.0
     print("[liq] harvester starting (Ctrl-C to stop)", flush=True)
-    while True:
-        try:
-            await _run_once(buckets)
-            backoff = 2.0
-        except Exception as e:  # noqa: BLE001 — fail-safe: log + reconnect, never die
-            _write_status(False, buckets, 0.0)
-            print(
-                f"[liq] disconnected ({type(e).__name__}: {e}); reconnecting in {backoff:.0f}s",
-                flush=True,
-            )
+    try:
+        while True:
             try:
-                buckets.flush_completed(_hour_key(time.time() * 1000))
-            except Exception:
-                pass
-            await asyncio.sleep(backoff)
-            backoff = min(RECONNECT_MAX_BACKOFF, backoff * 2)
+                await _run_once(buckets)
+                backoff = 2.0
+            except Exception as e:  # noqa: BLE001 — fail-safe: log + reconnect, never die
+                _write_status(False, buckets, buckets.last_event_ts)
+                print(
+                    f"[liq] disconnected ({type(e).__name__}: {e}); reconnecting in {backoff:.0f}s",
+                    flush=True,
+                )
+                try:
+                    buckets.flush_completed(_hour_key(time.time() * 1000))
+                except Exception:
+                    pass
+                await asyncio.sleep(backoff)
+                backoff = min(RECONNECT_MAX_BACKOFF, backoff * 2)
+    finally:
+        # Persist completed hours on clean shutdown (Ctrl-C / process stop).
+        try:
+            buckets.flush_completed(_hour_key(time.time() * 1000))
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

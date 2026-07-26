@@ -1,0 +1,4 @@
+interface:
+  display_name: "TP/SL Precision Engine"
+  short_description: "Validate and reconcile futures protection"
+  default_prompt: "Use $tp-precision-engine to validate this TP/SL plan and its venue-coverage evidence."

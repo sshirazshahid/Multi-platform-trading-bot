@@ -1,0 +1,4 @@
+interface:
+  display_name: "Exchange Connectivity"
+  short_description: "Audit safe multi-venue exchange connectivity"
+  default_prompt: "Use $exchange-connectivity to audit this exchange adapter and produce fail-closed connectivity evidence."

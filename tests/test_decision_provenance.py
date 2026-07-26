@@ -22,6 +22,7 @@ import inspect
 import json
 import re
 import sys
+import threading
 import time
 import uuid as uuid_mod
 from pathlib import Path
@@ -276,11 +277,22 @@ def test_every_return_false_in_execute_open_preceded_by_reason_stash():
     misses = []
     for i, ln in enumerate(lines):
         if ln.strip() == "return False":
+            # Walk back over up to 5 non-blank lines so multi-line stash
+            # statements (e.g. action["reject_reason"] = str(\n ... \n)) count.
             j = i - 1
-            while j >= 0 and not lines[j].strip():
+            found = False
+            checked = 0
+            while j >= 0 and checked < 5:
+                stripped = lines[j].strip()
                 j -= 1
-            if j < 0 or "reject_reason" not in lines[j]:
-                misses.append(f"line {i}: {ln.strip()} (prev: {lines[j].strip()[:60]})")
+                if not stripped:
+                    continue
+                checked += 1
+                if "reject_reason" in stripped:
+                    found = True
+                    break
+            if not found:
+                misses.append(f"line {i}: {ln.strip()}")
     assert not misses, "return False without reject_reason stash:\n" + "\n".join(misses)
 
 
@@ -402,6 +414,8 @@ def test_spot_fallback_forwards_decision_and_provenance_kwargs():
     om.kelly.should_block_trade.return_value = (False, "")
     om._futures_disabled = set()
     om._oneway_mode = set()
+    om._pending_maker = {}
+    om._pending_maker_lock = threading.RLock()
     om._save_order_mode_state = MagicMock()  # NEVER touch data/
     om._check_price_band = MagicMock(return_value=True)
     om._generate_client_order_id = MagicMock(return_value="cid-1234")
@@ -441,6 +455,7 @@ def test_spot_fallback_forwards_decision_and_provenance_kwargs():
         mcp_score=88.0,
         model_version="mv1",
         decision_id="d-spotfb",
+        execution_snapshot=None,
     )
 
     assert result == "SPOT_POS"
@@ -458,6 +473,7 @@ def test_spot_fallback_forwards_decision_and_provenance_kwargs():
         mcp_score=88.0,
         model_version="mv1",
         decision_id="d-spotfb",
+        execution_snapshot=None,
     )
 
 

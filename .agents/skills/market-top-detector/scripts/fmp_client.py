@@ -23,6 +23,26 @@ except ImportError:
     print("ERROR: requests library not found. Install with: pip install requests", file=sys.stderr)
     sys.exit(1)
 
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import looks_like_eod_bar_list, resolve_fmp_key
+except ImportError:  # pragma: no cover
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+    def looks_like_eod_bar_list(data, *, sample_size: int = 5):  # type: ignore[misc]
+        if not isinstance(data, list) or not data:
+            return False
+        for item in data[: min(sample_size, len(data))]:
+            if not isinstance(item, dict) or not item.get("date"):
+                return False
+            if item.get("close") is None and item.get("adjClose") is None:
+                return False
+        return True
+
 
 # --- FMP endpoint fallback: stable (new users) -> v3 (legacy users) ---
 
@@ -36,6 +56,12 @@ def _stable_quote_url(base, symbols_str, params):
 def _v3_quote_url(base, symbols_str, params):
     """api/v3/quote/^GSPC"""
     return f"{base}/{symbols_str}", params
+
+
+def _stable_eod_url(base, symbols_str, params):
+    """stable/historical-price-eod/full?symbol=SPY (current FMP free/stable)."""
+    params["symbol"] = symbols_str
+    return base, params
 
 
 def _stable_hist_url(base, symbols_str, params):
@@ -55,6 +81,10 @@ _FMP_ENDPOINTS = {
         ("https://financialmodelingprep.com/api/v3/quote", _v3_quote_url),
     ],
     "historical": [
+        (
+            "https://financialmodelingprep.com/stable/historical-price-eod/full",
+            _stable_eod_url,
+        ),
         ("https://financialmodelingprep.com/stable/historical-price-full", _stable_hist_url),
         ("https://financialmodelingprep.com/api/v3/historical-price-full", _v3_hist_url),
     ],
@@ -68,7 +98,7 @@ class FMPClient:
     RATE_LIMIT_DELAY = 0.3  # 300ms between requests
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("FMP_API_KEY")
+        self.api_key = resolve_fmp_key(api_key)
         if not self.api_key:
             raise ValueError(
                 "FMP API key required. Set FMP_API_KEY environment variable "
@@ -82,6 +112,8 @@ class FMPClient:
         self.retry_count = 0
         self.max_retries = 1
         self.api_calls_made = 0
+        # Yahoo fallback for symbols FMP free tier returns 402 for (most ETFs)
+        self.yahoo_fallback = True
 
     def _rate_limited_get(
         self, url: str, params: Optional[dict] = None, quiet: bool = False
@@ -91,6 +123,8 @@ class FMPClient:
 
         if params is None:
             params = {}
+        params = dict(params)
+        params.setdefault("apikey", self.api_key)
 
         elapsed = time.time() - self.last_call_time
         if elapsed < self.RATE_LIMIT_DELAY:
@@ -154,6 +188,15 @@ class FMPClient:
                     continue
 
             if endpoint_key == "historical":
+                # Current stable EOD returns a bare list of bars (newest first)
+                if isinstance(data, list):
+                    if not looks_like_eod_bar_list(data):
+                        continue
+                    limit = int((extra_params or {}).get("timeseries") or len(data))
+                    return {
+                        "symbol": symbols_str,
+                        "historical": data[:limit],
+                    }
                 if not isinstance(data, dict):
                     continue  # callers expect dict with .get("historical")
                 if "historicalStockList" in data:
@@ -161,16 +204,22 @@ class FMPClient:
                     norm = symbols_str.replace("-", ".")
                     for entry in data["historicalStockList"]:
                         if entry.get("symbol", "").replace("-", ".") == norm:
+                            hist = entry.get("historical", [])
+                            if hist and not looks_like_eod_bar_list(hist):
+                                break
                             return {
                                 "symbol": entry.get("symbol"),
-                                "historical": entry.get("historical", []),
+                                "historical": hist if isinstance(hist, list) else [],
                             }
                     # Symbol not found — this endpoint is no good, try next
                     continue
                 elif "historical" not in data:
                     continue  # truthy dict but missing expected key
+                hist = data.get("historical")
+                if hist is not None and not looks_like_eod_bar_list(hist):
+                    continue
                 # Single-symbol: verify returned symbol matches request
-                elif is_single and data.get("symbol"):
+                if is_single and data.get("symbol"):
                     if data["symbol"].replace("-", ".") != symbols_str.replace("-", "."):
                         continue
 
@@ -195,6 +244,19 @@ class FMPClient:
             return self.cache[cache_key]
 
         data = self._request_with_fallback("historical", symbol, {"timeseries": days})
+        if not data and self.yahoo_fallback:
+            try:
+                import sys
+                from pathlib import Path
+
+                shared = Path(__file__).resolve().parents[2] / "_shared_fmp_yahoo_patch.py"
+                if str(shared.parent) not in sys.path:
+                    sys.path.insert(0, str(shared.parent))
+                from _shared_fmp_yahoo_patch import yahoo_historical
+
+                data = yahoo_historical(symbol, days=days)
+            except Exception:
+                data = None
         if data:
             self.cache[cache_key] = data
         return data

@@ -108,6 +108,7 @@ def test_s3_vertical_slice_end_to_end(tmp_path):
         "dsr",
         "multiple_comparisons",
         "confirmation_window",
+        "paper_edge_v1",
     }
     assert set(verdict["sub_gates"].keys()) == expected
     assert all("pass" in g for g in verdict["sub_gates"].values())

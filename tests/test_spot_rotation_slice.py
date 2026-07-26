@@ -142,7 +142,8 @@ def test_spot_rotation_slice_end_to_end(tmp_path):
 
     verdict = report["verdict"]
     assert isinstance(verdict["accept"], bool)
-    assert len(verdict["sub_gates"]) == 8
+    assert len(verdict["sub_gates"]) == 9
+    assert "paper_edge_v1" in verdict["sub_gates"]
 
     ev = report["evidence"]
     assert ev["strategy_id"] == "SPOT_S2_ROTATION"

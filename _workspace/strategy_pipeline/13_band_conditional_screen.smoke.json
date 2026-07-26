@@ -1,0 +1,495 @@
+{
+  "screen": "13_band_conditional",
+  "generated_utc": "2026-07-12 11:24 UTC",
+  "frac": 0.35,
+  "p0_baseline": 0.657,
+  "bonferroni_m": 16,
+  "n_raw": 300,
+  "n_resolved": 300,
+  "n_censored": 0,
+  "span_days": 0.46,
+  "baseline_full": {
+    "wr": 0.68,
+    "n": 300,
+    "ci": [
+      0.6252,
+      0.7302
+    ],
+    "exp_usd": -0.359,
+    "exp_r": -0.2036
+  },
+  "baseline_replication_subset": {
+    "cutoff_ts": 1783651564,
+    "wr": 0.68,
+    "n": 300,
+    "ci": [
+      0.6252,
+      0.7302
+    ],
+    "deviation_pp": 2.3
+  },
+  "replication_guard_ok": false,
+  "coverage": {
+    "f1_btc_atr_regime": 300,
+    "f2_symbol_atr_pctl": 300,
+    "f3_adx_4h": 300,
+    "f4_spread_pctl": 223,
+    "f6_ema_gap_4h": 300
+  },
+  "f6_residual_below_0p15": 0,
+  "f4_forward_joins": 100,
+  "verdicts": [
+    {
+      "candidate": "band_conditional_f1_btc_atr_regime_<0.7",
+      "family": "f1_btc_atr_regime",
+      "bucket": "<0.7",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f1_btc_atr_regime_0.7-1.3",
+      "family": "f1_btc_atr_regime",
+      "bucket": "0.7-1.3",
+      "n": 300,
+      "after_cost_metrics": {
+        "wr": 0.68,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "exp_usd": -0.359,
+        "exp_r": -0.2036,
+        "entries_per_day": 655.7
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": true,
+          "wr": 0.68
+        },
+        "g2_n_ge_300": {
+          "ok": true,
+          "n": 300
+        },
+        "g3_halves_ge_65": {
+          "ok": false,
+          "half1_wr": 0.6133,
+          "half2_wr": 0.7467
+        },
+        "g4_expectancy_pos": {
+          "ok": false,
+          "exp_usd": -0.359,
+          "exp_r": -0.2036
+        },
+        "g5_bonferroni_p": {
+          "ok": false,
+          "p_raw": 0.21893724077504603,
+          "p_adj": 1.0,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 1.0
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "wins": 204
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f1_btc_atr_regime_>1.3",
+      "family": "f1_btc_atr_regime",
+      "bucket": ">1.3",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f2_symbol_atr_pctl_<25th",
+      "family": "f2_symbol_atr_pctl",
+      "bucket": "<25th",
+      "n": 21,
+      "after_cost_metrics": {
+        "wr": 0.9524,
+        "wilson_ci": [
+          0.7733,
+          0.9915
+        ],
+        "exp_usd": 0.4529,
+        "exp_r": 0.3505,
+        "entries_per_day": 45.9
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": true,
+          "wr": 0.9524
+        },
+        "g2_n_ge_300": {
+          "ok": false,
+          "n": 21
+        },
+        "g3_halves_ge_65": {
+          "ok": true,
+          "half1_wr": 1.0,
+          "half2_wr": 0.9091
+        },
+        "g4_expectancy_pos": {
+          "ok": true,
+          "exp_usd": 0.4529,
+          "exp_r": 0.3505
+        },
+        "g5_bonferroni_p": {
+          "ok": true,
+          "p_raw": 0.001764939964700424,
+          "p_adj": 0.028239039435206784,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": false,
+          "flow_share": 0.07
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.7733,
+          0.9915
+        ],
+        "wins": 20
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f2_symbol_atr_pctl_25-75th",
+      "family": "f2_symbol_atr_pctl",
+      "bucket": "25-75th",
+      "n": 279,
+      "after_cost_metrics": {
+        "wr": 0.6595,
+        "wilson_ci": [
+          0.6021,
+          0.7126
+        ],
+        "exp_usd": -0.4201,
+        "exp_r": -0.2453,
+        "entries_per_day": 609.8
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": false,
+          "wr": 0.6595
+        },
+        "g2_n_ge_300": {
+          "ok": false,
+          "n": 279
+        },
+        "g3_halves_ge_65": {
+          "ok": false,
+          "half1_wr": 0.554,
+          "half2_wr": 0.7643
+        },
+        "g4_expectancy_pos": {
+          "ok": false,
+          "exp_usd": -0.4201,
+          "exp_r": -0.2453
+        },
+        "g5_bonferroni_p": {
+          "ok": false,
+          "p_raw": 0.4927283353623822,
+          "p_adj": 1.0,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 0.93
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.6021,
+          0.7126
+        ],
+        "wins": 184
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f2_symbol_atr_pctl_>75th",
+      "family": "f2_symbol_atr_pctl",
+      "bucket": ">75th",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f3_adx_4h_<20",
+      "family": "f3_adx_4h",
+      "bucket": "<20",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f3_adx_4h_20-30",
+      "family": "f3_adx_4h",
+      "bucket": "20-30",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f3_adx_4h_>30",
+      "family": "f3_adx_4h",
+      "bucket": ">30",
+      "n": 300,
+      "after_cost_metrics": {
+        "wr": 0.68,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "exp_usd": -0.359,
+        "exp_r": -0.2036,
+        "entries_per_day": 655.7
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": true,
+          "wr": 0.68
+        },
+        "g2_n_ge_300": {
+          "ok": true,
+          "n": 300
+        },
+        "g3_halves_ge_65": {
+          "ok": false,
+          "half1_wr": 0.6133,
+          "half2_wr": 0.7467
+        },
+        "g4_expectancy_pos": {
+          "ok": false,
+          "exp_usd": -0.359,
+          "exp_r": -0.2036
+        },
+        "g5_bonferroni_p": {
+          "ok": false,
+          "p_raw": 0.21893724077504603,
+          "p_adj": 1.0,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 1.0
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "wins": 204
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f4_spread_pctl_<50th",
+      "family": "f4_spread_pctl",
+      "bucket": "<50th",
+      "n": 100,
+      "after_cost_metrics": {
+        "wr": 0.88,
+        "wilson_ci": [
+          0.8019,
+          0.93
+        ],
+        "exp_usd": 0.2529,
+        "exp_r": 0.144,
+        "entries_per_day": 218.6
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": true,
+          "wr": 0.88
+        },
+        "g2_n_ge_300": {
+          "ok": false,
+          "n": 100
+        },
+        "g3_halves_ge_65": {
+          "ok": true,
+          "half1_wr": 0.76,
+          "half2_wr": 1.0
+        },
+        "g4_expectancy_pos": {
+          "ok": true,
+          "exp_usd": 0.2529,
+          "exp_r": 0.144
+        },
+        "g5_bonferroni_p": {
+          "ok": true,
+          "p_raw": 3.2801723548267243e-07,
+          "p_adj": 5.248275767722759e-06,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 0.3333
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.8019,
+          0.93
+        ],
+        "wins": 88
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f4_spread_pctl_>=50th",
+      "family": "f4_spread_pctl",
+      "bucket": ">=50th",
+      "n": 123,
+      "after_cost_metrics": {
+        "wr": 0.6016,
+        "wilson_ci": [
+          0.5133,
+          0.6838
+        ],
+        "exp_usd": -0.6512,
+        "exp_r": -0.3428,
+        "entries_per_day": 268.8
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": false,
+          "wr": 0.6016
+        },
+        "g2_n_ge_300": {
+          "ok": false,
+          "n": 123
+        },
+        "g3_halves_ge_65": {
+          "ok": false,
+          "half1_wr": 0.459,
+          "half2_wr": 0.7419
+        },
+        "g4_expectancy_pos": {
+          "ok": false,
+          "exp_usd": -0.6512,
+          "exp_r": -0.3428
+        },
+        "g5_bonferroni_p": {
+          "ok": false,
+          "p_raw": 0.9163186159839466,
+          "p_adj": 1.0,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 0.41
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.5133,
+          0.6838
+        ],
+        "wins": 74
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f6_ema_gap_4h_0.15-0.30%",
+      "family": "f6_ema_gap_4h",
+      "bucket": "0.15-0.30%",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f6_ema_gap_4h_0.30-0.60%",
+      "family": "f6_ema_gap_4h",
+      "bucket": "0.30-0.60%",
+      "n": 0,
+      "after_cost_metrics": null,
+      "gates": null,
+      "verdict": "INSUFFICIENT_DATA"
+    },
+    {
+      "candidate": "band_conditional_f6_ema_gap_4h_>0.60%",
+      "family": "f6_ema_gap_4h",
+      "bucket": ">0.60%",
+      "n": 300,
+      "after_cost_metrics": {
+        "wr": 0.68,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "exp_usd": -0.359,
+        "exp_r": -0.2036,
+        "entries_per_day": 655.7
+      },
+      "gates": {
+        "g1_wr_ge_68": {
+          "ok": true,
+          "wr": 0.68
+        },
+        "g2_n_ge_300": {
+          "ok": true,
+          "n": 300
+        },
+        "g3_halves_ge_65": {
+          "ok": false,
+          "half1_wr": 0.6133,
+          "half2_wr": 0.7467
+        },
+        "g4_expectancy_pos": {
+          "ok": false,
+          "exp_usd": -0.359,
+          "exp_r": -0.2036
+        },
+        "g5_bonferroni_p": {
+          "ok": false,
+          "p_raw": 0.21893724077504603,
+          "p_adj": 1.0,
+          "m": 16
+        },
+        "g6_flow_ge_10pct": {
+          "ok": true,
+          "flow_share": 1.0
+        },
+        "verdict_go": false,
+        "wilson_ci": [
+          0.6252,
+          0.7302
+        ],
+        "wins": 204
+      },
+      "verdict": "NO_GO"
+    },
+    {
+      "candidate": "band_conditional_f5_fill_type_maker",
+      "family": "f5_fill_type",
+      "bucket": "maker",
+      "n": 15,
+      "verdict": "INSUFFICIENT_DATA",
+      "reason": "trades.fill_type non-null on only 25 of 2288 trades; 0 trades have mfe/mae, so the f=0.35 counterfactual band outcome is uncomputable",
+      "backfill": "C7 MFE/MAE persistence (commit 2aff0f2, 2026-07-08) accrues forward only; needs >=300 live/paper trades with fill_type AND mfe/mae \u2014 no harvest command can backfill retroactively"
+    },
+    {
+      "candidate": "band_conditional_f5_fill_type_taker",
+      "family": "f5_fill_type",
+      "bucket": "taker",
+      "n": 10,
+      "verdict": "INSUFFICIENT_DATA",
+      "reason": "trades.fill_type non-null on only 25 of 2288 trades; 0 trades have mfe/mae, so the f=0.35 counterfactual band outcome is uncomputable",
+      "backfill": "C7 MFE/MAE persistence (commit 2aff0f2, 2026-07-08) accrues forward only; needs >=300 live/paper trades with fill_type AND mfe/mae \u2014 no harvest command can backfill retroactively"
+    }
+  ]
+}

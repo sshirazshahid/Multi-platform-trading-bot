@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.10 or higher
+- Python 3.12 (the pinned pandas/scikit-learn stack is tested on 3.12)
 - At least one exchange account with API keys
 - (Optional) Gmail account for email reports
 - (Optional) Anthropic API key for live Claude AI analysis
@@ -46,7 +46,8 @@ Open `.env` in any text editor and fill in:
 
 - At least one exchange's API key + secret
 - (Optional) Gmail credentials for email reports
-- Keep `DRY_RUN=true` until you are confident
+- Keep `OPERATING_MODE=PAPER` and `ENTRY_POLICY=SHADOW_ONLY` during setup.
+  `OPERATING_MODE` is authoritative; `DRY_RUN` is retained only for legacy tools.
 
 ---
 
@@ -54,13 +55,40 @@ Open `.env` in any text editor and fill in:
 
 ### Windows (recommended)
 
-Double-click `TradingBot.bat`. On first run, the setup wizard will guide you through configuration.
+Double-click `TradingBot.bat`. It is the canonical Windows launcher and guides
+first-time setup. Credential prompts run inside Python with hidden input; API
+keys, secrets, passphrases, and app passwords are never placed in process
+arguments.
+
+For crash restart behavior, `auto_restart.bat` remains as a compatibility shim
+that delegates to `TradingBot.bat --supervise`. The canonical supervisor allows
+only one bot worker, starts persistent collectors once, restarts crash loops with
+bounded backoff, and stops/restarts its own PAPER worker if the heartbeat stalls.
+
+After a successful PAPER soak, an administrator can register the same fail-closed
+supervisor at Windows startup:
+
+```powershell
+# Preview first
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_24x7_task.ps1 -WhatIf
+
+# Register; add -StartNow only when PAPER monitoring should begin immediately
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_24x7_task.ps1
+```
+
+If Windows reports `Access is denied`, open PowerShell with **Run as
+Administrator** and run the same command. The installer does not weaken the
+task to live mode or silently install a less durable logon-only fallback.
+
+The task installer refuses `CONTROLLED_LIVE`. Configure Windows not to sleep,
+keep clock synchronization healthy, and use wired networking/UPS power for a
+real 24x7 host.
 
 ### All Platforms
 
 ```bash
-# Multi-profile learning (recommended)
-python multi_profile_main.py
+# Canonical PAPER/OBSERVATION worker
+python scripts/launcher_supervisor.py run --restart
 
 # Open dashboard in a second terminal
 python dashboard.py
@@ -88,20 +116,30 @@ If an exchange shows `Authentication failed` or is missing from the connected li
 
 ---
 
-## Paper Trading vs Live Trading
+## Operating Modes
 
 | Setting | Effect |
 |---|---|
-| `DRY_RUN=true` | All trades are simulated. No real orders placed. |
-| `DRY_RUN=false` | Real orders placed on the exchanges. |
+| `OPERATING_MODE=PAPER` | All trades are simulated. No real orders are placed. |
+| `OPERATING_MODE=OBSERVATION` | Data collection only. No paper or real orders are placed. |
+| `OPERATING_MODE=CONTROLLED_LIVE` | Real-order mode, gated outside the Windows launcher. |
 
-**Start with `DRY_RUN=true`.** Switch to live only after:
-- Running paper trading for 1–2 weeks
-- Reviewing the learning report (`data/learning_report.html`)
-- Achieving ≥ 55% win rate on ≥ 30 closed paper trades
-- Understanding the risk parameters for each profile
+**Start with `OPERATING_MODE=PAPER`.** Consider controlled live only after:
 
-To switch to live: use **Option [A]** in `TradingBot.bat`, or set `DRY_RUN=false` in `.env` and restart.
+- 30–60 days of fully matured, event-deduplicated shadow evidence
+- at least 100 independent resolved setups (prefer 500 for intraday candidates)
+- purged walk-forward symbol/time/venue holdouts plus an untouched final holdout
+- positive lower-bound expectancy after 1x/1.5x/2x costs, PF ≥ 1.20, and stable parameters
+- valid model/strategy manifests, zero execution mismatches, and every startup gate passing
+- explicit manual approval of the tiny controlled-live risk profile
+
+Win rate alone is not a promotion criterion, and no result guarantees future profit.
+
+`TradingBot.bat` intentionally cannot activate or start `CONTROLLED_LIVE`.
+Option **[A]** switches only between `PAPER` and `OBSERVATION`. Controlled-live
+operation requires the signed checklist, both environment latches, and the
+audited direct launch procedure described in
+[`CONTROLLED_LIVE_CHECKLIST.md`](CONTROLLED_LIVE_CHECKLIST.md).
 
 ---
 

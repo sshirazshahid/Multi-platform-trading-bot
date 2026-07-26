@@ -7,6 +7,7 @@ set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "VENV_PIP=%VENV_DIR%\Scripts\pip.exe"
 set "SETUP_FLAG=%BOT_DIR%data\.setup_done"
 set "HELPER=bot_helper.py"
+if /i "%~1"=="--supervise" goto :supervise
 if not exist "%BOT_DIR%data"            mkdir "%BOT_DIR%data" 2>nul
 if not exist "%BOT_DIR%logs"            mkdir "%BOT_DIR%logs" 2>nul
 if not exist "%BOT_DIR%data\research"   mkdir "%BOT_DIR%data\research" 2>nul
@@ -14,6 +15,18 @@ if not exist "%BOT_DIR%data\profiles"   mkdir "%BOT_DIR%data\profiles" 2>nul
 if not exist "%BOT_DIR%data\arbitrage"  mkdir "%BOT_DIR%data\arbitrage" 2>nul
 if not exist "%SETUP_FLAG%" goto :wizard
 goto :menu
+:supervise
+cd /d "%BOT_DIR%"
+if not exist "%VENV_PYTHON%" (
+    echo  ERROR: venv Python not found. Run TradingBot.bat to complete setup.
+    exit /b 2
+)
+if not exist ".env" (
+    echo  ERROR: .env missing. Run TradingBot.bat to complete setup.
+    exit /b 2
+)
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" run --restart
+exit /b %ERRORLEVEL%
 :wizard
 cls
 echo.
@@ -65,35 +78,15 @@ pause
 goto :menu
 :step3
 cls
-echo  Step 3 - Binance API Keys (Enter to skip)
+echo  Step 3 - Credentials
 echo.
-set "BIN_KEY=" & set "BIN_SEC="
-set /p "BIN_KEY=  Binance API Key    : "
-set /p "BIN_SEC=  Binance Secret Key : "
-if "!BIN_KEY!"=="" set "BIN_KEY=your_binance_api_key_here" & set "BIN_SEC=your_binance_secret_key_here"
-set "BIN_TESTNET=false"
+echo  Credential input is hidden and never passed on a process command line.
+echo.
+cd /d "%BOT_DIR%"
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" secure-setup
+if errorlevel 1 goto :secure_setup_fail
 cls
-echo  Step 4 - Bybit API Keys (Enter to skip)
-echo.
-set "BY_KEY=" & set "BY_SEC="
-set /p "BY_KEY=  Bybit API Key    : "
-set /p "BY_SEC=  Bybit Secret Key : "
-cls
-echo  Step 5 - Bitget API Keys (Enter to skip)
-echo.
-set "BG_KEY=" & set "BG_SEC=" & set "BG_PASS="
-set /p "BG_KEY=  Bitget API Key    : "
-set /p "BG_SEC=  Bitget Secret Key : "
-set /p "BG_PASS= Bitget Passphrase : "
-cls
-echo  Step 6 - Email + Risk Profile
-echo.
-set "GM_SEND=" & set "GM_PASS2=" & set "GM_RECV="
-set /p "GM_SEND=  Gmail address (Enter to skip): "
-if "!GM_SEND!"=="" goto :wiz_risk
-set /p "GM_PASS2=  App Password: "
-set /p "GM_RECV=  Recipient email: "
-:wiz_risk
+echo  Step 4 - Risk Profile
 echo.
 echo  Risk: [1] CONSERVATIVE  [2] MODERATE  [3] AGGRESSIVE
 echo.
@@ -105,21 +98,22 @@ echo.
 echo  Operating Mode:
 echo    [1] PAPER       - Simulated trades, no real orders (recommended)
 echo    [2] OBSERVATION - Data collection only, no trades at all
-echo    [3] LIVE        - Real orders with real money
 echo.
-set /p "MODE_C=  Choose [1/2/3]: "
+set /p "MODE_C=  Choose [1/2]: "
 set "OP_MODE=PAPER"
 if "!MODE_C!"=="2" set "OP_MODE=OBSERVATION"
-if "!MODE_C!"=="3" set "OP_MODE=CONTROLLED_LIVE"
 cd /d "%BOT_DIR%"
-"%VENV_PYTHON%" %HELPER% write_env "!BIN_KEY!" "!BIN_SEC!" "!BIN_TESTNET!" "" "" "" "!GM_SEND!" "!GM_PASS2!" "!GM_RECV!" "false"
 "%VENV_PYTHON%" %HELPER% apply_risk "!R_PCT!" "!R_POS!" "!R_DL!" "!R_SL!" "!R_TP!" "!R_LEV!"
-if not "!BY_KEY!"=="" "%VENV_PYTHON%" %HELPER% update_keys bybit "!BY_KEY!" "!BY_SEC!"
-if not "!BG_KEY!"=="" "%VENV_PYTHON%" %HELPER% update_keys bitget "!BG_KEY!" "!BG_SEC!" "!BG_PASS!"
-"%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', '!OP_MODE!'); set_env_var('CONTROLLED_LIVE_ENABLED', 'true' if '!OP_MODE!'=='CONTROLLED_LIVE' else 'false')" 2>nul
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" set-mode "!OP_MODE!"
+if errorlevel 1 goto :secure_setup_fail
 echo done > "%SETUP_FLAG%"
 echo  Setup complete.
 timeout /t 3 >nul
+goto :menu
+:secure_setup_fail
+echo.
+echo  ERROR: Secure setup did not complete.
+pause
 goto :menu
 :menu
 cls
@@ -177,8 +171,8 @@ echo  -----------------------------------------------------------------------
 echo   [1] Start bot          [2] Dashboard (60s)    [3] Switch trade mode
 echo   [4] Scan portfolio     [5] Backtest            [6] Open positions
 echo   [7] View logs          [8] Edit API keys       [9] Risk profile
-echo   [A] Switch mode        [B] Re-run wizard       [C] Clear cache
-echo   [D] Build exe          [M] Multi-Profile       [R] Multi report
+echo   [A] Switch safe mode   [B] Re-run wizard       [D] Build exe
+echo   [M] Multi-Profile      [R] Multi report
 echo  -----------------------------------------------------------------------
 echo   WALLET
 echo   [L]  Replicate Live Wallet to DRY RUN
@@ -207,7 +201,6 @@ if /i "!CHOICE!"=="8" goto :keys
 if /i "!CHOICE!"=="9" goto :risk
 if /i "!CHOICE!"=="A" goto :tog_mode
 if /i "!CHOICE!"=="B" del "%SETUP_FLAG%" >nul 2>&1 & goto :wizard
-if /i "!CHOICE!"=="C" goto :clr
 if /i "!CHOICE!"=="D" goto :build
 if /i "!CHOICE!"=="M" goto :mprofile
 if /i "!CHOICE!"=="R" goto :mreport
@@ -230,30 +223,11 @@ echo.
 cd /d "%BOT_DIR%"
 if not exist "%VENV_PYTHON%" goto :err_setup
 if not exist ".env" goto :err_env
-"%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
-set "IS_LIVE=0"
-findstr /i "OPERATING_MODE=CONTROLLED_LIVE" .env >nul 2>&1
-if not errorlevel 1 set "IS_LIVE=1"
-if "!IS_LIVE!"=="0" goto :bot_start
-echo   ************************************************************
-echo   *  WARNING: CONTROLLED_LIVE MODE - REAL MONEY AT RISK      *
-echo   *  Safety: 3x max leverage, 1%% sizing, $2 max loss/trade  *
-echo   ************************************************************
-echo.
-set /p "CONFIRM=  Type YES to confirm: "
-if /i not "!CONFIRM!"=="YES" goto :bot_cancel
-:bot_start
 echo  Running. Ctrl+C to stop.
 echo.
-:: Start persistent auxiliary processes (confluence paper + liq/skew/L2 harvesters), dedup-safe
-call "%BOT_DIR%start_all.bat"
-"%VENV_PYTHON%" main.py
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" run --restart
 echo.
 echo  Bot stopped.
-pause
-goto :menu
-:bot_cancel
-echo  Cancelled.
 pause
 goto :menu
 :dashboard
@@ -392,7 +366,6 @@ echo.
 pause
 goto :menu
 :ai_live
-"%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
 echo  Live API key found. Running...
 echo.
 "%VENV_PYTHON%" claude_ai_runner.py
@@ -440,7 +413,6 @@ set "IS_LIVE=0"
 findstr /i "OPERATING_MODE=CONTROLLED_LIVE" .env >nul 2>&1
 if not errorlevel 1 set "IS_LIVE=1"
 if "!IS_LIVE!"=="1" goto :mp_err
-"%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
 echo  Starting... Press Ctrl+C to stop.
 echo.
 "%VENV_PYTHON%" multi_profile_main.py
@@ -495,38 +467,23 @@ echo  Current: !OP_MODE!
 echo.
 echo  [1] PAPER             - Simulated trades (safe, no real orders)
 echo  [2] OBSERVATION       - Data collection only (no trades)
-echo  [3] CONTROLLED_LIVE   - Real orders (requires signed checklist)
+echo.
+echo  CONTROLLED_LIVE cannot be activated or started from this launcher.
 echo.
 cd /d "%BOT_DIR%"
-set /p "MC=  Choose [1/2/3]: "
+set /p "MC=  Choose [1/2]: "
 if "!MC!"=="1" (
-    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'PAPER'); set_env_var('CONTROLLED_LIVE_ENABLED', 'false')"
+    "%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" set-mode PAPER
     echo  Switched to PAPER mode.
     pause
     goto :menu
 )
 if "!MC!"=="2" (
-    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'OBSERVATION'); set_env_var('CONTROLLED_LIVE_ENABLED', 'false')"
+    "%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" set-mode OBSERVATION
     echo  Switched to OBSERVATION mode.
     pause
     goto :menu
 )
-if "!MC!"=="3" (
-    echo.
-    echo  WARNING: CONTROLLED_LIVE = REAL MONEY AT RISK
-    echo  Safety nets: 3x max leverage, 1%% sizing, $2 max loss/trade
-    echo.
-    set /p "CONF=  Type YES to confirm: "
-    if /i not "!CONF!"=="YES" goto :tog_cancel2
-    "%VENV_PYTHON%" -c "from bot_helper import set_env_var; set_env_var('OPERATING_MODE', 'CONTROLLED_LIVE'); set_env_var('CONTROLLED_LIVE_ENABLED', 'true')"
-    echo  Switched to CONTROLLED_LIVE mode.
-    pause
-    goto :menu
-)
-goto :menu
-:tog_cancel2
-echo  Cancelled.
-pause
 goto :menu
 :backtest
 cls
@@ -641,32 +598,22 @@ if "!EKC!"=="5" notepad "%BOT_DIR%.env" & goto :menu
 goto :menu
 :k_bin
 echo.
-set /p "BK=  Binance API Key    : "
-set /p "BS=  Binance Secret Key : "
-"%VENV_PYTHON%" %HELPER% update_keys binance "!BK!" "!BS!"
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" secure-keys binance
 pause
 goto :menu
 :k_bybit
 echo.
-set /p "BYK=  Bybit API Key    : "
-set /p "BYS=  Bybit Secret Key : "
-"%VENV_PYTHON%" %HELPER% update_keys bybit "!BYK!" "!BYS!"
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" secure-keys bybit
 pause
 goto :menu
 :k_bitget
 echo.
-set /p "BGK=  Bitget API Key    : "
-set /p "BGS=  Bitget Secret Key : "
-set /p "BGP=  Bitget Passphrase : "
-"%VENV_PYTHON%" %HELPER% update_keys bitget "!BGK!" "!BGS!" "!BGP!"
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" secure-keys bitget
 pause
 goto :menu
 :k_em
 echo.
-set /p "GS=  Gmail sender    : "
-set /p "GP=  App Password    : "
-set /p "GR=  Recipient email : "
-"%VENV_PYTHON%" %HELPER% update_email "!GS!" "!GP!" "!GR!"
+"%VENV_PYTHON%" "%BOT_DIR%scripts\launcher_supervisor.py" secure-email
 pause
 goto :menu
 :risk
@@ -685,18 +632,6 @@ cd /d "%BOT_DIR%"
 echo  Profile applied.
 pause
 goto :menu
-:clr
-cls
-echo.
-echo  Clearing cache...
-echo.
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-"%VENV_PYTHON%" -c "import shutil,os;n=sum(1 for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__' and not shutil.rmtree(os.path.join(r,d)));print(f'Cleared {n} __pycache__ dirs')" 2>nul
-echo  Cache cleared.
-echo.
-pause
-goto :menu
 :build
 cls
 echo.
@@ -704,7 +639,6 @@ if not exist "%VENV_PYTHON%" goto :err_setup
 set /p "BC=  Build exe? [Y/N]: "
 if /i not "!BC!"=="Y" goto :menu
 cd /d "%BOT_DIR%"
-"%VENV_PYTHON%" -c "import shutil,os;[shutil.rmtree(os.path.join(r,d)) for r,ds,_ in os.walk('.') if 'venv' not in r for d in ds if d=='__pycache__']" >nul 2>&1
 "%VENV_PIP%" install pyinstaller --quiet
 "%VENV_DIR%\Scripts\pyinstaller.exe" --onefile --name "TradingBot" --add-data "config.py;." --add-data "bot_helper.py;." --hidden-import "ccxt" --hidden-import "loguru" --hidden-import "dotenv" --hidden-import "schedule" --collect-all "ccxt" main.py
 if not errorlevel 1 goto :build_ok

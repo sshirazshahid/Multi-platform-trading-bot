@@ -1,0 +1,153 @@
+{
+  "candidate": "B_rev3 \u2014 post-listing perp short (capital-scaled, position-capped)",
+  "sizing": {
+    "stake_frac": 0.03,
+    "max_concurrent_exposure": 0.12,
+    "max_concurrent_positions": 4
+  },
+  "costs": {
+    "fee_per_side": 0.0005,
+    "slip_per_side": 0.0005,
+    "roundtrip_cost": 0.002
+  },
+  "universe": {
+    "genuine_listings_all": 103,
+    "genuine_listings_crypto_only": 92,
+    "excluded_equity_commodity_junk_bases": [
+      "AAPL",
+      "AMZN",
+      "CL",
+      "COIN",
+      "COPPER",
+      "MSFT",
+      "MSTR",
+      "TSLA",
+      "XAG",
+      "XAU",
+      "\u5e01\u5b89\u4eba\u751f"
+    ]
+  },
+  "n_trials_dsr": 6,
+  "multiplicity_note": "family's 2nd registration (sequential); n_trials=2x3 horizons=6",
+  "funding_charged_account_scaled": {
+    "7d": {
+      "n_candidates_crypto": 77,
+      "n_accepted": 71,
+      "n_capped_out": 6,
+      "peak_concurrent": 4,
+      "exposure_utilization_pct": 100.0,
+      "excluded_no_price_window": 0,
+      "excluded_no_funding_window": 15,
+      "acct_mean": 0.0037256343956954922,
+      "acct_total_return": 0.26452004209437996,
+      "raw_short_net_mean": 0.12418781318984977,
+      "win_rate": 0.7887323943661971,
+      "funding_sum_mean": -0.03252737450704226,
+      "funding_negative_rate": 0.7605633802816901,
+      "underperf_vs_ctrl_mean": 0.1423929884394502,
+      "beats_control": true,
+      "dsr_prob": 0.9387632971221732,
+      "monte_carlo": {
+        "n_trades": 71,
+        "p_total_positive": 0.997,
+        "max_drawdown_p95": 0.07449469973799921,
+        "passes": true
+      },
+      "oos_wr_walk_forward": 0.8035714285714286
+    },
+    "30d": {
+      "n_candidates_crypto": 77,
+      "n_accepted": 34,
+      "n_capped_out": 43,
+      "peak_concurrent": 4,
+      "exposure_utilization_pct": 100.0,
+      "excluded_no_price_window": 1,
+      "excluded_no_funding_window": 14,
+      "acct_mean": 0.005550934300211332,
+      "acct_total_return": 0.1887317662071853,
+      "raw_short_net_mean": 0.1850311433403778,
+      "win_rate": 0.7941176470588235,
+      "funding_sum_mean": -0.10301850823529413,
+      "funding_negative_rate": 0.7941176470588235,
+      "underperf_vs_ctrl_mean": 0.2333988313588665,
+      "beats_control": true,
+      "dsr_prob": 0.8571112259065934,
+      "monte_carlo": {
+        "n_trades": 34,
+        "p_total_positive": 0.993,
+        "max_drawdown_p95": 0.07288308186997539,
+        "passes": true
+      },
+      "oos_wr_walk_forward": 0.7916666666666666
+    },
+    "90d": {
+      "n_candidates_crypto": 67,
+      "n_accepted": 12,
+      "n_capped_out": 55,
+      "peak_concurrent": 4,
+      "exposure_utilization_pct": 100.0,
+      "excluded_no_price_window": 13,
+      "excluded_no_funding_window": 12,
+      "acct_mean": 0.010271318630475272,
+      "acct_total_return": 0.12325582356570328,
+      "raw_short_net_mean": 0.342377287682509,
+      "win_rate": 0.8333333333333334,
+      "funding_sum_mean": -0.15966874083333335,
+      "funding_negative_rate": 0.8333333333333334,
+      "underperf_vs_ctrl_mean": 0.3264925192101294,
+      "beats_control": true,
+      "dsr_prob": 0.8471279792602047,
+      "monte_carlo": {
+        "n_trades": 12,
+        "p_total_positive": 0.991,
+        "max_drawdown_p95": 0.040069011493651815,
+        "passes": false
+      },
+      "oos_wr_walk_forward": 1.0
+    }
+  },
+  "pbo_across_horizons": 0.07142857142857142,
+  "gate_detail": {
+    "n_accepted_by_horizon": {
+      "7d": 71,
+      "30d": 34,
+      "90d": 12
+    },
+    "evaluable_by_horizon": {
+      "7d": true,
+      "30d": true,
+      "90d": false
+    },
+    "pbo_across_horizons": 0.07142857142857142,
+    "7d": {
+      "acct_mean>0": true,
+      "wr>=MIN_OOS_WR": true,
+      "beats_control": true,
+      "dsr>=MIN_DSR": true,
+      "pbo<=MAX_PBO": true,
+      "oos_wr>=MIN_OOS_WR": true,
+      "mc_P>0>=0.95": true,
+      "mc_maxDD_p95<=0.25": true
+    },
+    "30d": {
+      "acct_mean>0": true,
+      "wr>=MIN_OOS_WR": true,
+      "beats_control": true,
+      "dsr>=MIN_DSR": true,
+      "pbo<=MAX_PBO": true,
+      "oos_wr>=MIN_OOS_WR": true,
+      "mc_P>0>=0.95": true,
+      "mc_maxDD_p95<=0.25": true
+    }
+  },
+  "verdict": "GO",
+  "reason": "All eight frozen gates pass on the account-scaled, position-capped sample at ['7d', '30d'].",
+  "thresholds": {
+    "MIN_DSR": 0.1,
+    "MAX_PBO": 0.5,
+    "MIN_OOS_WR": 0.55,
+    "MC_MIN_TRADES": 30,
+    "maxDD_p95<=": 0.25,
+    "MC_P>0>=": 0.95
+  }
+}

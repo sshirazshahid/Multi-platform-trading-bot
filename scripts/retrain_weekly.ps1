@@ -25,10 +25,17 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-# Pick a Python. Default: whatever `python` is on PATH (the same interpreter
-# the user runs scripts with interactively, where the deps are installed).
-# Override by setting the TRADINGBOT_PYTHON env var to a specific exe path.
-$Python = if ($env:TRADINGBOT_PYTHON) { $env:TRADINGBOT_PYTHON } else { "python" }
+# Pin scheduled research to this repository's tested environment. An explicit
+# override remains available for controlled maintenance, but an absent venv is
+# a hard failure instead of silently using an unrelated PATH interpreter.
+$VenvPython = Join-Path $Root "venv\Scripts\python.exe"
+$Python = if ($env:TRADINGBOT_PYTHON) {
+    $env:TRADINGBOT_PYTHON
+} elseif (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
+    $VenvPython
+} else {
+    throw "Project virtual-environment Python not found: $VenvPython"
+}
 
 # Log file (one per run, timestamped).
 $LogDir = Join-Path $Root "data\retrain_logs"

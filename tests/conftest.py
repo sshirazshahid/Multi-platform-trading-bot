@@ -108,3 +108,127 @@ def _maker_state_isolation_guard(tmp_path, monkeypatch):
 
     monkeypatch.setattr(om_mod.OrderManager, "__init__", _patched)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _mutable_runtime_state_isolation_guard(tmp_path, monkeypatch):
+    """Redirect mutable default artifacts away from the running bot.
+
+    A test suite is an untrusted writer. Several otherwise-correct unit tests
+    constructed production classes from the repository root and consequently
+    rewrote real close counters, post-mortems, spot state, decision logs and
+    prediction evidence. Patch injectable defaults before test constructors
+    run; explicit paths supplied by a test remain authoritative.
+    """
+    data_dir = tmp_path / "data"
+
+    import core.order_manager as om
+
+    monkeypatch.setattr(om, "ORDER_MODE_STATE_PATH", data_dir / "order_mode_state.json")
+    monkeypatch.setattr(om, "SL_WIDENED_STATE_PATH", data_dir / "sl_widened.json")
+    monkeypatch.setattr(om, "PAPER_FUNDING_WINDOWS_PATH", data_dir / "paper_funding_windows.json")
+    monkeypatch.setattr(om, "PENDING_MAKER_ENTRIES_PATH", data_dir / "pending_maker_entries.json")
+    monkeypatch.setattr(om, "CLOSE_FAIL_COUNT_PATH", data_dir / "close_fail_count.json")
+
+    import core.position_tracker as pt
+
+    monkeypatch.setattr(pt.PositionTracker, "SAVE_PATH", data_dir / "positions.json")
+    monkeypatch.setattr(pt.PositionTracker, "BACKUP_PATH", data_dir / "positions.json.bak")
+
+    import core.post_mortem as pm
+    import core.auto_mutator as am
+
+    monkeypatch.setattr(pm, "SAVE_PATH", data_dir / "post_mortem.json")
+    monkeypatch.setattr(am, "POST_MORTEM_FILE", data_dir / "post_mortem.json")
+    monkeypatch.setattr(am, "MUTATIONS_FILE", data_dir / "auto_mutations.json")
+
+    import core.trailing_stop_manager as tsm
+
+    monkeypatch.setattr(tsm, "PEAKS_FILE", data_dir / "trailing_peaks.json")
+    monkeypatch.setattr(tsm, "PARAMS_FILE", data_dir / "trailing_params.json")
+
+    import core.journal as journal
+
+    monkeypatch.setattr(journal, "_JOURNAL_DIR", tmp_path / "journal")
+
+    import core.spot_manager as spot
+
+    monkeypatch.setattr(spot, "STATE_FILE", data_dir / "spot_portfolio.json")
+    monkeypatch.setattr(spot, "RECOMMENDATIONS_FILE", data_dir / "spot_recommendations.jsonl")
+    monkeypatch.setattr(spot, "S1_REGIME_STATE_FILE", data_dir / "s1_regime_state.json")
+
+    import core.mcp_brain as mb
+
+    monkeypatch.setattr(mb, "DECISION_LOG", data_dir / "mcp_decisions.jsonl")
+    monkeypatch.setattr(mb, "ACCURACY_FILE", data_dir / "mcp_accuracy.json")
+    monkeypatch.setattr(mb, "STATE_FILE", data_dir / "mcp_state.json")
+
+    import core.prediction_agent as pa
+    import core.prediction_tracker as ptr
+
+    monkeypatch.setattr(pa, "PREDICTION_LOG_PATH", data_dir / "prediction_agent_log.jsonl")
+    monkeypatch.setattr(pa, "PREDICTION_FAILURE_LOG_PATH", data_dir / "prediction_agent_failures.jsonl")
+    monkeypatch.setattr(ptr, "PREDICTION_LOG", data_dir / "prediction_agent_log.jsonl")
+    monkeypatch.setattr(ptr, "ACCURACY_CACHE", data_dir / "prediction_accuracy.json")
+
+    import core.virtual_wallet as vw
+    import core.blacklist_manager as bm
+    import core.compliance_logger as cl
+    import core.smart_executor as se
+    import core.capital_allocator as ca
+    import core.probability_calibrator as pc
+    import core.knowledge_model as km
+    import core.learning_engine as le
+    import core.machine_signal as ms
+    import core.news_scanner as ns
+
+    monkeypatch.setattr(vw, "WALLET_FILE", data_dir / "virtual_wallet.json")
+    monkeypatch.setattr(bm, "DEFAULT_BLACKLIST_FILE", data_dir / "blacklist.json")
+    monkeypatch.setattr(cl, "COMPLIANCE_DIR", data_dir / "compliance")
+    monkeypatch.setattr(se, "EXEC_STATS_FILE", data_dir / "execution_stats.json")
+    monkeypatch.setattr(ca, "STATE_FILE", data_dir / "capital_allocator.json")
+    monkeypatch.setattr(ca, "RECOMMENDATIONS_FILE", data_dir / "allocation_recommendations.jsonl")
+    monkeypatch.setattr(pc, "SAVE_PATH", data_dir / "calibration.json")
+    monkeypatch.setattr(pc, "ISO_PATH", data_dir / "calibration_iso.pkl")
+    monkeypatch.setattr(pc, "PAIRS_PATH", data_dir / "calibration_pairs.json")
+    monkeypatch.setattr(km, "MODEL_FILE", data_dir / "knowledge_model.json")
+    monkeypatch.setattr(km, "BACKUP_FILE", data_dir / "knowledge_model.bak.json")
+    monkeypatch.setattr(le, "POSITIONS_FILE", data_dir / "positions.json")
+    monkeypatch.setattr(le, "LEARNING_FILE", data_dir / "learning_report.json")
+    monkeypatch.setattr(le, "REPORT_HTML_FILE", data_dir / "learning_report.html")
+    monkeypatch.setattr(ms, "MACHINE_DECISION_LOG", data_dir / "machine_decisions.jsonl")
+    monkeypatch.setattr(ns, "NEWS_CACHE", data_dir / "news_cache.json")
+    monkeypatch.setattr(ns, "NEWS_TEXT", data_dir / "news_latest.txt")
+    monkeypatch.setattr(ns, "SENTIMENT_HISTORY", data_dir / "sentiment_history.json")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _kill_switch_isolation_guard(tmp_path, monkeypatch):
+    """Unit tests must not inherit the operator's real containment latch."""
+    import core.kill_switch as ks
+
+    path = tmp_path / "KILL_SWITCH"
+    monkeypatch.setattr(ks, "KILL_SWITCH_PATH", path)
+    monkeypatch.setattr(ks, "_default", ks.KillSwitch())
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _risk_state_isolation_guard(tmp_path, monkeypatch):
+    """Never let a unit test overwrite the running bot's risk ledger.
+
+    RiskManager historically used a cwd-relative ``data/risk_state.json``.
+    Tests that instantiated it without changing cwd therefore loaded and
+    rewrote production state.  Redirect every mutable risk artifact to the
+    per-test directory; tests that chdir to ``tmp_path`` and explicitly seed
+    ``data/risk_state.json`` continue to address the same file.
+    """
+    import core.risk_manager as rm
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(rm, "RISK_STATE_PATH", data_dir / "risk_state.json")
+    monkeypatch.setattr(rm, "_REVIEW_FLAG_PATH", data_dir / "review_required.json")
+    monkeypatch.setattr(rm, "_INCIDENT_LATCH_PATH", data_dir / "risk_incident_latch.json")
+    monkeypatch.setattr(rm, "_INCIDENT_HISTORY_PATH", data_dir / "risk_incident_history.jsonl")
+    yield

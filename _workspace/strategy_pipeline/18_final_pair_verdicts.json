@@ -1,0 +1,195 @@
+{
+ "run": "2026-07-22 dual-model (Codex GPT-5.6-Sol vs Claude Fable 5)",
+ "first_pass_agreement": "28/44",
+ "conditionality": "ALL FIT verdicts conditional on restoring PAPER+MAX_FLOW_BAND profile (A1: AGGRESSIVE_RESEARCH does not activate band knobs; config.py gates pinned by tests/test_f3_profile_gated_research_knobs.py)",
+ "pairs": {
+  "1INCH/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "AAVE/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "ADA/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "ALGO/USDT:USDT": {
+   "verdict": "FIT_BAND_PAPER",
+   "provenance": "agreed"
+  },
+  "APT/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "ARB/USDT:USDT": {
+   "verdict": "FIT_BAND_PAPER",
+   "provenance": "agreed"
+  },
+  "ATOM/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "conservative (FBP vs FWG)"
+  },
+  "AVAX/USDT:USDT": {
+   "verdict": "FIT_BAND_PAPER",
+   "provenance": "agreed"
+  },
+  "BCH/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "BNB/USDT:USDT": {
+   "verdict": "COST_UNFIT",
+   "provenance": "agreed"
+  },
+  "BTC/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "RULED for Fable: n=1471 measured band outcomes beat a 30d proxy at 0.98 (~breakeven, not dominated; COST_UNFIT definition = TRX-class 0.46). DISSENT Codex: HOLD-COST_UNFIT, move/cost<1."
+  },
+  "COMP/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "CRV/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "DASH/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "DOT/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "ENA/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "ETC/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "ETH/USDT:USDT": {
+   "verdict": "FIT_BAND_PAPER",
+   "provenance": "agreed"
+  },
+  "FET/USDT:USDT": {
+   "verdict": "EXCLUDE",
+   "provenance": "RULED for Codex (conservative): no live bybit USDT-perp route (2026-07-20 boot log; sole route-dead pair). Readmit on route verification. DISSENT Fable: FIT_WITH_GAPS."
+  },
+  "FIL/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "GALA/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "GRT/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "HBAR/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "INJ/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "conservative (FBP vs FWG)"
+  },
+  "JUP/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "LINK/USDT:USDT": {
+   "verdict": "FIT_BAND_PAPER",
+   "provenance": "agreed"
+  },
+  "LTC/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "conservative (FBP vs FWG)"
+  },
+  "MANA/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "NEAR/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "ONDO/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "OP/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "RENDER/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "SAND/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "SEI/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "SNX/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "SOL/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "SUI/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "TAO/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  },
+  "TIA/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "agreed"
+  },
+  "TRX/USDT:USDT": {
+   "verdict": "COST_UNFIT",
+   "provenance": "agreed"
+  },
+  "UNI/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "VET/USDT:USDT": {
+   "verdict": "FIT_WITH_GAPS",
+   "provenance": "codex-conceded"
+  },
+  "XRP/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "RULED for Codex (conservative): band cache n=1 = no usable geometry evidence. DISSENT Fable: FIT_WITH_GAPS."
+  },
+  "ZEC/USDT:USDT": {
+   "verdict": "DATA_STARVED",
+   "provenance": "agreed"
+  }
+ },
+ "distribution": {
+  "DATA_STARVED": 14,
+  "FIT_WITH_GAPS": 22,
+  "FIT_BAND_PAPER": 5,
+  "COST_UNFIT": 2,
+  "EXCLUDE": 1
+ },
+ "candidates": {
+  "C1_cftc_options_pressure": "QUEUED FOR SCREEN (proposer Codex; Fable SCREEN w/ binding hardened prereg: delta-adjustment artifact control, joint t+1/t+2/t+3 multiplicity, ETF-era split, Friday-lag no-lookahead; expectation NO_GO; needs CFTC report harvest first)",
+  "C2_deribit_gamma_expiry": "INSUFFICIENT_DATA (both models; reopen: timestamped historical chain archive OR >=30 forward-collected qualifying events with pre-frozen GEX convention; unconditioned 08:00 reversal substitute FORBIDDEN as refuted seasonality)",
+  "C3_quarter_hour_imbalance": "QUEUED-BEHIND-C1 as measurement-first pilot per Codex MODIFY (3-month BTC/ETH, opening-10s imbalance residualized vs price/volume, day-clustered inference, >=20bps-after-cost bar to expand, else drop+ledger; historical aggTrades so latency-infeasibility does not bar measurement; expectation NO_GO)"
+ }
+}

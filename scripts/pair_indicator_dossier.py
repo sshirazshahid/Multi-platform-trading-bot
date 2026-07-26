@@ -61,8 +61,11 @@ def _safe(fn, default, label=""):
 def build_doc(ex, symbols: list, skipped: list) -> dict:
     """Fetch + assemble the dossier document (same schema as the 27_ artifact)."""
     now_s = time.time()
-    wh = _safe(lambda: warehouse_candidates_by_base([s.split("/", 1)[0] for s in symbols]),
-               {}, "warehouse candidates")
+    wh = _safe(
+        lambda: warehouse_candidates_by_base([s.split("/", 1)[0] for s in symbols]),
+        {},
+        "warehouse candidates",
+    )
     l2 = _safe(l2_symbols, None, "l2_history")
     agg = _safe(aggtrades_symbols, None, "aggtrades_qh")
 
@@ -89,7 +92,8 @@ def build_doc(ex, symbols: list, skipped: list) -> dict:
             "bars_4h": len(bars4) if bars4 else 0,
             "closed_4h_used": n_closed,
             "bars_1h": len(bars1) if bars1 else 0,
-            "err_4h": err4, "err_1h": err1,
+            "err_4h": err4,
+            "err_1h": err1,
         }
         rec["indicators_4h"] = ind
         # local coverage
@@ -101,15 +105,17 @@ def build_doc(ex, symbols: list, skipped: list) -> dict:
             "ohlcv_cache_4h": cov4h,
             "funding_history": fund,
             "warehouse_candidates": (wh or {}).get(base),
-            "orderbook_depth": ("l2_history.jsonl"
-                                if (l2 and any(base in s for s in l2)) else "ABSENT"),
-            "trades": ("aggtrades_qh" if (agg and any(base in s for s in agg))
-                       else "ABSENT"),
+            "orderbook_depth": (
+                "l2_history.jsonl" if (l2 and any(base in s for s in l2)) else "ABSENT"
+            ),
+            "trades": ("aggtrades_qh" if (agg and any(base in s for s in agg)) else "ABSENT"),
             "onchain": "ABSENT",
         }
         # verdict — DATA READINESS ONLY, never indicator direction
         verdict, reasons = classify_verdict(
-            rec["coverage"], bars_computable=ind is not None, live_1h_ok=err1 is None,
+            rec["coverage"],
+            bars_computable=ind is not None,
+            live_1h_ok=err1 is None,
             n_bars_4h=len(bars4) if bars4 else 0,
         )
         rec["verdict"] = verdict
@@ -117,33 +123,35 @@ def build_doc(ex, symbols: list, skipped: list) -> dict:
         records.append(rec)
         print(f"[{i}/{len(symbols)}] {sym}: {verdict} (closed4h={n_closed})")
 
-    counts = {v: sum(1 for r in records if r["verdict"] == v)
-              for v in ("DATA_OK", "PARTIAL", "BACKFILL_FIRST")}
+    counts = {
+        v: sum(1 for r in records if r["verdict"] == v)
+        for v in ("DATA_OK", "PARTIAL", "BACKFILL_FIRST")
+    }
     return {
         "generated_utc": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "purpose": "per-pair indicator posture + data coverage; MEASUREMENT ONLY, "
-                   "no strategy claims, no edge assertions",
+        "no strategy claims, no edge assertions",
         "universe": {
             "source": "core.agents.bundle_mr_probe_agent.resolve_universe(venue='bybit') "
-                      "on data/strategy_specs (MCP_DIRECTIONAL_PAPER active-paper spec), "
-                      "perp_available mirroring bot_engine._venue_perp_available",
-            "count": len(symbols), "skipped_bases": skipped,
+            "on data/strategy_specs (MCP_DIRECTIONAL_PAPER active-paper spec), "
+            "perp_available mirroring bot_engine._venue_perp_available",
+            "count": len(symbols),
+            "skipped_bases": skipped,
         },
         "global_data_notes": {
             "warehouse_raw_ohlcv": "ABSENT — warehouse.sqlite has no OHLCV bars table; "
-                                   "local bars live in data/ohlcv_cache/*.parquet",
-            "orderbook_depth_store": {"file": "data/l2_history.jsonl",
-                                      "symbols_seen": l2},
+            "local bars live in data/ohlcv_cache/*.parquet",
+            "orderbook_depth_store": {"file": "data/l2_history.jsonl", "symbols_seen": l2},
             "trades_store": {"dir": "data/aggtrades_qh", "symbols": agg},
             "onchain_store": "ABSENT — no on-chain artifacts found under data/",
             "feed_persistence": "core/data_feeds/orderbook_depth_feed.py and "
-                                "smart_money_feed.py persist NOTHING to disk "
-                                "(in-memory/HTTP only); l2_history.jsonl and "
-                                "aggtrades_qh come from the separate harvesters "
-                                "scripts/harvest_l2.py and "
-                                "scripts/harvest_binance_aggtrades_qh.py",
+            "smart_money_feed.py persist NOTHING to disk "
+            "(in-memory/HTTP only); l2_history.jsonl and "
+            "aggtrades_qh come from the separate harvesters "
+            "scripts/harvest_l2.py and "
+            "scripts/harvest_binance_aggtrades_qh.py",
             "news_sentiment_store": "global only (data/news_cache.json, "
-                                    "sentiment_history.json) — not per-symbol",
+            "sentiment_history.json) — not per-symbol",
         },
         "verdict_counts": counts,
         "fetch_failures": fetch_failures,
@@ -171,42 +179,58 @@ def render_md(doc: dict) -> str:
     for r in doc["pairs"]:
         ind, cov = r.get("indicators_4h"), r["coverage"]
         if ind:
-            smarel = "/".join((ind["sma"][f"price_vs_sma{n}"] or "?")[0].upper()
-                              for n in (20, 50, 200))
+            smarel = "/".join(
+                (ind["sma"][f"price_vs_sma{n}"] or "?")[0].upper() for n in (20, 50, 200)
+            )
             bb = ind.get("bollinger") or {}
             vol = ind.get("volume_20") or {}
             kdjv = ind.get("kdj_9_3_3") or {}
             ind_cells = [
-                f"{ind['close']:g}", smarel, ind["sma"]["sma50_vs_sma200"] or "?",
-                ind["macd"]["hist_sign"], f"{ind['rsi14']}",
+                f"{ind['close']:g}",
+                smarel,
+                ind["sma"]["sma50_vs_sma200"] or "?",
+                ind["macd"]["hist_sign"],
+                f"{ind['rsi14']}",
                 f"{bb.get('pct_b')} / {bb.get('bandwidth_pctl')}",
-                ind.get("psar_side") or "?", ind.get("supertrend_10_3") or "?",
+                ind.get("psar_side") or "?",
+                ind.get("supertrend_10_3") or "?",
                 f"{vol.get('trend', '?')} ({vol.get('zscore', '?')})",
                 f"{kdjv.get('k')}/{kdjv.get('d')}/{kdjv.get('j')}",
-                ind.get("obv_slope_20") or "?", f"{ind.get('williams_r14')}",
+                ind.get("obv_slope_20") or "?",
+                f"{ind.get('williams_r14')}",
             ]
         else:
             ind_cells = ["FETCH_FAIL"] + ["-"] * 11
         c1, c4 = cov["ohlcv_cache_1h"], cov["ohlcv_cache_4h"]
-        fmt_c = lambda c: (f"{c['rows']} ({c['staleness_days']})" if c["present"]  # noqa: E731
-                           and c.get("rows") is not None else "ABSENT")
+        fmt_c = lambda c: (
+            f"{c['rows']} ({c['staleness_days']})"
+            if c["present"]  # noqa: E731
+            and c.get("rows") is not None
+            else "ABSENT"
+        )
         fb = cov["funding_history"].get("bybit", {})
         wh = cov.get("warehouse_candidates") or {}
         lines.append(
-            "| " + " | ".join(
-                [r["symbol"].replace("/USDT:USDT", "")] + ind_cells + [
-                    fmt_c(c1), fmt_c(c4),
+            "| "
+            + " | ".join(
+                [r["symbol"].replace("/USDT:USDT", "")]
+                + ind_cells
+                + [
+                    fmt_c(c1),
+                    fmt_c(c4),
                     (f"{fb.get('rows')} rows" if fb.get("present") else "ABSENT"),
                     str(wh.get("rows", 0)),
                     f"{'D' if cov['orderbook_depth'] != 'ABSENT' else '-'}/"
                     f"{'T' if cov['trades'] != 'ABSENT' else '-'}",
                     f"**{r['verdict']}**",
-                ]) + " |")
+                ]
+            )
+            + " |"
+        )
     counts = doc["verdict_counts"]
     n = len(doc["pairs"])
     bf = [r for r in doc["pairs"] if r["verdict"] == "BACKFILL_FIRST"]
-    missing_fund = [r["base"] for r in bf
-                    if not r["verdict_reasons"]["bybit_funding_csv"]]
+    missing_fund = [r["base"] for r in bf if not r["verdict_reasons"]["bybit_funding_csv"]]
     stale_1h = [r["base"] for r in bf if not r["verdict_reasons"]["local_1h_fresh"]]
     no_live = [r["base"] for r in bf if not r["verdict_reasons"]["live_4h_computable"]]
     lines += [

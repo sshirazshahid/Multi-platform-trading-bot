@@ -118,8 +118,7 @@ def read_parquet_bars(base: str, tf: str, now: datetime) -> list | None:
             ts /= 1000.0
         if ts > cutoff:
             continue
-        rows.append([ts * 1000.0, float(r[1]), float(r[2]), float(r[3]),
-                     float(r[4]), float(r[5])])
+        rows.append([ts * 1000.0, float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])])
     return rows[-300:] or None
 
 
@@ -340,10 +339,16 @@ def gather_asset(symbol: str, base: str, *, now: datetime, ex=None, shared: dict
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Per-asset research brief (descriptive only).")
-    ap.add_argument("--symbol", default=None,
-                    help="single BASE (e.g. BTC); also reads the persisted sentiment map")
-    ap.add_argument("--refresh", action="store_true",
-                    help="pull closed 4h bars from public keyless ccxt bybit (slower)")
+    ap.add_argument(
+        "--symbol",
+        default=None,
+        help="single BASE (e.g. BTC); also reads the persisted sentiment map",
+    )
+    ap.add_argument(
+        "--refresh",
+        action="store_true",
+        help="pull closed 4h bars from public keyless ccxt bybit (slower)",
+    )
     return ap
 
 
@@ -377,10 +382,14 @@ def main(argv: list[str] | None = None) -> int:
     market_intel = _safe(intel_mod.latest_market_intel, None, "market intel") if intel_mod else None
     market_stale = (
         _safe(lambda: intel_mod.brief_is_stale(market_intel, now), None, "")
-        if (intel_mod and market_intel) else None
+        if (intel_mod and market_intel)
+        else None
     )
-    oi = _safe(lambda: intel_mod.funding_oi_summary(bases), {}, "funding/OI CSVs") if intel_mod \
+    oi = (
+        _safe(lambda: intel_mod.funding_oi_summary(bases), {}, "funding/OI CSVs")
+        if intel_mod
         else {}
+    )
     mentions, sentiment_map, news_stamp = _safe(news_snapshot, ({}, {}, None), "news cache")
     shared = {
         "l2": _safe(l2_last_hours, {}, "l2_history"),
@@ -407,12 +416,18 @@ def main(argv: list[str] | None = None) -> int:
         inputs = gather_asset(sym, base, now=now, ex=ex, shared=shared)
         asset = rb.build_asset_brief(inputs, now=now)
         assets.append(asset)
-        print(f"[{i}/{len(symbols)}] {base}: {asset['data_quality']['verdict']} "
-              f"({asset['counts']['facts']} measured / {asset['counts']['absent']} absent)")
+        print(
+            f"[{i}/{len(symbols)}] {base}: {asset['data_quality']['verdict']} "
+            f"({asset['counts']['facts']} measured / {asset['counts']['absent']} absent)"
+        )
 
     doc = rb.build_doc(
-        assets=assets, now=now, mode=mode, universe_source=universe_source,
-        skipped_bases=skipped, market_intel=market_intel,
+        assets=assets,
+        now=now,
+        mode=mode,
+        universe_source=universe_source,
+        skipped_bases=skipped,
+        market_intel=market_intel,
         market_intel_stale=market_stale,
         diagnostics={
             "failed": sorted(set(_FAILED)),
@@ -421,8 +436,8 @@ def main(argv: list[str] | None = None) -> int:
                 "data_quality describes the LOCAL artifacts (classify_verdict); under "
                 "--refresh the price findings may instead come from the live public fetch "
                 "named in their own source field"
-                if args.refresh else
-                "data_quality and every price finding describe the same local artifacts"
+                if args.refresh
+                else "data_quality and every price finding describe the same local artifacts"
             ),
         },
     )

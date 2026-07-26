@@ -1,4 +1,4 @@
-# TradingBot.ps1 — PowerShell launcher
+# TradingBot.ps1 - PowerShell launcher
 # Right-click -> "Run with PowerShell"
 
 $Host.UI.RawUI.WindowTitle = "Trading Bot Launcher"
@@ -39,7 +39,7 @@ function Install-Bot {
         Write-Host "  [1/3] Creating virtual environment..." -ForegroundColor Cyan
         & $basePython -m venv (Join-Path $BOT_DIR "venv")
     } else {
-        Write-Host "  [1/3] Venv already exists — skipping" -ForegroundColor Green
+        Write-Host "  [1/3] Venv already exists - skipping" -ForegroundColor Green
     }
 
     Write-Host "  [2/3] Upgrading pip..." -ForegroundColor Cyan
@@ -70,27 +70,22 @@ function Run-Bot {
     }
 
     $envContent = Get-Content (Join-Path $BOT_DIR ".env") -ErrorAction SilentlyContinue
-    $dryRunLine = $envContent | Where-Object { $_ -match "^DRY_RUN\s*=" }
-    $isLive     = $dryRunLine -match "=\s*false"
-
-    if ($isLive) {
-        Write-Host "  [WARNING] DRY_RUN=false — REAL TRADES WILL BE PLACED!" -ForegroundColor Red
-        Write-Host ""
-        $confirm = Read-Host "  Type YES to confirm live trading"
-        if ($confirm -ne "YES") {
-            Write-Host "  Cancelled." -ForegroundColor Yellow
-            Read-Host "  Press Enter"; return
-        }
-    } else {
-        Write-Host "  Mode: DRY RUN (paper trading)" -ForegroundColor Green
+    $modeLine = $envContent | Where-Object { $_ -match "^\s*OPERATING_MODE\s*=" } |
+        Select-Object -Last 1
+    $mode = if ($modeLine) { ($modeLine -split "=", 2)[1].Trim().ToUpperInvariant() } else { "PAPER" }
+    if ($mode -notin @("PAPER", "OBSERVATION")) {
+        Write-Host "  [REFUSED] This launcher supports PAPER/OBSERVATION only." -ForegroundColor Red
+        Write-Host "  CONTROLLED_LIVE requires the signed audited procedure." -ForegroundColor Yellow
+        Read-Host "  Press Enter"; return
     }
+    Write-Host "  Mode: $mode (fail-closed supervisor)" -ForegroundColor Green
 
     Write-Host ""
     Write-Host "  Starting bot... Ctrl+C to stop." -ForegroundColor Cyan
     Write-Host "  Logs: $BOT_DIR\logs\" -ForegroundColor DarkGray
     Write-Host ""
     Set-Location $BOT_DIR
-    & $VENV_PYTHON (Join-Path $BOT_DIR "main.py")
+    & $VENV_PYTHON (Join-Path $BOT_DIR "scripts\launcher_supervisor.py") run --restart
     Write-Host ""
     Read-Host "  Bot stopped. Press Enter to return"
 }
@@ -137,7 +132,7 @@ function Show-Status {
         Read-Host "  Press Enter"; return
     }
     Set-Location $BOT_DIR
-    & $VENV_PYTHON (Join-Path $BOT_DIR "main.py") --status
+    & $VENV_PYTHON (Join-Path $BOT_DIR "bot_helper.py") snapshot
     Write-Host ""
     Read-Host "  Press Enter to return"
 }
@@ -149,7 +144,7 @@ function Edit-Config {
         Copy-Item (Join-Path $BOT_DIR ".env.example") $envFile -ErrorAction SilentlyContinue
         Write-Host "  Created .env from .env.example" -ForegroundColor Green
     }
-    Write-Host "  [1] Edit .env      (API keys, DRY_RUN toggle)"
+    Write-Host "  [1] Edit .env      (API keys, safe operating mode)"
     Write-Host "  [2] Edit config.py (strategy parameters)"
     Write-Host "  [3] Back"
     Write-Host ""
@@ -162,7 +157,7 @@ function View-Logs {
     Show-Header
     $logsDir = Join-Path $BOT_DIR "logs"
     if (-not (Test-Path $logsDir)) {
-        Write-Host "  No logs yet — run the bot first." -ForegroundColor Yellow
+        Write-Host "  No logs yet - run the bot first." -ForegroundColor Yellow
         Read-Host "  Press Enter"; return
     }
     Write-Host "  [1] Tail latest log (live)"
@@ -175,7 +170,7 @@ function View-Logs {
     if ($c -eq "1") {
         $latest = Get-ChildItem "$logsDir\bot_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if ($latest) {
-            Write-Host "  Following $($latest.Name) — Ctrl+C to stop" -ForegroundColor Cyan
+            Write-Host "  Following $($latest.Name) - Ctrl+C to stop" -ForegroundColor Cyan
             Get-Content $latest.FullName -Wait -Tail 40
         } else {
             Write-Host "  No log files found." -ForegroundColor Yellow

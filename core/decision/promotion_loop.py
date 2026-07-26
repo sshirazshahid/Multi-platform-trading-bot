@@ -1,4 +1,4 @@
-"""Autonomous shadow -> active-paper promotion loop (PAPER-only).
+"""Shadow evidence loop with manually approved PAPER activation.
 
 Wires the EXISTING honest gate (``core.promotion_gate``) + PBO/CSCV
 (``core.stat_tests.pbo``) + trade-sequence Monte Carlo
@@ -179,6 +179,17 @@ def accept(
     ci_level: float = 0.95,
     bootstrap_resamples: int = 5000,
     random_state: int = 42,
+    fee_slippage_costs: Sequence[float] | None = None,
+    family_p_values: Sequence[float] | None = None,
+    candidate_family_index: int | None = None,
+    group_labels: dict[str, Sequence[str]] | None = None,
+    independent_event_ids: Sequence[str] | None = None,
+    preregistration: dict | None = None,
+    holdout_hash: str | None = None,
+    parameter_plateau_pass: bool = False,
+    lookahead_analysis_pass: bool = False,
+    recursive_indicator_analysis_pass: bool = False,
+    edge_bootstrap_resamples: int = 2000,
 ) -> dict:
     """One after-cost verdict so no strategy invents its own pass/fail.
 
@@ -203,7 +214,10 @@ def accept(
 
     Returns a single verdict dict; performs no writes.
     """
-    r = np.asarray(list(returns or []), dtype=float)
+    r = np.asarray(
+        list(() if returns is None else returns),
+        dtype=float,
+    )
     n = int(r.size)
     honest_n = max(int(n_trials), int(trial_budget), 1)
 
@@ -267,7 +281,10 @@ def accept(
     mc_pass = bool(p_adj < alpha)
 
     # 8 — 30-60d RESOLVED PAPER confirmation window (post-0b rows only)
-    n_resolved = len(list(resolved_paper_returns or []))
+    forward_returns = list(
+        () if resolved_paper_returns is None else resolved_paper_returns
+    )
+    n_resolved = len(forward_returns)
     conf_pass = bool(n_resolved > 0 and float(confirm_days) >= float(confirm_min_days))
 
     sub_gates = {
@@ -312,9 +329,36 @@ def accept(
             "n_resolved": int(n_resolved),
         },
     }
+    from core.edge_validation import validate_paper_edge
+
+    paper_edge = validate_paper_edge(
+        forward_returns=forward_returns,
+        strategy_class=strategy_class,
+        confirmation_days=confirm_days,
+        fee_slippage_costs=fee_slippage_costs,
+        pbo_value=pbo_value,
+        n_trials=honest_n,
+        family_p_values=family_p_values,
+        candidate_family_index=candidate_family_index,
+        group_labels=group_labels,
+        independent_event_ids=independent_event_ids,
+        preregistration=preregistration,
+        holdout_hash=holdout_hash,
+        parameter_plateau_pass=parameter_plateau_pass,
+        lookahead_analysis_pass=lookahead_analysis_pass,
+        recursive_indicator_analysis_pass=recursive_indicator_analysis_pass,
+        n_resamples=edge_bootstrap_resamples,
+        seed=random_state,
+    )
+    sub_gates["paper_edge_v1"] = {
+        "pass": paper_edge["pass"],
+        "validation_schema": paper_edge["validation_schema"],
+    }
     accepted = all(g["pass"] for g in sub_gates.values())
     return {
         "accept": bool(accepted),
+        "validation_schema": paper_edge["validation_schema"],
+        "paper_edge": paper_edge,
         "strategy_class": str(strategy_class),
         "n_used": n,
         "n_floor": floor_n,
@@ -577,9 +621,59 @@ def promote_to_active_paper(
     adaptive_path: Path | str = ADAPTIVE_MACHINE_CONFIG_PATH,
     ttl_hours: int = 24,
     evidence: dict | None = None,
+    manual_approval_path: Path | str | None = None,
 ) -> dict:
-    """Flip a variant to ``active-paper``: write the winning config to the adaptive
-    path MachineSignal polls, and update the registry. Both writes latched."""
+    """Activate PAPER only with an expiring evidence/version/SHA approval."""
+    assert_paper_self_improve([str(path), str(adaptive_path)])
+    if manual_approval_path is None:
+        return {"promoted": False, "reason": "manual_paper_approval_required"}
+    try:
+        from core.entry_policy import current_git_sha
+
+        approval = json.loads(
+            Path(manual_approval_path).read_text(encoding="utf-8")
+        )
+        expiry = datetime.fromisoformat(
+            str(approval["expires_at"]).replace("Z", "+00:00")
+        )
+        evidence_payload = evidence or {}
+        evidence_hash = hashlib.sha256(
+            json.dumps(
+                evidence_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        strategy_version = str(candidate.config.get("strategy_version") or "")
+        approver = str(approval.get("approved_by") or "").strip()
+        exact_evidence = bool(
+            evidence_payload.get("validation_schema") == "paper-edge-v1"
+            and (
+                evidence_payload.get("pass") is True
+                or (
+                    isinstance(evidence_payload.get("paper_edge"), dict)
+                    and evidence_payload["paper_edge"].get("pass") is True
+                )
+            )
+        )
+        approved = bool(
+            approval.get("candidate_id") == candidate.variant_id
+            and strategy_version
+            and approval.get("strategy_version") == strategy_version
+            and approval.get("git_sha") == current_git_sha()
+            and expiry.tzinfo is not None
+            and expiry > _utc_now()
+            and approver.lower()
+            not in {"", "auto", "automated", "bot", "machine", "system"}
+            and approval.get("evidence_sha256") == evidence_hash
+            and exact_evidence
+        )
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        approved = False
+    if not approved:
+        return {"promoted": False, "reason": "manual_paper_approval_invalid"}
+
     payload = {
         "enabled": True,
         "source": "promotion_loop",
@@ -594,10 +688,11 @@ def promote_to_active_paper(
     if not sane.applied:
         return {"promoted": False, "reason": sane.reason}
 
-    assert_paper_self_improve([str(path), str(adaptive_path)])
     ap = Path(adaptive_path)
     ap.parent.mkdir(parents=True, exist_ok=True)
-    ap.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = ap.with_suffix(ap.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(ap)
 
     reg = load_registry(path)
     v = reg["variants"].get(candidate.variant_id, {})
@@ -694,20 +789,23 @@ def tick(
     adaptive_path: Path | str = ADAPTIVE_MACHINE_CONFIG_PATH,
     gate: PromotionGate | None = None,
 ) -> dict:
-    """Evaluate every candidate; promote winners to active-paper, register the rest as
-    shadow. PAPER-latched at every write. Returns an audit report."""
+    """Evaluate candidates and register them shadow-only for human review."""
     if live_returns is None:
         live_returns = read_live_paper_returns()
     results: list[dict] = []
     for c in candidates:
         ev = evaluate_candidate(c, live_returns, gate=gate)
-        if ev["promote"]:
-            ev["action"] = promote_to_active_paper(
-                c, path=registry_path, adaptive_path=adaptive_path, evidence=ev
-            )
-        else:
-            register_shadow(c, path=registry_path, evidence=ev)
-            ev["action"] = {"registered": "shadow"}
+        ev["promotion_candidate"] = bool(ev["promote"])
+        ev["promote"] = False
+        register_shadow(c, path=registry_path, evidence=ev)
+        ev["action"] = {
+            "registered": "shadow",
+            "reason": (
+                "manual_paper_approval_required"
+                if ev["promotion_candidate"]
+                else "evidence_gate_failed"
+            ),
+        }
         results.append(ev)
     return {
         "generated_at": _utc_now().isoformat(),

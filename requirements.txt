@@ -15,6 +15,9 @@ jsonschema>=4.25.1
 # Without it, heartbeat reports memory_mb=0 forever, masking leaks.
 psutil>=5.9.0
 
+# Read-only local warehouse MCP server (mcp_server/trading_bot_mcp.py).
+mcp==1.28.1
+
 # Quant ML stack (Phase 0+ of quant rebuild plan)
 scikit-learn==1.9.0
 scipy==1.18.0

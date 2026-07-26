@@ -23,15 +23,26 @@ Spec references:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
 import time
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 from loguru import logger
+
+from core.contracts import (
+    DecisionRecord,
+    ExecutionEvent,
+    FundingSettlement,
+    InstrumentId,
+    MarketSnapshot,
+    OrderIntent,
+)
 
 # NOTE: relative-to-cwd is the repo-wide contract (tests isolate by chdir'ing
 # to tmp). Standalone entrypoints must chdir to the repo root before touching
@@ -237,6 +248,259 @@ CREATE INDEX IF NOT EXISTS idx_shadow_outcomes_status
 """
 
 
+# The legacy warehouse schema above predates explicit version tracking and must
+# remain intact for existing databases and callers.  New append-only ledgers are
+# installed through ordered migrations so future changes have a durable audit
+# trail and can be retried safely after interruption.
+_MIGRATIONS = (
+    (
+        1,
+        "immutable_event_store",
+        (
+            """CREATE TABLE IF NOT EXISTS market_snapshots (
+                snapshot_id       TEXT PRIMARY KEY,
+                observed_at       TEXT NOT NULL,
+                received_at       TEXT NOT NULL,
+                venue             TEXT NOT NULL,
+                market            TEXT NOT NULL,
+                canonical_symbol  TEXT NOT NULL,
+                exchange_symbol   TEXT NOT NULL,
+                source            TEXT NOT NULL,
+                source_sequence   INTEGER,
+                schema_version    INTEGER NOT NULL CHECK(schema_version > 0),
+                payload_json      TEXT NOT NULL,
+                payload_sha256    TEXT NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_market_snapshots_instrument_time
+                ON market_snapshots(
+                    venue, market, canonical_symbol, exchange_symbol, observed_at
+                )""",
+            """CREATE TABLE IF NOT EXISTS decision_events (
+                event_id           TEXT PRIMARY KEY,
+                decision_id        TEXT NOT NULL UNIQUE,
+                occurred_at        TEXT NOT NULL,
+                venue              TEXT NOT NULL,
+                market             TEXT NOT NULL,
+                canonical_symbol   TEXT NOT NULL,
+                exchange_symbol    TEXT NOT NULL,
+                strategy_id        TEXT NOT NULL,
+                action             TEXT NOT NULL,
+                side               TEXT,
+                snapshot_id        TEXT NOT NULL,
+                model_manifest_id  TEXT,
+                schema_version     INTEGER NOT NULL CHECK(schema_version > 0),
+                payload_json       TEXT NOT NULL,
+                payload_sha256     TEXT NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_decision_events_strategy_time
+                ON decision_events(strategy_id, occurred_at)""",
+            """CREATE INDEX IF NOT EXISTS idx_decision_events_instrument_time
+                ON decision_events(
+                    venue, market, canonical_symbol, exchange_symbol, occurred_at
+                )""",
+            """CREATE TABLE IF NOT EXISTS order_events (
+                event_id           TEXT PRIMARY KEY,
+                record_type        TEXT NOT NULL CHECK(
+                    record_type IN ('order_intent', 'execution_event')
+                ),
+                intent_id          TEXT NOT NULL,
+                decision_id        TEXT,
+                event_type         TEXT NOT NULL,
+                occurred_at        TEXT NOT NULL,
+                received_at        TEXT,
+                venue              TEXT NOT NULL,
+                market             TEXT NOT NULL,
+                canonical_symbol   TEXT NOT NULL,
+                exchange_symbol    TEXT NOT NULL,
+                venue_order_id     TEXT,
+                source_sequence    INTEGER,
+                schema_version     INTEGER NOT NULL CHECK(schema_version > 0),
+                payload_json       TEXT NOT NULL,
+                payload_sha256     TEXT NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_order_events_intent_time
+                ON order_events(intent_id, occurred_at)""",
+            """CREATE INDEX IF NOT EXISTS idx_order_events_decision_time
+                ON order_events(decision_id, occurred_at)""",
+            """CREATE INDEX IF NOT EXISTS idx_order_events_instrument_time
+                ON order_events(
+                    venue, market, canonical_symbol, exchange_symbol, occurred_at
+                )""",
+            """CREATE TABLE IF NOT EXISTS funding_settlements (
+                settlement_id      TEXT PRIMARY KEY,
+                position_id        TEXT NOT NULL,
+                occurred_at        TEXT NOT NULL,
+                received_at        TEXT NOT NULL,
+                venue              TEXT NOT NULL,
+                market             TEXT NOT NULL,
+                canonical_symbol   TEXT NOT NULL,
+                exchange_symbol    TEXT NOT NULL,
+                rate               TEXT NOT NULL,
+                amount             TEXT NOT NULL,
+                asset              TEXT NOT NULL,
+                schema_version     INTEGER NOT NULL CHECK(schema_version > 0),
+                payload_json       TEXT NOT NULL,
+                payload_sha256     TEXT NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_funding_settlements_position_time
+                ON funding_settlements(position_id, occurred_at)""",
+            """CREATE INDEX IF NOT EXISTS idx_funding_settlements_instrument_time
+                ON funding_settlements(
+                    venue, market, canonical_symbol, exchange_symbol, occurred_at
+                )""",
+            """CREATE TRIGGER IF NOT EXISTS trg_market_snapshots_no_update
+                BEFORE UPDATE ON market_snapshots BEGIN
+                    SELECT RAISE(ABORT, 'market_snapshots is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_market_snapshots_no_delete
+                BEFORE DELETE ON market_snapshots BEGIN
+                    SELECT RAISE(ABORT, 'market_snapshots is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_decision_events_no_update
+                BEFORE UPDATE ON decision_events BEGIN
+                    SELECT RAISE(ABORT, 'decision_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_decision_events_no_delete
+                BEFORE DELETE ON decision_events BEGIN
+                    SELECT RAISE(ABORT, 'decision_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_order_events_no_update
+                BEFORE UPDATE ON order_events BEGIN
+                    SELECT RAISE(ABORT, 'order_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_order_events_no_delete
+                BEFORE DELETE ON order_events BEGIN
+                    SELECT RAISE(ABORT, 'order_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_funding_settlements_no_update
+                BEFORE UPDATE ON funding_settlements BEGIN
+                    SELECT RAISE(ABORT, 'funding_settlements is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_funding_settlements_no_delete
+                BEFORE DELETE ON funding_settlements BEGIN
+                    SELECT RAISE(ABORT, 'funding_settlements is append-only');
+                END""",
+        ),
+    ),
+    (
+        2,
+        "immutable_event_store_replace_guards",
+        (
+            """CREATE TRIGGER IF NOT EXISTS trg_market_snapshots_no_replace
+                BEFORE INSERT ON market_snapshots
+                WHEN EXISTS (
+                    SELECT 1 FROM market_snapshots
+                    WHERE snapshot_id=NEW.snapshot_id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'market_snapshots is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_decision_events_no_replace
+                BEFORE INSERT ON decision_events
+                WHEN EXISTS (
+                    SELECT 1 FROM decision_events WHERE event_id=NEW.event_id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'decision_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_order_events_no_replace
+                BEFORE INSERT ON order_events
+                WHEN EXISTS (
+                    SELECT 1 FROM order_events WHERE event_id=NEW.event_id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'order_events is append-only');
+                END""",
+            """CREATE TRIGGER IF NOT EXISTS trg_funding_settlements_no_replace
+                BEFORE INSERT ON funding_settlements
+                WHEN EXISTS (
+                    SELECT 1 FROM funding_settlements
+                    WHERE settlement_id=NEW.settlement_id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'funding_settlements is append-only');
+                END""",
+        ),
+    ),
+)
+
+
+class EventConflictError(ValueError):
+    """An immutable event ID was retried with a different payload."""
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Apply each unapplied migration atomically and record its version."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS schema_migrations (
+            version     INTEGER PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            applied_at  TEXT NOT NULL
+        )"""
+    )
+    for version, name, statements in _MIGRATIONS:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT name FROM schema_migrations WHERE version=?", (version,)
+            ).fetchone()
+            if row is not None:
+                if row["name"] != name:
+                    raise RuntimeError(
+                        f"warehouse migration {version} is recorded as "
+                        f"{row['name']!r}, expected {name!r}"
+                    )
+                conn.commit()
+                continue
+            for statement in statements:
+                conn.execute(statement)
+            applied_at = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z")
+            )
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?,?,?)",
+                (version, name, applied_at),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def _canonical_payload(contract: Any) -> tuple[str, str]:
+    payload_json = json.dumps(
+        contract.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return payload_json, digest
+
+
+def _utc_iso(value: datetime, name: str) -> str:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{name} must be a datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
+    return (
+        value.astimezone(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _validated_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise TypeError("limit must be an integer")
+    if not 1 <= limit <= 10_000:
+        raise ValueError("limit must be between 1 and 10000")
+    return limit
+
+
 class Warehouse:
     """Thin SQLite wrapper. Safe to instantiate once per process."""
 
@@ -246,6 +510,7 @@ class Warehouse:
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else WAREHOUSE_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection_key = str(self.path.resolve())
         with self._lock:
             conn = self._conn()
             conn.executescript(_SCHEMA)
@@ -393,19 +658,432 @@ class Warehouse:
                 )
             except sqlite3.OperationalError:
                 pass
+            _apply_migrations(conn)
             conn.commit()
         logger.info(f"[Warehouse] Ready at {self.path}")
 
     def _conn(self) -> sqlite3.Connection:
         """Thread-local connection. WAL mode so readers don't block writers."""
         conn = getattr(self._tls, "conn", None)
+        connection_key = getattr(self._tls, "connection_key", None)
+        if conn is not None and connection_key != self._connection_key:
+            conn.close()
+            conn = None
         if conn is None:
             conn = sqlite3.connect(str(self.path), isolation_level=None)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             self._tls.conn = conn
+            self._tls.connection_key = self._connection_key
         return conn
+
+    # -- Immutable event store -------------------------------------------------
+
+    @property
+    def schema_version(self) -> int:
+        row = self._conn().execute(
+            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+        ).fetchone()
+        return int(row["version"])
+
+    def applied_migrations(self) -> list[dict]:
+        return self.query(
+            "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"
+        )
+
+    def _append_immutable(
+        self,
+        *,
+        table: str,
+        id_column: str,
+        event_id: str,
+        sql: str,
+        params: tuple,
+        payload_json: str,
+        payload_sha256: str,
+    ) -> str:
+        """Insert once; identical retries succeed and conflicting retries fail."""
+        try:
+            self._conn().execute(sql, params)
+            return event_id
+        except sqlite3.IntegrityError as exc:
+            row = self._conn().execute(
+                f"SELECT payload_json, payload_sha256 FROM {table} "
+                f"WHERE {id_column}=?",
+                (event_id,),
+            ).fetchone()
+            if (
+                row is not None
+                and row["payload_sha256"] == payload_sha256
+                and row["payload_json"] == payload_json
+            ):
+                return event_id
+            if row is not None:
+                raise EventConflictError(
+                    f"{table} event {event_id!r} already exists with a different payload"
+                ) from exc
+            raise
+
+    @staticmethod
+    def _instrument_filters(
+        where: list[str], params: list[Any], instrument: InstrumentId | None
+    ) -> None:
+        if instrument is None:
+            return
+        if not isinstance(instrument, InstrumentId):
+            raise TypeError("instrument must be an InstrumentId")
+        where.extend(
+            (
+                "venue=?",
+                "market=?",
+                "canonical_symbol=?",
+                "exchange_symbol=?",
+            )
+        )
+        params.extend(instrument.identity_key)
+
+    @staticmethod
+    def _time_filters(
+        where: list[str],
+        params: list[Any],
+        column: str,
+        since: datetime | None,
+        until: datetime | None,
+    ) -> None:
+        since_iso = _utc_iso(since, "since") if since is not None else None
+        until_iso = _utc_iso(until, "until") if until is not None else None
+        if since_iso is not None and until_iso is not None and since_iso > until_iso:
+            raise ValueError("since must not be after until")
+        if since_iso is not None:
+            where.append(f"{column}>=?")
+            params.append(since_iso)
+        if until_iso is not None:
+            where.append(f"{column}<=?")
+            params.append(until_iso)
+
+    def append_market_snapshot(self, snapshot: MarketSnapshot) -> str:
+        if not isinstance(snapshot, MarketSnapshot):
+            raise TypeError("snapshot must be a MarketSnapshot")
+        payload_json, payload_sha256 = _canonical_payload(snapshot)
+        instrument = snapshot.instrument
+        return self._append_immutable(
+            table="market_snapshots",
+            id_column="snapshot_id",
+            event_id=snapshot.snapshot_id,
+            sql="""INSERT INTO market_snapshots(
+                    snapshot_id, observed_at, received_at,
+                    venue, market, canonical_symbol, exchange_symbol,
+                    source, source_sequence, schema_version,
+                    payload_json, payload_sha256)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            params=(
+                snapshot.snapshot_id,
+                _utc_iso(snapshot.observed_at, "observed_at"),
+                _utc_iso(snapshot.received_at, "received_at"),
+                *instrument.identity_key,
+                snapshot.source,
+                snapshot.sequence,
+                snapshot.schema_version,
+                payload_json,
+                payload_sha256,
+            ),
+            payload_json=payload_json,
+            payload_sha256=payload_sha256,
+        )
+
+    def append_snapshot(self, snapshot: MarketSnapshot) -> str:
+        """Compatibility alias for callers using the shorter noun."""
+        return self.append_market_snapshot(snapshot)
+
+    def append_decision_event(self, decision: DecisionRecord) -> str:
+        if not isinstance(decision, DecisionRecord):
+            raise TypeError("decision must be a DecisionRecord")
+        payload_json, payload_sha256 = _canonical_payload(decision)
+        instrument = decision.instrument
+        return self._append_immutable(
+            table="decision_events",
+            id_column="event_id",
+            event_id=decision.event_id,
+            sql="""INSERT INTO decision_events(
+                    event_id, decision_id, occurred_at,
+                    venue, market, canonical_symbol, exchange_symbol,
+                    strategy_id, action, side, snapshot_id, model_manifest_id,
+                    schema_version, payload_json, payload_sha256)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            params=(
+                decision.event_id,
+                decision.decision_id,
+                _utc_iso(decision.decided_at, "decided_at"),
+                *instrument.identity_key,
+                decision.strategy_id,
+                decision.action.value,
+                decision.side.value if decision.side is not None else None,
+                decision.snapshot_id,
+                decision.model_manifest_id,
+                decision.schema_version,
+                payload_json,
+                payload_sha256,
+            ),
+            payload_json=payload_json,
+            payload_sha256=payload_sha256,
+        )
+
+    def append_decision(self, decision: DecisionRecord) -> str:
+        return self.append_decision_event(decision)
+
+    def append_order_intent(self, intent: OrderIntent) -> str:
+        if not isinstance(intent, OrderIntent):
+            raise TypeError("intent must be an OrderIntent")
+        payload_json, payload_sha256 = _canonical_payload(intent)
+        instrument = intent.instrument
+        return self._append_immutable(
+            table="order_events",
+            id_column="event_id",
+            event_id=intent.event_id,
+            sql="""INSERT INTO order_events(
+                    event_id, record_type, intent_id, decision_id, event_type,
+                    occurred_at, received_at,
+                    venue, market, canonical_symbol, exchange_symbol,
+                    venue_order_id, source_sequence, schema_version,
+                    payload_json, payload_sha256)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            params=(
+                intent.event_id,
+                "order_intent",
+                intent.intent_id,
+                intent.decision_id,
+                "intent_created",
+                _utc_iso(intent.created_at, "created_at"),
+                None,
+                *instrument.identity_key,
+                None,
+                None,
+                intent.schema_version,
+                payload_json,
+                payload_sha256,
+            ),
+            payload_json=payload_json,
+            payload_sha256=payload_sha256,
+        )
+
+    def append_execution_event(self, event: ExecutionEvent) -> str:
+        if not isinstance(event, ExecutionEvent):
+            raise TypeError("event must be an ExecutionEvent")
+        payload_json, payload_sha256 = _canonical_payload(event)
+        instrument = event.instrument
+        return self._append_immutable(
+            table="order_events",
+            id_column="event_id",
+            event_id=event.event_id,
+            sql="""INSERT INTO order_events(
+                    event_id, record_type, intent_id, decision_id, event_type,
+                    occurred_at, received_at,
+                    venue, market, canonical_symbol, exchange_symbol,
+                    venue_order_id, source_sequence, schema_version,
+                    payload_json, payload_sha256)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            params=(
+                event.event_id,
+                "execution_event",
+                event.intent_id,
+                event.decision_id,
+                event.event_type.value,
+                _utc_iso(event.occurred_at, "occurred_at"),
+                _utc_iso(event.received_at, "received_at"),
+                *instrument.identity_key,
+                event.venue_order_id,
+                event.sequence,
+                event.schema_version,
+                payload_json,
+                payload_sha256,
+            ),
+            payload_json=payload_json,
+            payload_sha256=payload_sha256,
+        )
+
+    def append_order_event(
+        self, event: Union[OrderIntent, ExecutionEvent]
+    ) -> str:
+        if isinstance(event, OrderIntent):
+            return self.append_order_intent(event)
+        if isinstance(event, ExecutionEvent):
+            return self.append_execution_event(event)
+        raise TypeError("event must be an OrderIntent or ExecutionEvent")
+
+    def append_funding_settlement(self, settlement: FundingSettlement) -> str:
+        if not isinstance(settlement, FundingSettlement):
+            raise TypeError("settlement must be a FundingSettlement")
+        payload_json, payload_sha256 = _canonical_payload(settlement)
+        instrument = settlement.instrument
+        return self._append_immutable(
+            table="funding_settlements",
+            id_column="settlement_id",
+            event_id=settlement.settlement_id,
+            sql="""INSERT INTO funding_settlements(
+                    settlement_id, position_id, occurred_at, received_at,
+                    venue, market, canonical_symbol, exchange_symbol,
+                    rate, amount, asset, schema_version,
+                    payload_json, payload_sha256)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            params=(
+                settlement.settlement_id,
+                settlement.position_id,
+                _utc_iso(settlement.occurred_at, "occurred_at"),
+                _utc_iso(settlement.received_at, "received_at"),
+                *instrument.identity_key,
+                str(settlement.rate),
+                str(settlement.amount),
+                settlement.asset,
+                settlement.schema_version,
+                payload_json,
+                payload_sha256,
+            ),
+            payload_json=payload_json,
+            payload_sha256=payload_sha256,
+        )
+
+    def query_market_snapshots(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        instrument: InstrumentId | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[MarketSnapshot]:
+        where: list[str] = []
+        params: list[Any] = []
+        if snapshot_id is not None:
+            if not isinstance(snapshot_id, str) or not snapshot_id.strip():
+                raise ValueError("snapshot_id must be a non-empty string")
+            where.append("snapshot_id=?")
+            params.append(snapshot_id.strip())
+        self._instrument_filters(where, params, instrument)
+        self._time_filters(where, params, "observed_at", since, until)
+        params.append(_validated_limit(limit))
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+        rows = self._conn().execute(
+            "SELECT payload_json FROM market_snapshots"
+            f"{where_sql} ORDER BY observed_at, snapshot_id LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [MarketSnapshot.from_dict(json.loads(row["payload_json"])) for row in rows]
+
+    def query_decision_events(
+        self,
+        *,
+        decision_id: str | None = None,
+        strategy_id: str | None = None,
+        instrument: InstrumentId | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[DecisionRecord]:
+        where: list[str] = []
+        params: list[Any] = []
+        if decision_id is not None:
+            if not isinstance(decision_id, str) or not decision_id.strip():
+                raise ValueError("decision_id must be a non-empty string")
+            where.append("decision_id=?")
+            params.append(decision_id.strip())
+        if strategy_id is not None:
+            if not isinstance(strategy_id, str) or not strategy_id.strip():
+                raise ValueError("strategy_id must be a non-empty string")
+            where.append("strategy_id=?")
+            params.append(strategy_id.strip())
+        self._instrument_filters(where, params, instrument)
+        self._time_filters(where, params, "occurred_at", since, until)
+        params.append(_validated_limit(limit))
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+        rows = self._conn().execute(
+            "SELECT payload_json FROM decision_events"
+            f"{where_sql} ORDER BY occurred_at, event_id LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [DecisionRecord.from_dict(json.loads(row["payload_json"])) for row in rows]
+
+    def query_order_events(
+        self,
+        *,
+        event_id: str | None = None,
+        intent_id: str | None = None,
+        decision_id: str | None = None,
+        event_type: str | None = None,
+        instrument: InstrumentId | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[Union[OrderIntent, ExecutionEvent]]:
+        where: list[str] = []
+        params: list[Any] = []
+        for column, value in (
+            ("event_id", event_id),
+            ("intent_id", intent_id),
+            ("decision_id", decision_id),
+            ("event_type", event_type),
+        ):
+            if value is not None:
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"{column} must be a non-empty string")
+                where.append(f"{column}=?")
+                normalized = value.strip().lower() if column == "event_type" else value.strip()
+                params.append(normalized)
+        self._instrument_filters(where, params, instrument)
+        self._time_filters(where, params, "occurred_at", since, until)
+        params.append(_validated_limit(limit))
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+        rows = self._conn().execute(
+            "SELECT record_type, payload_json FROM order_events"
+            f"{where_sql} ORDER BY occurred_at, event_id LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        contracts: list[Union[OrderIntent, ExecutionEvent]] = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if row["record_type"] == "order_intent":
+                contracts.append(OrderIntent.from_dict(payload))
+            elif row["record_type"] == "execution_event":
+                contracts.append(ExecutionEvent.from_dict(payload))
+            else:
+                raise ValueError(f"unknown order event record_type: {row['record_type']!r}")
+        return contracts
+
+    def query_funding_settlements(
+        self,
+        *,
+        settlement_id: str | None = None,
+        position_id: str | None = None,
+        instrument: InstrumentId | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[FundingSettlement]:
+        where: list[str] = []
+        params: list[Any] = []
+        if settlement_id is not None:
+            if not isinstance(settlement_id, str) or not settlement_id.strip():
+                raise ValueError("settlement_id must be a non-empty string")
+            where.append("settlement_id=?")
+            params.append(settlement_id.strip())
+        if position_id is not None:
+            if not isinstance(position_id, str) or not position_id.strip():
+                raise ValueError("position_id must be a non-empty string")
+            where.append("position_id=?")
+            params.append(position_id.strip())
+        self._instrument_filters(where, params, instrument)
+        self._time_filters(where, params, "occurred_at", since, until)
+        params.append(_validated_limit(limit))
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+        rows = self._conn().execute(
+            "SELECT payload_json FROM funding_settlements"
+            f"{where_sql} ORDER BY occurred_at, settlement_id LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [
+            FundingSettlement.from_dict(json.loads(row["payload_json"]))
+            for row in rows
+        ]
 
     # ── Candidates ────────────────────────────────────────────────────
 
@@ -792,7 +1470,7 @@ class Warehouse:
             # Step 1: exact match, OPEN-only.
             row = self._conn().execute(
                 "SELECT id FROM trades "
-                "WHERE exchange=? AND symbol=? AND ts_entry=? AND side=? "
+                "WHERE exchange=? COLLATE NOCASE AND symbol=? AND ts_entry=? AND side=? "
                 "AND status='OPEN' "
                 "ORDER BY id DESC LIMIT 1",
                 (exchange, symbol, ts_entry, side),
@@ -805,7 +1483,7 @@ class Warehouse:
                 return None
             row = self._conn().execute(
                 "SELECT id, ts_entry FROM trades "
-                "WHERE exchange=? AND symbol=? AND side=? AND status='OPEN' "
+                "WHERE exchange=? COLLATE NOCASE AND symbol=? AND side=? AND status='OPEN' "
                 "AND ts_entry >= ? AND ts_entry <= ? "
                 "ORDER BY ABS(ts_entry - ?) ASC, id DESC LIMIT 1",
                 (exchange, symbol, side,

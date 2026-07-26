@@ -139,6 +139,51 @@ def test_sl_fail_close_failure_alerts_naked_manual_intervention(om, monkeypatch)
     assert "closed fail-safe" not in sent
 
 
+def test_sl_failure_http_debug_evidence_redacts_credentials(om, monkeypatch):
+    from loguru import logger
+
+    ex = _make_exchange()
+    raw = MagicMock()
+    raw.options = {"defaultType": "swap"}
+    raw.last_request_url = (
+        "https://api.exchange.test/order?symbol=AAVEUSDT&"
+        "apiKey=API_KEY_SHOULD_NOT_LEAK&signature=SIGNATURE_SHOULD_NOT_LEAK"
+    )
+    raw.last_request_body = (
+        "symbol=AAVEUSDT&secret=SECRET_SHOULD_NOT_LEAK&"
+        "passphrase=PASSPHRASE_SHOULD_NOT_LEAK"
+    )
+    raw.last_request_headers = {
+        "Authorization": "Bearer TOKEN_SHOULD_NOT_LEAK",
+        "X-BAPI-API-KEY": "HEADER_KEY_SHOULD_NOT_LEAK",
+    }
+    raw.last_http_response = '{"retCode":10001,"apiKey":"ECHO_SHOULD_NOT_LEAK"}'
+    raw.last_response_headers = {"trace-id": "safe-trace"}
+    ex.exchange = raw
+    ex.create_order.side_effect = Exception("venue rejected the stop order")
+    monkeypatch.setattr(om, "close_position", MagicMock())
+
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="DEBUG")
+    try:
+        _place(om, ex, _make_position())
+    finally:
+        logger.remove(sink)
+
+    rendered = "\n".join(str(message) for message in messages)
+    for secret in (
+        "API_KEY_SHOULD_NOT_LEAK",
+        "SIGNATURE_SHOULD_NOT_LEAK",
+        "SECRET_SHOULD_NOT_LEAK",
+        "PASSPHRASE_SHOULD_NOT_LEAK",
+        "TOKEN_SHOULD_NOT_LEAK",
+        "HEADER_KEY_SHOULD_NOT_LEAK",
+        "ECHO_SHOULD_NOT_LEAK",
+    ):
+        assert secret not in rendered
+    assert "AAVEUSDT" in rendered
+
+
 # --- operator escape hatch: flag off restores the old behavior ---------------
 
 

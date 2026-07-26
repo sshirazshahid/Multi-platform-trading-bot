@@ -37,6 +37,10 @@ class OrderBookDepthFeed:
 
     def __init__(self, *, cache_ttl: int = 60, target_notional_usd: float = 500.0):
         self._cache: dict[str, dict] = {}
+        self._cache_times: dict[str, float] = {}
+        self._cache_attempt_times: dict[str, float] = {}
+        # Retained for compatibility with callers that inspect the old
+        # feed-wide timestamp. Freshness decisions use _cache_times instead.
         self._cache_time: float = 0.0
         self._cache_ttl = cache_ttl
         self._target_notional = target_notional_usd
@@ -62,18 +66,25 @@ class OrderBookDepthFeed:
             }}
         """
         now = time.time()
-        if now - self._cache_time < self._cache_ttl and self._cache:
-            return self._cache
-
         result: dict[str, dict] = {}
 
         for coin in coins[:15]:  # limit to control latency
+            cached = self._cache.get(coin)
+            last_attempt = self._cache_attempt_times.get(coin, 0.0)
+            if cached and now - last_attempt < self._cache_ttl:
+                result[coin] = cached
+                continue
+
+            self._cache_attempt_times[coin] = now
             try:
                 data = self._fetch_binance_depth(coin)
+                source = "binance"
                 if data is None:
                     data = self._fetch_bybit_depth(coin)
+                    source = "bybit"
                 if data is None:
                     result[coin] = self._neutral(stale=True)
+                    self._cache[coin] = result[coin]
                     continue
 
                 bids = data["bids"]
@@ -81,6 +92,7 @@ class OrderBookDepthFeed:
 
                 if not bids or not asks:
                     result[coin] = self._neutral(stale=True)
+                    self._cache[coin] = result[coin]
                     continue
 
                 # Depth at multiple levels (top 10 and top 20)
@@ -139,6 +151,7 @@ class OrderBookDepthFeed:
                     "bid_wall": bid_wall,
                     "ask_wall": ask_wall,
                     "depth_ratio_log": round(depth_ratio_log, 4),
+                    "source": source,
                     "stale": False,
                 }
                 result[coin] = entry
@@ -148,8 +161,11 @@ class OrderBookDepthFeed:
                 logger.debug(f"[OBFeed] {coin}: {e}")
                 result[coin] = self._neutral(stale=True)
 
-        self._cache = result
-        self._cache_time = now
+            self._cache[coin] = result[coin]
+            if not result[coin].get("stale", True):
+                self._cache_times[coin] = now
+                self._cache_time = max(self._cache_time, now)
+
         return result
 
     def _estimate_slippage(
@@ -164,33 +180,48 @@ class OrderBookDepthFeed:
         For buys: walk ask side upward.
         For sells: walk bid side downward.
         """
-        remaining = notional_usd
-        cost = 0.0
+        if direction not in {"buy", "sell"}:
+            raise ValueError(f"unsupported order direction: {direction}")
+        if not math.isfinite(notional_usd) or notional_usd < 0:
+            return math.inf
+        if not math.isfinite(mid_price) or mid_price <= 0:
+            return math.inf
+        if notional_usd == 0:
+            return 0.0
+
+        target_base_qty = notional_usd / mid_price
+        filled_base_qty = 0.0
+        quote_cost = 0.0
 
         for level in levels:
-            price = float(level[0])
-            qty = float(level[1])
-            level_value = price * qty
+            try:
+                price = float(level[0])
+                available_base_qty = float(level[1])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if (not math.isfinite(price) or price <= 0 or
+                    not math.isfinite(available_base_qty) or
+                    available_base_qty <= 0):
+                continue
 
-            if level_value >= remaining:
-                # Partial fill at this level
-                fill_qty = remaining / price
-                cost += fill_qty * price
-                remaining = 0
+            remaining_base_qty = target_base_qty - filled_base_qty
+            fill_base_qty = min(available_base_qty, remaining_base_qty)
+            filled_base_qty += fill_base_qty
+            quote_cost += fill_base_qty * price
+            if filled_base_qty >= target_base_qty:
                 break
-            else:
-                cost += level_value
-                remaining -= level_value
 
-        if remaining > 0:
-            # Book too thin — couldn't fill, return high slippage
-            return 100.0  # 100 bps = 1% (signals illiquid)
+        tolerance = max(1e-12, target_base_qty * 1e-12)
+        if filled_base_qty < target_base_qty - tolerance:
+            # Infinity preserves the float API and guarantees that every
+            # finite slippage limit rejects an order the book cannot fill.
+            return math.inf
 
-        avg_fill = cost / (notional_usd / mid_price) if mid_price > 0 else mid_price
+        vwap = quote_cost / filled_base_qty
         if direction == "buy":
-            slippage = (avg_fill - mid_price) / mid_price * 10000
+            slippage = (vwap - mid_price) / mid_price * 10000
         else:
-            slippage = (mid_price - avg_fill) / mid_price * 10000
+            slippage = (mid_price - vwap) / mid_price * 10000
 
         return max(0.0, slippage)
 
@@ -247,5 +278,6 @@ class OrderBookDepthFeed:
             "bid_wall": False,
             "ask_wall": False,
             "depth_ratio_log": 0.0,
+            "source": None,
             "stale": stale,
         }

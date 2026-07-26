@@ -1,0 +1,1817 @@
+{
+  "generated_utc": "2026-07-23T10:07:49.346073+00:00",
+  "windows": {
+    "7d": {
+      "summary": {
+        "n": 41,
+        "wins": 20,
+        "losses": 21,
+        "flats": 0,
+        "pnl_sum": -3.684420298789892,
+        "pnl_avg": -0.08986390972658273,
+        "fee_sum": 1.61695546879,
+        "avg_hold_sec": 5104.38878744986,
+        "wr": 0.4878048780487805
+      },
+      "by_exit_reason": [
+        {
+          "exit_reason": "take_profit",
+          "n": 20,
+          "wins": 20,
+          "pnl": 2.84851486328504,
+          "fees": 0.651649956715
+        },
+        {
+          "exit_reason": "stop_loss",
+          "n": 20,
+          "wins": 0,
+          "pnl": -6.409251162074935,
+          "fees": 0.903463512075
+        },
+        {
+          "exit_reason": "data_feed_failure",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.12368399999999774,
+          "fees": 0.06184200000000001
+        }
+      ],
+      "by_strategy_family": [
+        {
+          "strategy_family": "algo_det",
+          "n": 41,
+          "wins": 20,
+          "pnl": -3.684420298789892,
+          "fees": 1.61695546879
+        }
+      ],
+      "by_fill_type": [
+        {
+          "fill_type": "taker_fallback",
+          "n": 21,
+          "wins": 8,
+          "pnl": -3.237542623544914
+        },
+        {
+          "fill_type": "maker",
+          "n": 20,
+          "wins": 12,
+          "pnl": -0.44687767524497835
+        }
+      ],
+      "worst_symbols": [
+        {
+          "symbol": "JUP/USDT:USDT",
+          "n": 13,
+          "wins": 2,
+          "pnl": -2.2266844770749135
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "n": 10,
+          "wins": 5,
+          "pnl": -1.4217039088499976
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "n": 8,
+          "wins": 4,
+          "pnl": -1.2594775566249792
+        },
+        {
+          "symbol": "AXS/USDT:USDT",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.12368399999999774
+        },
+        {
+          "symbol": "ETH/USDT:USDT",
+          "n": 2,
+          "wins": 2,
+          "pnl": 0.28454779552500453
+        },
+        {
+          "symbol": "LTC/USDT:USDT",
+          "n": 2,
+          "wins": 2,
+          "pnl": 0.5038779253349932
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "n": 5,
+          "wins": 5,
+          "pnl": 0.5587039228999982
+        }
+      ],
+      "recent_20": [
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.1636504106999924,
+          "fee": 0.052829010700000005,
+          "hold_sec": 3926.4307112693787,
+          "ts_exit": 1784800905.693351,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.11728324522499084,
+          "fee": 0.052449495225000003,
+          "hold_sec": 1373.5494911670685,
+          "ts_exit": 1784796872.1213863,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "maker",
+          "realized_pnl": 0.11411767360000055,
+          "fee": 0.023015126400000002,
+          "hold_sec": 2699.572704553604,
+          "ts_exit": 1784795462.6245494,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.44416623649998654,
+          "fee": 0.06172683649999999,
+          "hold_sec": 1270.8594543933868,
+          "ts_exit": 1784795259.63972,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.4154918090499979,
+          "fee": 0.06170990905,
+          "hold_sec": 502.27384853363037,
+          "ts_exit": 1784793918.4433444,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.07739577849999296,
+          "fee": 0.0340387785,
+          "hold_sec": 2288.5406754016876,
+          "ts_exit": 1784793356.144812,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.3144431556000066,
+          "fee": 0.022274355599999997,
+          "hold_sec": 2423.215936422348,
+          "ts_exit": 1784792674.4610083,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.6450780084999853,
+          "fee": 0.06506100849999999,
+          "hold_sec": 264.7112765312195,
+          "ts_exit": 1784791021.728443,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.077875043,
+          "fee": 0.077875043,
+          "hold_sec": 2223.5084834098816,
+          "ts_exit": 1784790710.6278894,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.42740519265000215,
+          "fee": 0.04050869265,
+          "hold_sec": 20275.794854164124,
+          "ts_exit": 1784790683.5979595,
+          "mcp_score": 65.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.14235465619999876,
+          "fee": 0.0412226438,
+          "hold_sec": 7971.4564616680145,
+          "ts_exit": 1784789222.1407957,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.0383323807999991,
+          "fee": 0.0168507808,
+          "hold_sec": 766.4654805660248,
+          "ts_exit": 1784788378.3618488,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.22042369199999293,
+          "fee": 0.030559692,
+          "hold_sec": 677.9843225479126,
+          "ts_exit": 1784787316.4602764,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.13262517377000044,
+          "fee": 0.041227386229999996,
+          "hold_sec": 1554.6374950408936,
+          "ts_exit": 1784780935.247332,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.06626150730000255,
+          "fee": 0.026146892700000007,
+          "hold_sec": 1316.5580348968506,
+          "ts_exit": 1784772248.3441308,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.033948320000000004,
+          "fee": 0.033948320000000004,
+          "hold_sec": 387.2868733406067,
+          "ts_exit": 1784770849.1551328,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.23410912839998607,
+          "fee": 0.10473232840000002,
+          "hold_sec": 436.83131432533264,
+          "ts_exit": 1784770412.8158846,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.4221429315000034,
+          "fee": 0.028705931499999997,
+          "hold_sec": 1908.0260145664215,
+          "ts_exit": 1784770328.1332326,
+          "mcp_score": 62.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.17480806830000784,
+          "fee": 0.0521944317,
+          "hold_sec": 1221.1810669898987,
+          "ts_exit": 1784769905.7923892,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.058125635100009634,
+          "fee": 0.04113716490000001,
+          "hold_sec": 2112.522693157196,
+          "ts_exit": 1784768345.1497192,
+          "mcp_score": 62.0
+        }
+      ]
+    },
+    "30d": {
+      "summary": {
+        "n": 850,
+        "wins": 270,
+        "losses": 580,
+        "flats": 0,
+        "pnl_sum": -250.5815364434725,
+        "pnl_avg": -0.29480180758055585,
+        "fee_sum": 63.949167715184416,
+        "avg_hold_sec": 7678.085061980696,
+        "wr": 0.3176470588235294
+      },
+      "by_exit_reason": [
+        {
+          "exit_reason": "stop_loss",
+          "n": 483,
+          "wins": 112,
+          "pnl": -236.97567403563804,
+          "fees": 36.78598277574767
+        },
+        {
+          "exit_reason": "trailing_stop",
+          "n": 151,
+          "wins": 34,
+          "pnl": -34.516959147331846,
+          "fees": 11.242479932144079
+        },
+        {
+          "exit_reason": "take_profit",
+          "n": 110,
+          "wins": 108,
+          "pnl": 56.49413245595849,
+          "fees": 7.701100842113139
+        },
+        {
+          "exit_reason": "STALE",
+          "n": 69,
+          "wins": 0,
+          "pnl": -15.18740095502703,
+          "fees": 5.2331987645780815
+        },
+        {
+          "exit_reason": "mcp_take_profit",
+          "n": 15,
+          "wins": 15,
+          "pnl": 8.411678893699614,
+          "fees": 1.2207382864142766
+        },
+        {
+          "exit_reason": "AGE_LIMIT",
+          "n": 13,
+          "wins": 0,
+          "pnl": -23.05493509196121,
+          "fees": 1.42432340601467
+        },
+        {
+          "exit_reason": "reconciled_no_context",
+          "n": 2,
+          "wins": 0,
+          "pnl": -3.0,
+          "fees": 0.0
+        },
+        {
+          "exit_reason": "reconciled_from_exchange",
+          "n": 2,
+          "wins": 0,
+          "pnl": -1.6600000000000001,
+          "fees": 0.0
+        },
+        {
+          "exit_reason": "machine_time_stop",
+          "n": 2,
+          "wins": 1,
+          "pnl": -0.7193049639624718,
+          "fees": 0.2517275089625
+        },
+        {
+          "exit_reason": "sl_placement_failed",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.007998749999999858,
+          "fees": 0.00549875
+        },
+        {
+          "exit_reason": "data_feed_failure",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.12368399999999774,
+          "fees": 0.06184200000000001
+        },
+        {
+          "exit_reason": "claude_close",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.2413908492100006,
+          "fees": 0.02227544921
+        }
+      ],
+      "by_strategy_family": [
+        {
+          "strategy_family": "claude",
+          "n": 596,
+          "wins": 188,
+          "pnl": -177.62560472134004,
+          "fees": 45.023743988216104
+        },
+        {
+          "strategy_family": "algo",
+          "n": 192,
+          "wins": 59,
+          "pnl": -58.69774328285973,
+          "fees": 16.164891190695315
+        },
+        {
+          "strategy_family": "algo_det",
+          "n": 41,
+          "wins": 20,
+          "pnl": -3.684420298789892,
+          "fees": 1.61695546879
+        },
+        {
+          "strategy_family": "machine",
+          "n": 13,
+          "wins": 3,
+          "pnl": -3.272646102817825,
+          "fees": 1.107061459818
+        },
+        {
+          "strategy_family": "reconciled_exchange",
+          "n": 4,
+          "wins": 0,
+          "pnl": -4.66,
+          "fees": 0.0
+        },
+        {
+          "strategy_family": "tsmom",
+          "n": 3,
+          "wins": 0,
+          "pnl": -2.6331232876649997,
+          "fees": 0.031016857665
+        },
+        {
+          "strategy_family": "systematic_v3_1",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.007998749999999858,
+          "fees": 0.00549875
+        }
+      ],
+      "by_fill_type": [
+        {
+          "fill_type": "?",
+          "n": 772,
+          "wins": 236,
+          "pnl": -235.05250144334676
+        },
+        {
+          "fill_type": "maker",
+          "n": 42,
+          "wins": 17,
+          "pnl": -13.571690059752685
+        },
+        {
+          "fill_type": "taker_fallback",
+          "n": 36,
+          "wins": 17,
+          "pnl": -1.9573449403730676
+        }
+      ],
+      "worst_symbols": [
+        {
+          "symbol": "ADA/USDT:USDT",
+          "n": 70,
+          "wins": 21,
+          "pnl": -21.980313444911513
+        },
+        {
+          "symbol": "LINK/USDT:USDT",
+          "n": 71,
+          "wins": 20,
+          "pnl": -21.013451686790027
+        },
+        {
+          "symbol": "ARB/USDT:USDT",
+          "n": 53,
+          "wins": 13,
+          "pnl": -17.714329595237743
+        },
+        {
+          "symbol": "DOGE/USDT:USDT",
+          "n": 41,
+          "wins": 13,
+          "pnl": -16.386115618573193
+        },
+        {
+          "symbol": "SOL/USDT:USDT",
+          "n": 52,
+          "wins": 22,
+          "pnl": -15.289395199455623
+        },
+        {
+          "symbol": "AVAX/USDT:USDT",
+          "n": 44,
+          "wins": 10,
+          "pnl": -15.248873662463435
+        },
+        {
+          "symbol": "XRP/USDT:USDT",
+          "n": 33,
+          "wins": 9,
+          "pnl": -15.09157324687329
+        },
+        {
+          "symbol": "BNB/USDT:USDT",
+          "n": 46,
+          "wins": 13,
+          "pnl": -14.135615904526091
+        },
+        {
+          "symbol": "ETH/USDT:USDT",
+          "n": 45,
+          "wins": 14,
+          "pnl": -13.730853576734816
+        },
+        {
+          "symbol": "BTC/USDT:USDT",
+          "n": 49,
+          "wins": 14,
+          "pnl": -13.647117235642003
+        },
+        {
+          "symbol": "ATOM/USDT:USDT",
+          "n": 34,
+          "wins": 15,
+          "pnl": -11.05627199557574
+        },
+        {
+          "symbol": "APT/USDT:USDT",
+          "n": 49,
+          "wins": 19,
+          "pnl": -10.960070528908155
+        },
+        {
+          "symbol": "DOT/USDT:USDT",
+          "n": 49,
+          "wins": 13,
+          "pnl": -10.663047938939028
+        },
+        {
+          "symbol": "AAVE/USDT:USDT",
+          "n": 47,
+          "wins": 18,
+          "pnl": -7.421595751348094
+        },
+        {
+          "symbol": "ALGO/USDT:USDT",
+          "n": 14,
+          "wins": 3,
+          "pnl": -7.225927373951031
+        }
+      ],
+      "recent_20": [
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.1636504106999924,
+          "fee": 0.052829010700000005,
+          "hold_sec": 3926.4307112693787,
+          "ts_exit": 1784800905.693351,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.11728324522499084,
+          "fee": 0.052449495225000003,
+          "hold_sec": 1373.5494911670685,
+          "ts_exit": 1784796872.1213863,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "maker",
+          "realized_pnl": 0.11411767360000055,
+          "fee": 0.023015126400000002,
+          "hold_sec": 2699.572704553604,
+          "ts_exit": 1784795462.6245494,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.44416623649998654,
+          "fee": 0.06172683649999999,
+          "hold_sec": 1270.8594543933868,
+          "ts_exit": 1784795259.63972,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.4154918090499979,
+          "fee": 0.06170990905,
+          "hold_sec": 502.27384853363037,
+          "ts_exit": 1784793918.4433444,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.07739577849999296,
+          "fee": 0.0340387785,
+          "hold_sec": 2288.5406754016876,
+          "ts_exit": 1784793356.144812,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.3144431556000066,
+          "fee": 0.022274355599999997,
+          "hold_sec": 2423.215936422348,
+          "ts_exit": 1784792674.4610083,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.6450780084999853,
+          "fee": 0.06506100849999999,
+          "hold_sec": 264.7112765312195,
+          "ts_exit": 1784791021.728443,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.077875043,
+          "fee": 0.077875043,
+          "hold_sec": 2223.5084834098816,
+          "ts_exit": 1784790710.6278894,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.42740519265000215,
+          "fee": 0.04050869265,
+          "hold_sec": 20275.794854164124,
+          "ts_exit": 1784790683.5979595,
+          "mcp_score": 65.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.14235465619999876,
+          "fee": 0.0412226438,
+          "hold_sec": 7971.4564616680145,
+          "ts_exit": 1784789222.1407957,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.0383323807999991,
+          "fee": 0.0168507808,
+          "hold_sec": 766.4654805660248,
+          "ts_exit": 1784788378.3618488,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.22042369199999293,
+          "fee": 0.030559692,
+          "hold_sec": 677.9843225479126,
+          "ts_exit": 1784787316.4602764,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.13262517377000044,
+          "fee": 0.041227386229999996,
+          "hold_sec": 1554.6374950408936,
+          "ts_exit": 1784780935.247332,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.06626150730000255,
+          "fee": 0.026146892700000007,
+          "hold_sec": 1316.5580348968506,
+          "ts_exit": 1784772248.3441308,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.033948320000000004,
+          "fee": 0.033948320000000004,
+          "hold_sec": 387.2868733406067,
+          "ts_exit": 1784770849.1551328,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.23410912839998607,
+          "fee": 0.10473232840000002,
+          "hold_sec": 436.83131432533264,
+          "ts_exit": 1784770412.8158846,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.4221429315000034,
+          "fee": 0.028705931499999997,
+          "hold_sec": 1908.0260145664215,
+          "ts_exit": 1784770328.1332326,
+          "mcp_score": 62.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.17480806830000784,
+          "fee": 0.0521944317,
+          "hold_sec": 1221.1810669898987,
+          "ts_exit": 1784769905.7923892,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.058125635100009634,
+          "fee": 0.04113716490000001,
+          "hold_sec": 2112.522693157196,
+          "ts_exit": 1784768345.1497192,
+          "mcp_score": 62.0
+        }
+      ]
+    },
+    "all": {
+      "summary": {
+        "n": 2341,
+        "wins": 792,
+        "losses": 1494,
+        "flats": 55,
+        "pnl_sum": -653.7026200859198,
+        "pnl_avg": -0.2859591513936657,
+        "fee_sum": 168.8746729276417,
+        "avg_hold_sec": 7525.146092548069,
+        "wr": 0.33831695856471594
+      },
+      "by_exit_reason": [
+        {
+          "exit_reason": "stop_loss",
+          "n": 1172,
+          "wins": 307,
+          "pnl": -657.4385134185442,
+          "fees": 97.30116859729506
+        },
+        {
+          "exit_reason": "trailing_stop",
+          "n": 379,
+          "wins": 129,
+          "pnl": -43.70983931149195,
+          "fees": 28.558264064056328
+        },
+        {
+          "exit_reason": "take_profit",
+          "n": 192,
+          "wins": 190,
+          "pnl": 160.05267893063822,
+          "fees": 14.471959949463539
+        },
+        {
+          "exit_reason": "STALE",
+          "n": 145,
+          "wins": 13,
+          "pnl": -23.403862054216752,
+          "fees": 9.392146853768082
+        },
+        {
+          "exit_reason": "reconciled_from_exchange",
+          "n": 106,
+          "wins": 49,
+          "pnl": -39.010250119999995,
+          "fees": 0.0
+        },
+        {
+          "exit_reason": "entry_invalidated",
+          "n": 95,
+          "wins": 28,
+          "pnl": -22.77064851296733,
+          "fees": 8.86033486096825
+        },
+        {
+          "exit_reason": "stale_unrecoverable",
+          "n": 54,
+          "wins": 0,
+          "pnl": 0,
+          "fees": 0.653603079925
+        },
+        {
+          "exit_reason": "mcp_brain_close",
+          "n": 44,
+          "wins": 13,
+          "pnl": -20.090345986999967,
+          "fees": 0.973874958
+        },
+        {
+          "exit_reason": "mcp_take_profit",
+          "n": 41,
+          "wins": 41,
+          "pnl": 29.22711954246724,
+          "fees": 3.080174247646777
+        },
+        {
+          "exit_reason": "systematic_close",
+          "n": 21,
+          "wins": 1,
+          "pnl": -3.696789625850001,
+          "fees": 0.45342072585000004
+        },
+        {
+          "exit_reason": "AGE_LIMIT",
+          "n": 15,
+          "wins": 0,
+          "pnl": -23.934192043261206,
+          "fees": 1.5141638573146698
+        },
+        {
+          "exit_reason": "sl_placement_failed",
+          "n": 14,
+          "wins": 4,
+          "pnl": 2.0605902533060387,
+          "fees": 0.9520568706939999
+        },
+        {
+          "exit_reason": "ghost_sync",
+          "n": 13,
+          "wins": 1,
+          "pnl": -0.9791781891199951,
+          "fees": 0.16583592878
+        },
+        {
+          "exit_reason": "reconciled_no_context",
+          "n": 2,
+          "wins": 0,
+          "pnl": -3.0,
+          "fees": 0.0
+        },
+        {
+          "exit_reason": "machine_time_stop",
+          "n": 2,
+          "wins": 1,
+          "pnl": -0.7193049639624718,
+          "fees": 0.2517275089625
+        },
+        {
+          "exit_reason": "auto_small_tp_1pct",
+          "n": 2,
+          "wins": 2,
+          "pnl": 0.6419665000000001,
+          "fees": 0.0616335
+        },
+        {
+          "exit_reason": "sl_crossed_at_placement",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.4650303399999988,
+          "fees": 0.054789660000000004
+        },
+        {
+          "exit_reason": "phantom_stale",
+          "n": 1,
+          "wins": 0,
+          "pnl": 0,
+          "fees": 0.007033460000000001
+        },
+        {
+          "exit_reason": "ghost_reconciled",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.14144474500000184,
+          "fees": 0.07683474500000001
+        },
+        {
+          "exit_reason": "data_feed_failure",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.12368399999999774,
+          "fees": 0.06184200000000001
+        },
+        {
+          "exit_reason": "claude_close",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.2413908492100006,
+          "fees": 0.02227544921
+        },
+        {
+          "exit_reason": "book +1.9% at target, 4h RSI18.6 bounce risk",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.20473978250000024,
+          "fees": 0.027847467499999994
+        },
+        {
+          "exit_reason": "Trend=up(2.0) fights short; 284m stale",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.1419756000000001,
+          "fees": 0.027975600000000003
+        },
+        {
+          "exit_reason": "Trend=down, lock +0.5% profit",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.0002712200000002038,
+          "fees": 0.00682878
+        },
+        {
+          "exit_reason": "Trend flipped down, -1.2% cut loss",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.3501777300000006,
+          "fees": 0.02587773
+        },
+        {
+          "exit_reason": "TSMOM exit: daily momentum flipped non-positive",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.9009676840774966,
+          "fees": 0.0223289490775
+        },
+        {
+          "exit_reason": "Scalp TP hit at 2.1%",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.32084811200000485,
+          "fees": 0.046063888000000004
+        },
+        {
+          "exit_reason": "Past TP at +2.4%; target was 1.8-2.0%",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.19142183599999738,
+          "fees": 0.024682164
+        },
+        {
+          "exit_reason": "Past SL at -3.5%; breach confirmed",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.19519769999999892,
+          "fees": 0.013997699999999998
+        },
+        {
+          "exit_reason": "Past SL at -3.5%; SL limit was 2.5%",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.3632601449999969,
+          "fees": 0.030950145000000002
+        },
+        {
+          "exit_reason": "Past 2.5% SL, 1h EMA mixed",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.16767747999999824,
+          "fees": 0.015757479999999997
+        },
+        {
+          "exit_reason": "Lock +2%; OB imb -0.712 heavy sell pressure",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.0673,
+          "fees": 0.012700000000000001
+        },
+        {
+          "exit_reason": "Duplicate ATOM exposure; -2.2% near SL",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.10064284999999969,
+          "fees": 0.01314285
+        },
+        {
+          "exit_reason": "DOGE trend up(6), short bleeding at -1.1%",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.30935596499999873,
+          "fees": 0.046615964999999995
+        },
+        {
+          "exit_reason": "Bank +3.1%, past scalp target",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.9480988843200068,
+          "fees": 0.06827557968
+        },
+        {
+          "exit_reason": "Bank +2.6%, 4h RSI near 18",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.33109310055001023,
+          "fees": 0.03495369945
+        },
+        {
+          "exit_reason": "Bank +1.2%; 4h RSI=28.3 reversal risk",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.04218799999999872,
+          "fees": 0.017812
+        },
+        {
+          "exit_reason": "Age 328m, bounce ongoing, stale",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.6055400500000085,
+          "fees": 0.10644005000000001
+        },
+        {
+          "exit_reason": "ALGO stale 191m pnl=+0.0%",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.09229219000000174,
+          "fees": 0.03123219
+        },
+        {
+          "exit_reason": "ADX=14.4 weak, -0.6% stalled 302m",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.03887124999999926,
+          "fees": 0.00837125
+        },
+        {
+          "exit_reason": "509m, -1.5%, trend mixed, SL zone",
+          "n": 1,
+          "wins": 0,
+          "pnl": -1.8640165500000032,
+          "fees": 0.21731655
+        },
+        {
+          "exit_reason": "506m open, -3.2% past SL, MACD neg, 15m EMA down",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.4040482500000023,
+          "fees": 0.03154825
+        },
+        {
+          "exit_reason": "4h RSI=26.5 reversal zone, last 5 all losses",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.1282970000000008,
+          "fees": 0.017703
+        },
+        {
+          "exit_reason": "4h EMA=mixed; 25%WR bleed; +0.1% salvage",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.017000300000017482,
+          "fees": 0.15479969999999998
+        },
+        {
+          "exit_reason": "4h EMA=mixed, fear regime, loss -0.7%",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.7038265000000233,
+          "fees": 0.15442650000000002
+        },
+        {
+          "exit_reason": "4h EMA=down conflicts long; -0.3% pnl",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.11251736000000084,
+          "fees": 0.04843736
+        },
+        {
+          "exit_reason": "4h EMA down, OB=-0.92, 430m no recovery",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.6632694500000029,
+          "fees": 0.07696945000000001
+        },
+        {
+          "exit_reason": "4h EMA down invalidates long; -1.8% losing",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.8436153899999979,
+          "fees": 0.08323539000000002
+        },
+        {
+          "exit_reason": "4h ADX=15.4 below 20, 15m EMA down, MACD negative",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.06231757000000128,
+          "fees": 0.01017757
+        },
+        {
+          "exit_reason": "425m short, 1h bounce +0.8% adverse momentum",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.40896469999999335,
+          "fees": 0.050064700000000004
+        },
+        {
+          "exit_reason": "282m, -0.8%, 4h RSI=38.7 reversal risk",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.20226125000000134,
+          "fees": 0.05176125
+        },
+        {
+          "exit_reason": "240m stale, 4h EMA=down conflicts long",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.3267473100000108,
+          "fees": 0.25004731
+        },
+        {
+          "exit_reason": "1h EMA+OB+0.777 contradict short",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.2566269000000004,
+          "fees": 0.042026900000000006
+        },
+        {
+          "exit_reason": "171m stagnant -0.2%; 17% WR, 5L streak",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.07445775999999975,
+          "fees": 0.02167776
+        },
+        {
+          "exit_reason": "15m RSI 81.4 OB, +2.6% exceeds scalp target",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.23477955000000025,
+          "fees": 0.01992045
+        },
+        {
+          "exit_reason": "15m RSI 67 EMA up, at SL boundary",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.31523816999999954,
+          "fees": 0.02637817
+        },
+        {
+          "exit_reason": "15m EMA reversed up, OB +0.393 bullish vs short",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.41341349999999766,
+          "fees": 0.0325335
+        },
+        {
+          "exit_reason": "14% WR, last 5 all losses, cut loss",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.03261492000000006,
+          "fees": 0.007654919999999999
+        },
+        {
+          "exit_reason": "-3.7% past SL; 15m mixed+RSI42 no recovery",
+          "n": 1,
+          "wins": 0,
+          "pnl": -0.08736939300000007,
+          "fees": 0.006864393
+        },
+        {
+          "exit_reason": "+2.2% above scalp TP; tape mean=-$0.83 bleeds",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.6606640000000007,
+          "fees": 0.07613600000000001
+        }
+      ],
+      "by_strategy_family": [
+        {
+          "strategy_family": "claude_portfolio",
+          "n": 1038,
+          "wins": 353,
+          "pnl": -273.7309523629288,
+          "fees": 90.56750827048495
+        },
+        {
+          "strategy_family": "claude",
+          "n": 770,
+          "wins": 236,
+          "pnl": -212.5610098761496,
+          "fees": 56.9235812833272
+        },
+        {
+          "strategy_family": "algo",
+          "n": 192,
+          "wins": 59,
+          "pnl": -58.69774328285973,
+          "fees": 16.164891190695315
+        },
+        {
+          "strategy_family": "reconciled_exchange",
+          "n": 108,
+          "wins": 49,
+          "pnl": -42.010250119999995,
+          "fees": 0.0
+        },
+        {
+          "strategy_family": "systematic_v3_1",
+          "n": 64,
+          "wins": 23,
+          "pnl": 0.183427691975004,
+          "fees": 1.31559220045
+        },
+        {
+          "strategy_family": "MultiTF",
+          "n": 58,
+          "wins": 28,
+          "pnl": -11.32531120587374,
+          "fees": 0.4561953704795318
+        },
+        {
+          "strategy_family": "algo_det",
+          "n": 41,
+          "wins": 20,
+          "pnl": -3.684420298789892,
+          "fees": 1.61695546879
+        },
+        {
+          "strategy_family": "Supertrend",
+          "n": 39,
+          "wins": 16,
+          "pnl": -45.17610230963274,
+          "fees": 0.4883919589542039
+        },
+        {
+          "strategy_family": "machine",
+          "n": 13,
+          "wins": 3,
+          "pnl": -3.272646102817825,
+          "fees": 1.107061459818
+        },
+        {
+          "strategy_family": "TrendFollowing",
+          "n": 7,
+          "wins": 0,
+          "pnl": -0.14258034459999722,
+          "fees": 0.0620660154
+        },
+        {
+          "strategy_family": "tsmom",
+          "n": 4,
+          "wins": 0,
+          "pnl": -3.534090971742496,
+          "fees": 0.0533458067425
+        },
+        {
+          "strategy_family": "manual",
+          "n": 4,
+          "wins": 2,
+          "pnl": 0.001502710000001698,
+          "fees": 0.059597290000000004
+        },
+        {
+          "strategy_family": "reconcile",
+          "n": 2,
+          "wins": 2,
+          "pnl": 0.1250913875000057,
+          "fees": 0.0501486125
+        },
+        {
+          "strategy_family": "MeanReversion",
+          "n": 1,
+          "wins": 1,
+          "pnl": 0.12246500000000002,
+          "fees": 0.009337999999999999
+        }
+      ],
+      "by_fill_type": [
+        {
+          "fill_type": "?",
+          "n": 2263,
+          "wins": 758,
+          "pnl": -638.173585085794
+        },
+        {
+          "fill_type": "maker",
+          "n": 42,
+          "wins": 17,
+          "pnl": -13.571690059752685
+        },
+        {
+          "fill_type": "taker_fallback",
+          "n": 36,
+          "wins": 17,
+          "pnl": -1.9573449403730676
+        }
+      ],
+      "worst_symbols": [
+        {
+          "symbol": "SOL/USDT:USDT",
+          "n": 257,
+          "wins": 97,
+          "pnl": -80.0659433370616
+        },
+        {
+          "symbol": "ETH/USDT:USDT",
+          "n": 78,
+          "wins": 24,
+          "pnl": -61.22798590061664
+        },
+        {
+          "symbol": "LINK/USDT:USDT",
+          "n": 259,
+          "wins": 95,
+          "pnl": -60.082746129122825
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "n": 160,
+          "wins": 47,
+          "pnl": -49.599893173752264
+        },
+        {
+          "symbol": "AVAX/USDT:USDT",
+          "n": 155,
+          "wins": 49,
+          "pnl": -47.70227687568223
+        },
+        {
+          "symbol": "APT/USDT:USDT",
+          "n": 84,
+          "wins": 28,
+          "pnl": -38.021886247897456
+        },
+        {
+          "symbol": "DOT/USDT:USDT",
+          "n": 135,
+          "wins": 43,
+          "pnl": -36.82686743501055
+        },
+        {
+          "symbol": "BNB/USDT:USDT",
+          "n": 160,
+          "wins": 49,
+          "pnl": -36.751639927567155
+        },
+        {
+          "symbol": "XRP/USDT:USDT",
+          "n": 160,
+          "wins": 65,
+          "pnl": -35.881520732883146
+        },
+        {
+          "symbol": "BTC/USDT:USDT",
+          "n": 151,
+          "wins": 49,
+          "pnl": -31.224477403623776
+        },
+        {
+          "symbol": "ARB/USDT:USDT",
+          "n": 119,
+          "wins": 32,
+          "pnl": -29.828754049918192
+        },
+        {
+          "symbol": "DOGE/USDT:USDT",
+          "n": 108,
+          "wins": 36,
+          "pnl": -26.19293732435993
+        },
+        {
+          "symbol": "ATOM/USDT:USDT",
+          "n": 95,
+          "wins": 36,
+          "pnl": -21.9520564446401
+        },
+        {
+          "symbol": "AAVE/USDT:USDT",
+          "n": 93,
+          "wins": 28,
+          "pnl": -21.933621390092917
+        },
+        {
+          "symbol": "ALGO/USDT:USDT",
+          "n": 84,
+          "wins": 30,
+          "pnl": -18.29658355160681
+        }
+      ],
+      "recent_20": [
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.1636504106999924,
+          "fee": 0.052829010700000005,
+          "hold_sec": 3926.4307112693787,
+          "ts_exit": 1784800905.693351,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.11728324522499084,
+          "fee": 0.052449495225000003,
+          "hold_sec": 1373.5494911670685,
+          "ts_exit": 1784796872.1213863,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "maker",
+          "realized_pnl": 0.11411767360000055,
+          "fee": 0.023015126400000002,
+          "hold_sec": 2699.572704553604,
+          "ts_exit": 1784795462.6245494,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.44416623649998654,
+          "fee": 0.06172683649999999,
+          "hold_sec": 1270.8594543933868,
+          "ts_exit": 1784795259.63972,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.4154918090499979,
+          "fee": 0.06170990905,
+          "hold_sec": 502.27384853363037,
+          "ts_exit": 1784793918.4433444,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.07739577849999296,
+          "fee": 0.0340387785,
+          "hold_sec": 2288.5406754016876,
+          "ts_exit": 1784793356.144812,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "INJ/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.3144431556000066,
+          "fee": 0.022274355599999997,
+          "hold_sec": 2423.215936422348,
+          "ts_exit": 1784792674.4610083,
+          "mcp_score": 57.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.6450780084999853,
+          "fee": 0.06506100849999999,
+          "hold_sec": 264.7112765312195,
+          "ts_exit": 1784791021.728443,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.077875043,
+          "fee": 0.077875043,
+          "hold_sec": 2223.5084834098816,
+          "ts_exit": 1784790710.6278894,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.42740519265000215,
+          "fee": 0.04050869265,
+          "hold_sec": 20275.794854164124,
+          "ts_exit": 1784790683.5979595,
+          "mcp_score": 65.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.14235465619999876,
+          "fee": 0.0412226438,
+          "hold_sec": 7971.4564616680145,
+          "ts_exit": 1784789222.1407957,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.0383323807999991,
+          "fee": 0.0168507808,
+          "hold_sec": 766.4654805660248,
+          "ts_exit": 1784788378.3618488,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.22042369199999293,
+          "fee": 0.030559692,
+          "hold_sec": 677.9843225479126,
+          "ts_exit": 1784787316.4602764,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "HBAR/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.13262517377000044,
+          "fee": 0.041227386229999996,
+          "hold_sec": 1554.6374950408936,
+          "ts_exit": 1784780935.247332,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.06626150730000255,
+          "fee": 0.026146892700000007,
+          "hold_sec": 1316.5580348968506,
+          "ts_exit": 1784772248.3441308,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.033948320000000004,
+          "fee": 0.033948320000000004,
+          "hold_sec": 387.2868733406067,
+          "ts_exit": 1784770849.1551328,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "taker_fallback",
+          "realized_pnl": -0.23410912839998607,
+          "fee": 0.10473232840000002,
+          "hold_sec": 436.83131432533264,
+          "ts_exit": 1784770412.8158846,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "stop_loss",
+          "fill_type": "maker",
+          "realized_pnl": -0.4221429315000034,
+          "fee": 0.028705931499999997,
+          "hold_sec": 1908.0260145664215,
+          "ts_exit": 1784770328.1332326,
+          "mcp_score": 62.0
+        },
+        {
+          "symbol": "JUP/USDT:USDT",
+          "side": "sell",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.17480806830000784,
+          "fee": 0.0521944317,
+          "hold_sec": 1221.1810669898987,
+          "ts_exit": 1784769905.7923892,
+          "mcp_score": 50.0
+        },
+        {
+          "symbol": "ADA/USDT:USDT",
+          "side": "buy",
+          "strategy_family": "algo_det",
+          "exit_reason": "take_profit",
+          "fill_type": "taker_fallback",
+          "realized_pnl": 0.058125635100009634,
+          "fee": 0.04113716490000001,
+          "hold_sec": 2112.522693157196,
+          "ts_exit": 1784768345.1497192,
+          "mcp_score": 62.0
+        }
+      ]
+    }
+  },
+  "funnel": {
+    "generated_utc": "2026-07-23T09:40:06.046382+00:00",
+    "lanes": [
+      {
+        "lane": "tsmom_20d_1h",
+        "state": "ACCRUING",
+        "floor_progress": "25/30",
+        "wr": 0.36
+      },
+      {
+        "lane": "tsmom_20d_4h",
+        "state": "ACCRUING",
+        "floor_progress": "9/30",
+        "wr": 0.2222222222222222
+      },
+      {
+        "lane": "breakout_60d",
+        "state": "IDLE",
+        "floor_progress": "0/30",
+        "wr": null
+      },
+      {
+        "lane": "unlock_short",
+        "state": "IDLE",
+        "floor_progress": "0/30",
+        "wr": null
+      },
+      {
+        "lane": "zfade_4h_cfg365",
+        "state": "ACCRUING",
+        "floor_progress": "19/30",
+        "wr": 0.7368421052631579
+      },
+      {
+        "lane": "rsi2_4h_cfg226",
+        "state": "ACCRUING",
+        "floor_progress": "25/30",
+        "wr": 0.64
+      },
+      {
+        "lane": "pullback_ma20_4h",
+        "state": "ACCRUING",
+        "floor_progress": "5/30",
+        "wr": 0.0
+      },
+      {
+        "lane": "listing_short",
+        "state": "STARVED",
+        "floor_progress": "0/30",
+        "wr": null
+      },
+      {
+        "lane": "f1_carry",
+        "state": "IDLE",
+        "floor_progress": "0/30",
+        "wr": null
+      },
+      {
+        "lane": "directional_paper_cohort",
+        "state": "ACCRUING",
+        "floor_progress": "24/30",
+        "wr": 0.458333
+      }
+    ]
+  },
+  "heartbeat": {
+    "operating_mode": "PAPER",
+    "paper_trading_profile": "MAX_FLOW_BAND",
+    "signal_source": "mcp",
+    "entry_policy": "APPROVED_PAPER",
+    "is_halted": false,
+    "daily_pnl": -2.4120579355949014,
+    "open_positions": 1
+  }
+}

@@ -57,6 +57,12 @@ from loguru import logger
 PredictionVerdict = Literal["CONFIRM", "VETO", "WEAK_CONFIRM"]
 AgentMode = Literal["VETO", "ADVISOR", "FULL"]
 
+# Injectable persistence paths.  These logs are dormant production research
+# artifacts, but unit tests exercise the full prediction flow and must never
+# append mocked Claude responses to the real evidence stream.
+PREDICTION_LOG_PATH = Path("data/prediction_agent_log.jsonl")
+PREDICTION_FAILURE_LOG_PATH = Path("data/prediction_agent_failures.jsonl")
+
 
 @dataclass
 class PredictionResult:
@@ -609,7 +615,7 @@ class PredictionAgent:
             "cache_hit": result.cache_hit,
         }
         try:
-            log_path = Path("data/prediction_agent_log.jsonl")
+            log_path = PREDICTION_LOG_PATH
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
@@ -626,7 +632,7 @@ class PredictionAgent:
             "raw_data": data if isinstance(data, (str, dict, list)) else str(data)[:500],
         }
         try:
-            log_path = Path("data/prediction_agent_failures.jsonl")
+            log_path = PREDICTION_FAILURE_LOG_PATH
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")

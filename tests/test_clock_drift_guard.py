@@ -26,7 +26,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import config
-from core.bot_engine import sample_clock_drift_ms
+from core.bot_engine import _live_entry_clock_drift_rejection, sample_clock_drift_ms
 from core.health_watchdog import HealthWatchdog
 
 
@@ -145,7 +145,8 @@ def test_check_registered_in_tick():
 def test_heartbeat_carries_clock_drift_field():
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     i = src.index("def _write_heartbeat")
-    assert '"clock_drift_ms"' in src[i : i + 3000], (
+    j = src.index("def _try_reconnect", i)
+    assert '"clock_drift_ms"' in src[i:j], (
         "heartbeat.json must surface per-venue clock drift"
     )
 
@@ -156,3 +157,53 @@ def test_health_cycle_samples_drift():
     assert "sample_clock_drift_ms" in src[i : i + 5000], (
         "_check_exchange_health must sample venue clock drift each cycle"
     )
+
+
+def test_controlled_live_entry_drift_gate_fails_closed():
+    assert _live_entry_clock_drift_rejection(
+        "PAPER", "binance", {}, 500
+    ) is None
+    assert _live_entry_clock_drift_rejection(
+        "CONTROLLED_LIVE", "binance", {}, 500
+    ) == "clock_drift_unavailable"
+    assert _live_entry_clock_drift_rejection(
+        "CONTROLLED_LIVE", "binance", {"binance": float("nan")}, 500
+    ) == "clock_drift_unavailable"
+    assert _live_entry_clock_drift_rejection(
+        "CONTROLLED_LIVE", "binance", {"binance": -750.0}, 500
+    ) == "clock_drift_exceeded"
+    assert _live_entry_clock_drift_rejection(
+        "CONTROLLED_LIVE", "binance", {"binance": 499.0}, 500
+    ) is None
+
+
+def test_execute_open_calls_live_clock_drift_gate_before_entry_policy():
+    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    block = source[source.index("def _execute_open"):source.index("def _execute_close")]
+
+    assert block.index("_live_entry_clock_drift_rejection(") < block.index(
+        "authorize_runtime_entry("
+    )
+
+
+def test_fund_ops_buy_and_transfer_share_live_clock_drift_gate():
+    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("def _execute_fund_ops"):
+        source.index("def _fetch_all_exchange_positions")
+    ]
+
+    assert 'op_type in {"TRANSFER", "BUY_PORTFOLIO"}' in block
+    assert "_live_entry_clock_drift_rejection(" in block
+    assert "continue" in block[block.index("clock_rejection"):]
+
+
+def test_failed_health_sample_invalidates_prior_clock_drift():
+    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("def _check_exchange_health"):
+        source.index("def is_exchange_halted")
+    ]
+
+    failure = block[block.index("except Exception as e:"):]
+    assert 'self._clock_drift_ms[ex_name] = None' in failure

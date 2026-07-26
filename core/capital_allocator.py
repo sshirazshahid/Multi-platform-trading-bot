@@ -256,6 +256,20 @@ class CapitalAllocator:
             self._record_action(action, success=False)
             return False
 
+        if action_type in {"ACCUMULATE", "HEDGE"}:
+            from core.entry_policy import authorize_runtime_entry
+
+            authorization = authorize_runtime_entry(
+                "capital_allocator", strategy_version="capital-allocator-v1"
+            )
+            if not authorization.allowed:
+                logger.info(
+                    f"[EntryPolicy] capital action {action_type} blocked: "
+                    f"{authorization.reason}"
+                )
+                self._record_action(action, success=False)
+                return False
+
         # ACCUMULATE executes a REAL futures→spot transfer only in explicit
         # CONTROLLED_LIVE with recommendation_only=False. The transfer
         # circuit-breaker prevents futile retries.

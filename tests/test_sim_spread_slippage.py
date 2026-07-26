@@ -55,3 +55,25 @@ def test_mult_zero_reproduces_flat():
     ex = _FakeEx(bid=99.0, ask=101.0, last=100.0)
     m = _model(0.0)
     assert m.paper_fill_price(ex, "X/USDT", "buy", "futures") == 101.0 * 1.0005
+
+
+def test_execution_snapshot_vwap_drives_paper_fill_without_double_spread():
+    ex = _FakeEx(bid=99.0, ask=101.0, last=100.0)
+    snapshot = {
+        "allowed": True,
+        "vwap": "102.0",
+        "mid": "100.0",
+    }
+    model = _model(0.5)
+
+    fill = model.paper_fill_price(
+        ex,
+        "X/USDT",
+        "buy",
+        "futures",
+        size=3,
+        execution_snapshot=snapshot,
+    )
+
+    # L2 VWAP already includes spread and impact; only latency slip is added.
+    assert fill == 102.0 * 1.0005

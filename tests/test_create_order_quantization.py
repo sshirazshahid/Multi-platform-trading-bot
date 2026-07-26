@@ -31,7 +31,7 @@ import pytest
 
 from core.order_manager import OrderManager
 from core.position_tracker import Position
-from exchanges.base import BaseExchange
+from exchanges.base import BaseExchange, OrderSubmissionUncertain
 
 
 @pytest.fixture(autouse=True)
@@ -166,6 +166,36 @@ def test_non_numeric_trigger_params_left_alone(ex):
 def test_client_order_id_invariant_preserved(ex):
     ex.create_order("ETH/USDT", "market", "buy", 0.5)
     assert _sent(ex)[5].get("clientOrderId")
+
+
+def test_ambiguous_create_is_reconciled_by_same_client_order_id(ex):
+    ex.exchange.create_order.side_effect = TimeoutError("network timeout")
+    ex.exchange.fetch_order_by_client_order_id.return_value = {
+        "id": "recovered-1",
+        "status": "closed",
+    }
+
+    order = ex.create_order("ETH/USDT", "market", "buy", 0.5)
+
+    sent_client_id = ex.exchange.create_order.call_args[0][5]["clientOrderId"]
+    assert ex.exchange.create_order.call_count == 1
+    assert ex.exchange.fetch_order_by_client_order_id.call_args[0][0] == sent_client_id
+    assert order["id"] == "recovered-1"
+    assert order["_client_order_id"] == sent_client_id
+    assert order["_submission_reconciled"] is True
+
+
+def test_unresolved_create_timeout_is_never_blind_retried(ex):
+    ex.exchange.create_order.side_effect = TimeoutError("network timeout")
+    ex.exchange.fetch_order_by_client_order_id.side_effect = TimeoutError(
+        "reconciliation unavailable"
+    )
+
+    with pytest.raises(OrderSubmissionUncertain) as caught:
+        ex.create_order("ETH/USDT", "market", "buy", 0.5)
+
+    assert ex.exchange.create_order.call_count == 1
+    assert caught.value.client_order_id
 
 
 # ── partial_close_position rounding (the tracker-drift fix) ──────────────────

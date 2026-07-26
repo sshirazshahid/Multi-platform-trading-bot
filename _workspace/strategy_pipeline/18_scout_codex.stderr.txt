@@ -1,0 +1,701 @@
+Reading additional input from stdin...
+2026-07-22T11:21:11.201286Z ERROR codex_models_manager::cache: failed to load models cache: missing field `supports_reasoning_summaries` at line 88 column 5
+OpenAI Codex v0.144.5
+--------
+workdir: D:\Downloads\Trading_Bot
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 019f898e-f3e7-72b1-9cce-10a2c25fa126
+--------
+user
+You are the Codex GPT-5.6-Sol scout voice in a dual-model trading-strategy research run (your counterpart is Claude Fable 5 running the same task independently — you cannot see its output; genuine independence is the point). AUTHORIZED defensive research on the maintainer's own trading-bot repo. Do NOT read ~/.claude/ or agents/ dirs; .claude/skills/refuted-families-ledger/SKILL.md is the ONE .claude file you MUST read first — it is the binding ledger of ~20 strategy families this system already REFUTED with pre-registered after-cost screens (RSI mean-reversion, textbook trend/breakout, candlesticks, confluence, pairs/Kalman, directional funding, formulaic alphas, ML forecasters, seasonality, scalping, grid/DCA, OI-divergence, TSMOM, listing-short full-stake, dispersion, settlement-timing, basis leg-swap, band-conditional selection, stablecoin-depeg, wrapper-discount, F1-percentile-selectivity...), ONE validated family (F1 delta-neutral carry, currently regime-idle), and in-shadow log-only probes. Also read _workspace/strategy_pipeline/14_scout_a_futures_2026-07-16.md and 14_scout_c_reopen_sweep_2026-07-16.md for what the last exhaustive sweep (2026-07-17) already adjudicated. THEN: propose at most 2 NOVEL futures-strategy candidates for a USD 420 retail account on Binance/Bybit/Bitget USDT-perps (10s polling, 5-min decision cycle, no options venue) with evidence from 2025-2026 measured studies (use web search; flag single-source claims). A candidate re-proposing any refuted family must be dropped by you with the ledger row cited. ZERO candidates is a fully valid answer — say so plainly rather than padding. For each candidate: What it is / Mechanism (why someone PAYS — risk transfer, forced flow, constraint — not price-shape) / External evidence (links, dates) / Data to test it locally (repo has data/ohlcv_cache 1h+15m parquets ~635 symbols, data/funding_history 492 venue-symbol CSVs, data/warehouse.sqlite) / Costs-feasibility at 420 USD / Novelty-vs-ledger verdict. Also list (1 line each) any NEW 2026 external evidence on the in-shadow probes (listing-short, unlock-short, TSMOM-20d, breakout-60d, bundle-MR zfade/RSI2) or anything meeting the ledger's reopen bar. Markdown output only.
+deprecated: `[features].web_search_cached` is deprecated because web search is enabled by default.
+Set `web_search` to `"live"`, `"indexed"`, `"cached"`, or `"disabled"` at the top level (or under a profile) in config.toml if you want to override it.
+warning: Exceeded skills context budget of 2%. All skill descriptions were removed and 335 additional skills were not included in the model-visible skills list.
+codex
+I’ll treat the refutations ledger as the hard exclusion boundary, then cross-check the two prior scout reports before searching only for genuinely new 2025–2026 measured evidence. I’ll return zero candidates if none clear that bar.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Raw -LiteralPath '.claude/skills/refuted-families-ledger/SKILL.md'" in D:\Downloads\Trading_Bot
+ succeeded in 2532ms:
+---
+name: refuted-families-ledger
+description: The binding ledger of strategy families this trading bot has ALREADY refuted with pre-registered gates, the one validated family, and the evidence bar to reopen anything. MUST be consulted before proposing, researching, screening, backtesting, or implementing ANY trading strategy or edge idea â€” including requests phrased as "new strategy", "apply strategies", "trading patterns", "what should the bot trade", "add an indicator", or re-runs of old ideas. If a strategy request arrives, read this FIRST.
+---
+
+# Refuted-Families Ledger
+
+~2,400+ pattern tests were run on this system's own 3-year multi-venue data with pre-registered gates. Re-litigating them wastes money and risks âˆ’EV trades for an owner who depends on this capital. These verdicts are binding until the reopen bar is met â€” that is why this ledger exists as a file instead of folklore.
+
+## Validated (the only family with a live pipeline)
+Delta-neutral cross-venue funding-rate carry (**F1**): 15 coins, maker-first execution, in PAPER soak. External support: peer-reviewed ScienceDirect 2025 study (60 scenarios, â‰¤115.9%/6mo, max loss 1.92%, zero HODL correlation). Extensions â€” cross-venue funding *dispersion*, settlement-window timing â€” are ADJACENT and screen-eligible.
+
+## In shadow (log-only â€” hypotheses ON TRIAL, not validated; pipeline CONFIRMED-GO unless a row says otherwise)
+| Family | Registration + binding fragility profile | Date |
+|---|---|---|
+| Textbook breakout â€” Codex deep-run winner breakout_60d (BTC/ETH/SOL/XRP/BNB/ADA/DOGE/LINK/AVAX/DOT bybit perps, 4h; close beyond the shifted prior-60d high/low channel, 2.2Ã—ATR(14) stop, 3R target, 21d max hold, notational 1%-risk sizing) | **Owner-directed forward paper probe â€” NOT a pipeline GO; the reopen bar is NOT met.** The family stays in the Refuted table below (textbook trend/breakout 0/40 OOS, 2026-06-13; donchian_breakout scored F in Codex's own first 6-month sweep) â€” this row does NOT reopen it. The Codex deep run (`reports/DEEP_FUTURES_RESEARCH.md`, 2026-07-11) is the family's strongest external evidence yet â€” 5-6yr Ã— 10 markets, survives 2Ã— costs (100% cost survival), 9/9 parameter-neighborhood cells stable around the confirmed (2.2, 3.0) spec â€” BUT (a) the winner was selected ON holdout metrics across 20 candidates (holdout burned; a flat 6-point trial penalty is not DSR/PBO multiplicity control) and (b) **Codex's OWN Monte Carlo fails our frozen capital-preservation gates: P(positive) 91.5% < 0.95 floor, maxDD p95 42.5% > 0.25 cap.** âš  WR is ~30-35% BY DESIGN (3:1 R:R trend system; per-market backtest WR 23-41%) â€” conflicts with the owner's standing â‰¥65% WR-floor preference, so even a gate-passing result could never enter the accuracy-band lane without a separate explicit owner decision. Probe: `core/agents/breakout_probe_agent.py`, arm `breakout_60d_4h_v1`, frozen score tanh(penetration/0.02) (scale from the Codex cache distribution, median 0.0137, n=1,604) never re-tuned post-outcome. Expectation is NO-PROMOTE; promotion (only if forward evidence surprises) via frozen `core/promotion_gate.py` on â‰¥30 RESOLVED forward events + explicit owner sign-off. Probe exists because Codex's own creation gate requires forward paper trading and the owner directed implementing that recommendation | 2026-07-11 |
+| Time-series momentum â€” Codex TSMOM-20d, 1h + 4h arms (BTC/ETH/SOL bybit perps; 20d momentum sign + 5d-EMA side filter, 2Ã—ATR(14) stop, 2R target, 7d max hold, notational 1%-risk sizing) | **Owner-directed forward paper probe â€” NOT a pipeline GO; the reopen bar is NOT met.** TSMOM stays in the Refuted table below (long-only TSMOM: no profit edge, 2026-06-15; textbook trend/breakout 0/40 OOS, 2026-06-13) â€” this row does NOT reopen the family. The external Codex backtest that recommended "regime-watch: monitor in paper mode, do NOT automate" (bot_weight 0.0) is ~30 OOS trades on a ~1.8-month single-regime window, the winner of a ~90-run sweep with no multiplicity control, and its PRECEDING period was **âˆ’17.4% with 0% profitable runs** â€” regime fragility is the KNOWN failure mode; a bleed on a tape turn is the documented expectation, not a surprise. Probe: `core/agents/tsmom_probe_agent.py`, arms `tsmom_20d_1h_v1`/`tsmom_20d_4h_v1` logged + scored separately, frozen score tanh(\|mom_20d\|/0.10) never re-tuned post-outcome. Expectation is NO-PROMOTE; promotion (only if forward evidence surprises) via frozen `core/promotion_gate.py` on â‰¥30 RESOLVED forward events PER ARM + explicit owner sign-off | 2026-07-11 |
+| Event-driven unlock-short (pre-unlock cliff â‰¥10%-of-mcap non-insider, W1 entry Tâˆ’28d / W2 entry Tâˆ’14d, exit at unlock T, capital-scaled 3%/12% UNLEVERED) | CONFIRMED-GO **strictly as a log-only shadow probe** (`core/agents/unlock_short_probe_agent.py`; audit `_workspace/strategy_pipeline/09_audit_candidate2_final.md`, 6 binding conditions). Fragility recorded UP-FRONT so a future bleed is never re-litigated as a surprise: **100% of backtested profit came from 2025-26 bear-tape events â€” 2023 was net-NEGATIVE in both arms (F2)** â€” and the screen's n=32/36 is really **~19/22 independent bets** (SUI/GUN near-contiguous monthly-cliff pseudo-replication, F1). If a bear-to-bull tape transition makes this probe bleed, that is the KNOWN failure mode playing out. W2 is the robustness-primary arm (F3); W3 (Tâ†’T+3d post-unlock) failed its AUC gate (0.591<0.60) and is NOT probed. The frozen entry score is expected to FAIL the forward AUCâ‰¥0.60 gate (F4) â€” a legitimate NO-PROMOTE outcome; never re-tune it post-outcome. Promotion ONLY via frozen `core/promotion_gate.py` on â‰¥30 RESOLVED forward events PER ARM + explicit owner sign-off (~months at 1-3 qualifying events/month â€” by design). [2026-07-16 evidence update] Independent practitioner backtest (Tigro Blanc, Apr 2026, 22 trades, single-source) replicates the effect (CAR âˆ’15.05%, WR 0.773); its full-size âˆ’86.6% maxDD blow-up externally validates the 3%/12% caps. | 2026-07-11 |
+
+## Refuted (do not re-propose without the reopen bar)
+| Family | Verdict evidence | Date |
+|---|---|---|
+| RSI mean-reversion (any timeframe) | 5 coins Ã— 3yr screen, NO_EDGE | 2026-06 |
+| Textbook trend/breakout (supertrend, Dow swing, Asian range, BB squeeze) | 8 strategies Ã— 5 majors, independent toolchain, 0/40 OOS | 2026-06-13 |
+| Candlestick patterns | 1,989 tests, 0 survivors | 2026-06-07 |
+| Indicator-confluence stacks | refuted on own data | 2026-06-08 |
+| Kalman/cointegration pairs | 435 pairs, 0 FDR survivors | 2026-06-06 |
+| Directional funding-rate signals | IR 0.248, NO_EDGE | 2026-05-26 |
+| Formulaic alphas | 443+ tested, best IRâ‰ˆ0.45 pre-cost | 2026-05-25 |
+| ML price forecasters (Kronos family) | âˆ’EV both directions; 89% alpha loss to costs | 2026-05-29 |
+| Hour-of-day / seasonality sweet spots | 0 survive OOS | 2026-06-02 |
+| BTC-dominance & ETF-flow timing | NO_EDGE | 2026-06-07 |
+| $1â€“2 scalping | no edge after costs; exits can't manufacture EV | 2026-05-28 |
+| Grid / DCA | grid backtest-only; live DCA hard-OFF | standing |
+| OI-divergence | NO_EDGE â†’ gates disabled | 2026-05-30 |
+| Long-only TSMOM | halves drawdown, no profit edge; implemented default-OFF | 2026-06-15 |
+| Post-listing perp short â€” equal-notional unhedged full-stake sizing ONLY | Signal itself NOT refuted (WR 0.75â€“0.81, DSRâ‰ˆ1, PBO 0.09, beats control, OOS-WR 0.82â€“0.88 on 88 funding-charged Binance listings) but fails the capital-preservation MC maxDD p95 â‰¤0.25 gate at all horizons (2.3â€“3.3 per-stake tails when listing clusters pump); audit-confirmed 2026-07-09. The capital-scaled 3%/12%-cap variant separately earned CONFIRMED_GO (rev3, unlevered log-only shadow probe) â€” not covered by this row | 2026-07-09 |
+| Cross-venue funding dispersion â€” binanceâˆ©bybit hold-until-sign-flip, taker | Audit-A1-corrected single-round-trip hold model on multi-year data (15 coins, 2,788â€“4,832 OOS settlements/pair): positive OOS mean carry (best pair ZEC +0.45 bps/settle, DSR 0.9998, MC P(>0)=1.0) BUT per-settlement OOS-WR 0.378 < the frozen 0.55 floor â€” the mean is a fat-right-tail artifact of a minority of large-differential settlements, not a repeatable per-settlement edge; audit-confirmed. [2026-07-16] MDPI Two-Tiered now published (Mathematics 14(2):346, Jan 2026): only ~40% of top cross-venue spreads are net-positive after costs â€” external anchor for this NO_GO | 2026-07-09 |
+| Funding-settlement-window entry-timing refinement (F1, âˆ’15m/âˆ’30m/âˆ’60m/+15m offsets vs the live [20,180]min pre-settlement window) | Real binance+bybit 15m premium-index series (30/30 series, 2,586 pooled qualifying settlements, both venues â‰¥120 min floor). Best offset (âˆ’15m) mean +1.33 bps/episode fails the 5bps unmodeled-fill bound; OOS-WR 0.510 < 0.55 floor; fold sign unstable ([+,+,+,+,âˆ’]); venue sign unstable (binance +2.37bps vs bybit âˆ’0.48bps). F1's current entry window is already near-optimal; +15m post-settlement costs âˆ’11 to âˆ’15bps | 2026-07-11 |
+| Quarterly-futures basis leg-swap (ETH, conditional on APR_basis > APR_funding at entry, express F1 short leg via dated future instead of perp) | Conditional mean +9.2bps/event clears DSR(0.463)/PBO(0.0)/OOS-WR(0.625)/maxDD(0.114) but MC P(total>0)=0.683 fails the 0.95 capital-preservation floor; unconditional mean âˆ’7.3bps/event; n=31 (bare minimum, 64 monthly decision points 2021-03â†’2026-06). BTC variant stays INFEASIBLE-AT-CURRENT-CAPITAL (unchanged, not re-probed). [2026-07-16] AEA 2026 abstract: quarterlies fall 8â€“10% vs spot in stress events (perps ~3%) â€” fixed-leg carry instruments carry MORE stress convexity, not less | 2026-07-11 |
+| Band-geometry conditional entry filters (positive selection) | 0/16 pre-registered buckets GO â€” ALL fail after-cost expectancy >0 (best subset f6 small-gap 0.15-0.30% EMA: 78.5% WR at âˆ’$0.06/trade, and it fails the â‰¥10% flow floor at 6.4%); 12-day shadow sample (14,555 resolved band outcomes), Bonferroni m=16 (`_workspace/strategy_pipeline/13_band_conditional_screen.json`). Two buckets INSUFFICIENT_DATA pending forward backfills: f4 spread-percentile (FeatureVector writer dormant since 2026-06-14) and f5 fill_type+MFE/MAE (accrue forward only, needs â‰¥300 trades). NEGATIVE selection is separately shipped as the flag-gated band-lane-only veto `BAND_REGIME_FILTER_ENABLED` (4h ADX>30 / BTC-vol-ratio<0.7) â€” WR-band protection + bleed reduction, NOT edge | 2026-07-12 |
+| F1 funding-percentile persistence selectivity (P75/270-settle + persistence entry overlay, trailing-median decay exit) | Structural: forfeits 79% of total carry harvest (0.21Ã— vs 0.75Ã— guard) and flips negative under 2Ã— cost stress while the incumbent stays robustly positive; +2.16 bps/settle efficiency delta not distinguishable from zero under coin-clustered bootstrap; efficiency sub-claim UNTESTABLE in the 2025â€“26 compressed-funding regime (qualifying episodes structurally absent). 3-model debate CONFIRMED_NO_GO (`_workspace/strategy_pipeline/16_debate_15b_f1_selectivity.md`); entry-only variant = NEW prereg only (fixed empty-fold semantics + clustered delta bootstrap required) | 2026-07-17 |
+| Stablecoin-peg mean-reversion â€” long-discount spot, absolute threshold Î¸=10â€“20bps, Binance, 48h timeout, zero-fee era | Î¸=10 (n=75): mean âˆ’8.3 bps/event, WR 0.067, timeout-dominated (FDUSD persistent ~0.9978 sub-peg = regime, not events; 19/24 trigger months); Î¸=20 (n=32): âˆ’29 bps, MC maxDD p95 0.257 (Apr-2025 FDUSD crash âˆ’8.27% through gapped stop). Structural kill: wherever mean>0 under generous costs, frozen-score AUC 0.548â€“0.554 fails even at ZERO cost. NOT covered (NEW prereg only): Î¸â‰¥30 (n=11), USDC-only, transient/regime-relative event definitions, maker/longer timeouts, other venues. 3-model debate CONFIRMED_NO_GO (`16_debate_15c_depeg.md` rev2) | 2026-07-17 |
+| Staked-asset wrapper discount (wBETH/stETH vs ETH) â€” CEX-spot taker round-trip, 1h-close basis, perp-hedged | Stage-1 stop rule: p95 discount 21.3 bps (WBETH) / 27.9 bps (STETH) vs 49.96 bps 4-leg floor (fees-only zero-slip 30 bps floor also unmet); â‰¥20 bps episodes median duration 1h â€” transient, not warehousable; funding credit negligible. Numbers reproduced bit-exact in 3-model debate CONFIRMED_NO_GO (`16_debate_15d_wrapper.md`). Sub-hourly, resting-limit, and on-chain-redemption expressions untested = NEW candidates | 2026-07-17 |
+
+## Open (INSUFFICIENT_DATA â€” not refuted, not screenable yet)
+| Family | Status + reopen condition | Date |
+|---|---|---|
+| Delisting forced-flow (2a capital-scaled perp short on announcement; 2b survivor-venue spot bounce) | n=34 independent Binance delisting events 2022-03â†’2026-06 (near the structural ceiling) < frozen 30-event floor per covered variant â€” fail-closed, NO ledger-refutation. Adverse point evidence recorded: ALPACA 2025-05 squeeze âˆ’22.4Ã— stake incl. âˆ’96%-of-notional funding (reproduced 3Ã— independently); funding negative on 21/29 covered legs; 2b bounce negative even at true zero cost. Cite `_workspace/strategy_pipeline/16_debate_15a_delisting.md` (4 binding corrections), NOT the 15a screen narrative. Reopen: â‰¥30 covered events (~1â€“2 yr forward accrual at 8â€“12 events/yr) or an isolated-margin/stop-overlay NEW pre-registration (debate showed isolated-margin E2 passes MC point estimates but still fails mean-vs-control + DSR) | 2026-07-17 |
+
+## Reopen Bar
+Peer-reviewed or equivalently rigorous 2025+ evidence with genuine out-of-sample validation, FDR/DSR-grade multiplicity control, and after-cost accounting on liquid crypto at retail venues. Quote it verbatim. Meeting the bar earns a SCREEN (via `strategy-evidence-pipeline`) â€” never a build.
+
+## Usage
+- Reject refuted proposals by citing the ledger row â€” conversationally, without launching workflows.
+- Route genuinely new ideas to the `strategy-evidence-pipeline` skill: screen â†’ shadow â†’ promotion gate. Nothing is wired live from research alone.
+- When a new screen concludes NO_GO, ADD a row here (family, evidence, date) so the knowledge compounds.
+
+
+codex
+The ledger rules out most obvious directional and carry-adjacent ideas, and it sets an unusually strong reopen threshold: 2025+ liquid-crypto evidence with genuine OOS, multiplicity control, and after-cost accounting. I’m now checking the prior sweep so I don’t relabel an already-adjudicated idea as “novel.”
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Raw -LiteralPath '_workspace/strategy_pipeline/14_scout_a_futures_2026-07-16.md'" in D:\Downloads\Trading_Bot
+ succeeded in 708ms:
+# 14 â€” Scout A: Futures/Derivatives-Side Candidates (2026-07-16)
+
+Scout A (futures/derivatives sub-question) | Phase 1 of strategy-evidence-pipeline run 2026-07-16. Research only â€” no screening code, no backtests, no trades.
+
+**Ledger compliance:** `refuted-families-ledger` read first. Nothing below re-proposes a refuted row (incl. the three rows added since the last scout pass: funding-settlement-window timing 07-11, quarterly-basis leg-swap 07-11, band-geometry positive selection 07-12) or touches the four in-shadow probes (capital-scaled listing-short, pre-unlock short, TSMOM-20d, breakout-60d â€” evidence updates on those are scout C's lane).
+
+**Local data freshness (checked 2026-07-16 23:1x local):**
+- `data/funding_history/`: **492 venue-symbol CSVs** (expanded from 137 since 07-11), newest file written today 23:17 â€” current.
+- `data/ohlcv_cache/`: 638 parquet files (635Ã—1h + 15m subset), newest 2026-07-14 â€” ~2 days stale; standard top-up before any screen.
+- `data/funding_oi/`: 10 files, current to 2026-07-16; OI depth still only ~30d (Binance API cap) â€” unchanged constraint.
+- `data/derivs_history.jsonl`: hourly multi-venue snapshots since 2026-05-29, current to today 23:01.
+
+---
+
+## Candidate 1 â€” Cross-venue delisting-short (capital-scaled, event-driven)
+
+**What it is.** When a major venue (Binance primarily; Bybit/Bitget secondarily) announces DELISTING of a token's spot and/or perp, short the token's perp â€” on a venue that still lists it (cross-venue expression), or on the delisting venue itself up to its reduce-only cutoff â€” entering at the first post-announcement decision cycle and exiting before contract suspension/settlement. Sized with the capital-scaled template (3% per-trade / 12% exposure caps, unlevered) that already passed the MC maxDD gate for the sibling listing-short.
+
+**Mechanism (why someone pays, not shape).** A delisting is a scheduled liquidity-death event against a public calendar: holders on the delisting venue MUST exit or be force-settled (Binance auto-settles remaining futures positions at a 30-min average index price, charging taker fees); market makers withdraw immediately (their inventory becomes unhedgeable); and the token permanently loses its largest demand/access pool â€” historically ~65% survive only on smaller exchanges and ~15% ever regain a major listing. That is structural forced flow, the mirror image of the listing-effect family. The seller is paying to escape a constraint (venue access disappearing), not reacting to a price pattern.
+
+**External evidence (2025â€“2026, measured).**
+- Announcement-day drops, multiple independent 2025â€“2026 event waves (trade press, each reporting exchange-measured prices): SYS âˆ’33.8%, ATA âˆ’33.3%, PHB âˆ’31.6%, MLN âˆ’27.7%, FARM âˆ’23.3% in one wave ([Yahoo Finance](https://finance.yahoo.com/markets/crypto/articles/4-binance-delisting-targets-tumble-153227077.html)); A2Z âˆ’16.2%, IDEX âˆ’17.6% initial â†’ âˆ’33% daily, FORTH âˆ’16.3%, NTRN âˆ’15.2% (Apr 2025 wave, [DailyCoin](https://dailycoin.com/binances-april-1-delistings-hammer-8-altcoins-in-minutes/)); NFP/POND ~âˆ’20% ([CoinGape](https://coingape.com/binance-warns-of-delisting-these-tokens-price-drop-ahead/)); five altcoins double-digit down, May 2026 ([BeInCrypto](https://beincrypto.com/binance-delist-5-altcoins-may-2026/)).
+- âš  Single-source vendor claim: delisted tokens lose ~80% of market value within 30 days of notice ([Volity](https://volity.io/crypto/delisting/) â€” education/vendor content, unaudited; treat as hypothesis, not fact).
+- Peer-reviewed family support (2026): [Yang, Asia-Pacific Journal of Financial Studies](https://onlinelibrary.wiley.com/doi/10.1111/ajfs.70045) â€” Binance delistings are predictable from public signals (price drops, risk-topic news, Reddit; XGBoost+SHAP). Full text paywalled (402 today) â€” abstract-grade; it measures predictability of the EVENT, not post-announcement returns. âš  Search-snippet-grade stat needing verification in Phase 2: ~104 Binance spot delisting announcements Jan-2023â†’Mar-2025, average notice ~3 days, ~79% announced only 2 days ahead.
+- Event-study support (older): negative crypto events show significant cumulative abnormal returns in a (âˆ’5,+10d) window at 1% significance ([Ãœnsal & Ã–zkan-type event study, IDEAS/RePEc 2022](https://ideas.repec.org/a/ahs/journl/v7y2022i1p16-31.html)) â€” direction-consistent, pre-2025, family support only.
+- Mechanics (venue-official): Binance futures delisting = reduce-only 30 min before suspension, auto-settlement at 30-min average index, taker fee on forced settlement ([Binance FAQ](https://www.binance.com/en/support/faq/delisting-of-futures-contracts-dd60dfbf654d4055aa6b217ea6d5ddba)). No formal academic study of post-announcement RETURN drift on futures specifically was found â€” the local screen is what establishes it.
+
+**Data to test it.**
+- **Blocker to resolve first (harvest, not improvise):** a historical delisting-announcement calendar with timestamps. Binance publishes a complete public announcement archive (delisting category: `binance.com/en/support/announcement/list/161`; the CMS article-list endpoint is scrapeable). Bybit exposes a public announcement API (`GET /v5/announcements/index?locale=en-US&type=delistings` via ccxt/raw HTTP). Bitget has an announcements page. Harvest 2023â†’2026 with announcement timestamps â€” the archive is complete regardless of whether the token survived, which kills selection bias at the signal stage.
+- Prices: `data/ohlcv_cache` covers only currently-listed symbols â†’ **survivorship risk is real and must be bounded**: for each announcement, pull OHLCV from the venues that STILL list the token (ccxt historical works there); count and report the events where no venue still serves data instead of dropping them silently.
+- Funding charged to the short leg: `data/funding_history` (492 CSVs) where covered; per-event top-up via existing `scripts/backfill_funding_history.py` otherwise. Non-negotiable â€” delisting-doomed coins get crowded shorts and deeply negative funding (shorts PAY); this is the same honest cost that dominated the listing-short screen.
+- Sub-signal to log in the same harvest: leverage-tier/margin-reduction and "monitoring tag" announcements often precede delisting (consistent with Yang's predictability result); no measured study found â€” record them as covariates, do not trade them.
+
+**Costs / feasibility @$420.** Perp short = 2 fee legs + realized (likely negative) funding. Capital-scaled caps already proven compatible with the account and with the MC maxDD gate on the sibling family. Honest risks: (a) a large share of the announcement-day drop happens within MINUTES â€” at a 5-min decision cycle the screen must measure entry at announcement+1 cycle, never at the announcement print; (b) delistings come in WAVES (4â€“11 tokens same day) â†’ correlated concurrent shorts; the screen must model concurrent-MTM account equity from the start (the exact issue that killed full-stake listing-short); (c) short window: if the ~2â€“3-day notice stat verifies, holds are days not weeks; (d) exit must be forced â‰¥1 day before the earliest venue suspension to avoid reduce-only traps and settlement-fee treatment.
+
+**Novelty-vs-ledger: NEW.** Not on the ledger. Mirror-image mechanism of the in-shadow listing-short but a different event, different calendar, different expression (cross-venue survival leg). Not "directional funding signals" (funding is a charged cost here, not the signal).
+
+---
+
+## Candidate 2 â€” Funding-percentile persistence selectivity for F1 (carry-lane entry/exit refinement)
+
+**What it is.** Condition F1 carry ENTRIES on the coin's funding sitting in a high percentile of its OWN trailing distribution (e.g., top quartile of 30â€“90d) with a persistence requirement, and condition EXITS on funding decaying below its trailing median â€” instead of (or on top of) the current level-based gate. The testable claim: percentile+persistence selection concentrates the same capital in fewer, longer, richer carry episodes, raising realized net carry per unit of round-trip cost. Delta-neutral throughout; no direction taken, ever.
+
+**Mechanism.** Identical risk transfer to validated F1 (leveraged longs pay for hedged inventory); the refinement claim is that funding richness is autocorrelated â€” persistent demand imbalances (a coin trending in retail attention) decay over days, not one settlement â€” so the level-gate admits marginal episodes whose funding decays before round-trip costs amortize. Selectivity is the margin, and it matters MORE now: the average carry level has compressed.
+
+**External evidence.**
+- [Borri, Liu, Tsyvinski & Wu, "Cryptocurrency as an Investable Asset Class: Coming of Age" (arXiv 2510.14435, 2025)](https://arxiv.org/html/2510.14435v2): crypto carry (long spot + short perp, funding-driven) annualized Sharpe **6.45 over 2020â€“2025 full sample, fell to 4.06 from 2024, turned NEGATIVE in 2025**; funding mean ~8%/yr at 0.8% vol in-sample. Top-tier author group. This is double-edged and must be stated plainly: it strengthens the case for selectivity AND is the most credible external evidence yet that the F1 family's tailwind weakened in 2025 â€” worth surfacing to the owner regardless of this candidate's fate.
+- [MDPI, "The Two-Tiered Structure of Cryptocurrency Funding Rate Markets"](https://www.mdpi.com/2227-7390/14/2/346) â€” persistent structural funding differences (abstract-grade; full text 403 since 07-08).
+- Practitioner-grade persistence notes only (e.g., [MetaMask education](https://metamask.io/news/monitoring-perps-funding-rate-trends-signals): assets show "consistently elevated funding over multiple days or weeks") â€” âš  no rigorous study of the SPECIFIC percentile-entry claim was found. This candidate's evidence is thin externally and rests on being cheaply, fully measurable locally â€” the same status settlement-window timing had before it screened NO_GO. That precedent is a live warning, not a footnote.
+
+**Data to test it.** Entirely local, zero acquisition cost: `data/funding_history` (492 venue-symbol CSVs, multi-year, current to today) for percentile/persistence construction; F1 paper-soak logs (warehouse + carry runner gate pass/fail logging since Rev5) as the incumbent baseline. **The null hypothesis is the CURRENT gate, not zero:** `f1_entry_gate` already requires funding>0 now, 7d-average>0, trailing-settlement mean, contango, and net edge â‰¥ cost-multiple â€” the screen must show percentile+persistence beats that incumbent after costs, or the verdict is NO_GO.
+
+**Costs / feasibility @$420.** Best of this batch: no new positions, no new fee legs, no new margin â€” a selection-rule change on the only validated, already-capitalized lane. Failure mode is benign (F1 unchanged). Fewer/longer episodes would also cut round-trip churn, the dominant F1 cost.
+
+**Novelty-vs-ledger: ADJACENT** â€” the ledger's Validated section explicitly makes carry extensions screen-eligible. Distinct from all three refuted carry-adjacent rows: settlement-window timing (intra-window offsets â€” this is cross-settlement selection), dispersion hold-until-flip (venue-pair spread â€” this is single-venue-pair F1 as-is), quarterly basis leg-swap (instrument choice â€” this keeps the perp). Not directional funding (delta-neutral; funding is the harvest, not a price signal).
+
+---
+
+## Candidate 3 â€” Korean cross-listing lag (Upbit/Bithumb announcement pump on our venues) â€” forward measurement ONLY
+
+**What it is.** When Upbit/Bithumb announce a listing of a token that ALREADY trades as a USDT perp on Binance/Bybit/Bitget, the token pumps on our venues within minutes. Proposed strictly as a zero-cost forward measurement: log Korean listing notices with timestamps and measure our-venue drift at announcement +5m/+30m/+2h/+24h â€” to establish whether ANY exploitable drift (long continuation or fade-short reversal) survives our latency. No trading candidate until that dataset exists.
+
+**Mechanism.** A Korean listing opens a large, structurally segmented retail demand pool (KRW pairs, historical kimchi premium, no shorting on Upbit) to the token â€” a genuine access/demand shock against a public announcement, not a chart shape. Arbitrageurs transmit the Korean bid onto global venues immediately.
+
+**External evidence.** Measured magnitudes, weak timing granularity: tokens surge 30â€“100% on international exchanges "within minutes" of an Upbit notice ([CCN analysis](https://www.ccn.com/analysis/crypto/upbit-listing-pump/)); vendor measurement: Upbit listings max expected return 51.9%, Bithumb 108.9%, strongest >800% intraday, with sub-second announcement feeds marketed as necessary ([DataMaxi+, Sep 2025](https://medium.com/@datamaxiplus/the-rise-of-korean-exchange-listing-alpha-capturing-upbit-and-bithumb-listing-pumps-9c9055388f15) â€” âš  vendor selling the feed, single source for the specific numbers); 2026 event examples: PLUME +50% ([CCN](https://www.ccn.com/analysis/crypto/plume-upbit-listing-price-surge/)), 9-altcoin wave ([Yahoo Finance](https://finance.yahoo.com/markets/crypto/articles/upbit-listing-announcement-triggers-price-033217292.html)). The post-pump "sharp reversal" is narrative-grade â€” no measured reversal study found.
+
+**Data to test it.** Does not exist locally and CANNOT be reconstructed historically without announcement timestamps: harvest Upbit notices (public notice board, `upbit.com/service_center/notice`; scrapeable archive with timestamps) + Bithumb equivalents, join to `ohlcv_cache` 15m/1h bars. Historical notice timestamps are retrievable, so a retrospective drift-at-lag measurement IS possible before committing to forward collection â€” that retrospective join is the Phase-2 ask.
+
+**Costs / feasibility @$420: the long side is latency-infeasible as-is.** 30-min news scan + 5-min decision cycle + 10s polling against a move that completes in minutes means we would systematically buy the top. Only two honest outcomes: (a) measurement shows residual drift at +30m or later â†’ a candidate exists; (b) it doesn't â†’ close the question for good. Either way the measurement is nearly free.
+
+**Novelty-vs-ledger: NEW** (not on the ledger; distinct from the in-shadow Binance-perp listing-short probe: different venue class, different direction, different window).
+
+---
+
+## Directions searched and NOT advanced (with reasons â€” do not re-search without new evidence)
+
+- **Quarterly/expiry-day flow effects (CME or CEX dated futures):** searched; nothing measured beyond options "max-pain" narratives (e.g., [Cryptopotato](https://cryptopotato.com/massive-11b-end-of-quarter-options-expiry-could-rattle-crypto-markets-today/)-grade coverage of the Jun-2026 $9.3B expiry). No mechanism-grade, quantified drift study found â†’ INSUFFICIENT DATA, no candidate. (Distinct from â€” and does not reopen â€” the refuted quarterly-basis leg-swap row.)
+- **New-perp funding-cap-pinned carry (collect extreme negative funding on day-1 listings, delta-neutral):** mechanism is real (day-1 listings frequently pin deeply negative), but the collecting side requires LONG perp + SHORT spot, and spot borrow on day-1 listings is unavailable or extortionate at retail â€” the borrow leg kills it at $420. The perp-perp expression is cross-venue dispersion, whose per-settlement fat-tail failure mode is already a refuted-row finding (2026-07-09). The [BitMEX 2025Q3 derivatives report](https://www.bitmex.com/blog/2025q3-derivatives-report) (Oct 2025) documents arbitrage-enforced funding ceilings (BitMEX BTC pinned at exactly 0.01%/8h for 78% of the period) but provides no cap-episode persistence stats. No candidate.
+- **ADL / insurance-fund mechanics:** active academic literature exists ([arXiv 2512.01112](https://arxiv.org/pdf/2512.01112), [arXiv 2602.15182](https://arxiv.org/pdf/2602.15182), [arXiv 2603.15963](https://arxiv.org/pdf/2603.15963) â€” ADL optimization/design) but it is exchange-design research, not a retail-harvestable edge; any tradable implication routes through the post-cascade family, which is already forward-collection-only (07-11 candidate 4). No new candidate.
+- **Leverage-tier/margin-change announcements as a standalone signal:** no measured study found; folded into Candidate 1's harvest as a logged covariate.
+
+## Ranking for edge-screener (Phase 2)
+
+1. **Candidate 1 (cross-venue delisting-short)** â€” strongest measured event evidence of this pass (multiple independent 2025â€“26 waves, âˆ’15% to âˆ’34% announcement-day, peer-reviewed predictability support), proven capital-scaled probe template, clear harvest path. Gated on the announcement-calendar harvest; survivorship must be bounded, concurrent-MTM modeled from day one, entry measured at announcement+1 cycle.
+2. **Candidate 2 (funding-percentile persistence selectivity for F1)** â€” best feasibility (zero new capital, refines the validated lane), fully local data, but thin external evidence for the specific claim and a freshly refuted sibling (settlement timing) as precedent; null hypothesis = incumbent gate. The Borri et al. carry-turned-negative-2025 finding should be surfaced to the owner independently of the screen result.
+3. **Candidate 3 (Korean cross-listing lag)** â€” real, measured mechanism but latency-infeasible for the obvious trade; advance ONLY as the retrospective notice-timestamp join / forward drift measurement, which is nearly free and closes the question either way.
+
+## Source list
+
+1. Yahoo Finance â€” 4 Binance delisting targets tumble (announcement-day drops) â€” https://finance.yahoo.com/markets/crypto/articles/4-binance-delisting-targets-tumble-153227077.html
+2. DailyCoin â€” Binance Apr-1 delistings hammer 8 altcoins in minutes â€” https://dailycoin.com/binances-april-1-delistings-hammer-8-altcoins-in-minutes/
+3. BeInCrypto â€” 5 altcoins double-digit losses after Binance delisting call (May 2026) â€” https://beincrypto.com/binance-delist-5-altcoins-may-2026/
+4. CoinGape â€” Binance delisting warning, NFP/POND ~âˆ’20% â€” https://coingape.com/binance-warns-of-delisting-these-tokens-price-drop-ahead/
+5. Volity â€” delisting education, "âˆ’80% within 30 days" (âš  vendor, single source) â€” https://volity.io/crypto/delisting/
+6. Yang 2026, AJFS â€” predictive/explainable models for Binance delistings (âš  paywalled; abstract-grade) â€” https://onlinelibrary.wiley.com/doi/10.1111/ajfs.70045
+7. Binance FAQ â€” futures delisting mechanics (reduce-only, 30-min settlement average, taker fee) â€” https://www.binance.com/en/support/faq/delisting-of-futures-contracts-dd60dfbf654d4055aa6b217ea6d5ddba
+8. IDEAS/RePEc â€” event study, negative crypto events CARs (âˆ’5,+10d) (2022; family support) â€” https://ideas.repec.org/a/ahs/journl/v7y2022i1p16-31.html
+9. Borri, Liu, Tsyvinski, Wu (arXiv 2510.14435, 2025) â€” crypto carry Sharpe 6.45 (2020â€“25) â†’ 4.06 (2024) â†’ negative (2025) â€” https://arxiv.org/html/2510.14435v2
+10. MDPI â€” two-tiered funding-rate market structure (âš  abstract-grade, 403) â€” https://www.mdpi.com/2227-7390/14/2/346
+11. MetaMask education â€” funding persistence practitioner note (weak) â€” https://metamask.io/news/monitoring-perps-funding-rate-trends-signals
+12. CCN â€” dissecting Upbit listing pumps (30â€“100% within minutes) â€” https://www.ccn.com/analysis/crypto/upbit-listing-pump/
+13. DataMaxi+ (Sep 2025) â€” Korean listing alpha, Upbit 51.9% / Bithumb 108.9% max expected (âš  vendor selling feed, single source) â€” https://medium.com/@datamaxiplus/the-rise-of-korean-exchange-listing-alpha-capturing-upbit-and-bithumb-listing-pumps-9c9055388f15
+14. CCN â€” PLUME +50% on Upbit listing â€” https://www.ccn.com/analysis/crypto/plume-upbit-listing-price-surge/ ; Yahoo â€” Upbit 9-altcoin wave â€” https://finance.yahoo.com/markets/crypto/articles/upbit-listing-announcement-triggers-price-033217292.html
+15. BitMEX 2025Q3 derivatives report (Oct 2025) â€” funding floor/ceiling structure â€” https://www.bitmex.com/blog/2025q3-derivatives-report
+16. ADL design literature (not advanced): arXiv 2512.01112, 2602.15182, 2603.15963
+17. Cryptopotato â€” $11B quarter-end expiry coverage (narrative-grade; direction not advanced) â€” https://cryptopotato.com/massive-11b-end-of-quarter-options-expiry-could-rattle-crypto-markets-today/
+
+*Coverage note: web research ran normally (not LIMITED). Wiley AJFS and MDPI full texts paywalled (402/403) â€” findings from those flagged abstract-grade. The "104 announcements / ~2â€“3-day notice" statistic is search-snippet-grade and must be re-established from the harvested announcement archive itself in Phase 2, not quoted forward.*
+
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Raw -LiteralPath '_workspace/strategy_pipeline/14_scout_c_reopen_sweep_2026-07-16.md'" in D:\Downloads\Trading_Bot
+ succeeded in 683ms:
+# 14 â€” Scout C: Reopen-Bar Sweep + Evidence Updates (2026-07-16)
+
+Scout C (strategy-scout) | Phase 1 of strategy-evidence-pipeline run 2026-07-16. Adversarial literature hygiene only â€” **no new candidates, no code, no trades**. This file is authoritative for this sub-question.
+
+**Reopen bar (verbatim from `refuted-families-ledger`):** "Peer-reviewed or equivalently rigorous 2025+ evidence with genuine out-of-sample validation, FDR/DSR-grade multiplicity control, and after-cost accounting on liquid crypto at retail venues. Quote it verbatim. Meeting the bar earns a SCREEN (via `strategy-evidence-pipeline`) â€” never a build."
+
+**Method / coverage:** 10 web searches + 8 targeted fetches (2026-07-16). Sources already reviewed in `07_scout_candidates_2026-07-11.md` and `deep-research_crypto-strategy-patterns_2026-07-08.md` were NOT re-reviewed. Settled SKIPs (retail market-making, vol-risk-premium, CEXâ†”DEX arb, latency arb) were not re-searched. Access failures this pass: SSRN 6632838 (403, retried once as instructed), SSRN 6579278 (403, retried once), ScienceDirect S1059056026002716 (403), ResearchGate 403391704 (403), Tandfonline 10.1080/14697688.2026.2653663 (403). Web tools worked normally â€” coverage NOT limited.
+
+---
+
+## TASK 1 â€” REOPEN-BAR SWEEP: VERDICT BY FAMILY GROUP
+
+**Bottom line: NOTHING found in 2025â€“2026 literature meets the reopen bar for ANY refuted family. Every refuted-table row stands.** Per-group detail with the closest candidates adjudicated:
+
+### Group A â€” Technical patterns (RSI-MR, candlesticks, indicator-confluence, hour-of-day/seasonality)
+**Verdict: bar NOT met. One close call, adjudicated below.**
+
+- **Closest candidate of the entire sweep:** *"Intraday price forecasts using candlestick patterns in cryptocurrency markets"*, International Review of Economics & Finance, published **April 2026** ([ScienceDirect](https://www.sciencedirect.com/science/article/pii/S1059056026002716)). Per search-visible abstract coverage: 55 TA-Lib reversal patterns, hourly OHLC, ~400 cryptos / 2,000 pairs / 36 exchanges, ~200M observations; "Profitability is assessed using the **stepwise superior predictive ability test** to mitigate data-snooping" (search-snippet quote); Bullish Harami / Hikkake / Bearish Harami / Hanging Man reported significant, "consistent across time, market conditions, cryptocurrencies, and exchanges."
+  **Why it does NOT meet the bar:** (1) **after-cost accounting is unverified** â€” full text 403 on both ScienceDirect and ResearchGate; no visible cost model or net-return numbers; the visible claim is statistical predictability, not retail after-cost tradability. (2) **Sample is July 2018 â€“ January 2022** â€” it ends 4.5 years ago, entirely predating this system's own after-cost candlestick refutation (1,989 tests, 0 survivors, run 2026-06-07 on current data at our exact venues/fees). Peer review + SPA multiplicity are genuinely present, but the bar's after-cost element cannot be confirmed and the evidence is stale relative to our fresher local refutation. **Ledger row stands.** *Follow-up (conditional, low priority): if the full text ever opens AND shows after-cost survival of its four named patterns, the correct action is a narrow re-adjudication of exactly those patterns at hourly frequency â€” a screen, never a build.* Single-source flag: abstract details reconstructed from search snippets, not the paper itself.
+- RSI-MR 2025â€“2026: searched; only vendor/blog content (UEEx, Stoic.ai, Changelly â€” all marketing-grade). No qualifying study. Bar not met.
+- Seasonality/calendar: nothing 2025+; the literature remains pre-2024 ("turn-of-the-candle" Heliyon 2023; calendar-anomaly Cogent 2023). Bar not met.
+- Umbrella confirmation: Wei (2024, Int. J. Finance & Economics, ["Cryptocurrencies and Lucky Factors"](https://onlinelibrary.wiley.com/doi/full/10.1002/ijfe.2863)) â€” 7,846 technical rules Ã— 12 cryptos with snooping control: only a tiny non-pattern set survives. 2024 (pre-bar) and its direction *supports* the refutation anyway.
+
+### Group B â€” Textbook trend/breakout + TSMOM (incl. long-only TSMOM row)
+**Verdict: bar NOT met. Two 2025â€“2026 items adjudicated, both fail.**
+
+- **[arXiv 2602.11708](https://arxiv.org/pdf/2602.11708), "Systematic Trend-Following with Adaptive Portfolio Construction" (Bui & Nguyen, Talyxion Research, 12 Feb 2026).** Full text read this pass (PDF extracted locally). Claims: "OOS" Jan 2022â€“Dec 2024, Sharpe 2.41, maxDD âˆ’12.7%, cost model 4bps taker + linear slippage + funding. **Fails the bar:** (a) NOT peer-reviewed (arXiv cs.CE preprint from a corporate research shop, gmail contact); (b) the "OOS" window is **burned by design selection** â€” the timeframe comparison (Table 5: H6 chosen because it wins on the evaluation window), the (Î±,Î») sensitivity surface, and the 70/30-vs-50/50 allocation choice are all reported ON the evaluation period; (c) multiplicity control is bootstrap-vs-benchmark only â€” no DSR/FDR/reality-check across the searched design space; (d) internal inconsistency: Â§4.1 says OOS ends Dec 2024 but Figure 1 caption says "Jan 2022 â€“ Oct 2025"; (e) monthly grid-search re-optimization is the ablation's second-largest Sharpe contributor (Î”SR 1.07) â€” the edge substantially IS the re-fitting. Win rates 54.2%/47.8%/41.3% (bull/sideways/bear) â€” all below our 0.55 OOS-WR gate and the owner's 65% floor. **Does not reopen the family.**
+- **[SSRN 5209907](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5209907), Zarattini, Pagani & Barbon, "Catching Crypto Trends"** ([Concretum page](https://concretumgroup.com/catching-crypto-trends-a-tactical-approach-for-bitcoin-and-altcoins/) fetched): Donchian-channel ensemble + vol sizing on top-20 liquid cryptos; claims "Sharpe ratio above 1.5" and "annualized alpha of 10.8% relative to Bitcoin." **Abstract-grade only** â€” no visible data period, no OOS protocol, no multiplicity control, no after-cost numbers on the accessible page; SSRN working paper, not peer-reviewed. Bar not met. (Relevant as weak family-supportive context for the breakout-60d probe â€” see Task 2.)
+- Han, Kang & Ryu ([SSRN 4675565](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4675565), "â€¦under Realistic Assumptions"): pre-dates the bar (2024) and cuts AGAINST reopening â€” "accounting for transaction costs and daily price fluctuations, many momentum portfolios are liquidated and many with statistically significant returns earn insignificant profits" (search-snippet quote; snippet-grade flag).
+- Gbadebo 2026 TSM-vs-CSM comparative ([ResearchGate 406476873](https://www.researchgate.net/publication/406476873)): explicitly "does not incorporate transaction costs, slippage, funding rates, or liquidity constraints" â€” inadmissible against an after-cost bar.
+
+### Group C â€” Kalman/cointegration pairs (435 pairs, 0 FDR survivors, 2026-06-06)
+**Verdict: bar NOT met. Two peer-reviewed 2025â€“2026 papers exist; both fail on multiplicity and/or staleness.**
+
+- **Tadi & Witzany, "Copula-based trading of cointegrated cryptocurrency pairs", Financial Innovation, 13 Jan 2025** ([Springer, open access](https://link.springer.com/article/10.1186/s40854-024-00702-7)) â€” full page fetched. Peer-reviewed 2025+ âœ“; after-cost âœ“ (Binance futures 2/4 bps, best config net 75.2% ann., Sharpe 3.77). **Fails:** (a) **no multiplicity control** â€” multiple copula families Ã— entry thresholds (Î±â‚ âˆˆ {10,15,20}%) Ã— two cointegration tests reported with the best highlighted, zero FDR/DSR adjustment; (b) **no genuine holdout** â€” rolling 3-week-formation/1-week-trading cycles "each cycle sharing three quarters of its data with its previous or subsequent cycle"; (c) data **Jan 2021 â€“ Jan 2023** â€” ends 3.5 years ago, fully inside the window our own 435-pair FDR screen already covered; (d) market-order execution on 20 alt perps with slippage beyond taker fee unmodeled. Does not reopen.
+- **Quantitative Finance 2026 GA-optimized pairs paper** ([Tandfonline](https://www.tandfonline.com/doi/full/10.1080/14697688.2026.2653663), 403 â€” abstract-grade from search): 229 pairs, data Aug 2021 â€“ Jan 2024, genetic-algorithm-optimized thresholds. GA optimization with no visible snooping control is the textbook overfitting surface; period ends Jan 2024. Does not meet the bar on visible evidence. Single-source flag (snippets only).
+
+### Group D â€” Directional funding signals + formulaic alphas
+**Verdict: bar NOT met â€” and the new 2026 evidence points the OTHER way.**
+
+- **MDPI Mathematics 14(2):346, "The Two-Tiered Structure of Cryptocurrency Funding Rate Markets" (Jan 2026)** ([link](https://www.mdpi.com/2227-7390/14/2/346)) â€” previously 403'd abstract-only in the 07-08 pass; now published with numbers visible in coverage: 35.7M one-minute observations, 749 symbols, 26 exchanges (11 CEX / 15 DEX). Finding: ~17% of observations show economically significant cross-venue funding spreads, but "only 40% of top opportunities generate positive returns after transaction costs and spread reversals" (search-snippet quote). This *reinforces* both the directional-funding refutation and our dispersion CONFIRMED_NO_GO row (costs + reversals consume most of the apparent spread). Evidence UPGRADE for the ledger's context, not a reopen.
+- **IRFA 2026 factor-selection paper** ([ScienceDirect S1057521925004764](https://www.sciencedirect.com/science/article/abs/pii/S1057521925004764)): "just two to three factors can eliminate all significant portfolio alphas" in crypto (turnover volatility, bid-ask spread, blockchain-native metrics). Reinforces the formulaic-alphas refutation (443+ tested locally, best IRâ‰ˆ0.45 pre-cost). Snippet-grade, single-source flag.
+
+### Group E â€” ML price forecasters (Kronos family row)
+**Verdict: bar NOT met â€” the one rigorous 2026 study is a REFUTATION-REINFORCER.**
+
+- **Bysik & Åšlepaczuk, "Machine Learning-Based Bitcoin Trading Under Transaction Costs" ([arXiv 2606.00060](https://arxiv.org/html/2606.00060), Univ. of Warsaw, 19 May 2026)** â€” full text read. This is the methodological standard the bar asks for (27-fold non-anchored walk-forward, strict temporal integrity, **Holm-adjusted p-values**, 10k-replication circular block bootstrap, 10bps all-in costs) and its conclusion is negative: naive ML strategies go from +73.5%/+181.8% frictionless to **âˆ’64.0%/âˆ’98.6% after 10bps**; a cost-aware filter (cutting trades 10,619â†’251, >99% turnover reduction) restores XGBoost long-only to +65.4% ARC / Sharpe 1.09, **but "no statistically significant Sharpe-ratio outperformance [vs buy-and-hold] after Holm correction; bootstrap 95% CI for SR difference includes zero"**, with fold-level instability and configuration fragility. Rigorous 2026 evidence that ML forecasting does not beat a 1-trade passive benchmark after costs at retail cost levels. Ledger row stands, strengthened.
+
+### Group F â€” Remaining rows (scalping, grid/DCA, OI-divergence, dominance/ETF-flow, band-geometry filters, settlement-window timing, quarterly leg-swap, dispersion, full-stake listing-short)
+**Verdict: bar NOT met â€” nothing 2025â€“2026 found addressing any of these at academic rigor.**
+
+- Scalping / grid / DCA / OI-divergence / dominance / ETF-flow: searches returned vendor content only. No qualifying evidence.
+- Quarterly-futures basis leg-swap (NO_GO 2026-07-11): the **AEA 2026 conference paper "Perpetual Futures and Basis Risk: Evidence from Cryptocurrency"** ([program page](https://www.aeaweb.org/conference/2026/program/paper/ByyFEfr4)) reports quarterly futures decline **8â€“10% more than spot** during large market events vs ~3% for perps (abstract-grade). This adds independent crash-risk evidence AGAINST the dated-future leg â€” supports the NO_GO, no reopen.
+- Settlement-window timing (NO_GO 2026-07-11): no new measured pre-settlement-drift study found (unchanged from 07-08 finding of "insufficient external data"; our own screen has since refuted it locally).
+
+---
+
+## TASK 2 â€” IN-SHADOW PROBE EVIDENCE UPDATES
+
+### 2a. Capital-scaled listing-short (ListingShortProbeAgent)
+**Delta: NONE.** Searched "new perpetual futures listing price decline short 2026" â€” nothing new beyond the already-cited FMZQuant 2023 study; results were long/short-ratio sentiment noise. Registered hypothesis unchanged; the probe's forward log remains the primary evidence stream.
+
+### 2b. Pre-unlock short (UnlockShortProbeAgent)
+**Delta: MODERATE STRENGTHEN of direction + STRONG independent validation of the audit's sizing/tail-risk reasoning. Timing contradiction persists unresolved.**
+
+1. **SSRN 6632838 ("72-Hour Shock") full-text retry: still HTTP 403** (retried once 2026-07-16 as instructed). Note from search coverage: the April 2026 version reportedly has "replication data and analysis code made publicly available" â€” if the repo link ever surfaces outside the SSRN paywall, the W-window adjudication could be checked against his raw events. Remains abstract-grade, single-source.
+2. **NEW independent practitioner backtest** â€” Tigro Blanc, ["I Backtested Shorting Token Unlocks â€” Here's Why I'm Not Trading It Yet"](https://medium.com/coinmonks/i-backtested-shorting-token-unlocks-heres-why-i-m-not-trading-it-yet-42e237d40d9a) (Coinmonks, 10 Apr 2026; full text read). 59 Binance USDT perps matched to DefiLlama emissions, 36â€“38 large events (FDR>5%-of-supply trigger), 22 qualified trades: beta-adjusted CAR[âˆ’30,+30] **âˆ’15.05%** ("95% bootstrap CI = [âˆ’24.82%, âˆ’5.54%]"), WR 77.3%, avg net +8.88%/trade, PF 2.12 â€” **but maxDD âˆ’86.6%: "One extreme squeeze destroyed the strategy economics."** Author's verdict: not tradable standalone; "if the max drawdown is âˆ’86.6%, it does not matter that the win rate is 77.3%." Also proposes an explicit frequency gate for event strategies (<~20 events/yr = don't trade standalone; his estimate 16.9 events/yr).
+   **Read-through for our probe:** (i) independent corroboration of effect direction and magnitude on a different event set/data source â€” the unlocks.app 236-event study is no longer the only measured source, though it remains the only *controlled* one; (ii) his blow-up is on unhedged full-size event sizing â€” **exactly the failure mode our audit pre-empted with the 3%/12% capital-scaled caps**; his result is an external replication of why our full-stake sibling (listing-short) was CONFIRMED_NO_GO on sizing; (iii) his frequency concern matches our registered "~months at 1â€“3 qualifying events/month" pace and the â‰¥30-resolved promotion floor; (iv) his entry is Tâˆ’1 with ~21d hold (post-unlock exposure) vs our W1 Tâˆ’28d / W2 Tâˆ’14d exit-at-T â€” the Kim (post-unlock) vs unlocks.app (pre-unlock drift) timing contradiction is still not adjudicated externally; our own screen's adjudication stands as registered. Single-source flag (practitioner blog, self-admitted "not a fully mature walk-forward production backtest").
+3. **No replication, critique, or contradiction of the unlocks.app 236-event study (2026-06-29) found** â€” secondary coverage (KuCoin, Phemex 2026 guides) merely repeats its numbers. It remains single-source, methodologically strongest.
+
+### 2c. TSMOM-20d probe (TsmomProbeAgent)
+**Delta: WEAK-TO-NEUTRAL â€” new 2026 material is consistent with the registered NO-PROMOTE expectation; nothing strengthens the reopen case.**
+
+- AdaptiveTrend (arXiv 2602.11708, Feb 2026), whose own agenda is pro-trend, reports vanilla post-cost TSMOM on 2022â€“2024 crypto at **Sharpe 0.65 (1M lookback) / 0.54 (3M), maxDD âˆ’34.8% / âˆ’38.2%** â€” marginal after costs even in a paper selling trend-following, with vol-scaling required to reach 1.83. Consistent with our regime-fragility registration.
+- Han/Kang/Ryu (2024, snippet-grade): realistic assumptions liquidate many momentum portfolios; TSM significance often becomes economic insignificance.
+- Nothing 2026 provides multiplicity-controlled after-cost evidence FOR short-lookback crypto TSMOM. Probe continues as registered; forward log remains the instrument.
+
+### 2d. Breakout-60d probe (BreakoutProbeAgent)
+**Delta: WEAK SUPPORTIVE (family-level), evidentially immaterial.**
+
+- Zarattini/Pagani/Barbon (SSRN 5209907): Donchian-ensemble on top-20 liquid cryptos claims Sharpe >1.5 and 10.8% ann. alpha vs BTC with a cost-reduction portfolio construction â€” the same family as the Codex deep-run winner. Abstract-grade, no visible OOS/multiplicity control, working paper. Does not change probe status or the family's refuted-table row; forward paper evidence remains the only admissible instrument.
+- **SSRN 6579278 (Lim, cascade anatomy) full-text retry: still HTTP 403** (retried once). No bearing on the four probes; remains abstract-grade for the (measurement-only) cascade candidate from the 07-11 brief.
+
+---
+
+## TASK 3 â€” HONESTY METASTUDY UPDATE (additions to system priors)
+
+1. **The execution-conversion margin dominates model quality** â€” Bysik & Åšlepaczuk (arXiv 2606.00060, May 2026, Univ. of Warsaw): "The main obstacle in hourly cryptocurrency trading is not only weak predictability, but also the way forecasts are converted into trades." A >99% turnover cut was required for ANY net-positive ML result, and even then buy-and-hold was not beaten after Holm correction. **Prior update: reinforces the Jun-4 diagnosis (cost/turnover is the tractable margin, alpha is not) with the most rigorous 2026 evidence yet. Any future screen whose edge shrinks as its trade count grows should be treated as presumptively cost-artifacted.**
+2. **The funding-arb opportunity set is real but mostly cost-consumed** â€” MDPI Mathematics Jan 2026 (Two-Tiered): 17% of 1-minute observations show significant cross-venue spreads; only ~40% of TOP opportunities are net-positive after costs and spread reversals. **Prior update: quantitative external anchor for why F1 survives only with maker-first execution and why the dispersion extension failed our screen â€” selection INTO the visible spread is where the loss hides.**
+3. **Crypto factor "alphas" are mostly redundant** â€” IRFA 2026: 2â€“3 factors (turnover volatility, bid-ask spread, chain metrics) absorb all significant portfolio alphas (snippet-grade, single source). Consistent with our formulaic-alphas refutation.
+4. **Frequency gate for event strategies** â€” practitioner-grade but well-argued (Tigro Blanc, Apr 2026): event strategies below ~20 trades/yr cannot be statistically distinguished from luck at retail horizons. **Our â‰¥30-resolved-events-per-arm promotion floor already embodies this; treat any future event-driven GO with n/yr < ~15 as multi-year-to-promote BY DESIGN and say so up front.**
+5. **Dated-futures crash-basis risk** â€” AEA 2026 conference paper: quarterly futures fall 8â€“10% more than spot in stress events vs ~3% for perps (abstract-grade). Supports the quarterly leg-swap NO_GO and adds a standing prior: fixed-leg carry instruments carry MORE stress-convexity than perps, not less.
+6. **Retail algo-profitability claims: no update.** The "60% of retail algo traders profitable" claim still traces to vendor/affiliate content ([tv-hub 2026 guide](https://www.tv-hub.org/guide/is-automated-trading-profitable)); 2026 secondary aggregations (Traders Union: 75â€“89% of customers lose) are non-academic. The 07-08 verdict â€” treat as marketing â€” stands unchanged; no rigorous 2026 audited-sample study found.
+
+---
+
+## SOURCE LIST (all accessed 2026-07-16)
+
+| # | Source | Date | Grade / flags |
+|---|---|---|---|
+| 1 | [Bysik & Åšlepaczuk, ML Bitcoin trading under transaction costs, arXiv 2606.00060](https://arxiv.org/html/2606.00060) | 19 May 2026 | Full text read; preprint (Univ. of Warsaw QFRG); most rigorous item of the sweep |
+| 2 | [Tigro Blanc, unlock-short backtest, Coinmonks](https://medium.com/coinmonks/i-backtested-shorting-token-unlocks-heres-why-i-m-not-trading-it-yet-42e237d40d9a) | 10 Apr 2026 | Full text read; practitioner, single-source, self-flagged small-n |
+| 3 | [Bui & Nguyen, AdaptiveTrend, arXiv 2602.11708](https://arxiv.org/pdf/2602.11708) | 12 Feb 2026 | Full text read (local PDF extraction); NOT peer-reviewed; eval-window design selection |
+| 4 | [Tadi & Witzany, copula pairs, Financial Innovation](https://link.springer.com/article/10.1186/s40854-024-00702-7) | 13 Jan 2025 | Full page read; peer-reviewed; no multiplicity control; data ends Jan 2023 |
+| 5 | [Candlestick intraday forecasts, IREF, S1059056026002716](https://www.sciencedirect.com/science/article/pii/S1059056026002716) | Apr 2026 | **403 â€” abstract-grade from snippets**; peer-reviewed + SPA control; after-cost UNVERIFIED; sample ends Jan 2022 |
+| 6 | [MDPI Mathematics 14(2):346, Two-Tiered funding structure](https://www.mdpi.com/2227-7390/14/2/346) | Jan 2026 | Published (was 403 abstract in 07-08 pass); numbers via coverage snippets |
+| 7 | [QF 2026 GA-optimized pairs](https://www.tandfonline.com/doi/full/10.1080/14697688.2026.2653663) | 2026 | 403 â€” snippet-grade, single-source |
+| 8 | [Zarattini/Pagani/Barbon, Catching Crypto Trends, SSRN 5209907](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5209907) ([Concretum page](https://concretumgroup.com/catching-crypto-trends-a-tactical-approach-for-bitcoin-and-altcoins/)) | ~2025 | Concretum page fetched; abstract-grade; working paper |
+| 9 | [AEA 2026, Perpetual Futures and Basis Risk](https://www.aeaweb.org/conference/2026/program/paper/ByyFEfr4) | 2026 | Abstract-grade, single-source |
+| 10 | [Han/Kang/Ryu, momentum under realistic assumptions, SSRN 4675565](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4675565) | 2024 | Snippet-grade; pre-dates bar; direction supports refutation |
+| 11 | [Wei, Lucky Factors, IJFE](https://onlinelibrary.wiley.com/doi/full/10.1002/ijfe.2863) | 2024 | Pre-dates bar; supports refutation |
+| 12 | [IRFA factor selection, S1057521925004764](https://www.sciencedirect.com/science/article/abs/pii/S1057521925004764) | 2026 | Snippet-grade, single-source |
+| 13 | SSRN [6632838](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6632838) + [6579278](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6579278) | â€” | **Both still 403 after one retry each (2026-07-16)** |
+| 14 | [tv-hub automated-trading guide](https://www.tv-hub.org/guide/is-automated-trading-profitable), [Traders Union 2026](https://tradersunion.com/interesting-articles/retail-crypto-trading-study/) | 2026 | Vendor/secondary â€” cited only to confirm the marketing-claim verdict stands |
+
+*Scout C run complete. No ledger rows reopened; no candidates produced (by design). Recommended ledger touch-ups for the orchestrator (evidence-context only, no verdict changes): (a) note MDPI Two-Tiered is now published with after-cost numbers on the dispersion NO_GO row; (b) note the Tigro Blanc independent corroboration + tail-risk replication on the unlock-short shadow row; (c) note the AEA 2026 basis-risk abstract on the quarterly leg-swap row.*
+
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "(Get-Content -LiteralPath '_workspace/strategy_pipeline/14_scout_a_futures_2026-07-16.md').Count; (Get-Content -LiteralPath '_workspace/strategy_pipeline/14_scout_c_reopen_sweep_2026-07-16.md').Count" in D:\Downloads\Trading_Bot
+ succeeded in 755ms:
+108
+116
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -LiteralPath '_workspace/strategy_pipeline/14_scout_a_futures_2026-07-16.md' | Select-Object -Skip 64 -First 44" in D:\Downloads\Trading_Bot
+ succeeded in 961ms:
+**External evidence.** Measured magnitudes, weak timing granularity: tokens surge 30â€“100% on international exchanges "within minutes" of an Upbit notice ([CCN analysis](https://www.ccn.com/analysis/crypto/upbit-listing-pump/)); vendor measurement: Upbit listings max expected return 51.9%, Bithumb 108.9%, strongest >800% intraday, with sub-second announcement feeds marketed as necessary ([DataMaxi+, Sep 2025](https://medium.com/@datamaxiplus/the-rise-of-korean-exchange-listing-alpha-capturing-upbit-and-bithumb-listing-pumps-9c9055388f15) â€” âš  vendor selling the feed, single source for the specific numbers); 2026 event examples: PLUME +50% ([CCN](https://www.ccn.com/analysis/crypto/plume-upbit-listing-price-surge/)), 9-altcoin wave ([Yahoo Finance](https://finance.yahoo.com/markets/crypto/articles/upbit-listing-announcement-triggers-price-033217292.html)). The post-pump "sharp reversal" is narrative-grade â€” no measured reversal study found.
+
+**Data to test it.** Does not exist locally and CANNOT be reconstructed historically without announcement timestamps: harvest Upbit notices (public notice board, `upbit.com/service_center/notice`; scrapeable archive with timestamps) + Bithumb equivalents, join to `ohlcv_cache` 15m/1h bars. Historical notice timestamps are retrievable, so a retrospective drift-at-lag measurement IS possible before committing to forward collection â€” that retrospective join is the Phase-2 ask.
+
+**Costs / feasibility @$420: the long side is latency-infeasible as-is.** 30-min news scan + 5-min decision cycle + 10s polling against a move that completes in minutes means we would systematically buy the top. Only two honest outcomes: (a) measurement shows residual drift at +30m or later â†’ a candidate exists; (b) it doesn't â†’ close the question for good. Either way the measurement is nearly free.
+
+**Novelty-vs-ledger: NEW** (not on the ledger; distinct from the in-shadow Binance-perp listing-short probe: different venue class, different direction, different window).
+
+---
+
+## Directions searched and NOT advanced (with reasons â€” do not re-search without new evidence)
+
+- **Quarterly/expiry-day flow effects (CME or CEX dated futures):** searched; nothing measured beyond options "max-pain" narratives (e.g., [Cryptopotato](https://cryptopotato.com/massive-11b-end-of-quarter-options-expiry-could-rattle-crypto-markets-today/)-grade coverage of the Jun-2026 $9.3B expiry). No mechanism-grade, quantified drift study found â†’ INSUFFICIENT DATA, no candidate. (Distinct from â€” and does not reopen â€” the refuted quarterly-basis leg-swap row.)
+- **New-perp funding-cap-pinned carry (collect extreme negative funding on day-1 listings, delta-neutral):** mechanism is real (day-1 listings frequently pin deeply negative), but the collecting side requires LONG perp + SHORT spot, and spot borrow on day-1 listings is unavailable or extortionate at retail â€” the borrow leg kills it at $420. The perp-perp expression is cross-venue dispersion, whose per-settlement fat-tail failure mode is already a refuted-row finding (2026-07-09). The [BitMEX 2025Q3 derivatives report](https://www.bitmex.com/blog/2025q3-derivatives-report) (Oct 2025) documents arbitrage-enforced funding ceilings (BitMEX BTC pinned at exactly 0.01%/8h for 78% of the period) but provides no cap-episode persistence stats. No candidate.
+- **ADL / insurance-fund mechanics:** active academic literature exists ([arXiv 2512.01112](https://arxiv.org/pdf/2512.01112), [arXiv 2602.15182](https://arxiv.org/pdf/2602.15182), [arXiv 2603.15963](https://arxiv.org/pdf/2603.15963) â€” ADL optimization/design) but it is exchange-design research, not a retail-harvestable edge; any tradable implication routes through the post-cascade family, which is already forward-collection-only (07-11 candidate 4). No new candidate.
+- **Leverage-tier/margin-change announcements as a standalone signal:** no measured study found; folded into Candidate 1's harvest as a logged covariate.
+
+## Ranking for edge-screener (Phase 2)
+
+1. **Candidate 1 (cross-venue delisting-short)** â€” strongest measured event evidence of this pass (multiple independent 2025â€“26 waves, âˆ’15% to âˆ’34% announcement-day, peer-reviewed predictability support), proven capital-scaled probe template, clear harvest path. Gated on the announcement-calendar harvest; survivorship must be bounded, concurrent-MTM modeled from day one, entry measured at announcement+1 cycle.
+2. **Candidate 2 (funding-percentile persistence selectivity for F1)** â€” best feasibility (zero new capital, refines the validated lane), fully local data, but thin external evidence for the specific claim and a freshly refuted sibling (settlement timing) as precedent; null hypothesis = incumbent gate. The Borri et al. carry-turned-negative-2025 finding should be surfaced to the owner independently of the screen result.
+3. **Candidate 3 (Korean cross-listing lag)** â€” real, measured mechanism but latency-infeasible for the obvious trade; advance ONLY as the retrospective notice-timestamp join / forward drift measurement, which is nearly free and closes the question either way.
+
+## Source list
+
+1. Yahoo Finance â€” 4 Binance delisting targets tumble (announcement-day drops) â€” https://finance.yahoo.com/markets/crypto/articles/4-binance-delisting-targets-tumble-153227077.html
+2. DailyCoin â€” Binance Apr-1 delistings hammer 8 altcoins in minutes â€” https://dailycoin.com/binances-april-1-delistings-hammer-8-altcoins-in-minutes/
+3. BeInCrypto â€” 5 altcoins double-digit losses after Binance delisting call (May 2026) â€” https://beincrypto.com/binance-delist-5-altcoins-may-2026/
+4. CoinGape â€” Binance delisting warning, NFP/POND ~âˆ’20% â€” https://coingape.com/binance-warns-of-delisting-these-tokens-price-drop-ahead/
+5. Volity â€” delisting education, "âˆ’80% within 30 days" (âš  vendor, single source) â€” https://volity.io/crypto/delisting/
+6. Yang 2026, AJFS â€” predictive/explainable models for Binance delistings (âš  paywalled; abstract-grade) â€” https://onlinelibrary.wiley.com/doi/10.1111/ajfs.70045
+7. Binance FAQ â€” futures delisting mechanics (reduce-only, 30-min settlement average, taker fee) â€” https://www.binance.com/en/support/faq/delisting-of-futures-contracts-dd60dfbf654d4055aa6b217ea6d5ddba
+8. IDEAS/RePEc â€” event study, negative crypto events CARs (âˆ’5,+10d) (2022; family support) â€” https://ideas.repec.org/a/ahs/journl/v7y2022i1p16-31.html
+9. Borri, Liu, Tsyvinski, Wu (arXiv 2510.14435, 2025) â€” crypto carry Sharpe 6.45 (2020â€“25) â†’ 4.06 (2024) â†’ negative (2025) â€” https://arxiv.org/html/2510.14435v2
+10. MDPI â€” two-tiered funding-rate market structure (âš  abstract-grade, 403) â€” https://www.mdpi.com/2227-7390/14/2/346
+11. MetaMask education â€” funding persistence practitioner note (weak) â€” https://metamask.io/news/monitoring-perps-funding-rate-trends-signals
+12. CCN â€” dissecting Upbit listing pumps (30â€“100% within minutes) â€” https://www.ccn.com/analysis/crypto/upbit-listing-pump/
+13. DataMaxi+ (Sep 2025) â€” Korean listing alpha, Upbit 51.9% / Bithumb 108.9% max expected (âš  vendor selling feed, single source) â€” https://medium.com/@datamaxiplus/the-rise-of-korean-exchange-listing-alpha-capturing-upbit-and-bithumb-listing-pumps-9c9055388f15
+14. CCN â€” PLUME +50% on Upbit listing â€” https://www.ccn.com/analysis/crypto/plume-upbit-listing-price-surge/ ; Yahoo â€” Upbit 9-altcoin wave â€” https://finance.yahoo.com/markets/crypto/articles/upbit-listing-announcement-triggers-price-033217292.html
+15. BitMEX 2025Q3 derivatives report (Oct 2025) â€” funding floor/ceiling structure â€” https://www.bitmex.com/blog/2025q3-derivatives-report
+16. ADL design literature (not advanced): arXiv 2512.01112, 2602.15182, 2603.15963
+17. Cryptopotato â€” $11B quarter-end expiry coverage (narrative-grade; direction not advanced) â€” https://cryptopotato.com/massive-11b-end-of-quarter-options-expiry-could-rattle-crypto-markets-today/
+
+*Coverage note: web research ran normally (not LIMITED). Wiley AJFS and MDPI full texts paywalled (402/403) â€” findings from those flagged abstract-grade. The "104 announcements / ~2â€“3-day notice" statistic is search-snippet-grade and must be re-established from the harvested announcement archive itself in Phase 2, not quoted forward.*
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -LiteralPath '_workspace/strategy_pipeline/14_scout_c_reopen_sweep_2026-07-16.md' | Select-Object -First 64" in D:\Downloads\Trading_Bot
+ succeeded in 962ms:
+# 14 â€” Scout C: Reopen-Bar Sweep + Evidence Updates (2026-07-16)
+
+Scout C (strategy-scout) | Phase 1 of strategy-evidence-pipeline run 2026-07-16. Adversarial literature hygiene only â€” **no new candidates, no code, no trades**. This file is authoritative for this sub-question.
+
+**Reopen bar (verbatim from `refuted-families-ledger`):** "Peer-reviewed or equivalently rigorous 2025+ evidence with genuine out-of-sample validation, FDR/DSR-grade multiplicity control, and after-cost accounting on liquid crypto at retail venues. Quote it verbatim. Meeting the bar earns a SCREEN (via `strategy-evidence-pipeline`) â€” never a build."
+
+**Method / coverage:** 10 web searches + 8 targeted fetches (2026-07-16). Sources already reviewed in `07_scout_candidates_2026-07-11.md` and `deep-research_crypto-strategy-patterns_2026-07-08.md` were NOT re-reviewed. Settled SKIPs (retail market-making, vol-risk-premium, CEXâ†”DEX arb, latency arb) were not re-searched. Access failures this pass: SSRN 6632838 (403, retried once as instructed), SSRN 6579278 (403, retried once), ScienceDirect S1059056026002716 (403), ResearchGate 403391704 (403), Tandfonline 10.1080/14697688.2026.2653663 (403). Web tools worked normally â€” coverage NOT limited.
+
+---
+
+## TASK 1 â€” REOPEN-BAR SWEEP: VERDICT BY FAMILY GROUP
+
+**Bottom line: NOTHING found in 2025â€“2026 literature meets the reopen bar for ANY refuted family. Every refuted-table row stands.** Per-group detail with the closest candidates adjudicated:
+
+### Group A â€” Technical patterns (RSI-MR, candlesticks, indicator-confluence, hour-of-day/seasonality)
+**Verdict: bar NOT met. One close call, adjudicated below.**
+
+- **Closest candidate of the entire sweep:** *"Intraday price forecasts using candlestick patterns in cryptocurrency markets"*, International Review of Economics & Finance, published **April 2026** ([ScienceDirect](https://www.sciencedirect.com/science/article/pii/S1059056026002716)). Per search-visible abstract coverage: 55 TA-Lib reversal patterns, hourly OHLC, ~400 cryptos / 2,000 pairs / 36 exchanges, ~200M observations; "Profitability is assessed using the **stepwise superior predictive ability test** to mitigate data-snooping" (search-snippet quote); Bullish Harami / Hikkake / Bearish Harami / Hanging Man reported significant, "consistent across time, market conditions, cryptocurrencies, and exchanges."
+  **Why it does NOT meet the bar:** (1) **after-cost accounting is unverified** â€” full text 403 on both ScienceDirect and ResearchGate; no visible cost model or net-return numbers; the visible claim is statistical predictability, not retail after-cost tradability. (2) **Sample is July 2018 â€“ January 2022** â€” it ends 4.5 years ago, entirely predating this system's own after-cost candlestick refutation (1,989 tests, 0 survivors, run 2026-06-07 on current data at our exact venues/fees). Peer review + SPA multiplicity are genuinely present, but the bar's after-cost element cannot be confirmed and the evidence is stale relative to our fresher local refutation. **Ledger row stands.** *Follow-up (conditional, low priority): if the full text ever opens AND shows after-cost survival of its four named patterns, the correct action is a narrow re-adjudication of exactly those patterns at hourly frequency â€” a screen, never a build.* Single-source flag: abstract details reconstructed from search snippets, not the paper itself.
+- RSI-MR 2025â€“2026: searched; only vendor/blog content (UEEx, Stoic.ai, Changelly â€” all marketing-grade). No qualifying study. Bar not met.
+- Seasonality/calendar: nothing 2025+; the literature remains pre-2024 ("turn-of-the-candle" Heliyon 2023; calendar-anomaly Cogent 2023). Bar not met.
+- Umbrella confirmation: Wei (2024, Int. J. Finance & Economics, ["Cryptocurrencies and Lucky Factors"](https://onlinelibrary.wiley.com/doi/full/10.1002/ijfe.2863)) â€” 7,846 technical rules Ã— 12 cryptos with snooping control: only a tiny non-pattern set survives. 2024 (pre-bar) and its direction *supports* the refutation anyway.
+
+### Group B â€” Textbook trend/breakout + TSMOM (incl. long-only TSMOM row)
+**Verdict: bar NOT met. Two 2025â€“2026 items adjudicated, both fail.**
+
+- **[arXiv 2602.11708](https://arxiv.org/pdf/2602.11708), "Systematic Trend-Following with Adaptive Portfolio Construction" (Bui & Nguyen, Talyxion Research, 12 Feb 2026).** Full text read this pass (PDF extracted locally). Claims: "OOS" Jan 2022â€“Dec 2024, Sharpe 2.41, maxDD âˆ’12.7%, cost model 4bps taker + linear slippage + funding. **Fails the bar:** (a) NOT peer-reviewed (arXiv cs.CE preprint from a corporate research shop, gmail contact); (b) the "OOS" window is **burned by design selection** â€” the timeframe comparison (Table 5: H6 chosen because it wins on the evaluation window), the (Î±,Î») sensitivity surface, and the 70/30-vs-50/50 allocation choice are all reported ON the evaluation period; (c) multiplicity control is bootstrap-vs-benchmark only â€” no DSR/FDR/reality-check across the searched design space; (d) internal inconsistency: Â§4.1 says OOS ends Dec 2024 but Figure 1 caption says "Jan 2022 â€“ Oct 2025"; (e) monthly grid-search re-optimization is the ablation's second-largest Sharpe contributor (Î”SR 1.07) â€” the edge substantially IS the re-fitting. Win rates 54.2%/47.8%/41.3% (bull/sideways/bear) â€” all below our 0.55 OOS-WR gate and the owner's 65% floor. **Does not reopen the family.**
+- **[SSRN 5209907](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5209907), Zarattini, Pagani & Barbon, "Catching Crypto Trends"** ([Concretum page](https://concretumgroup.com/catching-crypto-trends-a-tactical-approach-for-bitcoin-and-altcoins/) fetched): Donchian-channel ensemble + vol sizing on top-20 liquid cryptos; claims "Sharpe ratio above 1.5" and "annualized alpha of 10.8% relative to Bitcoin." **Abstract-grade only** â€” no visible data period, no OOS protocol, no multiplicity control, no after-cost numbers on the accessible page; SSRN working paper, not peer-reviewed. Bar not met. (Relevant as weak family-supportive context for the breakout-60d probe â€” see Task 2.)
+- Han, Kang & Ryu ([SSRN 4675565](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4675565), "â€¦under Realistic Assumptions"): pre-dates the bar (2024) and cuts AGAINST reopening â€” "accounting for transaction costs and daily price fluctuations, many momentum portfolios are liquidated and many with statistically significant returns earn insignificant profits" (search-snippet quote; snippet-grade flag).
+- Gbadebo 2026 TSM-vs-CSM comparative ([ResearchGate 406476873](https://www.researchgate.net/publication/406476873)): explicitly "does not incorporate transaction costs, slippage, funding rates, or liquidity constraints" â€” inadmissible against an after-cost bar.
+
+### Group C â€” Kalman/cointegration pairs (435 pairs, 0 FDR survivors, 2026-06-06)
+**Verdict: bar NOT met. Two peer-reviewed 2025â€“2026 papers exist; both fail on multiplicity and/or staleness.**
+
+- **Tadi & Witzany, "Copula-based trading of cointegrated cryptocurrency pairs", Financial Innovation, 13 Jan 2025** ([Springer, open access](https://link.springer.com/article/10.1186/s40854-024-00702-7)) â€” full page fetched. Peer-reviewed 2025+ âœ“; after-cost âœ“ (Binance futures 2/4 bps, best config net 75.2% ann., Sharpe 3.77). **Fails:** (a) **no multiplicity control** â€” multiple copula families Ã— entry thresholds (Î±â‚ âˆˆ {10,15,20}%) Ã— two cointegration tests reported with the best highlighted, zero FDR/DSR adjustment; (b) **no genuine holdout** â€” rolling 3-week-formation/1-week-trading cycles "each cycle sharing three quarters of its data with its previous or subsequent cycle"; (c) data **Jan 2021 â€“ Jan 2023** â€” ends 3.5 years ago, fully inside the window our own 435-pair FDR screen already covered; (d) market-order execution on 20 alt perps with slippage beyond taker fee unmodeled. Does not reopen.
+- **Quantitative Finance 2026 GA-optimized pairs paper** ([Tandfonline](https://www.tandfonline.com/doi/full/10.1080/14697688.2026.2653663), 403 â€” abstract-grade from search): 229 pairs, data Aug 2021 â€“ Jan 2024, genetic-algorithm-optimized thresholds. GA optimization with no visible snooping control is the textbook overfitting surface; period ends Jan 2024. Does not meet the bar on visible evidence. Single-source flag (snippets only).
+
+### Group D â€” Directional funding signals + formulaic alphas
+**Verdict: bar NOT met â€” and the new 2026 evidence points the OTHER way.**
+
+- **MDPI Mathematics 14(2):346, "The Two-Tiered Structure of Cryptocurrency Funding Rate Markets" (Jan 2026)** ([link](https://www.mdpi.com/2227-7390/14/2/346)) â€” previously 403'd abstract-only in the 07-08 pass; now published with numbers visible in coverage: 35.7M one-minute observations, 749 symbols, 26 exchanges (11 CEX / 15 DEX). Finding: ~17% of observations show economically significant cross-venue funding spreads, but "only 40% of top opportunities generate positive returns after transaction costs and spread reversals" (search-snippet quote). This *reinforces* both the directional-funding refutation and our dispersion CONFIRMED_NO_GO row (costs + reversals consume most of the apparent spread). Evidence UPGRADE for the ledger's context, not a reopen.
+- **IRFA 2026 factor-selection paper** ([ScienceDirect S1057521925004764](https://www.sciencedirect.com/science/article/abs/pii/S1057521925004764)): "just two to three factors can eliminate all significant portfolio alphas" in crypto (turnover volatility, bid-ask spread, blockchain-native metrics). Reinforces the formulaic-alphas refutation (443+ tested locally, best IRâ‰ˆ0.45 pre-cost). Snippet-grade, single-source flag.
+
+### Group E â€” ML price forecasters (Kronos family row)
+**Verdict: bar NOT met â€” the one rigorous 2026 study is a REFUTATION-REINFORCER.**
+
+- **Bysik & Åšlepaczuk, "Machine Learning-Based Bitcoin Trading Under Transaction Costs" ([arXiv 2606.00060](https://arxiv.org/html/2606.00060), Univ. of Warsaw, 19 May 2026)** â€” full text read. This is the methodological standard the bar asks for (27-fold non-anchored walk-forward, strict temporal integrity, **Holm-adjusted p-values**, 10k-replication circular block bootstrap, 10bps all-in costs) and its conclusion is negative: naive ML strategies go from +73.5%/+181.8% frictionless to **âˆ’64.0%/âˆ’98.6% after 10bps**; a cost-aware filter (cutting trades 10,619â†’251, >99% turnover reduction) restores XGBoost long-only to +65.4% ARC / Sharpe 1.09, **but "no statistically significant Sharpe-ratio outperformance [vs buy-and-hold] after Holm correction; bootstrap 95% CI for SR difference includes zero"**, with fold-level instability and configuration fragility. Rigorous 2026 evidence that ML forecasting does not beat a 1-trade passive benchmark after costs at retail cost levels. Ledger row stands, strengthened.
+
+### Group F â€” Remaining rows (scalping, grid/DCA, OI-divergence, dominance/ETF-flow, band-geometry filters, settlement-window timing, quarterly leg-swap, dispersion, full-stake listing-short)
+**Verdict: bar NOT met â€” nothing 2025â€“2026 found addressing any of these at academic rigor.**
+
+- Scalping / grid / DCA / OI-divergence / dominance / ETF-flow: searches returned vendor content only. No qualifying evidence.
+- Quarterly-futures basis leg-swap (NO_GO 2026-07-11): the **AEA 2026 conference paper "Perpetual Futures and Basis Risk: Evidence from Cryptocurrency"** ([program page](https://www.aeaweb.org/conference/2026/program/paper/ByyFEfr4)) reports quarterly futures decline **8â€“10% more than spot** during large market events vs ~3% for perps (abstract-grade). This adds independent crash-risk evidence AGAINST the dated-future leg â€” supports the NO_GO, no reopen.
+- Settlement-window timing (NO_GO 2026-07-11): no new measured pre-settlement-drift study found (unchanged from 07-08 finding of "insufficient external data"; our own screen has since refuted it locally).
+
+---
+
+## TASK 2 â€” IN-SHADOW PROBE EVIDENCE UPDATES
+
+### 2a. Capital-scaled listing-short (ListingShortProbeAgent)
+**Delta: NONE.** Searched "new perpetual futures listing price decline short 2026" â€” nothing new beyond the already-cited FMZQuant 2023 study; results were long/short-ratio sentiment noise. Registered hypothesis unchanged; the probe's forward log remains the primary evidence stream.
+
+### 2b. Pre-unlock short (UnlockShortProbeAgent)
+**Delta: MODERATE STRENGTHEN of direction + STRONG independent validation of the audit's sizing/tail-risk reasoning. Timing contradiction persists unresolved.**
+
+codex
+The prior sweep already consumed the plausible event ideas: delistings are now “open/insufficient data,” Korean listing lag was measurement-only, cascade ideas were forward-collection-only, and funding selectivity was subsequently refuted. I’m searching for measured work that adds a distinct payer/constraint mechanism—not another indicator dressed up as novelty.
+web search: 
+web search: 2026 empirical cryptocurrency perpetual futures liquidation forced flow trading returns study ...
+web search: 
+web search: 
+web search: 
+web search: "Do Order-Book States Predict Passive-Buy Toxicity" PDF ...
+web search: 
+web search: 
+web search: 
+web search: "Bitcoin option expiration, gamma exposure, and intraday price reversals" ...
+web search: 
+web search: Dustin Weiss Robert Gaudiosi Zeyang Zhou Robert Webb bitcoin option expiration gamma PDF ...
+web search: 
+web search: 
+web search: 
+web search: "Option positions, non-momentum trading, and Bitcoin futures returns" ...
+web search: 
+web search: 2025 2026 CFTC Bitcoin option positions predict futures returns asset managers independent study ...
+codex
+Two non-ledger mechanisms have survived the first pass: regulated asset-manager option positioning (weekly risk-transfer pressure) and Deribit expiry hedging (forced delta flow traded through BTC perps). I’m checking whether the repo can support honest, timestamped tests and whether either paper actually reports enough execution detail to justify more than a research screen.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg --files data/ohlcv_cache data/funding_history | rg -i 'btc.*(parquet|csv)"'$'"'; @'
+import sqlite3
+p = r'data/warehouse.sqlite'
+con = sqlite3.connect(f'file:{p}?mode=ro', uri=True)
+for row in con.execute(\"SELECT type, name FROM sqlite_master WHERE type IN ('table','view') ORDER BY type,name\"):
+    print(row[0], row[1])
+con.close()
+'@ | python -" in D:\Downloads\Trading_Bot
+2026-07-22T11:24:10.418586Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1 seconds
+Output:
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg --files data/ohlcv_cache data/funding_history | rg -i 'btc.*(parqu ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+python : The term 'python' is not recognized as the name of a cmdlet, function, script file, or operable program. 
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:9 char:6
++ '@ | python -
++      ~~~~~~
+    + CategoryInfo          : ObjectNotFound: (python:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+ exited 1 in 1047ms:
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg --files data/ohlcv_cache data/funding_history | rg -i 'btc.*(parqu ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+python : The term 'python' is not recognized as the name of a cmdlet, function, script file, or operable program. 
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:9 char:6
++ '@ | python -
++      ~~~~~~
+    + CategoryInfo          : ObjectNotFound: (python:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -LiteralPath 'data/ohlcv_cache','data/funding_history' -File | Where-Object { "'$_.Name -match '"'(?i)btc.*\\.(parquet|csv)"'$'"' } | Select-Object -ExpandProperty FullName; Get-Command py,sqlite3 -ErrorAction SilentlyContinue | Select-Object Name,Source" in D:\Downloads\Trading_Bot
+2026-07-22T11:24:16.036027Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.1 seconds
+Output:
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_15m.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_1d.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_1h.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_4h.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\WBTC-USDT_1h.parquet
+D:\Downloads\Trading_Bot\data\funding_history\binance_BTC.csv
+D:\Downloads\Trading_Bot\data\funding_history\bitget_BTC.csv
+D:\Downloads\Trading_Bot\data\funding_history\bybit_BTC.csv
+
+ exited 1 in 1064ms:
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_15m.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_1d.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_1h.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\BTC-USDT_4h.parquet
+D:\Downloads\Trading_Bot\data\ohlcv_cache\WBTC-USDT_1h.parquet
+D:\Downloads\Trading_Bot\data\funding_history\binance_BTC.csv
+D:\Downloads\Trading_Bot\data\funding_history\bitget_BTC.csv
+D:\Downloads\Trading_Bot\data\funding_history\bybit_BTC.csv
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -LiteralPath 'data','core','scripts','_workspace' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { "'$_.FullName -notmatch '"'\\\\agents\\\\' } | Select-String -Pattern 'CFTC|Commitments of Traders|Deribit|gamma exposure|option expiration' -CaseSensitive:"'$false | Select-Object -First 80 Path,LineNumber,Line' in D:\Downloads\Trading_Bot
+2026-07-22T11:24:47.229101Z ERROR codex_core::tools::router: error=Exit code: 124
+Wall time: 20.8 seconds
+Output:
+command timed out after 20777 milliseconds
+
+Path                                                          LineNumber Line                                          
+----                                                          ---------- ----                                          
+D:\Downloads\Trading_Bot\data\market_research_2026_05_27.json        273   "news_sentiment": "Mixed to bearish short...
+D:\Downloads\Trading_Bot\data\news_cache.json                        345       "title": "CLARITY Act could help CFTC...
+D:\Downloads\Trading_Bot\data\news_cache.json                        347       "url": "https://cointelegraph.com/new...
+D:\Downloads\Trading_Bot\data\sentiment_history.json                 237   "CFTC": {                                   
+Select-String : The file D:\Downloads\Trading_Bot\data\bot.lock cannot be read: The process cannot access the file 
+because another process has locked a portion of the file.
+At line:2 char:166
++ ... ents\\' } | Select-String -Pattern 'CFTC|Commitments of Traders|Derib ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidArgument: (:) [Select-String], ArgumentException
+    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
+ 
+
+ exited 124 in 20777ms:
+
+Path                                                          LineNumber Line                                          
+----                                                          ---------- ----                                          
+D:\Downloads\Trading_Bot\data\market_research_2026_05_27.json        273   "news_sentiment": "Mixed to bearish short...
+D:\Downloads\Trading_Bot\data\news_cache.json                        345       "title": "CLARITY Act could help CFTC...
+D:\Downloads\Trading_Bot\data\news_cache.json                        347       "url": "https://cointelegraph.com/new...
+D:\Downloads\Trading_Bot\data\sentiment_history.json                 237   "CFTC": {                                   
+Select-String : The file D:\Downloads\Trading_Bot\data\bot.lock cannot be read: The process cannot access the file 
+because another process has locked a portion of the file.
+At line:2 char:166
++ ... ents\\' } | Select-String -Pattern 'CFTC|Commitments of Traders|Derib ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidArgument: (:) [Select-String], ArgumentException
+    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
+ 
+
+web search: 
+web search: site:binance.com support USD-M futures trading fee maker taker 2026 ...
+web search: 
+web search: site:binance.com/en/support/faq futures trading fees 0.02 0.05 USD-M ...
+web search: 
+web search: July 2026 crypto token unlock short backtest perpetual futures ...
+web search: 
+web search: 
+web search: 
+web search: S1544612326001339 109602 cryptocurrency momentum liquidity space title ...
+web search: 
+web search: 'transaction cost'
+web search: 
+web search: site:cftc.gov Commitments of Traders Tuesday data released Friday official ...
+web search: 
+web search: site:support.deribit.com options settlement 08:00 UTC expiration BTC options ...
+codex
+# Scout verdict
+
+**Two genuinely novel, futures-executable candidates survived, but both are SCREEN-only. Neither is ready for shadow or live capital.** The first has usable local OOS potential; the second is blocked by missing historical options-position data.
+
+The binding ledger and prior sweeps were applied: [refuted-families ledger](/D:/Downloads/Trading_Bot/.claude/skills/refuted-families-ledger/SKILL.md), [futures scout](/D:/Downloads/Trading_Bot/_workspace/strategy_pipeline/14_scout_a_futures_2026-07-16.md), and [reopen sweep](/D:/Downloads/Trading_Bot/_workspace/strategy_pipeline/14_scout_c_reopen_sweep_2026-07-16.md).
+
+## Candidate 1 — CME asset-manager option-position pressure, traded through BTCUSDT perp
+
+### What it is
+
+Once weekly, derive asset managers’ **options-only** BTC position from the CFTC futures-and-options-combined report minus its futures-only report. Residualize the weekly position change using the paper’s exact non-momentum specification, then trade BTCUSDT on Binance, Bybit, or Bitget during the paper’s second-week-ahead window.
+
+A no-lookahead implementation would consume Friday’s 15:30 ET release and hold approximately Tuesday-to-Tuesday of the following week. The paper’s exact sign and variable construction must be reproduced from its equations before preregistration.
+
+### Mechanism
+
+Asset managers use options to transfer downside and convexity risk, particularly in high-downside-risk states. Their non-momentum position adjustment proxies residual hedging/inventory pressure that other participants must absorb.
+
+This is materially weaker than a proven forced-flow mechanism: the authors’ Granger tests indicate that futures returns lead the position changes, so they interpret the result as a **predictive association consistent with risk transfer**, not causal price impact.
+
+### External evidence
+
+The peer-reviewed 2026 study uses weekly CME data from **21 January 2020 through 4 March 2025** and reports that asset-manager options positions selectively predict the second-week-ahead BTC futures return beyond futures positions. The result survives alternative returns, subsamples, and OOS forecasting and is concentrated in high-downside-risk states. [Shen, Li & Luo, *Finance Research Letters*, 2026](https://www.sciencedirect.com/science/article/pii/S1544612326008287).
+
+**Single-source flag:** the accessible paper does not demonstrate a net trading strategy after fees, funding, or offshore-perp basis; no DSR/FDR-style correction is visible. The CFTC also warns that classifications reflect traders’ predominant reported business, not the reason for each individual position. Reports normally contain Tuesday positions and are released Friday, making publication-lag correction mandatory. [CFTC release mechanics](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm).
+
+### Data to test locally
+
+- Add historical CFTC futures-only and futures-plus-options reports; derive options-only asset-manager positions exactly as the paper does.
+- Use `BTC-USDT_1h.parquet` for the frozen Tuesday-to-Tuesday return window. The untouched period from March 2025 onward supplies roughly 16 months of genuinely newer data.
+- Use `binance_BTC.csv`, `bybit_BTC.csv`, and `bitget_BTC.csv` to charge every funding settlement during each hold.
+- Evaluate each venue separately before any pooled result; include Friday publication delays, holidays, spread, slippage, and mark-to-market drawdown.
+- Null benchmark: always-flat, plus BTC directional exposure with the same holding calendar but randomized signal signs.
+
+### Costs and $420 feasibility
+
+Operationally feasible at 1× isolated exposure. At 10–20% account notional ($42–$84), a taker round trip costs about **$0.04–$0.10**, before spread and funding, using approximately 5–6 bps per side. Bybit currently quotes 2 bps maker/5.5 bps taker, while Bitget quotes 2/6 bps; verify the account-specific Binance rate before testing. [Bybit fee schedule](https://www.bybit.com/en/help-center/article/Trading-Fee-Structure), [Bitget fee documentation](https://www.bitget.com/en-CA/support/articles/12560603828198).
+
+Low turnover helps, but a week-long perp hold crosses many funding settlements. No leverage is justified until after-cost expectancy, clustered-bootstrap probability of profit, and maxDD gates pass.
+
+### Novelty versus ledger
+
+**NEW, eligible for a narrow screen.** It uses regulated trader-class risk-transfer data, not price indicators, funding direction, OI divergence, seasonality, or ETF-flow timing.
+
+Fail-closed rule: if the result disappears after Friday publication lag or is explained by lagged BTC returns, classify it under the ledger’s **formulaic-alpha / textbook directional** refutations and drop it.
+
+---
+
+## Candidate 2 — Negative-gamma option-expiry reversal, executed only in BTCUSDT perp
+
+### What it is
+
+On Deribit BTC option expiries with both:
+
+1. unusually high at-the-money expiring open interest, and  
+2. negative estimated cumulative dealer gamma,
+
+measure the pre-expiry dealer-hedging move and take the opposite BTCUSDT-perp position immediately after the 08:00 UTC expiry, using the paper’s exact return window.
+
+No option is traded and no options account is required; options positioning is only the external state variable.
+
+### Mechanism
+
+Dealers short gamma must hedge procyclically—buying as BTC rises and selling as it falls—to remain within risk limits. As contracts expire, that price-insensitive hedge demand disappears or unwinds, producing the measured reversal. Option holders pay dealers to warehouse convexity, while dealers’ mandated hedging creates the temporary underlying-perp flow.
+
+### External evidence
+
+A peer-reviewed 2026 study documents statistically and economically significant BTC return reversals around Deribit option expiration. Effects are strongest with elevated ATM OI and negative cumulative gamma; activity also rises in Deribit perpetuals and settlement-index spot markets. The authors estimate roughly **$50 million per year** in associated wealth transfers. [Weiss et al., *Finance Research Letters*, online June 2026](https://www.sciencedirect.com/science/article/pii/S1544612326008688).
+
+Deribit confirms daily BTC options expire at **08:00 UTC**, with the delivery index calculated over 07:30–08:00 UTC. [Deribit contract policy](https://support.deribit.com/hc/en-us/articles/25944688876957-Contract-Introduction-Policy), [inverse-option specification](https://support.deribit.com/hc/en-us/articles/31424939096093-Inverse-Options).
+
+**Single-source and contradiction flags:** accessible text does not disclose an after-cost trading rule, genuine holdout, or multiplicity correction. A 2025 SSRN study reaches the opposite economic conclusion, estimating BTC gamma exposure at only 0.025% of daily option volume and therefore too small to move spot materially. [Lachowicz, November 2025](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5782822).
+
+### Data to test locally
+
+- Local `BTC-USDT_15m.parquet` can measure 07:30–08:00 pressure and post-08:00 reversal, subject to confirming its venue provenance and filling missing history.
+- The three BTC funding CSVs supply venue-specific funding, although a same-session post-expiry trade should normally avoid most funding exposure.
+- Missing blocker: historical Deribit chain snapshots containing strike, expiry, OI, implied volatility and Greeks. Current public APIs expose OI and option summaries for forward collection, but they do not solve the historical archive. [Deribit public market-data API](https://docs.deribit.com/api-reference/market-data/public-get_book_summary_by_currency).
+- Request the authors’ stated available-on-request data or obtain a timestamped institutional archive. Do not substitute today’s OI for historical OI.
+- Freeze the paper’s exact GEX convention, ATM-OI cutoff, entry, exit, and event exclusions before observing Binance/Bybit/Bitget results.
+
+### Costs and $420 feasibility
+
+Operationally feasible but **economic feasibility is unproven**. At $42–$84 notional, a two-taker-fill event costs approximately $0.04–$0.10 plus spread and slippage. The 5-minute decision cycle can enter after the 08:00 settlement; 10-second polling is adequate for event detection but not for competing during the 07:30–08:00 settlement calculation itself.
+
+Use 1× isolated exposure and a small capital fraction. Because the accessible paper gives no net-per-event expectancy, this candidate remains data-gated.
+
+### Novelty versus ledger
+
+**NEW, but currently unscreenable without historical option-chain data.** It is distinct from:
+
+- funding-settlement timing—the forcing event is option expiry;
+- hour-of-day seasonality—the trade requires expiring ATM OI and negative gamma;
+- generic mean reversion—the reversal is admitted only by an external dealer-hedging state.
+
+If expiry/GEX conditioning adds no incremental value over simply fading the preceding return, drop it under the ledger’s **RSI/mean-reversion and formulaic-alpha** rows.
+
+## Proposals dropped at the scout gate
+
+- **Cross-sectional 8–10-week loser-minus-winner reversal:** a May–June 2026 SSRN preprint reports Sharpe 1.19–1.38, but it is a price-ranked contrarian alpha with no visible after-cost, genuine OOS, or multiplicity-controlled result. Dropped under **“Formulaic alphas—443+ tested, best IR≈0.45 pre-cost”** and the system’s mean-reversion exclusions. [Kiefer & Nowotny, 2026](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6703978).
+- **Order-book toxicity/absorption trading:** the 2026 evidence concerns passive execution at sub-minute horizons, while a peer-reviewed six-coin study finds no microstructure strategy survives realistic retail fees. It is infeasible with the repo’s OHLCV-only history and 5-minute decisions, so it is not advanced. [Frontiers, June 2026](https://www.frontiersin.org/journals/blockchain/articles/10.3389/fbloc.2026.1811716/full).
+
+## New 2026 evidence on existing probes
+
+- **Listing-short:** no new measured 2026 study beyond the evidence already recorded on 17 July; current listing announcements are observations, not a controlled backtest.
+- **Unlock-short:** no new measured evidence beyond the ledger’s April 2026 Tigro Blanc replication; July unlock calendars are narrative/event lists only.
+- **TSMOM-20d:** new-to-this-sweep peer-reviewed evidence is adverse—momentum is absent among nine survivor coins and profitable in the rolling top-30 only after trimming, with results described as highly sample-dependent. [Grobys, Sandretto & Äijö, *Finance Research Letters* 92, 2026](https://iris.unito.it/retrieve/handle/2318/2137833/2029867/1-s2.0-S1544612326001339-main%20%281%29.pdf).
+- **Breakout-60d:** no new 2026 OOS, multiplicity-controlled, after-cost evidence found; status remains unchanged.
+- **Bundle-MR zfade/RSI2:** the Kiefer–Nowotny cross-sectional reversal preprint is distant family support only—not RSI2/zfade, not after-cost, not genuine OOS, and single-source—so it does not reopen the ledger row.
+- **Reopen bar:** **nothing found meets it.** The strongest new rigorous microstructure study is negative after retail fees, so no refuted family is reopened.
+tokens used
+151,494

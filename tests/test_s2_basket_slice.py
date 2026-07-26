@@ -91,10 +91,11 @@ def test_s2_slice_end_to_end_records_verdict_and_infeasible(tmp_path):
     reg = tmp_path / "active_strategies.json"
     report = run_s2_slice(registry_path=reg)
 
-    # accept() ran and produced a verdict with all eight sub-gates
+    # accept() ran and produced a verdict with all nine sub-gates
     verdict = report["verdict"]
     assert isinstance(verdict["accept"], bool)
-    assert len(verdict["sub_gates"]) == 8
+    assert len(verdict["sub_gates"]) == 9
+    assert "paper_edge_v1" in verdict["sub_gates"]
 
     # EvidenceRegistry row for S2 with the survivorship-free universe method
     ev = report["evidence"]

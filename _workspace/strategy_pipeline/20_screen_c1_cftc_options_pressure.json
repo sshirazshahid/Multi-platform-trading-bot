@@ -1,0 +1,315 @@
+{
+  "candidate": "C1_cftc_options_pressure",
+  "generated_utc": "2026-07-23T02:51:31.809710+00:00",
+  "prereg_sha256": "2765e26912747c008bd9b97605bfc5b5b7676b2c40ffe9c26a5f9f6e73ec5732",
+  "harvest_manifest_sha256": "19a3d990ea4a7075248e9b4e06582a59e62bb159d7881ad41176e526d0e5d89c",
+  "n_trials": 6,
+  "n_signal_rows": 432,
+  "n_residual_finite": 155,
+  "joint_pbo": 0.1034965034965035,
+  "horizon_mined": false,
+  "delta_drift_kill_any": false,
+  "go_variant_keys": [],
+  "variants": {
+    "H1_long_on_pos": {
+      "horizon_days": 7,
+      "direction": "long_on_pos",
+      "residual": {
+        "n_oos": 67,
+        "mean": -0.0023685302162739738,
+        "wr": 0.4925373134328358,
+        "gates": {
+          "dsr": 0.023222596906303492,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.4807692307692308,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 67,
+            "p_total_positive": 0.2355,
+            "max_drawdown_p95": 0.5631441820276201,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 48,
+        "mean": -0.00022176264030762208,
+        "wr": 0.5208333333333334,
+        "gates": {
+          "dsr": 0.09008924167210297,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.6111111111111112,
+          "oos_wr_pass": true,
+          "mc": {
+            "n_trades": 48,
+            "p_total_positive": 0.4875,
+            "max_drawdown_p95": 0.37780204673582596,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 151,
+      "delta_drift_kill": false
+    },
+    "H1_short_on_pos": {
+      "horizon_days": 7,
+      "direction": "short_on_pos",
+      "residual": {
+        "n_oos": 67,
+        "mean": -0.0016314697837260274,
+        "wr": 0.44776119402985076,
+        "gates": {
+          "dsr": 0.03963658270617234,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.4423076923076923,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 67,
+            "p_total_positive": 0.303,
+            "max_drawdown_p95": 0.5279009306518462,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 48,
+        "mean": -0.003778237359692379,
+        "wr": 0.4375,
+        "gates": {
+          "dsr": 0.015918379007798408,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.3333333333333333,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 48,
+            "p_total_positive": 0.1535,
+            "max_drawdown_p95": 0.4875062233037401,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 151,
+      "delta_drift_kill": false
+    },
+    "H2_long_on_pos": {
+      "horizon_days": 14,
+      "direction": "long_on_pos",
+      "residual": {
+        "n_oos": 69,
+        "mean": 0.009981821773280827,
+        "wr": 0.6086956521739131,
+        "gates": {
+          "dsr": 0.5320427851727311,
+          "dsr_pass": true,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.5769230769230769,
+          "oos_wr_pass": true,
+          "mc": {
+            "n_trades": 69,
+            "p_total_positive": 0.8855,
+            "max_drawdown_p95": 0.7760621751140284,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 49,
+        "mean": 0.010306065703944331,
+        "wr": 0.6530612244897959,
+        "gates": {
+          "dsr": 0.4718129528008898,
+          "dsr_pass": true,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.6388888888888888,
+          "oos_wr_pass": true,
+          "mc": {
+            "n_trades": 49,
+            "p_total_positive": 0.945,
+            "max_drawdown_p95": 0.3235765055512754,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 154,
+      "delta_drift_kill": false
+    },
+    "H2_short_on_pos": {
+      "horizon_days": 14,
+      "direction": "short_on_pos",
+      "residual": {
+        "n_oos": 69,
+        "mean": -0.013981821773280834,
+        "wr": 0.36231884057971014,
+        "gates": {
+          "dsr": 0.0009078332188373537,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.38461538461538464,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 69,
+            "p_total_positive": 0.0515,
+            "max_drawdown_p95": 2.0447467636500765,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 49,
+        "mean": -0.014306065703944338,
+        "wr": 0.32653061224489793,
+        "gates": {
+          "dsr": 0.0015566182338782573,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.3333333333333333,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 49,
+            "p_total_positive": 0.0095,
+            "max_drawdown_p95": 1.3067134120063901,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 154,
+      "delta_drift_kill": false
+    },
+    "H3_long_on_pos": {
+      "horizon_days": 21,
+      "direction": "long_on_pos",
+      "residual": {
+        "n_oos": 68,
+        "mean": 0.00956839837790352,
+        "wr": 0.5441176470588235,
+        "gates": {
+          "dsr": 0.37559160266139385,
+          "dsr_pass": true,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.5576923076923077,
+          "oos_wr_pass": true,
+          "mc": {
+            "n_trades": 68,
+            "p_total_positive": 0.823,
+            "max_drawdown_p95": 1.0045940364916028,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 49,
+        "mean": 0.009630026306512192,
+        "wr": 0.5714285714285714,
+        "gates": {
+          "dsr": 0.32507974955000474,
+          "dsr_pass": true,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.6388888888888888,
+          "oos_wr_pass": true,
+          "mc": {
+            "n_trades": 49,
+            "p_total_positive": 0.909,
+            "max_drawdown_p95": 0.4819223120418361,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 153,
+      "delta_drift_kill": false
+    },
+    "H3_short_on_pos": {
+      "horizon_days": 21,
+      "direction": "short_on_pos",
+      "residual": {
+        "n_oos": 68,
+        "mean": -0.013568398377903522,
+        "wr": 0.45588235294117646,
+        "gates": {
+          "dsr": 0.003155600385097484,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.4423076923076923,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 68,
+            "p_total_positive": 0.097,
+            "max_drawdown_p95": 2.3835923443266887,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "raw_delta": {
+        "n_oos": 49,
+        "mean": -0.013630026306512198,
+        "wr": 0.42857142857142855,
+        "gates": {
+          "dsr": 0.006015490146161943,
+          "dsr_pass": false,
+          "pbo": 0.0,
+          "pbo_pass": true,
+          "oos_wr": 0.3611111111111111,
+          "oos_wr_pass": false,
+          "mc": {
+            "n_trades": 49,
+            "p_total_positive": 0.03,
+            "max_drawdown_p95": 1.4739669390657713,
+            "passes": false
+          },
+          "mc_pass": false
+        },
+        "verdict": "NO_GO"
+      },
+      "n_trades_all": 153,
+      "delta_drift_kill": false
+    }
+  },
+  "verdict": "NO_GO",
+  "expectation": "NO_GO",
+  "cost_model": {
+    "fee_per_side": 0.0005,
+    "slip_per_side": 0.0005,
+    "venues": [
+      "binance",
+      "bybit",
+      "bitget"
+    ]
+  },
+  "harvest_cmd": "python scripts/harvest_cftc_tff_btc.py"
+}

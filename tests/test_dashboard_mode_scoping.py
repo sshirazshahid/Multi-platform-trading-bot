@@ -53,7 +53,8 @@ def test_save_refuses_production_wallet_under_pytest():
     Sentinel-based check, NOT a byte diff: the live bot may legitimately
     save the file between our reads, but our sentinel start value can only
     appear if the guard failed and OUR _save landed."""
-    from core.virtual_wallet import WALLET_FILE, VirtualWallet
+    import core.virtual_wallet as vw
+    from core.virtual_wallet import VirtualWallet
     prod = Path("data/virtual_wallet.json")
     sentinel = 123456.789
     w = VirtualWallet.__new__(VirtualWallet)  # skip _load
@@ -61,9 +62,15 @@ def test_save_refuses_production_wallet_under_pytest():
     w._start = sentinel
     w._balances = {"binance": sentinel}
     w._lock = threading.RLock()
-    # cwd is the repo root under pytest, so WALLET_FILE resolves to prod
-    assert WALLET_FILE.resolve() == (Path.cwd() / "data" / "virtual_wallet.json").resolve()
-    w._save()
+    # The conftest isolation fixture redirects WALLET_FILE to tmp for every
+    # test; point it back at the REAL production path for this one test so
+    # the in-code guard (not the fixture) is what we exercise.
+    original = vw.WALLET_FILE
+    vw.WALLET_FILE = (Path.cwd() / "data" / "virtual_wallet.json")
+    try:
+        w._save()
+    finally:
+        vw.WALLET_FILE = original
     if prod.exists():
         data = json.loads(prod.read_text(encoding="utf-8"))
         assert data.get("start") != sentinel, (

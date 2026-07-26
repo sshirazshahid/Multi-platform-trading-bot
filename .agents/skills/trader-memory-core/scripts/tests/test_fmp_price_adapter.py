@@ -70,6 +70,10 @@ def test_uses_apikey_header():
 
 def test_no_api_key_raises():
     """Missing API key should raise ValueError."""
+    import _shared_fmp_yahoo_patch
+
     with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(ValueError, match="FMP API key required"):
-            fmp_price_adapter.FMPPriceAdapter(api_key=None)
+        # Also disable the repo-root .env source, else the key legitimately resolves.
+        with patch.object(_shared_fmp_yahoo_patch, "find_dotenv", return_value=None):
+            with pytest.raises(ValueError, match="FMP API key required"):
+                fmp_price_adapter.FMPPriceAdapter(api_key=None)

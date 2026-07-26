@@ -88,6 +88,7 @@ class EmailNotifier:
 
     SMTP_HOST = "smtp.gmail.com"
     SMTP_PORT = 465
+    SMTP_TIMEOUT_SECONDS = 15
 
     def __init__(self):
         self.sender    = GMAIL_SENDER
@@ -107,12 +108,11 @@ class EmailNotifier:
 
     def send(self, subject: str, body_html: str, *, bypass_cooldown: bool = False):
         if not self.enabled:
-            return
+            return False
         subject_key = subject[:50]
         now = time.time()
         if not bypass_cooldown and now - self._last_send.get(subject_key, 0) < self._send_cooldown:
-            return
-        self._last_send[subject_key] = now
+            return True  # a matching notification was delivered recently
         full_subject = f"{self.prefix} {subject}"
         msg = MIMEMultipart("alternative")
         msg["Subject"] = full_subject
@@ -126,14 +126,25 @@ class EmailNotifier:
         msg.attach(MIMEText(body_html, "html"))
         ctx = ssl.create_default_context()
         try:
-            with smtplib.SMTP_SSL(self.SMTP_HOST, self.SMTP_PORT, context=ctx) as server:
+            with smtplib.SMTP_SSL(
+                self.SMTP_HOST,
+                self.SMTP_PORT,
+                context=ctx,
+                timeout=self.SMTP_TIMEOUT_SECONDS,
+            ) as server:
                 server.login(self.sender, self.password)
                 server.sendmail(self.sender, self.recipient, msg.as_string())
+            # A failed transport must not consume the cooldown. Watchdogs can
+            # retry on the next tick after a transient SMTP outage.
+            self._last_send[subject_key] = now
             logger.info(f"[Notifier] Email sent: {full_subject}")
+            return True
         except smtplib.SMTPAuthenticationError:
             logger.error("[Notifier] Gmail auth failed — use an App Password, not your regular password.")
+            return False
         except Exception as e:
             logger.error(f"[Notifier] Email send failed: {e}")
+            return False
 
     # ─────────────────────────────────────────────────────────────────
     # HTML helpers
@@ -656,16 +667,18 @@ class EmailNotifier:
             body_rows += self._section_header("Context")
             for k, v in context.items():
                 body_rows += self._row(str(k), str(v))
-        self.send(title if title != "Alert" else "Bot Alert",
-                  f"<div style='font-family:Arial,sans-serif;max-width:560px;"
-                  f"margin:0 auto;'>"
-                  f"<div style='background:#f59e0b;padding:12px 20px;"
-                  f"border-radius:8px 8px 0 0;'>"
-                  f"<h2 style='margin:0;color:#fff;font-size:15px;'>{title}</h2>"
-                  f"</div>"
-                  f"<table style='width:100%;border-collapse:collapse;"
-                  f"background:#fffbeb;border:1px solid #fcd34d;border-top:none;"
-                  f"border-radius:0 0 8px 8px;'>{body_rows}</table></div>")
+        return self.send(
+            title if title != "Alert" else "Bot Alert",
+            f"<div style='font-family:Arial,sans-serif;max-width:560px;"
+            f"margin:0 auto;'>"
+            f"<div style='background:#f59e0b;padding:12px 20px;"
+            f"border-radius:8px 8px 0 0;'>"
+            f"<h2 style='margin:0;color:#fff;font-size:15px;'>{title}</h2>"
+            f"</div>"
+            f"<table style='width:100%;border-collapse:collapse;"
+            f"background:#fffbeb;border:1px solid #fcd34d;border-top:none;"
+            f"border-radius:0 0 8px 8px;'>{body_rows}</table></div>",
+        )
 
     def error(self, message: str, *, title: str = "Error",
               context: dict | None = None):

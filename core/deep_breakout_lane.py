@@ -125,6 +125,7 @@ class DeepBreakoutLane:
         ohlcv_provider: Callable[[str, str, str, int], list],
         warehouse=None,
         entry_pause_check: Optional[Callable[[], tuple]] = None,
+        entry_authorizer: Optional[Callable[[], object]] = None,
         cfg: Optional[dict] = None,
         now_fn: Callable[[], float] = time.time,
         state_path=None,
@@ -143,6 +144,13 @@ class DeepBreakoutLane:
         self._ohlcv = ohlcv_provider
         self._wh = warehouse
         self._pause_check = entry_pause_check
+        if entry_authorizer is None:
+            from core.entry_policy import authorize_runtime_entry
+
+            entry_authorizer = lambda: authorize_runtime_entry(
+                STRATEGY_FAMILY, strategy_version=MODEL_VERSION
+            )
+        self._entry_authorizer = entry_authorizer
         self._now = now_fn
         self._state_path = Path(state_path or "data/deep_breakout_lane.json")
         # base -> open ts (s) of the last 4h bar already evaluated/acted on.
@@ -173,6 +181,17 @@ class DeepBreakoutLane:
         # removed. State-change logging lives in core.kill_switch.
         if not paused and entries_halted():
             paused, pause_reason = True, "kill_switch_active"
+
+        if not paused:
+            try:
+                authorization = self._entry_authorizer()
+                if not bool(getattr(authorization, "allowed", False)):
+                    paused = True
+                    pause_reason = str(
+                        getattr(authorization, "reason", "entry_policy_denied")
+                    )
+            except Exception as exc:
+                paused, pause_reason = True, f"entry_policy_error:{exc}"
 
         for symbol in self._cfg.get("symbols", ()):
             base = str(symbol).split("/")[0].split(":")[0]

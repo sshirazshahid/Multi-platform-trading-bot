@@ -1,0 +1,1814 @@
+
+===== PAGE 1 =====
+Fundamentals of Perpetual Futures∗
+Songrun He Asaf Manela Omri Ross Victor von Wachter
+First draft December 2022. This draft July 2024.
+Abstract
+Perpetual futures are the most popular cryptocurrency derivatives. Perpetuals
+offer leveraged exposure to their underlying without rollover or direct ownership.
+Unlike fixed-maturity futures, perpetuals are not guaranteed to converge to the
+spot price. To minimize the gap between perpetual and spot prices, long investors
+periodically pay shorts a funding rate proportional to this difference. We derive no-
+arbitrage prices for perpetual futures in frictionless markets and bounds in markets
+with trading costs. Empirically, deviations from these prices in crypto are larger than
+in traditional currency markets, comove across currencies, and diminish over time. An
+implied arbitrage strategy yields high Sharpe ratios.
+JEL Classification: G11, G12, G13
+Keywords: Perpetual futures, crypto, random-maturity arbitrage, funding rate
+∗We are grateful to Lin William Cong, Urban Jermann, Shimon Kogan, Stefan Nagel, Tim Roughgarden,
+Adrien Verdelhan, as well as conference participants at the 2024 Utah Winter Finance Conference and
+seminar participants at a16z Crypto, Bank of Israel, Hebrew University, Reichman University, the University
+of Chicago, and the Virtual Derivatives Workshop for their insightful feedback and helpful comments.
+Songrun He is at Washington University in St. Louis ( h.songrun@wustl.edu). Asaf Manela is at
+Washington University in St. Louis and Reichman University ( amanela@wustl.edu). Omri Ross is at
+University of Copenhagen ( omri@di.ku.dk), and Chief Blockchain Scientist at the eToro Group. Victor
+von Wachter is at University of Copenhagen (victor.vonwachter@di.ku.dk).
+arXiv:2212.06888v6  [q-fin.PR]  21 Aug 2024
+===== PAGE 2 =====
+1 Introduction
+Perpetual futures are, by far, the most popular derivative traded in cryptocurrency
+markets, generating a daily volume of more than$100 billion. Prior to the recent collapse
+of FTX, perpetual futures were among the most actively traded products on the exchange,
+with the now-bankrupt hedge fund Alameda Research taking the other side of many such
+leveraged trades. Despite their central role in crypto markets, there is relatively little work
+studying these derivatives. In this paper we ask: what are the theoretical fundamental
+values of perpetual futures, and how large are deviations from these fundamentals
+empirically?
+Perpetuals are derivatives that allow investors to speculate on or hedge against cryp-
+tocurrency price fluctuations using high leverage, without needing to acquire the cryp-
+tocurrencies or to roll them over. Like traditional fixed-maturity futures, at initiation,
+a long and short counterparty agree on an initial futures price without exchanging any
+money, other than posting margin with the exchange. Both parties can enter or exit the
+contract at any time, with profits or losses continuously calculated and allocated to each
+side’s margin account based on prevailing market prices.
+Unlike fixed-maturity futures, perpetuals do not expire. This feature enhances the
+liquidity of the contract, as there is no staggering of contracts with different maturities
+traded on the exchange, and only a single perpetual futures contract per underlying asset
+is listed. Moreover, this instrument does not require market participants to roll over their
+futures positions and is traded 24/7.
+Because they have no set expiration date, perpetuals are not guaranteed to converge to
+the spot price of their underlying asset at any given time, and the usual no-arbitrage prices
+for perpetuals are not applicable without additional restrictions. To minimize the gap
+between perpetual futures and spot prices, long position holders periodically pay short
+position holders a ’funding rate’ proportional to this gap to incentivize trades that narrow
+1
+===== PAGE 3 =====
+it. For example, when the futures price exceeds the spot price, arbitrageurs who borrow
+cash to long the spot and simultaneously short the futures would receive the funding rate.
+Their trades would tend to increase the spot price and decrease the futures price. A narrow
+gap means that perpetual futures offer effective exposure to variation in the spot price of
+the underlying asset to hedging and speculating investors. Typically, the funding rate is
+paid every eight hours and approximately equals the average futures-spot spread over
+the preceding eight hours. Note that the strategy just sketched, commonly referred to
+as ’funding rate arbitrage,’ is not risk-free even disregarding margin requirements and
+trading costs, simply because there is no predetermined expiration date when the trade
+would be unwound at a profit.
+We derive no-arbitrage prices for perpetual futures in frictionless markets and derive
+no-arbitrage bounds in markets with trading costs. The theoretical perpetual futures price
+is proportional to the spot price of the underlying, with a constant of proportionality that
+increases in the ratio of the interest rate to a constant that determines the intensity of the
+funding rate. The interest rate captures the cost of borrowing cash to finance holding the
+underlying, while the funding rate intensity captures the benefit of shorting the futures.
+Thus, intuitively, the future-spot spread is larger when the cash borrowing interest rate is
+large relative to the funding rate.
+Our derivation relies on a weaker notion of arbitrage that we call random-maturity
+arbitrage. As its name suggests, unlike traditional riskless arbitrage, we allow the strategy’s
+time-to-maturity to be random. At first glance, one might object that such prices are
+not truly based on riskless arbitrage. Note, however, that riskless no-arbitrage pricing
+is usually just a useful fiction (Pedersen, 2019). For example, in real-world futures
+markets, arbitrageurs must maintain a margin account during the entire period in which
+the arbitrage trade is open. Temporary worsening of apparent arbitrage opportunities can
+lead to liquidations and losses. As the saying goes, an arbitrageur must remain liquid
+longer than the market stays irrational. Thus, even arbitrage opportunities that appear to
+2
+===== PAGE 4 =====
+be riskless in theory, may be risky in practice.
+Our no-arbitrage prices provide a useful benchmark for perpetual futures and si-
+multaneously prescribe a strategy to exploit divergence from these fundamental values.
+Motivated by the theoretical understanding, we study the empirical deviations of the
+perpetual futures price from the spot. We find that the mean deviation from our
+benchmark is modest and statistically insignificant, which suggests that it is a useful
+benchmark for futures prices.
+Around this benchmark, however, perpetual futures often differ significantly from spot
+prices. The mean absolute deviation is about 60% to 90% per year across different cryp-
+tocurrencies, which is considerably larger than the deviations documented in traditional
+currency markets by Du, Tepper, and Verdelhan (2018). We find strong comovement
+of the futures-spot gap across different cryptocurrencies. This comovement can be due
+to commonality in funding and market liquidity faced by arbitrageurs who operate in
+multiple cryptocurrencies. Common sentiment could also drive the difference in futures
+demand relative to the spot. Overall, the deviation’s magnitude is comparable to our
+theoretic no-arbitrage bound calibrated to actual trading fees.
+Deviations decline on average about 11% a year, consistent with an increase in arbitrage
+capital and competition among arbitrageurs (Kondor, 2009). The narrowing gap provides
+an additional perspective on the downfall of Alameda Research and Three Arrows Capital.
+According to news reports and interviews, both hedge funds seem to have pivoted from
+such arbitrage activity around late 2021 to early 2022 and started taking more directional
+bets on cryptocurrencies, with both direct unhedged crypto holdings and investments in
+crypto startups. The large declines in crypto prices in 2022 subsequently exhausted their
+capital and led to their bankruptcies.1
+1See, for example, Forbes, November 19, 2022, on How Did Sam Bankman-Fried’s Alameda Research
+Lose So Much Money?, Odd Lots, November 17, 2022, on Understanding the Collapse of Sam Bankman-
+Fried’s Crypto Empire, and Hugh Hendry’s interview on December 3, 2022 of Kyle Davies on the Collapse
+of Three Arrows Capital.
+3
+===== PAGE 5 =====
+To understand the economics of the futures-spot spread, we consider a trading strategy
+motivated by the random-maturity arbitrage theory. Whenever the futures-spot spread
+exceeds the theoretical bound under certain trading cost tiers, we open the trading position
+and close it when the futures-spot spread returns to its theoretical relationship under no
+trading costs. We find that empirically, the random maturity arbitrage strategy generates
+a sizable Sharpe ratio even under high trading costs. For example, for Bitcoin perpetual
+futures, the strategy generates a Sharpe ratio of 1.8 under high trading costs typical of
+retail investors, and up to 3.5 for highly-active market makers who pay no such fees. The
+strategy’s performance is even better for Ether and other cryptocurrencies and delivers
+significant alphas relative to the 3-factor model of Liu, Tsyvinski, and Wu (2022) and the
+5-factor model of Cong, Karolyi, Tang, and Zhao (2022b).
+The strong performance of our simple trading strategy, which exploits deviations
+from the random-maturity no-arbitrage bounds we derive, provides compelling evidence
+for the usefulness of these bounds as a benchmark for perpetual futures prices. The
+strategy generates high Sharpe ratios, even for investors subject to the highest trading
+costs on Binance. This indicates that the no-arbitrage prices serve as an effective anchor for
+perpetual futures, with profitable random maturity arbitrage opportunities arising when
+market prices diverge significantly from these fundamental values. Thus, the success of
+the trading strategy underscores the practical value and validity of our theoretical no-
+arbitrage results.
+What explains these large no-arbitrage deviations? One natural explanation is that
+liquidity in crypto markets is insufficient for arbitrageurs to eliminate such violations. Our
+finding that the spreads decline over time is consistent with liquidity improving as these
+markets develop, and leaves open the possibility that they will narrow going forward. We
+also find, however, that past return momentum significantly explains the futures-spot gap
+with a time-series regression R2 of more than 50%. When past returns are high, futures
+tend to trade at a higher price relative to the spot. This indicates positive feedback or
+4
+===== PAGE 6 =====
+momentum trading behavior in the perpetual futures market. This correlation may linger
+even as crypto markets become more efficient.
+The existing literature on perpetual futures mainly focuses on empirical evidence. See
+e.g. Alexander, Choi, Park, and Sohn (2020), De Blasis and Webb (2022), Ferko, Moin,
+Onur, and Penick (2022), and Streltsov and Ruan (2022). Christin, Routledge, Soska, and
+Zetlin-Jones (2022) present a novel study on the strategy of longing the spot and shorting
+the perpetual futures to understand the demand pressure in the market. They document a
+significant return to this trading strategy and attribute the profits to differences of opinion
+and leverage constraints in the market. Our paper provides a general explanation for their
+findings as perpetual futures are more expensive relative to the theoretical no-arbitrage
+price for most of the recent sample period across major cryptocurrencies. Therefore,
+longing the spot and shorting the futures would be consistent with arbitrage trading
+directions. Angeris, Chitra, Evans, and Lorig (2022) provide a theoretical no-arbitrage
+analysis of perpetuals, which relies on a strong assumption that the payoff from the
+perpetual is a fixed function of the underlying spot price. Ackerer et al. (2023) derive
+no-arbitrage prices for various perpetual contracts in both discrete and continuous-time
+by assuming the existence of an equivalent martingale measure. We further relate our
+work to both papers below. Overall, compared to the existing literature, we illustrate the
+fundamental mechanism behind the perpetual design and derive theoretical no-arbitrage
+prices and bounds for this instrument in the presence of trading costs.
+Also related is a recent literature on fixed maturity futures in the crypto market.
+Schmeling, Schrimpf, and Todorov (2022) provide a comprehensive analysis of the carry
+of fixed-maturity crypto futures, with the carry defined following the general definition
+of Koijen, Moskowitz, Pedersen, and Vrugt (2018). They document volatile convenience
+yields for fixed-maturity crypto futures and attribute this to trend-chasing small investors
+and the relative scarcity of arbitrage capital. Cong, He, and Tang (2022a) provide a
+novel link of the volatile convenience yield to the staking, service flow, and transaction
+5
+===== PAGE 7 =====
+convenience of the underlying tokens. They show that the large deviation from uncovered
+interest rate parity can be reconciled with transaction convenience. Our paper focuses
+on perpetual futures rather than fixed maturity futures and extends fixed-maturity to
+random-maturity no-arbitrage pricing.
+More broadly, our paper contributes to the understanding of frictions and arbitrage
+in cryptocurrency markets. Makarov and Schoar (2020) study price deviations across
+exchanges. They find large gaps across countries, highlighting the important role played
+by capital controls and slow-moving arbitrage capital as in Duffie (2010). Our analysis
+focuses on the price wedge between the spot and the futures market. We find that even
+within an exchange, futures prices deviate from their theoretical arbitrage-free values.
+These results indicate there are significant limits to arbitrage as in Gromb and Vayanos
+(2018) for cryptocurrencies in the early years. Finally, our finding that deviations from the
+no-arbitrage benchmark in crypto markets are highly correlated across currencies suggests
+that a common risk factor drives this variation as documented by Lustig, Roussanov, and
+Verdelhan (2011) in traditional currency markets.
+The rest of the paper is organized as follows: Section 2 provides the institutional
+details and history of perpetual futures. Section 3 presents the no-arbitrage analysis of the
+perpetual futures market and derives the theoretical price of perpetual futures. Section
+4 demonstrates the empirical futures-spot deviation and presents the simple theory-
+motivated trading strategy that can exploit the arbitrage opportunity. Section 5 provides
+some explanation for the deviation between futures and the spot. Section 6 concludes.
+2 An Introduction to Perpetual Futures
+The idea of perpetual futures was first introduced by Shiller (1993). The goal was to set
+up a perpetual claim on the cash flows of an illiquid asset. For example, the underlying
+6
+===== PAGE 8 =====
+illiquid asset could be a house that generates rents as cash flows. The purpose of the
+perpetual futures is to enable price discovery for the underlying with an illiquid or hard-
+to-measure price. Perpetual futures have no expiration date but cash is exchanged between
+the long and the short side: after buying the perpetual futures, the long side is entitled
+to receive the flow cash flow from the short side and they settle the price difference when
+exiting the position.
+Figure 1 Total trading volumes of perpetual futures across exchanges
+The figure displays the 7-day moving average daily traded volume for perpetual futures across all
+exchanges in blue. The median daily volume is$17.8 bn. (2020), $132.0 bn. (2021) and $101.9 bn.
+(2022). This translates to a yearly volume of $8,551 bn. (2020), $51,989 bn. (2021) and $39,306
+bn. (2022) respectively. Additionally, the grey line depicts the ratio between the traded volume in
+perpetuals and spot markets. In 2022 the Perpetual markets are consistently trading between 2x or
+3.5x the spot volume. The data is obtained from CoinGecko, a crypto data specialist. We exclude
+exchanges that are known for misrepresenting data (e.g. forms of wash trading).
+Perpetual futures in crypto markets similarly have no expiration date and cash is
+exchanged between the long and the short side, but their purpose is different from Shiller’s
+original idea. First, unlike, e.g. real estate market, crypto has no inherent dividend or
+cash flow. Second, the price discovery argument of Shiller is most applicable to settings
+where spot prices are difficult to measure. Crypto spot prices, however, can be measured
+from active trading on different exchanges, and decentralized exchanges such as Bancor
+(Hertzog et al., 2017) or Uniswap (Adams et al., 2021) offer price discovery for assets
+7
+===== PAGE 9 =====
+with minimal liquidity. The major role perpetual futures play in the crypto space is to
+offer an effective leveraged trading vehicle to hedge or speculate the underlying spot price
+movement, which makes the market more complete. It also serves as an effective tax
+payment optimization tool for investors.
+Crypto perpetual futures were first introduced by BitMEX in 2016, which has gained
+great popularity in the crypto space since its inception. It initially served as an effective
+hedging tool for crypto miners. It was later adopted by crypto speculators interested in
+leveraged exposure. Nowadays, based on data from CoinGecko, the median total daily
+trading volume of perpetual futures across all exchanges is 101.9 billion in the year 2022
+which is about 2× to 3× the total spot trading volume across these exchanges. Figure 1
+presents the 7-day moving average of the total trading volume of perpetual futures across
+all exchanges. We see a significant rise in trading of perpetual futures around January
+2021 and the total volume stabilizes at a level above$100 billion per day following the rise.
+Cong, Li, Tang, and Yang (2022c) document significant wash trading behavior among
+crypto exchanges because of competition, the ranking mechanism, and lack of regulation.
+They estimate that over 70% of crypto trading volume is not real. Amiram, Lyandres, and
+Rabetti (2021) confirm this conclusion using new data and an extended methodology.
+Therefore, in calculating trading volume, we exclude exchanges that are known to
+misrepresent data.
+A key feature of crypto perpetual futures is the funding rate, which is the cash
+exchanged between the long and short counterparties. Its goal is to keep the futures
+price close to the underlying spot so that the futures can be an effective hedging tool
+for spot price movement. The funding rate is typically paid every 8 hours. Its value is
+approximately a weighted average of the prior 8 hours’ price gap of the futures and the
+spot. If the futures price is above the spot, the funding rate will be positive, meaning the
+long side of the futures needs to pay the short side. This incentivizes traders to short the
+8
+===== PAGE 10 =====
+Figure 2 Bitcoin annualized funding rate across exchanges
+The figure presents the 7-day moving average annualized funding rate for Bitcoin (BTC) across
+exchanges. The data is obtained from Glassnode, an analytics platform. The data covers two
+major market turbulences: the COVID stock market crash from February to April 2020 and the
+FTX insolvency in November 2022. The FTX collapse led to significant negative funding rates on
+all solvent exchanges. Thus, the perpetual future prices were lower than the spot prices on the
+solvent exchanges. Vice versa on the insolvent FTX. The funding rates become more volatile after
+the event, indicating increased uncertainty for the market participants.
+futures, and in doing so, to move its price back in line with the spot. On the other hand,
+when the futures price is below the spot, the funding rate turns negative, which means the
+short side needs to pay the long side. Therefore, the funding rate is the key mechanism
+keeping the futures price close to the spot price.2 Note that perpetual futures cannot be
+replicated by rolling over 8-hour maturity futures. For the latter, every 8 hours, the price
+is guaranteed to converge to the underlying spot, while for the perpetual futures this is
+not the case.
+Figure 2 presents the annualized 7-day moving average of Bitcoin perpetual funding
+rates across leading exchanges from January 2020 to December 2022. The funding rate is
+positive when the futures-to-spot spread is positive, and negative otherwise. Funding
+rates tend to be similar across exchanges due to cross-exchange arbitrage activity, but
+2https://www.binance.com/en/support/faq/360033525031 provides a detailed explanation of how
+the funding rate is calculated. We summarize the mechanism in Appendix B.
+9
+===== PAGE 11 =====
+can diverge during extreme liquidity episodes. During March 2020, as COVID-19 started
+to spread and liquidity evaporated, funding rates turned substantially negative in most
+exchanges. Funding rates turned highly positive during the crypto bull run of early 2021.
+The last episode highlighted is the collapse of FTX, which was the 4th largest crypto
+exchange at the time. The figure shows that Bitcoin futures prices were substantially
+higher than spot prices at FTX, but the opposite was true on other exchanges. This
+pattern is consistent with FTX investors liquidating their short futures positions quickly,
+either voluntarily to reduce their exposure to the failing exchange, or involuntarily as the
+exchange liquidated their underfunded positions.
+3 Arbitrage in Perpetual Futures
+We next derive no-arbitrage prices for perpetual futures prices relative to spot prices.
+Unlike traditional futures, perpetual futures have no expiration date. To analyze arbitrage
+in this market, we extend the traditional notion of risk-free arbitrage, where arbitrageurs
+have a guaranteed positive payoff at a certain time in the future. We first describe the
+payoff structure of perpetual futures. We then introduce a generalized notion of an
+arbitrage opportunity with a certain positive payoff but at an uncertain future time.
+Definition 1(Perpetual futures). A perpetual futures contract with price{Ft}∞
+t=0 written on an
+underlying asset with spot price {St}∞
+t=0 is a swap agreement between the long and the short side.
+There is no cost to open the position. Once open, both the long side and the short side can terminate
+their position at any time t. To stay in the contract, both sides have to meet two requirements. (1)
+For each unit of the perpetual, the long and short sides must exchange an Fs−adapted cash-flow
+κ(Fs − Ss)ds, s ∈ (0,t), referred to as the funding payment. κ is a scaling parameter determining
+the magnitude of the funding rate relative to the price gap. If the value is positive, the long pays
+the short, and vice versa. (2) Both sides need to post mark-to-market margins to cover any losses
+in their margin accounts.
+10
+===== PAGE 12 =====
+This definition is an approximation of real-world perpetual futures. 3 In most ex-
+changes, the funding payment for perpetual futures is paid every 8 hours and approx-
+imately equals the average difference between the futures price and the spot over the
+8 hours (480 minutes or 1
+1095 years). If we measure time units in years, the cumulative
+funding rate payment during an 8-hour period is:
+Z t+1/1095
+t
+κ(Fs − Ss)ds.
+Consider the case when Ft − St = G, which is constant over the 8-hour interval. In the real
+world, the funding rate payment would equalG while in our model, the number is κG
+1095.
+To equalize the two, we haveκ = 1095.
+The traditional notions of arbitrage typically consider a guaranteed positive payoff at
+a certain future date.
+Definition 2 (Riskless arbitrage). A riskless arbitrage opportunity is defined with respect to a
+payoff x at a certain future time τ and its price p(x). If the following conditions are satisfied: (1)
+x ≥ 0 almost surely, (2) x > 0 with some positive probability, and (3) its price satisfies p(x) ≤ 0,
+then this payoff is an arbitrage opportunity (Cochrane, 2009).
+There is no certain future time, however, when a perpetual futures expires and its price
+is guaranteed to converge to some fixed function of the spot price. Therefore, a generalized
+notion of arbitrage is required. Suppose the risk-free rate is constant. We define random-
+maturity arbitrage opportunities as zero-cost strategies with a guaranteed positive payoff
+at a bounded uncertain future time. Stated formally:
+Definition 3 (Random-maturity arbitrage). A random-maturity arbitrage opportunity is
+defined with respect to a random payoff x at a bounded future random time ˜τ < ¯T, and its price
+3To avoid price manipulation and volatile funding payments, Binance applies a clamp function to funding
+rate payments when the deviation is small. We provide a thorough discussion of the funding rate mechanism
+in Appendix B.
+11
+===== PAGE 13 =====
+p(x). If the following conditions are satisfied: (1)x ≥ 0 almost surely, (2)x > 0 with some positive
+probability, and (3) its price satisfies p(x) ≤ 0, then this payoff is a random-maturity arbitrage
+opportunity.
+Definition 3 generalizes traditional arbitrage in the sense that there is a guaranteed
+positive payoff but at an uncertain future time. The following corollary specializes this
+definition for perpetual futures:
+Corollary 1. In the perpetual futures market, if a strategy (1) has 0 cost at time 0, and (2) for
+any price path of the futures and the spot,{Ft}∞
+t=0 and {St}∞
+t=0, there exists a bounded unwinding
+time ˜τ such that the strategy’s discounted payoff is positive, then this strategy is a random-maturity
+arbitrage.
+We next show that when there is no random-maturity arbitrage, the futures price is a
+fixed constant times the spot price under the two following assumptions:
+Assumption 1. The risk-free short rater in the cash market and the instantaneous interest rate on
+the underlying asset r′ are constant.
+Assumption 2. The gap between the perpetual futures and its fundamental price is bounded:
+supt |Ft(ω) − λ St(ω)| < M, ∀ ω, where λ is a proportionality constant implied by Equation(1).
+Assumption 3. The funding rate is larger than the short rate in the cash market:κ > r.
+Assumption 1 guarantees that there is no roll-over risk for the arbitrageurs. Assump-
+tion 2 is a no-bubble condition, which says that the largest deviation of perpetual futures
+from its no-arbitrage price can be bounded by M. Assumption 3 states that the design
+of the contract needs to guarantee that the reward for convergence trade is larger than
+deploying the capital to the risk-free asset. With these three assumptions, we can state our
+result as follows.
+12
+===== PAGE 14 =====
+Proposition 1 (No-arbitrage price). Under Assumptions 1, 2, and 3, there is an absence of
+random-maturity arbitrage opportunities if and only if
+Ft = κ
+κ − (r − r′)St. (1)
+Proof. We first show when there are no random maturity arbitrage opportunities, the
+perpetual futures price must be given by Equation (1). We establish this using the
+conjecture and verify approach.
+Firstly, conjecture that the equilibrium futures price is a linear function of the spot:
+Ft = λ St, where λ is the parameter to be determined. Consider the following two scenarios
+in Table 1. (1)F0 > λ S0; (2)F0 < λ S0. We show in the first case that arbitrageurs would long
+the spot and short the futures because this is a random-maturity arbitrage opportunity. We
+then show that the opposite strategy is optimal in the second case.
+For the payoff given in Table 1, it is worth noting that the mark-to-market margin
+requirements indicate any interim futures price changes will affect the payoff of the trader
+since she needs to post enough margin to cover losses or can invest the surplus in margin
+account in risk-free assets. Moreover, in the cash market, the trader needs to roll over the
+short-term debt to finance the position in the spot market. The interest paid from holding
+the underlying asset depends on the spot price.
+To start off, we need to fixλ. Given our conjecture, ifFt = λ St, both the first and second
+strategies in Table 1 should have0 payoff. This condition gives us the following equation:
+λ = 1 + (r − r′)λ
+κ =⇒ λ = κ
+κ − (r − r′).
+Next, given this λ, we verify that the deviation shown in Table 1 implies the existence
+13
+===== PAGE 15 =====
+F0 > λ S0 F0 < λ S0
+Actions Long λ spot, short 1 futures Long 1 futures, short λ spot
+Futures 0 0
+Time 0 Spot −λ S0 +λ S0
+Cash +λ S0 −λ S0
+Time t
+Futures −
+R t
+0 e−rsdFs
+R t
+0 e−rsdFs
+Funding κ
+R t
+0(Fs − Ss)e−rsds −κ
+R t
+0(Fs − Ss)e−rsds
+Spot λ
+R t
+0 e−rs(dSs + r′Ssds) −λ
+R t
+0 e−rs(dSs + r′Ssds)
+Cash −λ
+R t
+0 e−rsrSsds λ
+R t
+0 e−rsrSsds
+Payoff −
+R t
+0 e−rsd(Fs − λ Ss)+
+R t
+0 e−rsd(Fs − λ Ss)−
+κ
+R t
+0 e−rs
+
+Fs −
+
+1 + (r−r′)λ
+κ
+
+Ss
+
+ds −κ
+R t
+0 e−rs
+
+Fs −
+
+1 + (r−r′)λ
+κ
+
+Ss
+
+ds
+Table 1 Discounted payoffs to arbitrage strategies in perpetual futures and spot markets
+This table presents the costs and benefits of two arbitrage trading strategies: (1) when F0 > λ S0,
+long λ spot and short 1 futures; (2) whenF0 < λ S0, long 1 futures and shortλ spot. In the last row,
+the payoff from exiting the position is the discounted payoff from futures and spot price changes,
+proceeds from the cash market, and the funding rate.
+of random maturity arbitrage opportunities. In what follows, we denote the deviation by:
+us ≡ Fs − κ
+κ − (r − r′)Ss.
+We can then write the payoffs of the two strategies in Table 1 respectively as:
+−
+Z t
+0
+e−rsdus + κ
+Z t
+0
+e−rsusds = −e−rtut + u0 + (κ − r)
+Z t
+0
+use−rsds,
+Z t
+0
+e−rsdus − κ
+Z t
+0
+e−rsusds = e−rtut − u0 − (κ − r)
+Z t
+0
+use−rsds,
+where the equality follows from integration by parts.
+Scenario 1: If F0 > λ S0, consider the first strategy of longing λ spot and shorting 1
+futures. We want to show that for any price path of the perpetual futures and the spot,
+there exists a bounded future unwinding timet such that the strategy’s payoff is positive,
+which would mean this is a random-maturity arbitrage. To prevent the arbitrageur from
+14
+===== PAGE 16 =====
+making a profit, the payoff must be nonpositive at all timest:
+−e−rtut| {z }
+spread at unwinding
++ u0|{z}
+initial spread
++ (κ − r)
+Z t
+0
+use−rsds
+| {z }
+funding payments
+≤ 0. (2)
+Consider the first time period when the deviation is positive. That is,us > 0, s ∈ (0, min{t >
+0, ut = 0}). Rearrange the terms, the inequality becomes:
+e−rtut ≥ u0 + (κ − r)
+Z t
+0
+use−rsds. (3)
+Let ut denote a process, implicitly defined by e−rtut = u0 + (κ − r)
+R t
+0 use−rsds, which
+provides a lower bound for all processesut satisfying inequality (3). Solving this integral
+equation, we have:
+ut = eκtu0.
+From the above expression, there exists a time ¯T = log(M)−log(u0)
+κ , such that ut ≥ M when
+t ≥ ¯T. This implies that ut ≥ M when t ≥ ¯T, which violates Assumption2.
+Therefore, ut cannot stay positive in(0, ¯T ). However, if the deviation ever hits0 during
+t ∈ (0, ¯T ), this would also make positive profit for the arbitrageur. Consider the first time
+the deviation hits 0. The payoff in Equation (2) is positive. In sum, if F0 > λ S0, the
+proposed strategy is a random maturity arbitrage.
+Scenario 2: Next, if F0 < λ S0, i.e. u0 < 0, consider the second strategy of longing 1
+futures and shorting λ spot. As before, we want to show that for this strategy under any
+price path of the perpetual futures and the spot, there always exists a bounded future time
+t such that the strategy payoff is positive, i.e. this is a random maturity arbitrage. Similarly,
+to prevent the arbitrageur from making a profit, the payoff needs to satisfy:
+e−rtut ≤ u0 + (κ − r)
+Z t
+0
+use−rsds.
+15
+===== PAGE 17 =====
+Consider the first time period when the deviation is negative, i.e. us < 0, s ∈ (0, min{t >
+0, ut = 0}. e−rt ¯ut = u0 + (κ − r)
+R t
+0 ¯use−rsds provides an upper bound for all processes
+satisfying the inequality. This is the same integral equation as we see in the first case.
+We have:
+¯ut = eκtu0.
+From the above expression, there exists ¯T = log(M)−log(−u0)
+κ such that ¯ut < −M when t ≥ ¯T.
+This implies that ut ≤ −M when t ≥ ¯T, which breaks Assumption 2.
+Similar to scenario 1, ut cannot stay negative in (0, ¯T ). However, if it ever hits 0 in the
+period, exiting the position the first time the deviation hits0 would be a profitable strategy
+for the arbitrageur. Therefore, if F0 < λ S0, the proposed strategy is a random maturity
+arbitrage.
+In sum, when there is an absence of random maturity arbitrage strategies, the price of
+perpetual futures is a fixed constant times the spot price given in Equation (1).
+For the opposite direction of proof, when the futures and spot prices satisfy Equation
+1, we need to prove that there is no random maturity arbitrage opportunity in the market.
+This can be seen easily as any long-short trading strategies would be exposed to the risk
+in the spot market as long as the proportion is not the same asλ. Longing or shorting the
+spot market is clearly not a random maturity arbitrage opportunity as the time to make a
+positive arbitrage profit is not bounded for the arbitrageur.
+To gain an intuition for this result, consider the three terms of Equation 2. The first
+term is the spread at unwinding discounted to the present. The second term is the initial
+spread. The last term is the present value of cumulated funding payments from initiation
+to unwinding. The last two terms account for gains to the arbitrageur in this scenario.
+The first term is the source of tension here. For fixed-maturity futures, this spread is
+guaranteed to be zero at expiration. However, an arbitrageur in perpetual futures faces
+16
+===== PAGE 18 =====
+the risk that when they wish to unwind the trade, the spread may be arbitrarily large.
+Our key insight is that a positive and even modestly large spread can still leave the
+arbitrageur with a positive payoff because funding payments also increase with the spread.
+As long as the spread does not diverge to infinity, there will be some future bounded
+unwinding time t when the accumulated funding rate payments overcome any finite
+potential losses at unwinding.
+Note that if we relax the assumption that the short rate is constant for arbitrageurs,
+this may introduce some additional risk to the four parts of terms in Table 1: (1) mark-to-
+market changes in futures price; (2) funding-rate payment; (3) reinvestment in the spot
+market; (4) rollover of the short-term debt. This extension also relates to the literature
+examining the differences between futures and forwards in the context of stochastic
+interest rates, such as Cox et al. (1981) and Grinblatt and Jegadeesh (1996). They show
+that marking-to-market introduces an additional term in the futures price related to the
+covariance between the underlying asset and interest rate. Empirically, however, the
+volatility in the short rate is considerably smaller than the volatility in the deviation from
+futures to its fundamental price. Moreover, the changes in the short rate have opposite
+effects on payment from the cash market and the funding payment, as well as mark-to-
+market margin in the futures market and reinvestment in the spot market. Therefore, we
+abstract from short-rate randomness here but note it is an interesting avenue for future
+work.
+Empirically, the arbitrageurs face trading costs when opening or terminating their
+positions. Suppose they face a round-trip trading cost ofC. We can derive the no random
+maturity arbitrage bounds for perpetual futures.
+Proposition 2 (No-arbitrage bound). Under Assumption 1 and 2, when there is a round-
+trip trading cost C of executing the trading strategy, the absence of random-maturity arbitrage
+opportunities implies that perpetual futures price will lie within the following bound relative to the
+17
+===== PAGE 19 =====
+spot:
+|Ft − κ
+κ − (r − r′)St| ≤C. (4)
+Proof. Similar to the proof of proposition 1, consider the following two scenarios.
+Scenario 1: If F0 > λ S0 +C, then we show the strategy of longingλ spot and shorting
+1 futures is a random-maturity arbitrage strategy with trading cost. To prevent the
+arbitrageur from making a profit, now the payoff needs to satisfy:
+−e−rtut + u0 −C + (κ − r)
+Z t
+0
+use−rsds ≤ 0.
+Following the same argument as in the proof of proposition 1, we can find the lower bound
+process ut as:
+ut = (u0 −C)eκt.
+When u0 > C, this process will explode toward M at an exponential rate. Following the
+same argument as in proof proposition 1, the proposed trading strategy is a random-
+maturity arbitrage strategy.
+Scenario 2: If F0 < λ S0 −C, then we show the strategy of longing 1 futures and shorting
+λ spot is a random-maturity arbitrage strategy despite the trading cost. Now, the payoff
+needs to satisfy the following condition to prevent the arbitrageur from making a profit:
+e−rtut − u0 −C − (κ − r)
+Z t
+0
+use−rsds ≤ 0.
+Similar to the argument in scenario 2 of proposition 1, we can find the upper bound process
+as:
+¯ut = (u0 +C)eκt.
+When u0 < −C, this process will explode towardM at an exponential rate. With the same
+argument, the proposed trading strategy is again a random-maturity arbitrage strategy.
+18
+===== PAGE 20 =====
+In sum, with trading cost, the absence of random maturity arbitrage opportunity
+implies that the futures price lies within a bound relative to the spot: λ St − C ≤ Ft ≤
+λ St +C.
+In the presence of trading costs, when the deviation of the perpetual futures price
+from λ St, is larger than the round-trip trading costs C, arbitrageurs would have a strong
+incentive to trade perpetual futures toward the price λ St. Proposition 2 also prescribes
+a trading strategy to exploit the futures-spot divergence in markets with different levels
+of trading costs. In the next section, we provide an empirical analysis of the futures-spot
+deviation and present arbitrage trading strategies motivated by our theory.
+Before turning to the data, we pause to relate our results to two recent theoretical
+contributions. Angeris et al. (2022) consider an inverse problem to our setting. It assumes
+there is no arbitrage and that the perpetual futures price is a function of the spot, and
+derives the funding rate process that is consistent with the pricing formula. This takes
+a perspective of security design. However, empirically, funding rate mechanisms are
+predetermined and fixed for traders. Moreover, because of the limits of arbitrage, futures
+prices can deviate from the fixed function set by the designer. Our approach prescribes
+a strategy to exploit divergence from the fundamental price and offers a closer alignment
+with real-world trading conditions.
+Compared to Ackerer et al. (2023), our initial draft, disseminated December 2022 (see
+https://arxiv.org/abs/2212.06888v1), considers the case when the underlying pays
+no interest r′ = 0. It shows that the absence of random-maturity arbitrage opportunities
+implies the price of perpetual futures lies within the following bound relative to the spot:
+|Ft −
+
+1 + r
+κ
+
+St| ≤C, (5)
+19
+===== PAGE 21 =====
+and that in the case without trading costs, the price would be
+Ft =
+
+1 + r
+κ
+
+St. (6)
+Ackerer et al. (2023, https://arxiv.org/abs/2310.11771v1), dated October 2023,
+uses a different set of assumptions and solution method to derive no-arbitrage prices for
+more general perpetual contracts including the one we study. In their paper, the price
+relevant for the case we analyzed is:
+Ft = κ
+κ − r St. (7)
+Their paper further pointed out an inconsistency in the cash flow specification in our
+original derivation. After correcting this issue, Equation (1) above is consistent with their
+derivation in this case, and they deserve credit for deriving the correct formula first.4
+While different, to a first-order approximation, equations (6) and (7) are equivalent.
+Because our empirical analysis relies on first-order approximations for the deviations, the
+correction did not change any of our estimators. Moreover, the difference between the two
+benchmarks is negligible in practice becauseκ is much larger than r.
+An advantage of our derivation is that it makes explicit the arbitrage trading strategy
+in case of deviations and provides bounds in the case of trading costs which we use in our
+empirical analysis. Another difference is that we assume that the deviations between the
+futures and spot are bounded, whereas Ackerer et al. (2023) assume that a transversality
+condition holds such that the futures price (and therefore the spot) grows at a slow enough
+rate relative to the funding payments intensityκ. But even under their assumptions, it can
+be shown that strategies aimed at arbitrage of deviations from their benchmark prices are
+necessarily random-maturity arbitrage strategies, as we emphasize here.
+4We thank Damien Ackerer, Julien Hugonnier, and Urban Jermann for the comments that helped clarify
+the issue.
+20
+===== PAGE 22 =====
+4 Data and Empirical Analysis
+We conduct an empirical analysis of perpetual futures arbitrage strategies. We first
+describe the data. We then measure the deviations of the crypto futures-spot spread
+from the no-arbitrage benchmark. Finally, we implement a trading strategy that exploits
+deviations from random-maturity no-arbitrage bounds and quantify the gains from this
+strategy net of trading costs.
+4.1 Data
+We focus on the five largest cryptocurrencies excluding stablecoins: Bitcoin (BTC), Ether
+(ETH), BNB (BNB), Dogecoin (DOGE), and Cardano (ADA) with a total market cap of
+$1.83 trillion, which account for 73.2% of the total market share of the Crypto market by
+March 2024.
+For each token, we obtain perpetual futures and spot prices at a 1-hour frequency from
+Binance. Binance is by far the leading exchange in the crypto realm. Another major benefit
+of using the Binance data is: nearly every part of our trading strategies can be completed
+within the same platform without delay in transferring funds. As such, it approximates
+the real-world investment opportunities faced by traders.
+We retrieve the perpetual funding rates from Binance. The funding rate is paid every
+8 hours on Binance. So we have futures and spot prices every hour and realized funding
+rate payment at 8:00, 16:00, and 0:00 GMT each day. The perpetual and spot tradings occur
+24 hours per day and 7 days a week so there are no after-market hours in this market.
+We get the earliest possible data on perpetual futures trading from Binance. The table
+below lists the starting and ending dates of our data for each cryptocurrency. Our data
+ends on 2024-03-11, covering the fallout of the FTX.
+21
+===== PAGE 23 =====
+Asset Start date End date N
+BTC 2020-01-08 2024-03-11 36,578
+ETH 2020-01-08 2024-03-11 36,578
+BNB 2020-02-10 2024-03-11 35,777
+DOGE 2020-07-10 2024-03-11 32,152
+ADA 2020-01-31 2024-03-11 36,017
+Table 2 Sample descriptions
+This table presents the sample start and end dates for the five cryptocurrencies and their total
+number of observations.
+We obtain trading costs from Binance’s website5. In general, trading costs for the spot
+market are significantly larger than those for the perpetual futures for similar trading
+volume because futures are typically traded with leverage. Fee tiers are attributed to
+the 30-day trading volume. We attribute high trading costs with a 30-day spot trading
+volume above$1 million and futures trading volume above$15 million (small individual
+trader). Medium trading costs are attributed to a 30-day spot trading volume above$150
+million and futures trading volume above$1 billion (small funds). Low trading costs are
+attributed to a 30-day spot trading volume above $2 billion and futures trading volume
+above 12.5 billion (large funds). Zero fees can be negotiated with customized contracts,
+for example, for market makers. We consider trading costs for makers instead of takers
+because institutions typically trade maker orders.6
+Table 3 presents the specification of different trading costs. It also shows the random-
+maturity arbitrage bound for the deviation between the perpetual futures and the no-
+arbitrage price ( ρl and ρu). The bounds become wider as the trading costs increase.
+Detailed explanations of the trading costs specifications are also provided in appendix
+Figure 6 and Figure 7.
+5https://www.binance.com/en/fee/trading provides data on trading fees in perpetual futures and the
+spot market
+6Takers trade market orders while makers trade limit orders. Takers take liquidity from the market while
+makers make the market or provide liquidity to the market.
+22
+===== PAGE 24 =====
+Fee tier Spot Futures ρl ρu
+No 0% 0% 0.0% 0.0%
+Low 0.0225% 0.0018% -53.2% 53.2%
+Medium 0.045% 0.0072% -114.4% 114.3%
+High 0.0675% 0.0144% -179.5% 179.2%
+Table 3 Trading costs tiers
+Fee tiers are assigned based on past 30-day trading volume. High fees correspond to a 30-day
+trading volume above$1mn in spot and above$15mn in perpetuals, typically an individual trader.
+Medium fees attribute to a 30-day trading volume above $150mn in spot and above $1bn in
+perpetuals (small funds). Low fees are attributed to a 30-day trading volume above$2bn in spot
+and above $12.5bn in perpetuals (large funds). The no-fee tier can be negotiated with customized
+contracts, for example for market makers. We also report the theory implied no arbitrage bound (ρl
+and ρu) for ρ under different trading cost specifications. They are calculated using the following
+formulas: ρl = κlog (1 −C), ρu = κlog (1 +C), where C is the round-trip percentage trading costs of
+the long-short strategy of perpetual and spot.
+In addition to the direct trading fees, traders also face bid-ask spread and price impact
+costs in our arbitrage strategies. To assess the importance of such indirect trading costs,
+we attain from Kaiko a high-frequency sample with one month of order book snapshots
+taken every 30 seconds. With this data, we estimate that the average bid-ask spread for
+perpetual futures is less than 0.05 bps, and the price impact of a trade with a size equal to
+0.5 million is less than 0.3 bps. Combined, these indirect costs are less than 0.35 bps, which
+is substantially smaller than our direct trading fees. Therefore, we focus our analysis on
+the direct trading fees, as they are the dominant form of trading costs for our arbitrage
+strategies.
+To measure the deviation from the no-arbitrage price, we also obtain the interest rate
+data from Aave, a leading open-source DeFi liquidity protocol. Customers on Aave
+can either be suppliers or borrowers of cryptocurrencies. Because of the anonymity
+and decentralization of the DeFi system, all borrowings are over-collateralized and the
+collateral can serve as an additional supply to the system for borrowing. The customers
+can also supply spare currencies to the system to earn an interest rate. The supply
+23
+===== PAGE 25 =====
+interest rate is typically different from the borrowing interest rate. Both interest rates and
+their wedge are determined algorithmically based on the market condition of supply and
+demand. We use interest rates from this platform because we believe it is a good proxy for
+the funding condition in the crypto market. Our results are robust if we use the interest
+rate from the traditional financial market.7
+Our theory indicates using a risk-free rate available to the arbitrageurs. Therefore, we
+consider the interest rates on the stablecoins, which are not subject to volatile spot price
+movement and are the currency of denomination for perpetual futures margins. There are
+three major stablecoins traded on Aave: USDT, USDC, and DAI. To get a robust measure
+of the risk-free rate, we take an average of the three interest rates to arrive at our final
+risk-free supply and borrowing rate for the arbitrageurs.
+We plot the time-series evolvement of the interest rate in the appendix Figure 8. During
+the early years, we see higher interest rate volatility due to the funding liquidity of the
+DeFi platform. In later samples, interest rates are more stable and approach interest rates
+in traditional financial markets.
+Our interest rate data starts from 2020-01-08. Therefore, for coins with perpetual data
+available before the time (BTC and ETH), we begin the analysis from 2020-01-08. For
+other coins (BNB, DOGE, ADA), we begin the analysis from the time when they have
+data available.
+7We also run our analysis using daily T-bill rates obtained from Kenneth French’s website at https:
+//mba.tuck.dartmouth.edu/pages/faculty/ken.french/Data_Library/f-f_factors.html. The results
+are very close to ones using crypto market supply and borrowing rates.
+24
+===== PAGE 26 =====
+4.2 Deviations of perpetual futures from no-arbitrage benchmarks
+The focus of our empirical analysis is the annualized deviation ρ, defined as the interest
+rate spread that would rationalize an observed future-spot spread:
+F = S κ
+κ − (r + ρ − r′).
+For example, an estimatedρ of one percentage point would mean that borrowing costs in
+the cash market faced by arbitrageurs would have to be one percentage point higher than
+the prevailing interest rater in the cash market for the futures-spot gap to be arbitrage-free.
+Using f and s to denote log(F) and log(S) respectively, we obtain the following
+approximate equation for ρ:
+ρ = κ
+
+1 − e−( f −s)
+
+− (r − r′) ≈ κ( f − s) − (r − r′). (8)
+This definition is the same in spirit to Du et al. (2018), who measure covered interest
+parity (CIP) deviations with the wedge that would equate the dollar borrowing rate and
+the synthetic dollar borrowing rate. For the rest of our paper, we focus on the approximate
+measure and note that, in our setting, no interest is paid on spot crypto holdings (r′ = 0).8
+Each hour, we calculateρ defined in Equation (8) using data on the perpetual futures
+price, spot price, and the crypto risk-free interest rate. When the perpetual futures price
+is above the spot, an arbitrageur would short the futures and long the spot, and would
+finance her position by borrowing in the cash market (as is shown in Table 1). Therefore,
+we use the borrowing rate from Aave as the risk-free rate. On the other hand, when the
+perpetual futures price is below the spot, an arbitrageur would long the futures, short the
+spot, and invest the proceeds from shorting in the cash market (as is shown in Table 1).
+In such cases, we use the supply rate from Aave as the risk-free rate.
+8The difference between the exact and the approximate measure is negligible.
+25
+===== PAGE 27 =====
+2020-07 2021-01 2021-07 2022-01 2022-07 2023-01 2023-07 2024-01
+-300%
+-200%
+-100%
+0%
+100%
+200%
+300%
+400%
+Annualized percentage point deviation, 
+BTC
+ETH
+BNB
+DOGE
+ADA
+Figure 3 Deviations of perpetual futures from no-arbitrage benchmarks
+This figure presents the 7-day moving averages of the annualized deviation of the perpetual
+futures-spot spread from the no-arbitrage benchmark for the five cryptocurrencies.
+ρ |ρ|
+Asset Mean Median Std p-value Mean Median Std p-value
+BTC -0.06 -0.32 0.74 0.80 0.57 0.51 0.48 0.00
+ETH 0.04 -0.24 0.85 0.31 0.63 0.53 0.57 0.00
+BNB -0.10 -0.17 1.22 0.85 0.88 0.70 0.85 0.00
+DOGE 0.01 -0.28 1.38 0.45 0.86 0.64 1.07 0.00
+ADA 0.03 -0.21 1.14 0.39 0.83 0.70 0.79 0.00
+Table 4 Summary Statistics for Deviations from No-arbitrage Prices
+The table below summarizes statistics forρ and |ρ| across various crypto tokens. pNW corresponds
+to the Newey-West adjusted p-value, testing the null hypothesis that the meanρ (or |ρ|) is zero.
+The sample periods are shown in Table 2.
+Table 4 reports summary statistics for ρ and |ρ| in our sample. As can be seen, the
+mean future-spot spread is modest, lying between −2 and 12 percentage points. The
+p-values show we cannot reject the hypothesis that the deviations are zero on average.
+Thus, on average, our theoretical prices provide a useful benchmark. Around this
+26
+===== PAGE 28 =====
+benchmark, however, perpetual futures prices vary significantly from spot prices. The
+mean absolute deviation is about 60% to 90% per year across different cryptocurrency
+tokens. Figure 3 depicts the 7-day moving average of ρ for each of the five examined
+cryptocurrencies. It reveals considerable comovement in futures-spot spreads across these
+cryptocurrencies, suggesting a common factor at play that drives the observed divergence.
+This observation is corroborated by Table 5, which demonstrates high correlations among
+futures-spot deviations across the different cryptocurrencies. This trend underscores the
+interconnectedness of cryptocurrency markets and is consistent with the comovement of
+traditional currencies documented by Lustig, Roussanov, and Verdelhan (2011).
+One hypothesis for this significant comovement in ρ across various cryptocurrencies
+pertains to time-varying funding constraints encountered by arbitrageurs in the market
+(Brunnermeier and Pedersen, 2009; Garleanu and Pedersen, 2011). Because arbitrageurs
+often serve as marginal traders in all markets, their funding constraints are potentially
+reflected in the ρ across all major cryptocurrency markets. Our theoretical and empirical
+analyses underscore the importance of measuring ρ. Doing so not only sheds light on
+potential market stress but also provides a gauge for the shadow costs associated with the
+trading and funding constraints arbitrageurs face.
+Conversely, from the demand side, shared sentiment across various cryptocurrencies
+could also contribute to explaining the concurrent movement ofρ across different markets.
+Our theoretical analysis suggests that arbitrageurs will only meet the market demand if the
+price deviation surpasses the combined trading and funding costs. As a result, the overall
+market sentiment in the futures market relative to the spot market becomes evident in the
+price difference between futures and spot prices. If the sentiment across different markets
+is influenced by a common factor, we would anticipate a significant comovement in the
+futures-spot spread.
+Moreover, arbitrageurs are willing to absorb the idiosyncratic demand first because
+27
+===== PAGE 29 =====
+Arbitrage Deviation Funding Rate Spot Return
+ρET H ρBNB ρDOGE ρADA f rBTC f rET H f rBNB f rDOGE f rADA RBTC RET H RBNB RDOGE RADA
+Arbitrage Deviation ρBTC 0.89 0.58 0.76 0.82 0.85 0.76 0.57 0.55 0.69 0.00 0.05 0.08 0.10 0.05
+ρET H 0.61 0.76 0.84 0.76 0.84 0.57 0.53 0.70 0.08 0.11 0.12 0.12 0.10
+ρBNB 0.58 0.56 0.56 0.56 0.88 0.47 0.52 0.02 0.07 0.06 0.06 0.07
+ρDOGE 0.78 0.65 0.64 0.55 0.79 0.69 0.10 0.14 0.18 0.01 0.11
+ρADA 0.70 0.69 0.52 0.56 0.83 0.07 0.12 0.14 0.11 0.09
+Funding Rate f rBTC 0.86 0.65 0.63 0.74 0.06 0.09 0.15 0.13 0.10
+f rET H 0.63 0.58 0.74 0.11 0.16 0.18 0.17 0.14
+f rBNB 0.55 0.60 0.04 0.09 0.11 0.10 0.10
+f rDOGE 0.68 0.12 0.14 0.23 -0.01 0.13
+f rADA 0.10 0.15 0.21 0.16 0.12
+Spot Return RBTC 0.84 0.71 0.46 0.70
+RET H 0.73 0.43 0.74
+RBNB 0.34 0.65
+RDOGE 0.42
+Table 5 Correlation of arbitrage deviation (ρ), funding rate (f r), and spot returns (R)
+This table presents the correlation among different cryptocurrencies’ futures-spot deviationρ (rows 3 to 7), funding rate (rows 8 to 12),
+and spot returns (rows 13 to 16).
+28
+===== PAGE 30 =====
+combining the arbitrage trades across different idiosyncratic deviations would generate
+a high Sharpe ratio strategy as in Kozak et al. (2018). Therefore, in equilibrium, after
+arbitrageurs have absorbed the idiosyncratic demand, we anticipate the emergence of
+a common factor in deviations across different cryptocurrencies, driven by limits to
+arbitrage.
+In Section 5, we delve deeper into explaining the futures-spot spread. Our results
+demonstrate that the past returns of each cryptocurrency serve as significant explanatory
+variables for the time-series variation in the spread.
+Interestingly, the correlation between deviations and spot market returns is quite
+modest. Although spot market returns are highly correlated among themselves, in
+line with the strong market factor results from Liu et al. (2022), and no-arbitrage price
+deviations are highly correlated among themselves, it appears that different forces drive
+these distinct phenomena.
+Furthermore, we find that after the year 2022, futures-spot spreads become smaller in
+magnitude and less volatile compared to earlier years. The 7-day moving average stays
+around -50% most of the time for the five cryptocurrencies while larger sways in earlier
+years are quite common. This suggests the market is becoming increasingly efficient. In
+terms of the sign of the deviation, which appears to stabilize at the negative region, two
+forces are potentially at play: (1) on the futures customer end, the relative demand in
+the futures market is weaker compared to the spot; (2) for arbitrageurs, because of the
+lack of infrastructure to short the cryptos in the spot market (high shorting costs), their
+funding constraints would be larger in the negative region. All these forces contribute to
+the stabilization of the futures spot deviation around−50 percentage points.
+Last but not least, by design, ρ is also highly correlated with the funding rate. The
+funding rate does not correlate perfectly with ρ because in real-world implementations:
+(1) there is a clamp region, within which the funding rate is fixed at 0.01%; (2) the funding
+29
+===== PAGE 31 =====
+rate is calculated as a weighted average of futures-spot price deviations, with larger weight
+given to more recent observations; (3) in calculating the funding rate, Binance does not
+just consider the quote price, they also use an impact margin notional to consider price
+impact of the trade.9
+4.3 Random-maturity Arbitrage Strategy
+We next provide a trading strategy motivated by our random-maturity arbitrage theory.
+Table 3 reports for different trading cost tiers, the bounds (ρl and ρu) beyond which there
+exist random-maturity arbitrage opportunities. We consider a simple trading strategy:
+whenever ρ enters the region outside the annualized round-trip trading costs in Table 3,
+we open the position. We close the position whenρ first goes back to 0.
+Figure 4 provides an illustration of the trading strategy. When the deviation is beyond
+the orange lines, the strategy opens a trading position. The position is closed when the
+futures/spot deviation first hits the red line. We present trading thresholds across different
+trading costs for different currencies in Figure 9 in the appendix. Different trading
+strategies have the same close-position line, which is equal to 0, while the open-position
+line adjusts to the level of trading costs. In Appendix C, we also present the performance of
+a data-driven strategy that determines the open and close threshold optimally using the
+past 6-month data. The data-driven strategy can potentially improve upon this simpler
+strategy.
+Since our trading strategy is a threshold trading rule, to annualize Sharpe ratios we
+follow Lucca and Moench (2015), which considers a trading strategy that is only active on
+FOMC announcement dates. We first calculate the mean (µ) and standard deviation (σ)
+of our trading strategy during the time it is active. Next, we scale µ/σ by the number of
+9See https://www.binance.com/en/support/faq/360033525031 for details of the funding rate calcula-
+tion.
+30
+===== PAGE 32 =====
+2020-07 2021-01 2021-07 2022-01 2022-07 2023-01 2023-07 2024-01
+-300%
+-200%
+-100%
+0%
+100%
+200%
+300%
+400%
+Annualized percentage point deviation, 
+BTC
+open
+close
+Figure 4 Random-maturity Arbitrage Strategy: Bitcoin, high trading costs
+Futures-spot deviations and trading thresholds of the random-maturity arbitrage strategy we
+implement for BTC under high trading costs. Each blue dot in the figure represents the hourly
+deviation of futures from the spot ρ = κ( f − s) − r. The number is annualized for ease of
+interpretation. The orange line is the open-position threshold, and the red line is the close-position
+threshold.
+periods the strategy is active in a year:
+SR = µ
+σ
+√Na ,
+where µ and σ are average hourly returns and Na is the average number of hours the
+strategy is active in a year. We follow the same approach to annualize the returns and
+standard deviations: µann = µNa, σann = σ √Na.
+Table 6 presents the strategy’s performance under different fee tiers. As trading costs
+decrease, the random-maturity arbitrage strategy engages in more active trading, leading
+to an increase in the SRs and a decrease in the average duration of open-to-close positions.
+The strategy also delivers highly significant alphas relative to the 3-factor model by Liu
+et al. (2022) and the 5-factor model by Cong et al. (2022a). Evidently, the strategy’s
+31
+===== PAGE 33 =====
+Fee tiers
+No Low Medium High
+BTC SR 3.53 2.20 2.16 1.80
+Return 13.70 8.40 7.93 6.38
+Volatility 3.88 3.82 3.68 3.55
+MaxDD -4.24 -4.42 -4.34 -4.43
+α 13.36 6.46 5.94 4.38
+tα 5.34 2.76 2.58 1.89
+Active % 100.00 85.28 36.03 20.06
+OtC time 19.22 86.73 106.21 134.94
+ETH SR 4.83 2.95 2.86 2.55
+Return 21.23 12.71 11.61 9.59
+Volatility 4.40 4.30 4.06 3.76
+MaxDD -4.13 -4.21 -3.91 -3.94
+α 26.00 13.62 11.80 9.49
+tα 7.26 4.31 4.06 3.54
+Active % 99.94 83.93 40.35 22.68
+OtC time 14.57 52.60 82.95 83.71
+BNB SR 12.31 7.40 5.76 4.84
+Return 54.81 31.32 23.30 18.41
+Volatility 4.45 4.23 4.05 3.80
+MaxDD -1.12 -1.12 -1.10 -1.11
+α 71.39 36.63 26.11 20.36
+tα 12.30 8.60 7.73 6.82
+Active % 99.89 88.10 63.12 35.02
+OtC time 7.87 15.66 24.84 27.28
+DOGE SR 10.35 6.69 4.85 3.58
+Return 75.13 46.35 32.88 23.31
+Volatility 7.26 6.93 6.78 6.51
+MaxDD -8.56 -8.56 -8.56 -8.56
+α 146.40 70.40 42.80 27.04
+tα 8.49 6.69 5.59 4.54
+Active % 99.29 88.59 64.58 28.79
+OtC time 7.36 12.59 16.45 13.82
+ADA SR 10.43 5.53 3.46 2.68
+Return 54.83 27.87 16.89 12.03
+Volatility 5.26 5.04 4.88 4.49
+MaxDD -4.30 -4.26 -4.29 -4.35
+α 89.20 37.49 19.10 11.99
+tα 14.32 11.01 7.50 5.15
+Active % 98.90 88.42 67.43 34.60
+OtC time 7.57 14.36 28.44 40.58
+Table 6 Performance of Random-maturity Arbitrage Strategy
+Performance under different trading cost tiers. The fees for spot (futures) are 2.25 (0.18) bps, 4.5
+(0.72) bps, and 6.75 (1.44) bps for the low, medium, and high trading cost levels. Statistics reported
+are the annualized Sharpe ratio, return (%), volatility (%), max drawdown (%), alpha (%), t-stat of
+the alpha, proportion of time the strategy is active (%), and average open-to-close (OtC) position
+duration in hours. The returns reported are excess returns from the random maturity arbitrage
+strategies. The 3-factor data from Liu et al. (2022) used to calculate alpha ends on April 9th, 2023.
+32
+===== PAGE 34 =====
+performance cannot be explained by previously suggested risk factors.
+Table 7 and Table 8 zoom in and present the trading performance of the strategy under
+high trading costs. We consider two cases: (1) unrestricted and (2) long-spot only. We
+consider the second case because, in earlier years of crypto derivatives, the infrastructure
+for shorting cryptocurrencies was not well-developed. We find that, as is implied by our
+theory, whenever the deviation between futures and spot is larger than the trading costs,
+performing a random-maturity arbitrage strategy would generate returns with high SR.
+After trading costs, the strategy generates an SR of 1.80 for BTC and much higher SRs for
+other cryptocurrencies.
+Table 7 also shows that over time, the perpetual futures market seems to become more
+efficient. As we can see in 2022, the deviation of crypto price from the arbitrage-free bound
+is less frequent compared to earlier years. But when the deviation happens, the resulting
+SR from the trade remains high.
+Comparing the results with Du, Tepper, and Verdelhan (2018), we find that deviations
+in crypto perpetual futures are considerably larger in magnitude. As a result, gains from
+the arbitrage strategies we study are also larger. Even though the volatility of the trading
+strategy also scales up, the Sharpe ratios in the crypto space are still larger than those in
+the traditional foreign exchange market, as reported in Du, Tepper, and Verdelhan (2018).
+When a futures-spot gap opens up, gains from the trading strategy could potentially
+arise from two main sources: price convergence and funding rate payments. While
+industry publications usually emphasize the funding rate channel, we note that price
+convergence can generate quicker gains from arbitrage if dislocations are short-lived. To
+examine these two sources empirically, in Table 9, we provide a decomposition of the
+trading strategy’s performance into price convergence versus funding rate payment. We
+find that price convergence plays a dominant role in total trading returns, while funding
+rate payments have a more minor role, which seems to diminish over time.
+33
+===== PAGE 35 =====
+2020 2021 2022 2023 2024 All
+BTC SR 2.26 2.39 0.70 1.32 11.52 1.80
+Return 8.29 14.81 0.28 1.11 11.97 6.38
+Volatility 3.67 6.18 0.40 0.84 1.04 3.55
+MaxDD -1.90 -4.43 -0.29 -0.24 -0.15 -4.43
+Active % 28.66 34.43 9.21 7.68 22.18 20.06
+OtC time 94.00 141.52 402.50 223.33 185.50 134.94
+N 8,616 8,760 8,760 8,760 1,682 36,578
+ETH SR 3.08 3.52 1.29 1.64 10.70 2.55
+Return 17.12 18.08 1.19 1.81 10.98 9.59
+Volatility 5.55 5.13 0.92 1.10 1.03 3.76
+MaxDD -3.94 -2.49 -0.45 -0.30 -0.16 -3.94
+Active % 37.80 34.91 8.23 10.35 20.93 22.68
+OtC time 78.54 67.81 102.14 180.40 175.00 83.71
+N 8,616 8,760 8,760 8,760 1,682 36,578
+BNB SR 6.04 6.60 2.83 2.96 4.31 4.84
+Return 31.23 33.13 5.01 6.27 15.11 18.41
+Volatility 5.18 5.02 1.77 2.12 3.51 3.80
+MaxDD -1.11 -0.89 -0.77 -0.76 -0.65 -1.11
+Active % 55.23 48.03 16.54 18.93 53.39 35.02
+OtC time 23.17 21.44 54.77 41.62 61.21 27.28
+N 7,815 8,760 8,760 8,760 1,682 35,777
+DOGE SR 4.90 5.93 1.49 0.85 2.75 3.58
+Return 59.81 53.43 1.53 0.68 6.78 23.31
+Volatility 12.20 9.01 1.02 0.79 2.46 6.51
+MaxDD -8.56 -2.86 -0.44 -0.43 -0.93 -8.56
+Active % 60.12 49.19 16.92 8.37 12.72 28.79
+OtC time 6.20 18.22 32.68 243.67 70.33 13.82
+N 4,190 8,760 8,760 8,760 1,682 32,152
+ADA SR 3.88 3.41 2.33 1.12 2.23 2.68
+Return 21.35 24.19 3.05 1.63 5.02 12.03
+Volatility 5.51 7.09 1.31 1.45 2.25 4.49
+MaxDD -1.73 -4.35 -0.45 -0.43 -0.83 -4.35
+Active % 47.61 42.18 28.52 25.24 13.20 34.60
+OtC time 29.53 40.62 32.03 236.89 110.50 40.58
+N 8,055 8,760 8,760 8,760 1,682 36,017
+Table 7 Performance of Unrestricted Trading Strategy Over Time: High Trading Costs
+Tier
+This table presents the Sharpe ratios, annualized returns (%), standard deviations (%), maximum
+drawdowns (%), active percentages (%), and the average open-to-close time (hours) of the
+unrestricted random-maturity arbitrage trading strategies for five different cryptocurrencies with
+high trading costs. For the unrestricted trading strategy, both longing and shorting the spot are
+allowed. The returns reported are excess returns from the random maturity arbitrage strategies.
+The success of the trading strategy supports the theory of random-maturity arbitrage.
+Whenever there is a deviation larger than the gap implied by the theory, betting on
+34
+===== PAGE 36 =====
+2020 2021 2022 2023 2024 All
+BTC SR 1.98 2.28 0.51 0.87 11.52 1.62
+Return 6.43 13.95 0.08 0.26 11.97 5.49
+Volatility 3.25 6.13 0.17 0.30 1.04 3.40
+MaxDD -1.90 -4.43 -0.04 -0.24 -0.15 -4.43
+Active % 22.28 32.15 0.02 2.85 22.18 14.66
+OtC time 111.94 198.36 1.00 124.00 185.50 147.92
+N 8,616 8,760 8,760 8,760 1,682 36,578
+ETH SR 2.57 3.36 0.81 1.16 10.70 2.23
+Return 13.98 17.14 0.53 0.48 10.98 8.15
+Volatility 5.44 5.09 0.66 0.42 1.03 3.66
+MaxDD -3.94 -2.49 -0.26 -0.30 -0.16 -3.94
+Active % 34.48 34.59 0.08 3.76 20.93 18.29
+OtC time 122.79 74.10 1.33 108.67 175.00 93.21
+N 8,616 8,760 8,760 8,760 1,682 36,578
+BNB SR 4.46 4.99 0.76 0.73 2.24 3.29
+Return 15.34 21.91 0.16 0.28 3.02 8.96
+Volatility 3.44 4.39 0.21 0.38 1.35 2.73
+MaxDD -1.11 -0.87 -0.04 -0.12 -0.52 -1.11
+Active % 35.00 31.30 0.07 2.26 9.16 16.31
+OtC time 30.08 23.73 2.00 23.75 76.00 26.92
+N 7,815 8,760 8,760 8,760 1,682 35,777
+DOGE SR 2.64 5.03 1.03 0.49 2.75 2.52
+Return 31.16 36.20 0.25 0.08 6.78 14.37
+Volatility 11.80 7.19 0.24 0.16 2.46 5.71
+MaxDD -8.56 -2.86 -0.04 -0.08 -0.93 -8.56
+Active % 37.49 41.92 0.05 0.73 12.72 17.18
+OtC time 7.49 26.12 1.00 63.00 70.33 15.96
+N 4,190 8,760 8,760 8,760 1,682 32,152
+ADA SR 3.16 2.94 - 0.88 2.23 2.11
+Return 16.03 20.32 - 0.51 5.02 8.89
+Volatility 5.08 6.92 - 0.58 2.25 4.21
+MaxDD -1.73 -4.44 0.00 -0.43 -0.83 -4.44
+Active % 36.52 39.57 0.00 3.46 13.20 19.25
+OtC time 36.25 48.70 - 100.00 110.50 44.34
+N 8,055 8,760 8,760 8,760 1,682 36,017
+Table 8 Performance of Long-spot-only Trading Strategy Over Time: High Trading Costs
+Tier
+This table presents the Sharpe ratios, annualized returns (%), standard deviations (%), maximum
+drawdowns (%), active percentages (%), and the average open-to-close time (hours) of the long-
+spot only random-maturity arbitrage trading strategies for five different cryptocurrencies with high
+trading costs. For the long-spot-only strategy, shorting the spot is not allowed. The returns reported
+are excess returns from the random maturity arbitrage strategies. In 2022, for ADA, there is no
+positive deviation of rho from the high-trading cost threshold. Therefore, the trading strategy is
+not active during the year for ADA.
+35
+===== PAGE 37 =====
+2020 2021 2022 2023 2024 All
+BTC Return 21.68 29.60 0.35 2.65 17.21 13.70
+Price 14.00 14.29 2.29 3.59 11.19 8.64
+Funding 7.68 15.31 -1.94 -0.94 6.03 5.06
+ETH Return 40.93 36.66 3.15 5.52 15.95 21.23
+Price 27.58 19.07 3.68 5.75 8.97 13.73
+Funding 13.35 17.59 -0.53 -0.24 6.97 7.49
+BNB Return 82.48 76.29 27.75 39.14 36.92 54.81
+Price 66.70 60.37 21.69 32.26 21.68 43.58
+Funding 15.78 15.92 6.06 6.89 15.24 11.23
+DOGE Return 220.81 113.79 42.59 8.76 25.98 75.13
+Price 214.72 93.24 43.59 8.51 15.74 68.40
+Funding 6.09 20.55 -1.00 0.25 10.24 6.72
+ADA Return 90.81 66.73 43.48 23.56 42.55 54.83
+Price 77.17 49.51 42.67 23.71 32.92 46.98
+Funding 13.64 17.22 0.81 -0.15 9.64 7.85
+Table 9 Return Decomposition: Price Convergence vs Funding Rate Payment for
+Random-maturity Arbitrage Strategies
+This table decomposes the portfolio return into the part due to price convergence and the part
+due to funding rate payment. The returns reported are excess returns from the random-maturity
+arbitrage strategies. There are a few negative funding rate payments due to the difference in the
+empirical specification of funding rate payment (see Appendix B for details) with our theoretical
+framework when the deviation is small.
+convergence tends to generate a positive payoff at some uncertain future time. Therefore,
+the convergence arbitrage trade generates high Sharpe ratios.
+5 Explaining Futures-spot Deviations
+From Figure 3, we observe a strong common comovement of the futures-spot deviation
+across all crypto assets. Our goal is to understand the fundamental forces driving this
+common factor. We consider two potential hypotheses: (1) the time-varying funding
+constraints of arbitrageurs and (2) the time-varying relative demand from end-users for
+perpetual futures compared to the spot.
+36
+===== PAGE 38 =====
+Both forces could potentially explain these patterns. Arbitrageurs will accommodate
+the relative demand from end-users only until the price deviation lies within the random-
+maturity no-arbitrage bound, which depends on arbitrageurs’ funding conditions. As
+arbitrageurs are likely the marginal investors in all cryptocurrency markets, their time-
+varying funding constraints may create common time-series variation inρ across different
+cryptocurrencies.
+On the other hand, when the deviation lies within the no-arbitrage bound, variations
+in demand from the perpetual futures market compared to the spot market will influence
+the price deviation. It is plausible that relative demand has common factors across
+different cryptocurrencies. For instance, sentiment could drive their common variation,
+as perpetual futures allow for high leverage, which attracts overconfident, extrapolative,
+and sentiment-driven investors.
+Determining which of the two factors better explains the observed price deviation is
+an empirical question. To shed light on this, we use past returns as a proxy for relative
+extrapolative demand in the perpetual futures market compared to the spot market. Past
+returns correlate with the demand from investors with extrapolative beliefs, who are
+more likely to trade in the perpetual futures market, given the high leverage it provides.
+Therefore, past returns would correlate with the relative demand in the perpetual futures
+market compared to the spot.
+For the time-varying funding constraint, we consider using crypto return volatility as a
+proxy because, as in Adrian and Shin (2010), arbitrageurs likely face Value-at-Risk (VaR)
+type constraints, which are more likely to bind when market volatility is high.
+Moreover, from Figure 3, we see a downward trend for the magnitude of the deviation.
+Kondor (2009)’s model of convergence trading predicts that greater competition among
+arbitrageurs reduces the profitability of arbitrage opportunities and deviations approach
+a martingale. Therefore, we add a time trend variable to the regression to test if the market
+37
+===== PAGE 39 =====
+becomes more efficient as more arbitrageurs and capital compete in this market.
+In sum, the regression models can be represented as:
+ρi,t = β0,i + β1(t/365) +β2Ri,t−120:t−1 + β3σi,t−120:t−1 + εi,t, (9)
+|ρi,t| = β0,i + β1(t/365) +β2Ri,t−120:t−1 + β3σi,t−120:t−1 + εi,t, (10)
+where ρi,t represents the futures-spot deviation, β0,i is the currency fixed effect, t is the
+number of days since the beginning of the sample,Ri,t−120:t−1 is the annualized spot return
+to currency i over the past 120 days, and σi,t−120:t−1 is the annualized standard deviation
+of spot return of currency i over the past 120 days. Since we scale the time trend by the
+number of trading days in a year, the regression coefficientβ1 has an interpretation of the
+average annual change in the futures-spot deviation.
+Table 10 presents the regression results. The regression coefficients on the time trend
+are negative and highly significant for bothρ and |ρ|, indicating that the futures-spot gap
+has been decreasing both in level and in magnitude over time on average. Throughout
+our sample, on average, |ρ| shrinks about 11% per year, which accumulates to over 44%
+over the whole sample. This indicates that the perpetual futures market is becoming more
+efficient over time.
+The coefficients on past returns are positive and highly significant for bothρ and |ρ|.
+This suggests that when past returns are high, perpetual futures exhibit a more positive
+deviation against the spot. Mapping this back to our second hypothesis, when past returns
+are high, the demand for futures relative to the spot is also likely to be high. Consequently,
+even after arbitrageurs accommodate the demand outside of trading costs, the residual
+demand still manifests itself through the perpetual-spot deviation.
+This observation on limits to arbitrage is related to Makarov and Schoar (2020) which
+finds that crypto price deviations across international exchanges tend to comove with one
+38
+===== PAGE 40 =====
+Dependent Variable: ρ |ρ|
+Time -0.23*** -0.14*** -0.25*** -0.11*** -0.08*** -0.10***
+(-4.52) (-3.53) (-6.47) (-5.22) (-4.88) (-5.00)
+Ret 0.13*** 0.20*** 0.05*** 0.06***
+(4.52) (10.43) (4.07) (5.00)
+Vol -0.04*** -0.01
+(-6.02) (-1.50)
+Currency FE Yes Yes Yes Yes Yes Yes
+R2 0.09 0.26 0.33 0.07 0.13 0.14
+N 7235 7235 7235 7235 7235 7235
+Table 10 Regression of the futures-spot gap against explanatory variables
+We present regression results ofρ and |ρ| on a time trend (Time) measured in units of years, past
+120 days’ annualized returns (Ret), and volatility (Vol) in the spot market. We add a currency fixed
+effect to the regression and consider three specifications: (1) regressing ρ/|ρ| on the time trend,
+(2) regressing ρ/|ρ| on past returns, and (3) regressing ρ/|ρ| on past returns and volatility. The
+observations are at a daily frequency. The sample period spans from January 8, 2020 to March 11,
+2024, totaling 1,495 days. The table also reports theR2 values for each regression model. We report
+Newey-West t-statistics in parentheses with a lag of 120 days.∗ p < .1, ∗ ∗p < .05, ∗ ∗ ∗p < .01.
+another. The driving force behind this comovement is investors’ buying pressure across
+various countries, with cross-country capital controls serving as the primary impediment
+to arbitrage capital. In the context of perpetual futures, end-user demand contributes
+to the comovement of different cryptocurrencies. The limits to arbitrage predominantly
+manifest in the form of trading frictions.
+Liu and Tsyvinski (2021) document a significant time-series momentum pattern in
+the crypto market. Given that positive past returns lead to a positive gap between
+futures and spot prices, it is worth examining further whether the time-series momentum
+phenomenon is driven by margin trading and price pressure from the perpetual futures
+market. We leave this as an open question for future research.
+We find that volatility does not significantly covary with|ρ|. This suggests that time-
+varying funding constraints of arbitrageurs do not drive the comovement in futures-spot
+deviations across different cryptocurrencies.
+39
+===== PAGE 41 =====
+In summary, a prerequisite for the gap between futures and spot prices to occur is the
+existence of trading costs for arbitrageurs. Arbitrage trading will accommodate all the
+demand in the futures until the price deviation is within a trading cost bound. Within
+the bound, the relative demand of futures compared to the spot will still manifest itself in
+the deviation of futures prices from the spot. Due to the comovement of the time-varying
+relative demand, we observe a significant common factor in crypto future-spot deviations.
+6 Conclusion
+Perpetual futures play an important role in today’s crypto markets and could potentially be
+adopted in non-crypto markets in the future. Understanding the fundamental mechanism
+of this financial derivative is a crucial first step for understanding speculation and hedging
+dynamics in this fast-evolving area. We provide a comprehensive analysis of the arbitrage
+and funding rate payment mechanisms that underpin perpetual futures.
+In an ideal, frictionless world, we show that arbitrageurs would trade perpetual futures
+in such a way that a constant proportional relationship would hold between the futures
+price and the spot price. In the presence of trading costs, the deviation of the futures price
+from the spot would lie within a bound.
+Motivated by our theory, we empirically examine the comovement of the futures-
+spot spread across different cryptocurrencies and implement a theory-motivated arbitrage
+strategy. We find that this simple strategy yields substantial Sharpe ratios across various
+trading cost scenarios. The evidence supports our theoretical argument that perpetual
+futures-spot spreads exceeding trading costs represent a random-maturity arbitrage op-
+portunity.
+Finally, we provide an explanation for the common comovement in futures-spot
+spreads across different crypto-currencies: arbitrageurs can only accommodate market
+40
+===== PAGE 42 =====
+demand if the price deviation exceeds trading costs. As a result, the overall sentiment in
+the futures market relative to the spot market is reflected in the spread. Our empirical
+findings suggest that past return momentum can account for a significant portion of the
+time-series variation in the futures-spot spread.
+41
+===== PAGE 43 =====
+References
+Ackerer, Damien, Julien Hugonnier, and Urban J. Jermann, 2023, Perpetual Futures
+Pricing, Working paper.
+Adams, Hayden, Noah Zinsmeister, Moody Salem, River Keefer, and Dan Robinson, 2021,
+Uniswap v3 core, Whitepaper.
+Adrian, Tobias, and Hyun Song Shin, 2010, Liquidity and leverage, Journal of financial
+intermediation 19, 418–437.
+Alexander, Carol, Jaehyuk Choi, Heungju Park, and Sungbin Sohn, 2020, Bitmex bitcoin
+derivatives: Price discovery, informational efficiency, and hedging effectiveness,Journal
+of Futures Markets40, 23–43.
+Amiram, Dan, Evgeny Lyandres, and Daniel Rabetti, 2021, Cooking the order books:
+Information manipulation and competition among crypto exchanges, Working Paper.
+Angeris, Guillermo, Tarun Chitra, Alex Evans, and Matthew Lorig, 2022, A primer on
+perpetuals, Working Paper.
+Brunnermeier, Markus K, and Lasse Heje Pedersen, 2009, Market liquidity and funding
+liquidity, The review of financial studies22, 2201–2238.
+Christin, Nicolas, Bryan R Routledge, Kyle Soska, and Ariel Zetlin-Jones, 2022, The crypto
+carry trade, Working Paper.
+Cochrane, John, 2009, Asset pricing: Revised edition (Princeton university press).
+Cong, Lin William, Zhiheng He, and Ke Tang, 2022a, Staking, token pricing, and crypto
+carry, Working Paper.
+Cong, Lin William, George Andrew Karolyi, Ke Tang, and Weiyi Zhao, 2022b, Value
+premium, network adoption, and factor pricing of crypto assets, Working Paper.
+Cong, Lin William, Xi Li, Ke Tang, and Yang Yang, 2022c, Crypto wash trading, Working
+Paper.
+Cox, John C, Jonathan E Ingersoll Jr, and Stephen A Ross, 1981, The relation between
+forward prices and futures prices,Journal of Financial Economics9, 321–346.
+De Blasis, Riccardo, and Alexander Webb, 2022, Arbitrage, contract design, and market
+structure in bitcoin futures markets,Journal of Futures Markets42, 492–524.
+42
+===== PAGE 44 =====
+Du, Wenxin, Alexander Tepper, and Adrien Verdelhan, 2018, Deviations from Covered
+Interest Rate Parity,Journal of Finance 73, 915–957.
+Duffie, Darrell, 2010, Presidential address: Asset price dynamics with slow-moving
+capital, The Journal of finance 65, 1237–1267.
+Ferko, Alex, Amani Moin, Esen Onur, and Michael Penick, 2022, Who trades bitcoin
+futures and why?,Global Finance Journal 100778.
+Garleanu, Nicolae, and Lasse Heje Pedersen, 2011, Margin-based asset pricing and
+deviations from the law of one price,The Review of Financial Studies24, 1980–2022.
+Grinblatt, Mark, and Narasimhan Jegadeesh, 1996, Relative pricing of eurodollar futures
+and forward contracts,The journal of finance 51, 1499–1522.
+Gromb, Denis, and Dimitri Vayanos, 2018, The dynamics of financially constrained
+arbitrage, The Journal of Finance73, 1713–1750.
+Hertzog, Eyal, Guy Benartzi, Galia Benartzi, and Omri Ross, 2017, Bancor protocol, con-
+tinuous liquidity for cryptographic tokens through their smart contracts, Whitepaper.
+Koijen, Ralph SJ, Tobias J Moskowitz, Lasse Heje Pedersen, and Evert B Vrugt, 2018, Carry,
+Journal of Financial Economics127, 197–225.
+Kondor, P´eter, 2009, Risk in Dynamic Arbitrage: The Price Effects of Convergence Trading,
+Journal of Finance 64, 631–655.
+Kozak, Serhiy, Stefan Nagel, and Shrihari Santosh, 2018, Interpreting factor models, The
+Journal of Finance 73, 1183–1223.
+Liu, Yukun, and Aleh Tsyvinski, 2021, Risks and returns of cryptocurrency,The Review of
+Financial Studies 34, 2689–2727.
+Liu, Yukun, Aleh Tsyvinski, and Xi Wu, 2022, Common risk factors in cryptocurrency,The
+Journal of Finance 77, 1133–1177.
+Lucca, David O, and Emanuel Moench, 2015, The pre-fomc announcement drift, The
+Journal of finance 70, 329–371.
+Lustig, Hanno, Nikolai Roussanov, and Adrien Verdelhan, 2011, Common risk factors in
+currency markets, The Review of Financial Studies24, 3731–3777.
+43
+===== PAGE 45 =====
+Makarov, Igor, and Antoinette Schoar, 2020, Trading and arbitrage in cryptocurrency
+markets, Journal of Financial Economics135, 293–319.
+Pedersen, Lasse Heje, 2019, Efficiently inefficient: how smart money invests and market prices
+are determined (Princeton University Press).
+Schmeling, Maik, Andreas Schrimpf, and Karamfil Todorov, 2022, Crypto carry, Working
+Paper.
+Shiller, Robert J, 1993, Measuring asset values for cash settlement in derivative markets:
+hedonic repeated measures indices and perpetual futures,The Journal of Finance48, 911–
+931.
+Streltsov, Artem, and Qihong Ruan, 2022, Perpetual price discovery and crypto market
+quality, Working Paper.
+44
+===== PAGE 46 =====
+Appendix
+A. Additional Figures
+Figure 5 Trading view of BTC perpetual futures on Binance
+This figure presents the perpetual futures trading view on Binance. The key information includes
+the futures price (Mark), spot price (Index), real-time funding rate based on the rolling average
+of the past 8 hours’ observations, and countdown toward funding rate payment (Funding /
+Countdown) (illustrated with a red rectangle). In this example, futures are trading at a lower
+price than the spot. The funding rate is negative and is to be paid in 1 hour and 12 minutes.
+45
+===== PAGE 47 =====
+Figure 6 Trading costs tiers for the spot market
+This figure presents the trading cost tiers for the crypto spot market from Binance:https://www.
+binance.com/en/fee/trading. Our high, medium, and low trading cost specification corresponds
+to VIP 1, VIP 5, and VIP 8 tiers, as illustrated with red rectangles in the picture. The 30-day trading
+volume requirements for VIP 1, 5, and 8 are 1 million, 150 million, and 2 billion, respectively, in the
+spot market. We consider the trading costs for makers as institutions typically trade maker orders.
+Binance offers a temporary discount for VIP 4-8 to have the same trading cost as VIP 9. We consider
+the non-discounted trading costs to make the comparison more reliable and fair.
+46
+===== PAGE 48 =====
+Figure 7 Trading costs tiers for the perp market
+This figure presents the trading cost tiers for the crypto perpetual market from Binance: https:
+//www.binance.com/en/fee/trading. Our high, medium, and low trading cost specification
+corresponds to VIP 1, VIP 5, and VIP 8 tiers, as illustrated with red rectangles in the picture. The
+30-day trading volume requirements for VIP 1, 5, and 8 are 15 million, 1 billion, and 12.5 billion,
+respectively, in the perpetual market. We consider the trading costs for makers as institutions
+typically trade maker orders.
+47
+===== PAGE 49 =====
+2020-07 2021-01 2021-07 2022-01 2022-07 2023-01 2023-07 2024-01
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+0.30
+0.35
+0.40Annualized interest rate, percent
+supply rate
+borrow rate
+Figure 8 Annualized interest rate from Aave
+This figure presents the daily supply and borrowing rate from Aave. We consider three stablecoins:
+USDT, USDC, and DAI. Each day, we take the average interest rate of the three crypto stablecoins
+to get the proxy for the risk-free funding rate of the arbitrageurs. The averaging removes the
+idiosyncratic noise in borrowing and supply in individual stablecoins. The sample period is from
+2020-01-08 to 2024-03-11.
+48
+===== PAGE 50 =====
+Figure 9 Trading Strategy Visualization: Random-maturity Arbitrage
+This figure presents the random-maturity arbitrage strategy motivated by the theory. The orange,
+green, and purple lines correspond to the open-position threshold under high, medium, and low
+trading costs. The red line represents the close-position threshold.
+49
+===== PAGE 51 =====
+B. Funding Rate Calculation on Binance
+In this section, we discuss in more detail the funding rate mechanism on the Binance
+platform based on the methodology given on the Binance website.10
+There are five general steps in obtaining the funding rate. The first step is to find
+the Impact Bid/Ask Price Series in a given funding period by analyzing the order book
+and determining the average fill price to execute a certain notional value (Impact Margin
+Notional) on the bid and ask sides.
+The impact margin notional is defined as the notional available to trade with a margin
+of 200 USD. So it can be calculated using the following equation:
+IMN = 200/Initial margin rate at maximum leverage level.
+Given the definition of impact margin notional, the impact bid/ask price is defined
+as the average trade price after a market sell/buy order with the total quoted notional
+quantity given by the IMN.
+Given impact bid and ask prices (denoted as IBP and IAP , respectively), the second
+step is to calculate the premium index (denoted as P) series every 5 seconds using the
+following equation:
+P = [Max(0,IBP −Price Index) −Max(0,Price Index−IAP)]/Price Index,
+where ‘Price Index’ is the weighted average spot price of the underlying asset listed on
+major spot exchanges.
+The rationale behind this formula is to capture the relative difference between the
+perpetual contract’s price and the underlying asset’s price, taking into account the actual
+market liquidity and depth represented by the IBP and IAP.
+The third step is to calculate the time-weighted average premium index over the
+funding period (8 hours for Binance) using the premium index series:
+¯P =
+T
+∑
+t=1
+wtPt/
+T
+∑
+t=1
+wt,
+where Pt denotes the t-th 5-second in the 8-hour funding period, wt = t is the weight for
+10https://www.binance.com/en/support/faq/360033525031
+50
+===== PAGE 52 =====
+each observation, andT is the total number of 5-second intervals within the 8-hour period.
+For Binance, T = 12 × 6 × 8 = 5760. With this weighting scheme, the observations closer
+to the funding rate payment receive larger weights. The weights decrease linearly in time
+over the 8-hour interval.
+Given the average premium index, the fourth step is to calculate the funding rate using
+the equation below:
+f r = ¯P +clamp(γ − ¯P, −0.05%, 0.05%),
+where fr is the funding rate,γ is the interest component set by Binance, and
+clamp(x,min,max) =
+
+
+
+min, if x < min
+x, if min ≤ x ≤ max
+max, if x > max
+Empirically, for Binance futures, the interest rate r is fixed at 0.01% per 8 hours for most
+perpetual futures. Figure 10 plots the funding rate as a function of the premium index.
+As can be seen when the premium index is close to the interest rate 0.01%, the funding is
+fixed at the interest rate.
+Figure 10 Funding Rate Function
+This figure plots funding rate as a function of the average premium index.
+This design allows the funding rate to be fixed to a constant positive rate under normal
+market conditions. When markets are relatively stable and the perpetual contract price is
+51
+===== PAGE 53 =====
+trading close to the index price, the premium index will be small. The clamp ensures that
+under these normal conditions, the funding rate matches the pre-defined interest rate set
+by the exchange. This makes funding rate payments more predictable.
+Note that this still allows larger funding rates when there are significant deviations. If
+the premium index differs from the interest rate by more than 0.05% in either direction,
+the clamp will not cap the funding rate. Larger premiums or discounts in the contract
+price will flow through to correspondingly larger funding payments to incentivize price
+convergence.
+Last but not least, the fifth step is to apply a Capped Funding Rate based on the
+maximum leverage of the contract. For contracts with a maximum leverage of 30x or above,
+the cap and floor are determined by the Maintenance Margin Ratio. For contracts with a
+maximum leverage of 25x or below, the cap and floor are fixed at±3%. For contracts with
+higher leverage, the cap and floor can expand based on maximum leverage.
+For this design, extremely high funding rates can lead to significant losses for traders
+holding positions, especially those with high leverage. By capping the funding rate,
+Binance limits the potential downside from holding a position during volatile periods.
+This can help prevent accounts from being liquidated due to surging funding costs.
+52
+===== PAGE 54 =====
+C. Data-driven Arbitrage Strategy
+In the main text of our paper, we demonstrate the profitability of a simple theory-
+motivated trading strategy. The trading threshold can also be potentially further improved
+using a data-driven approach. In this part, we implement a data-driven two-threshold ar-
+bitrage trading strategy in the perpetual futures market. The strategy can be characterized
+with a tuple of two thresholds: (u, l), where u denotes the upper bar and l denotes the
+lower bar, u > l. When ρ > u, we long the spot and short the futures. When −l < ρ < l,
+we close the position. When ρ < −u, we long the futures and short the spot. Figure 11
+presents an illustration of the strategy for Bitcoin with the trading thresholds estimated
+using real-time data.
+2020-09 2021-01 2021-05 2021-09 2022-01 2022-05 2022-09 2023-01 2023-05 2023-09 2024-01
+-300%
+-200%
+-100%
+0%
+100%
+200%
+300%
+400%
+Annualized percentage point deviation, 
+BTC
+open
+close
+Figure 11 Data-driven strategy: Bitcoin, high trading costs
+This figure presents real-time trading thresholds of the arbitrage strategy we implement for BTC
+under high trading costs. Each blue dot in the figure represents the hourly deviation of futures
+from the spot ρ = κ( f − s) − r. The number is annualized for ease of interpretation. The orange
+line is the open-position threshold, and the red line is the close-position threshold.
+To determine the optimal(u, l), at the beginning of each month, we calculate the returns
+of the two-threshold trading strategy based on the past six months’ data on a grid of
+parameters. From Table 3, we find the theory implied bounds for price deviation across
+all trading costs specifications lie within −200% to +200%. So we choose the grid as
+increasing from 0% to 200% with an incremental step of 10% for u and l (u ≥ l). In total,
+53
+===== PAGE 55 =====
+there are 210 model specifications. We choose the model that delivers the highest Sharpe
+Ratio in the validation sample of the past six months.
+Figure 11 presents the real-time trading thresholds of our arbitrage strategy for BTC
+under high trading costs. To mitigate the trading cost, the strategy automatically chooses
+a much lower close-position threshold compared to the open-position threshold. We
+also present the visualization of all trading strategies under zero to high trading costs in
+appendix Figure 12 to Figure 15. Under no-trading costs, the strategy chooses a low open-
+position threshold, and the open- and close-position thresholds coincide with each other.
+Since there is no trading cost, the strategy no longer needs to wait for price convergence
+to avoid high turnover. On the contrary, with high trading costs, the strategy chooses a
+larger open-position threshold and a smaller close-position threshold. This reflects the
+automatic adjustment from the algorithm for trading costs and turnovers.
+Table 12 and Table 13 present the return statistics for this strategy under high trading
+costs over time. In the baseline ‘unrestricted’ strategy, we allow for both (1) longing the
+futures and shorting the spot and (2) shorting the futures and longing the spot, while in
+the ‘long-spot only’ strategy, we only allow for shorting the futures and longing the spot.
+The reason we consider the ‘long-spot only’ strategy is the infrastructure for shorting the
+spot is not well-developed. So we want to examine the performance of the trading strategy
+in the presence of such limits to arbitrage.
+We find the arbitrage trading strategy has a high Sharpe ratio under high trading costs.
+The annualized Sharpe ratio for Bitcoin is 2.00 in our sample. They are even higher for
+other cryptos. The high Sharpe ratio of the trading strategy corroborates our theoretical
+results that when the price deviation is large enough, the trading would be a random-
+maturity arbitrage opportunity.
+Since the year 2022, the deviation between the futures and the spot has become smaller
+and less volatile. There seems to be a structural break. We indeed find the trading strategy
+takes less active positions and significantly lower annualized returns. However, when
+there is a large enough deviation, the strategy can still generate sizeable Sharpe ratios in
+trading.
+54
+===== PAGE 56 =====
+Fee tiers
+No Low Medium High
+BTC SR 6.33 2.77 2.22 2.00
+Return 14.32 6.68 5.57 4.94
+Volatility 2.26 2.41 2.51 2.47
+MaxDD -1.80 -1.85 -1.87 -1.87
+α 15.39 6.96 5.25 4.01
+tα 9.82 5.11 3.62 2.84
+Active % 36.65 24.44 20.98 16.14
+OtC time 5.04 28.54 53.38 69.67
+ETH SR 8.58 4.10 3.09 2.59
+Return 22.42 10.76 8.55 7.70
+Volatility 2.61 2.62 2.77 2.97
+MaxDD -2.53 -2.58 -2.54 -2.48
+α 28.28 12.83 9.78 8.06
+tα 10.43 5.83 4.79 4.06
+Active % 42.77 30.56 20.26 18.60
+OtC time 3.96 16.43 36.05 38.90
+BNB SR 16.72 9.34 6.29 4.79
+Return 54.98 29.52 20.12 16.78
+Volatility 3.29 3.16 3.20 3.50
+MaxDD -1.03 -1.04 -1.04 -1.04
+α 72.60 34.02 22.29 18.10
+tα 13.40 8.42 6.93 6.40
+Active % 47.68 42.75 32.91 29.89
+OtC time 3.22 6.06 11.40 18.13
+DOGE SR 11.54 7.32 5.03 3.49
+Return 71.46 44.53 30.80 21.42
+Volatility 6.19 6.08 6.12 6.13
+MaxDD -8.56 -8.56 -8.56 -8.56
+α 130.81 66.75 40.22 24.59
+tα 9.23 6.62 5.41 4.48
+Active % 42.50 40.26 30.28 23.12
+OtC time 3.19 4.42 6.89 8.61
+ADA SR 15.64 8.03 4.49 2.64
+Return 53.01 27.35 15.01 11.09
+Volatility 3.39 3.41 3.34 4.20
+MaxDD -1.81 -1.76 -1.72 -4.35
+α 79.44 35.02 17.10 10.78
+tα 15.94 11.89 8.01 4.67
+Active % 43.68 44.80 28.19 26.60
+OtC time 2.98 4.80 9.86 23.57
+Table 11 Performance of Data-driven Random Maturity Arbitrage Strategy
+Performance under different trading cost tiers. The fees for spot (futures) are 2.25 (0.18) bps, 4.5
+(0.72) bps, and 6.75 (1.44) bps for the low, medium, and high trading cost levels. Statistics reported
+are the annualized Sharpe ratio, return (%), volatility (%), max drawdown (%), alpha (%), t-stat of
+the alpha, proportion of time the strategy is active (%), and average open-to-close (OtC) position
+duration in hours. The returns reported are excess returns from the random maturity arbitrage
+strategies.
+55
+===== PAGE 57 =====
+2020 2021 2022 2023 2024 All
+BTC SR 2.34 2.69 -0.02 1.30 6.39 2.00
+Return 8.62 8.81 -0.01 1.06 11.85 4.94
+Volatility 3.68 3.28 0.29 0.82 1.85 2.47
+MaxDD -1.87 -1.63 -0.25 -0.24 -0.68 -1.87
+Active % 35.65 18.39 3.78 2.96 37.57 16.14
+OtC time 119.54 25.98 7.00 63.75 569.00 69.67
+N 8,616 8,760 8,760 8,760 1,682 36,578
+ETH SR 3.15 3.64 1.38 2.54 1.25 2.59
+Return 14.07 13.63 1.25 2.87 2.90 7.70
+Volatility 4.47 3.74 0.91 1.13 2.31 2.97
+MaxDD -2.48 -1.27 -0.45 -0.34 -0.76 -2.48
+Active % 33.26 24.18 3.30 13.23 22.06 18.60
+OtC time 55.27 18.71 31.22 192.17 76.00 38.90
+N 8,616 8,760 8,760 8,760 1,682 36,578
+BNB SR 5.99 6.75 2.71 2.76 4.07 4.79
+Return 29.62 28.98 4.55 5.86 14.07 16.78
+Volatility 4.95 4.30 1.68 2.13 3.45 3.50
+MaxDD -1.04 -0.67 -0.57 -0.61 -0.66 -1.04
+Active % 49.65 32.48 14.13 20.89 53.45 29.89
+OtC time 18.95 9.86 32.49 34.94 57.60 18.13
+N 7,815 8,760 8,760 8,760 1,682 35,777
+DOGE SR 4.90 5.90 1.58 0.91 1.71 3.49
+Return 59.81 46.48 1.55 0.65 6.94 21.42
+Volatility 12.20 7.88 0.98 0.71 4.07 6.13
+MaxDD -8.56 -2.09 -0.15 -0.20 -1.69 -8.56
+Active % 60.12 39.78 9.60 3.30 17.84 23.12
+OtC time 6.20 9.64 8.14 143.50 99.00 8.61
+N 4,190 8,760 8,760 8,760 1,682 32,152
+ADA SR 3.51 3.66 1.94 1.26 1.63 2.64
+Return 19.27 22.99 2.35 1.42 5.83 11.09
+Volatility 5.49 6.28 1.21 1.12 3.58 4.20
+MaxDD -1.73 -4.35 -0.36 -0.37 -1.48 -4.35
+Active % 43.53 32.92 21.69 10.94 19.86 26.60
+OtC time 24.66 19.36 19.19 63.27 111.00 23.57
+N 8,055 8,760 8,760 8,760 1,682 36,017
+Table 12 Performance of Unrestricted Trading Strategy Over Time: Data-driven Strategy,
+High Trading Costs Tier
+This table presents the Sharpe ratios, annualized returns (%), standard deviations (%), and
+active percentages (%) of the random-maturity arbitrage trading strategies for five different
+cryptocurrencies with high trading costs. We break down returns for each year and provide
+summary statistics across all time. The left panel shows the performance of the unrestricted
+trading strategy, where both long and short spot positions are allowed. The right panel shows
+the performance of the long-spot-only trading strategy, where shorting the spot is not allowed.
+The returns reported are excess returns from the random maturity arbitrage strategies.
+56
+===== PAGE 58 =====
+2020 2021 2022 2023 2024 All
+BTC SR 1.97 2.54 0.12 -0.24 5.16 1.71
+Return 6.05 8.26 0.02 -0.10 9.33 3.81
+Volatility 3.07 3.25 0.16 0.41 1.81 2.23
+MaxDD -1.87 -1.63 -0.07 -0.54 -0.73 -2.12
+Active % 19.74 18.06 0.07 5.68 22.24 11.38
+OtC time 61.62 30.05 2.00 33.67 311.00 43.77
+N 8,616 8,760 8,760 8,760 1,682 36,578
+ETH SR 2.75 3.41 0.81 2.77 1.06 2.25
+Return 11.96 13.05 0.53 1.32 2.58 6.50
+Volatility 4.34 3.83 0.66 0.48 2.43 2.89
+MaxDD -2.48 -1.27 -0.26 -0.34 -0.83 -2.48
+Active % 31.73 24.47 0.08 6.22 22.06 15.86
+OtC time 81.85 22.76 1.33 89.83 76.00 43.27
+N 8,616 8,760 8,760 8,760 1,682 36,578
+BNB SR 4.35 4.87 0.76 0.88 2.17 3.22
+Return 13.79 19.32 0.16 0.53 2.90 8.05
+Volatility 3.17 3.97 0.21 0.60 1.34 2.50
+MaxDD -0.67 -0.72 -0.04 -0.18 -0.51 -0.72
+Active % 29.87 25.13 0.07 5.35 9.22 14.44
+OtC time 22.08 14.19 2.00 28.31 76.50 18.45
+N 7,815 8,760 8,760 8,760 1,682 35,777
+DOGE SR 2.64 5.43 1.19 0.90 1.73 2.46
+Return 31.16 30.29 0.30 0.47 7.05 12.90
+Volatility 11.80 5.58 0.26 0.52 4.07 5.25
+MaxDD -8.56 -1.02 -0.04 -0.23 -1.69 -8.56
+Active % 37.49 35.32 0.07 6.15 18.37 17.17
+OtC time 7.49 11.53 1.00 48.09 102.00 11.33
+N 4,190 8,760 8,760 8,760 1,682 32,152
+ADA SR 2.75 3.13 -0.12 -0.19 2.28 2.06
+Return 13.77 19.20 -0.01 -0.13 8.25 8.10
+Volatility 5.01 6.14 0.09 0.68 3.62 3.94
+MaxDD -1.73 -4.35 -0.04 -0.71 -1.48 -4.35
+Active % 32.70 30.97 0.07 5.83 29.37 17.65
+OtC time 27.64 23.03 2.00 15.48 164.33 25.62
+N 8,055 8,760 8,760 8,760 1,682 36,017
+Table 13 Performance of Long-spot-only Trading Strategy Over Time: Data-driven
+Strategy, High Trading Costs Tier
+This table presents the Sharpe ratios, annualized returns (%), standard deviations (%), and
+active percentages (%) of the random-maturity arbitrage trading strategies for five different
+cryptocurrencies with high trading costs. We break down returns for each year and provide
+summary statistics across all time. The left panel shows the performance of the unrestricted
+trading strategy, where both long and short spot positions are allowed. The right panel shows
+the performance of the long-spot-only trading strategy, where shorting the spot is not allowed.
+The returns reported are excess returns from the random maturity arbitrage strategies.
+57
+===== PAGE 59 =====
+The conclusion and results remain similar if we consider ‘long-spot only’ trading
+strategies where only shorting the futures and longing the spot is allowed. Considering
+this one-sided trade slightly lowers the Sharpe ratio, but the algorithm automatically
+adjusts by increasing the proportion of times being active. The resulting annualized
+returns increase. In the year 2022, since most of the time, the futures price is below the
+spot and we don’t allow longing the futures and shorting the spot trade, the proportion of
+time the strategy is active is very low.
+Table 11 further reports the performance of the trading strategy under different trading
+costs specifications laid out in Table 2. The results from Table 12 correspond to the last
+column in Table 11. As trading costs increase, our trading strategy dynamically adjusts
+by lowering the proportion of time being active. The annualized return decreases and
+annualized standard deviation are of similar magnitude across different trading costs. As
+a result, SR decreases as trading costs increase. Under no trading cost, we see a Sharpe
+ratio of 6.72 for BTC and Sharpe ratios above 10 for all other cryptos. This also confirms
+our theoretical results that when there is no trading cost, any deviation of perpetual price
+from the no-arbitrage benchmark would be a random-maturity arbitrage opportunity.
+Comparing Table 11 with Table 6, we find under low and no trading costs, the potential
+incremental benefits from using a data-driven two-threshold trading rule are much larger
+compared to higher trading costs. The intuition can be easily illustrated by comparing
+the empirical real-time trading thresholds in the theory-motivated strategy and the data-
+driven strategy under low trading costs (Figure 9 and Figure 12). With persistent ρ the
+data-driven approach can find the optimal close-position threshold corresponding to the
+level of ρ while the theory-motivated one is too conservative in setting a close-position
+threshold equal to 0.
+There are two sources of trading profit for our trading strategy: (1) the price conver-
+gence; (2) the funding rate payment. In Table 14, we decompose the return to our trading
+strategy without trading cost into the two sources. We find across different cryptos, the
+return from price convergence accounts for a larger proportion of the total profit. For BTC,
+the price convergence accounts for more than2/3 of the profits, and for ETH, it accounts for
+about 3/4. Additionally, the decomposition for the year 2022 generates different patterns,
+the return due to funding rate plays a much smaller role across different cryptos. This
+is because the deviation from perpetual to spot is much smaller during the year. The
+results suggest when more sophisticated arbitrageurs enter the market, the large deviation
+of perpetual from the spot would be more of an off-equilibrium outcome. As a result, the
+funding rate payment will also be small.
+58
+===== PAGE 60 =====
+2020 2021 2022 2023 2024 All
+BTC Return 19.76 25.69 4.12 8.77 9.29 14.32
+Price 12.54 16.09 3.92 9.17 4.69 10.16
+Funding 7.22 9.60 0.19 -0.40 4.60 4.16
+ETH Return 34.93 30.99 15.60 10.63 10.70 22.42
+Price 25.47 21.85 14.78 10.32 6.02 17.52
+Funding 9.46 9.14 0.82 0.31 4.68 4.90
+BNB Return 83.60 64.93 34.20 43.47 38.35 54.98
+Price 71.21 56.63 29.55 38.36 26.95 47.32
+Funding 12.39 8.30 4.65 5.11 11.41 7.66
+DOGE Return 220.81 95.90 42.48 16.71 8.31 71.46
+Price 214.72 82.67 42.22 17.03 3.43 66.83
+Funding 6.09 13.22 0.26 -0.32 4.88 4.64
+ADA Return 78.31 56.21 53.01 34.28 12.65 53.01
+Price 67.04 45.69 51.71 33.96 6.96 47.27
+Funding 11.27 10.52 1.30 0.32 5.69 5.74
+Table 14 Data-driven strategy: Price Convergence vs Funding Rate Payment
+This table decomposes the portfolio return into the part due to price convergence and the part due
+to funding rate payment.
+In all, our analysis of the trading strategy demonstrates the profitability of perpetual-
+spot arbitrage trade. The deviation of the futures to spot can also serve as an important
+measure for the frictions, trading costs, and limits to arbitrage in the market.
+59
+===== PAGE 61 =====
+Figure 12 Trading Strategy Visualization: No Trading Costs
+This figure presents the real-time trading thresholds under no trading costs. The orange line is the
+open-position threshold, and the red line is the close-position threshold. The trading thresholds
+are determined based on the adjusted SR from the past six months.
+60
+===== PAGE 62 =====
+Figure 13 Trading Strategy Visualization: Low Trading Costs
+This figure presents the real-time trading thresholds under low trading costs (2.25 bps for spot
+trading and 0.18 bp for futures trading). The orange line is the open-position threshold, and the red
+line is the close-position threshold. The trading thresholds are determined based on the adjusted
+SR from the past six months.
+61
+===== PAGE 63 =====
+Figure 14 Trading Strategy Visualization: Medium Trading Costs
+This figure presents the real-time trading thresholds under medium trading costs (4.5 bps for spot
+trading and 0.72 bp for futures trading). The orange line is the open-position threshold, and the red
+line is the close-position threshold. The trading thresholds are determined based on the adjusted
+SR from the past six months.
+62
+===== PAGE 64 =====
+Figure 15 Trading Strategy Visualization: High Trading Costs
+This figure presents the real-time trading thresholds under high trading costs (6.75 bps for spot
+trading and 1.44 bps for futures trading). The orange line is the open-position threshold, and
+the red line is the close-position threshold. The trading thresholds are determined based on the
+adjusted SR from the past six months.
+63

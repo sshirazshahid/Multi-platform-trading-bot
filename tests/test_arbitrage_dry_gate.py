@@ -13,6 +13,7 @@ False -> live orders proceed).
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import config
@@ -51,6 +52,10 @@ def test_controlled_live_global_allows_live_arb_path(monkeypatch):
     """Bot is CONTROLLED_LIVE (global DRY_RUN False) -> the live path is reached
     (here the buy leg is made to fail so we don't depend on the success-path shape)."""
     monkeypatch.setattr(config, "DRY_RUN", False)
+    monkeypatch.setattr(
+        "core.entry_policy.authorize_runtime_entry",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True, reason="test_authorized"),
+    )
     buy_ex, sell_ex = MagicMock(), MagicMock()
     buy_ex.create_order.side_effect = Exception("boom")  # reached, then fails
     eng = _engine(buy_ex, sell_ex)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trading Backtest Validation"
+  short_description: "Falsify and gate strategy evidence"
+  default_prompt: "Use $trading-backtest-validation to test this strategy's replay, model, and mature shadow evidence without live capital."

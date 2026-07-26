@@ -223,6 +223,18 @@ INDUSTRY_TO_SECTOR: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+
 # ---------------------------------------------------------------------------
 # CLI argument parsing
 # ---------------------------------------------------------------------------
@@ -232,7 +244,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fmp-api-key",
-        default=os.environ.get("FMP_API_KEY"),
+        default=resolve_fmp_key(),
         help="Financial Modeling Prep API key (env: FMP_API_KEY)",
     )
     parser.add_argument(

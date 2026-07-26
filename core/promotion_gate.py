@@ -41,9 +41,18 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 
+from core.models import (
+    ArtifactCompatibilityError,
+    ModelManifest,
+    aggregate_artifact_checksum,
+    canonical_payload_checksum,
+    inspect_model_artifact,
+    sha256_file,
+)
 from core.stat_tests import bootstrap_ci, deflated_sharpe, pbo, sharpe
 
 
@@ -310,6 +319,7 @@ MAX_MODEL_AGE_DAYS = 7
 
 LATEST_TEMPLATE = "ensemble_{market}_latest.json"
 AUDIT_LOG = Path("data/models/audit.jsonl")
+REQUIRED_ENSEMBLE_ARTIFACTS = ("lr", "gbm", "iso_lr", "iso_gbm")
 
 
 def _audit(payload: dict) -> None:
@@ -317,6 +327,241 @@ def _audit(payload: dict) -> None:
     AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
     with AUDIT_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload, default=float) + "\n")
+
+
+def _read_ensemble_payload(path: str | Path) -> dict[str, Any]:
+    artifact_path = Path(path)
+    try:
+        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ArtifactCompatibilityError(
+            f"ensemble artifact is missing: {artifact_path}"
+        ) from exc
+    except (OSError, ValueError) as exc:
+        raise ArtifactCompatibilityError(
+            f"ensemble artifact is unreadable: {artifact_path}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ArtifactCompatibilityError("ensemble artifact is not a JSON object")
+    return payload
+
+
+def _component_path(
+    ensemble_path: Path, artifacts: Mapping[str, Any], name: str,
+) -> Path:
+    value = artifacts.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ArtifactCompatibilityError(
+            f"ensemble artifact mapping is missing {name!r}"
+        )
+    path = Path(value)
+    return path if path.is_absolute() else ensemble_path.parent / path
+
+
+def _ensemble_checksums(
+    ensemble_path: Path,
+    payload: Mapping[str, Any],
+) -> dict[str, str]:
+    feature_keys = payload.get("feature_keys")
+    if (
+        not isinstance(feature_keys, list)
+        or not feature_keys
+        or not all(isinstance(key, str) and key for key in feature_keys)
+        or len(set(feature_keys)) != len(feature_keys)
+    ):
+        raise ArtifactCompatibilityError("ensemble feature_keys are invalid")
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise ArtifactCompatibilityError("ensemble artifacts mapping is missing")
+
+    model_version = str(payload.get("model_version") or "")
+    if not model_version:
+        raise ArtifactCompatibilityError("ensemble model_version is missing")
+    lr_path = _component_path(ensemble_path, artifacts, "lr")
+    gbm_path = _component_path(ensemble_path, artifacts, "gbm")
+    inspect_model_artifact(
+        lr_path,
+        expected_artifact_kind="lr",
+        expected_feature_count=len(feature_keys),
+        expected_model_version=f"{model_version}::lr",
+    )
+    inspect_model_artifact(
+        gbm_path,
+        expected_artifact_kind="gbm",
+        expected_feature_count=len(feature_keys),
+        expected_model_version=f"{model_version}::gbm",
+    )
+
+    checksums = {"ensemble": canonical_payload_checksum(payload)}
+    for name in REQUIRED_ENSEMBLE_ARTIFACTS:
+        component = _component_path(ensemble_path, artifacts, name)
+        if not component.is_file():
+            raise ArtifactCompatibilityError(
+                f"ensemble component is missing: {name}={component}"
+            )
+        checksums[name] = sha256_file(component)
+    return checksums
+
+
+def _window(
+    payload_value: Any,
+    *,
+    start: Any,
+    end: Any,
+    n_samples: Any,
+    method: str | None = None,
+) -> dict[str, Any]:
+    if isinstance(payload_value, Mapping):
+        result = dict(payload_value)
+    else:
+        result = {"start": start, "end": end, "n_samples": n_samples}
+    if method and "method" not in result:
+        result["method"] = method
+    return result
+
+
+def _build_ensemble_manifest(
+    row: Mapping[str, Any],
+    *,
+    market_type: str,
+    ensemble_path: Path,
+    payload: Mapping[str, Any],
+    promotion_diagnostics: Mapping[str, Any],
+) -> ModelManifest:
+    model_version = str(row.get("model_version") or "")
+    if not model_version or str(payload.get("model_version") or "") != model_version:
+        raise ArtifactCompatibilityError(
+            "ensemble model_version does not match the model_versions row"
+        )
+    payload_market = payload.get("market_type")
+    if payload_market is not None and str(payload_market) != market_type:
+        raise ArtifactCompatibilityError(
+            f"ensemble market_type {payload_market!r} != {market_type!r}"
+        )
+
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ArtifactCompatibilityError("ensemble metrics are missing")
+    brier = metrics.get("brier_ensemble")
+    try:
+        brier_value = float(brier)
+    except (TypeError, ValueError) as exc:
+        raise ArtifactCompatibilityError(
+            "calibration diagnostics are missing brier_ensemble"
+        ) from exc
+    if not np.isfinite(brier_value):
+        raise ArtifactCompatibilityError("brier_ensemble is not finite")
+
+    train_start = row.get("train_window_start")
+    train_end = row.get("train_window_end")
+    training_window = _window(
+        payload.get("training_window"),
+        start=train_start,
+        end=train_end,
+        n_samples=metrics.get("n_train"),
+    )
+    oos_window = _window(
+        payload.get("oos_window"),
+        start=row.get("oos_window_start", train_start),
+        end=row.get("oos_window_end", train_end),
+        n_samples=metrics.get("n_oos_ensemble"),
+        method="walk_forward_bounds",
+    )
+    checksums = _ensemble_checksums(ensemble_path, payload)
+    checksum = aggregate_artifact_checksum(checksums)
+    created_at = row.get("trained_at") or payload.get("trained_at")
+    return ModelManifest.create(
+        model_version=model_version,
+        artifact_kind="ensemble",
+        feature_keys=payload.get("feature_keys") or [],
+        artifact_checksum=checksum,
+        artifact_uri=ensemble_path,
+        artifact_checksums=checksums,
+        training_window=training_window,
+        oos_window=oos_window,
+        calibration_diagnostics={
+            "method": "isotonic",
+            "brier_ensemble": brier_value,
+            "calibrator_artifacts": ["iso_lr", "iso_gbm"],
+        },
+        promotion_diagnostics=promotion_diagnostics,
+        created_at=int(created_at) if created_at is not None else None,
+    )
+
+
+def _write_ensemble_manifest(
+    ensemble_path: Path,
+    payload: dict[str, Any],
+    manifest: ModelManifest,
+) -> None:
+    updated = dict(payload)
+    updated["manifest"] = manifest.to_dict()
+    tmp = ensemble_path.with_suffix(ensemble_path.suffix + ".tmp")
+    try:
+        tmp.write_text(
+            json.dumps(updated, indent=2, default=float), encoding="utf-8"
+        )
+        tmp.replace(ensemble_path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _validate_ensemble_manifest(
+    row: Mapping[str, Any],
+    *,
+    market_type: str,
+    max_age_days: float | None = MAX_MODEL_AGE_DAYS,
+) -> ModelManifest:
+    ensemble_path = Path(str(row.get("artifact_path") or ""))
+    payload = _read_ensemble_payload(ensemble_path)
+    raw_manifest = payload.get("manifest")
+    if not isinstance(raw_manifest, Mapping):
+        raise ArtifactCompatibilityError("ensemble ModelManifest is missing")
+
+    payload_version = str(payload.get("model_version") or "")
+    row_version = str(row.get("model_version") or "")
+    if payload_version != row_version:
+        raise ArtifactCompatibilityError(
+            "ensemble model_version does not match the promotion record"
+        )
+    payload_market = payload.get("market_type")
+    if payload_market is not None and str(payload_market) != market_type:
+        raise ArtifactCompatibilityError(
+            f"ensemble market_type {payload_market!r} != {market_type!r}"
+        )
+
+    checksums = _ensemble_checksums(ensemble_path, payload)
+    manifest = ModelManifest.from_dict(raw_manifest)
+    manifest.validate(
+        artifact_checksum=aggregate_artifact_checksum(checksums),
+        expected_artifact_kind="ensemble",
+        expected_feature_keys=payload.get("feature_keys") or [],
+        expected_model_version=row_version,
+        max_age_days=max_age_days,
+        require_complete=True,
+    )
+    if manifest.artifact_checksums != checksums:
+        raise ArtifactCompatibilityError("component artifact checksum mismatch")
+
+    promotion = manifest.promotion_diagnostics
+    for key in ("oos_wr", "deflated_sharpe", "pbo"):
+        try:
+            expected = float(row.get(key))
+            recorded = float(promotion.get(key))
+        except (TypeError, ValueError) as exc:
+            raise ArtifactCompatibilityError(
+                f"promotion diagnostics are missing {key}"
+            ) from exc
+        if not np.isclose(expected, recorded, rtol=0.0, atol=1e-12):
+            raise ArtifactCompatibilityError(
+                f"promotion diagnostic {key} does not match authorization record"
+            )
+    if promotion.get("promote") is not True:
+        raise ArtifactCompatibilityError(
+            "promotion diagnostics do not contain an eligible verdict"
+        )
+    return manifest
 
 
 def evaluate_model_version(
@@ -329,6 +574,8 @@ def evaluate_model_version(
     max_pbo: float = MAX_PBO,
     min_auc: float = MIN_AUC,
     min_wr_uplift: float = MIN_WR_UPLIFT,
+    require_manifest: bool = True,
+    max_model_age_days: float | None = MAX_MODEL_AGE_DAYS,
 ) -> tuple[bool, str, dict]:
     """Decide whether `row` (a `model_versions` row + paired ensemble JSON) is
     fit to publish as the live `*_latest.json` pointer.
@@ -370,6 +617,7 @@ def evaluate_model_version(
     diag = {
         "model_version": str(row.get("model_version")),
         "market_type": market_type,
+        "artifact_path": str(art_path),
         "oos_wr": oos_wr,
         "deflated_sharpe": float(row.get("deflated_sharpe") or 0.0),
         "pbo": float(row.get("pbo") or 1.0),
@@ -393,14 +641,16 @@ def evaluate_model_version(
     # JSON didn't carry an `auc_ensemble` field — fail-closed.
     if not np.isfinite(auc) or auc < min_auc:
         reasons.append(f"AUC {auc} < {min_auc:.2f}")
-    # WR-uplift over base rate. Skip if base_rate is unknown (older
-    # artifacts that don't carry `wr_train` — fail-open here so legacy
-    # artifacts can still pass; new trainer always emits wr_train).
+    # WR-uplift over base rate. Research callers can explicitly bypass the
+    # manifest boundary, but production authorization fails closed when the
+    # training base rate is unavailable.
     if np.isfinite(wr_uplift) and wr_uplift < min_wr_uplift:
         reasons.append(
             f"wr_uplift {wr_uplift:.2f} < {min_wr_uplift:.2f} "
             f"(oos_wr={oos_wr:.3f}, base_rate={base_rate:.3f})"
         )
+    elif require_manifest and not np.isfinite(wr_uplift):
+        reasons.append("wr_uplift unavailable: training base rate is missing")
     if diag["deflated_sharpe"] < min_dsr:
         reasons.append(f"DSR {diag['deflated_sharpe']:.2f} < {min_dsr:.2f}")
     # PBO can be NaN when not enough folds — treat NaN as fail-closed.
@@ -409,6 +659,24 @@ def evaluate_model_version(
         reasons.append(f"PBO {pbo_v} > {max_pbo:.2f}")
     if n_oos < floor_n:
         reasons.append(f"n_oos {n_oos} < {floor_n}")
+
+    if require_manifest:
+        try:
+            manifest = _validate_ensemble_manifest(
+                row,
+                market_type=market_type,
+                max_age_days=max_model_age_days,
+            )
+            diag["manifest_valid"] = True
+            diag["manifest_version"] = manifest.manifest_version
+            diag["feature_schema_hash"] = manifest.feature_schema_hash
+            diag["artifact_checksum"] = manifest.artifact_checksum
+        except (ArtifactCompatibilityError, OSError, ValueError) as exc:
+            diag["manifest_valid"] = False
+            diag["manifest_error"] = str(exc)
+            reasons.append(f"manifest invalid: {exc}")
+    else:
+        diag["manifest_valid"] = None
 
     promote = (not reasons)
     reason = "OK" if promote else "; ".join(reasons)
@@ -430,20 +698,47 @@ def promote_if_eligible(
     where the bot runs doesn't reliably support symlinks). Atomicity comes
     from write-to-temp + replace.
     """
-    promote, reason, diag = evaluate_model_version(
-        row, market_type=market_type, **kwargs
+    art_path = row.get("artifact_path") or ""
+    metric_kwargs = dict(kwargs)
+    metric_kwargs.pop("require_manifest", None)
+    promote, _reason, diag = evaluate_model_version(
+        row,
+        market_type=market_type,
+        require_manifest=False,
+        **metric_kwargs,
     )
-    diag["ts"] = int(__import__("time").time())
-    _audit(diag)
-
     if not promote:
+        diag["ts"] = int(time.time())
+        _audit(diag)
         return False
 
-    art_path = row.get("artifact_path") or ""
-    if not art_path or not Path(art_path).exists():
-        diag["reason"] = f"artifact missing: {art_path}"
+    try:
+        ensemble_path = Path(str(art_path))
+        payload_in = _read_ensemble_payload(ensemble_path)
+        manifest = _build_ensemble_manifest(
+            row,
+            market_type=market_type,
+            ensemble_path=ensemble_path,
+            payload=payload_in,
+            promotion_diagnostics=diag,
+        )
+        _write_ensemble_manifest(ensemble_path, payload_in, manifest)
+        promote, _reason, diag = evaluate_model_version(
+            row,
+            market_type=market_type,
+            require_manifest=True,
+            **metric_kwargs,
+        )
+    except (ArtifactCompatibilityError, OSError, TypeError, ValueError) as exc:
+        promote = False
         diag["promote"] = False
-        _audit(diag)
+        diag["manifest_valid"] = False
+        diag["manifest_error"] = str(exc)
+        diag["reason"] = f"manifest invalid: {exc}"
+
+    diag["ts"] = int(time.time())
+    _audit(diag)
+    if not promote:
         return False
 
     models_dir = Path(models_dir)
@@ -453,10 +748,11 @@ def promote_if_eligible(
     payload = {
         "model_version": str(row.get("model_version")),
         "artifact_path": str(art_path),
-        "promoted_at": int(__import__("time").time()),
+        "promoted_at": int(time.time()),
         "diag": diag,
+        "manifest": manifest.to_dict(),
     }
-    tmp.write_text(json.dumps(payload, indent=2, default=float))
+    tmp.write_text(json.dumps(payload, indent=2, default=float), encoding="utf-8")
     tmp.replace(latest)
     return True
 
@@ -484,6 +780,28 @@ def validate_model_pointer(
         }
 
     art_path = ptr.get("artifact_path") or diag_in.get("artifact_path") or ""
+    pointer_manifest = ptr.get("manifest")
+    if not isinstance(pointer_manifest, dict):
+        return False, "latest pointer missing ModelManifest", {
+            "model_version": ptr.get("model_version"),
+            "market_type": market_type,
+            "artifact_path": art_path,
+        }
+    try:
+        artifact_payload = _read_ensemble_payload(art_path)
+    except ArtifactCompatibilityError as exc:
+        return False, str(exc), {
+            "model_version": ptr.get("model_version"),
+            "market_type": market_type,
+            "artifact_path": art_path,
+        }
+    if artifact_payload.get("manifest") != pointer_manifest:
+        return False, "latest pointer ModelManifest does not match artifact", {
+            "model_version": ptr.get("model_version"),
+            "market_type": market_type,
+            "artifact_path": art_path,
+        }
+
     row = {
         "model_version": ptr.get("model_version") or diag_in.get("model_version"),
         "artifact_path": art_path,
@@ -491,7 +809,11 @@ def validate_model_pointer(
         "deflated_sharpe": diag_in.get("deflated_sharpe"),
         "pbo": diag_in.get("pbo"),
     }
-    ok, reason, diag = evaluate_model_version(row, market_type=market_type)
+    ok, reason, diag = evaluate_model_version(
+        row,
+        market_type=market_type,
+        max_model_age_days=max_age_days,
+    )
 
     promoted_at = float(ptr.get("promoted_at") or 0.0)
     now = time.time()

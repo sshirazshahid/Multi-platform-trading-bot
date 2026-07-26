@@ -42,11 +42,11 @@ pipeline were all one day of design-level work.
   the double latch (PAPER → CONTROLLED_LIVE) stays.
 
 **2. Learn (the paper laboratory)**
-- The directional lane trades paper on ~400 futures pairs across Binance/Bybit/Bitget
-  with the owner's accuracy band: take-profit at 0.45× the stop distance for longs,
-  0.35× for shorts — chosen from an audited 8,878-trade replay to land the win rate
-  in 63-67%. Honesty that never gets dropped: **the band buys accuracy, not profit**;
-  ~2,400 pattern experiments say directional prediction here has no after-cost edge.
+- The directional lane trades PAPER across Binance/Bybit/Bitget as a bounded
+  research cohort. The old take-profit geometry that mechanically targeted a
+  63-67% hit rate remains disabled because it was negative after costs. Daily
+  reporting counts the real exits, requires at least 30 closed outcomes, and
+  cannot declare success without positive expectancy and profit factor above 1.
 - Every idea enters through the evidence pipeline: after-cost screen → independent
   adversarial audit → log-only shadow → frozen gate. Failures go to a permanent
   refuted-families ledger so no lesson is paid for twice.

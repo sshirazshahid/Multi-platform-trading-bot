@@ -64,7 +64,11 @@ def env(tmp_path, monkeypatch):
     m = mod_mod.LRModel().fit(X, y)
     art_path = tmp_path / "data" / "models" / "lr_v_phase13_test_20260428_TEST.pkl"
     latest_path = tmp_path / "data" / "models" / "lr_v_latest.pkl"
-    m.save(art_path, model_version="lr_v_phase13_test_20260428_TEST")
+    m.save(
+        art_path,
+        model_version="lr_v_phase13_test_20260428_TEST",
+        feature_keys=list(_features_dict()),
+    )
     # Simulate the Windows fallback (copy-not-symlink).
     import shutil
     shutil.copy2(art_path, latest_path)

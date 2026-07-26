@@ -149,20 +149,28 @@ def test_runtime_config_uses_shadow_policy_empty_allowlist_and_typed_profile():
         "CONTROLLED_LIVE_ENABLED",
         "PAPER_TRADING_PROFILE",
         "PAPER_PROFILE_STARTED_AT",
+        # Also clear knobs that override MODE_PROFILE-derived defaults when
+        # present in the parent process environ (load_dotenv side-effect).
+        "MAX_PORTFOLIO_EXPOSURE_PCT",
+        "MAX_AGGREGATE_OPEN_RISK_PCT",
     ):
         env.pop(key, None)
     env["PYTHON_DOTENV_DISABLED"] = "1"
     root = Path(__file__).resolve().parents[1]
     code = """
 import config
-assert config.ENTRY_POLICY == 'SHADOW_ONLY'
-assert config.APPROVED_PAPER_STRATEGIES == frozenset()
-assert config.APPROVED_LIVE_STRATEGIES == frozenset()
-assert config.RISK['max_open_positions'] == 3
-assert config.RISK['futures_max_leverage'] == 1.5
-assert config.VOL_TARGET_SIZING['per_trade_risk_pct'] == 0.0025
-assert config.MAX_PORTFOLIO_EXPOSURE_PCT == 10.0
-assert config.MAX_AGGREGATE_OPEN_RISK_PCT == 0.0075
+checks = [
+    ('ENTRY_POLICY', config.ENTRY_POLICY, 'SHADOW_ONLY'),
+    ('APPROVED_PAPER_STRATEGIES', config.APPROVED_PAPER_STRATEGIES, frozenset()),
+    ('APPROVED_LIVE_STRATEGIES', config.APPROVED_LIVE_STRATEGIES, frozenset()),
+    ('max_open_positions', config.RISK['max_open_positions'], 3),
+    ('futures_max_leverage', config.RISK['futures_max_leverage'], 1.5),
+    ('per_trade_risk_pct', config.VOL_TARGET_SIZING['per_trade_risk_pct'], 0.0025),
+    ('MAX_PORTFOLIO_EXPOSURE_PCT', config.MAX_PORTFOLIO_EXPOSURE_PCT, 10.0),
+    ('MAX_AGGREGATE_OPEN_RISK_PCT', config.MAX_AGGREGATE_OPEN_RISK_PCT, 0.0075),
+]
+for name, got, want in checks:
+    assert got == want, f'{name}: got {got!r} want {want!r}'
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],
@@ -172,7 +180,7 @@ assert config.MAX_AGGREGATE_OPEN_RISK_PCT == 0.0075
         text=True,
         check=False,
     )
-    assert completed.returncode == 0, completed.stderr
+    assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
 def test_aggressive_profile_changes_only_paper_sampling_envelope():

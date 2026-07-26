@@ -48,18 +48,30 @@ def _make_stub(ticker):
 
 
 def test_fetch_mark_index_parses_mark_and_index():
-    ex = _make_stub({"info": {"markPrice": "100.5", "indexPrice": "100.1"}})
+    timestamp_ms = 1_750_000_000_000
+    ex = _make_stub({
+        "timestamp": timestamp_ms,
+        "info": {"markPrice": "100.5", "indexPrice": "100.1"},
+    })
     mi = ex.fetch_mark_index("BTC/USDT:USDT", "futures")
     assert mi["mark"] == pytest.approx(100.5)
     assert mi["index"] == pytest.approx(100.1)
-    assert mi["ts"] is not None
+    assert mi["ts"] == pytest.approx(timestamp_ms / 1000)
+    assert mi["mark_ts"] == mi["ts"]
+    assert mi["index_ts"] == mi["ts"]
 
 
 def test_fetch_mark_index_fail_open_when_not_ready():
     ex = _StubExchange.__new__(_StubExchange)
     ex.exchange = None
     ex._connected = False
-    assert ex.fetch_mark_index("X") == {"mark": None, "index": None, "ts": None}
+    assert ex.fetch_mark_index("X") == {
+        "mark": None,
+        "index": None,
+        "ts": None,
+        "mark_ts": None,
+        "index_ts": None,
+    }
 
 
 # --------------------------------------------------------- ledger frame

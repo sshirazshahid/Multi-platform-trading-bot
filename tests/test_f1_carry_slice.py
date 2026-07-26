@@ -13,6 +13,16 @@ import pytest
 from core.strategy_spec import StrategySpec
 from research import funding_carry_lab as fc
 
+_ENTRY_CONTRACT = dict(
+    trailing_funding_rates=[0.0004] * 21,
+    perp_mark=100.1,
+    spot_mid=100.0,
+    spot_spread_bps=1.0,
+    perp_spread_bps=1.0,
+    time_to_next_funding_min=60.0,
+    feeds_fresh=True,
+)
+
 
 # ── F1 net-expected-edge entry gate ───────────────────────────────────
 def test_f1_net_expected_edge_bps():
@@ -28,6 +38,7 @@ def test_f1_entry_gate_allows_rich_carry():
         funding_per_settlement=0.0004, hold_settlements=9,
         round_trip_cost_frac=0.0002, depth_ratio=30.0, liq_buffer_x=5.0,
         funding_age_sec=30.0, both_legs_fillable=True,
+        **_ENTRY_CONTRACT,
     )
     assert ok is True
     assert reason == "ok"
@@ -52,7 +63,7 @@ def test_f1_entry_gate_allows_rich_carry():
           funding_age_sec=30.0, both_legs_fillable=False), "atomic"),
 ])
 def test_f1_entry_gate_rejects(kw, bad):
-    ok, reason, _ = fc.f1_entry_gate(**kw)
+    ok, reason, _ = fc.f1_entry_gate(**kw, **_ENTRY_CONTRACT)
     assert ok is False
     assert bad in reason
 
@@ -63,6 +74,7 @@ def test_f1_entry_gate_edge_floor_is_max_15bps_or_3x_cost():
         funding_per_settlement=0.0008, hold_settlements=3,  # 24 bps gross
         round_trip_cost_frac=0.0010, depth_ratio=30.0, liq_buffer_x=5.0,
         funding_age_sec=30.0, both_legs_fillable=True,
+        **_ENTRY_CONTRACT,
     )
     # net = 24 - 10 = 14 bps < 30 bps threshold -> reject on edge.
     assert ok is False and "edge" in reason
@@ -131,7 +143,7 @@ def test_run_f1_slice_registers_and_records_verdict(tmp_path):
     assert rep["n_cycles"] >= 60
     # accept() ran and produced a boolean verdict; NO_GO is an acceptable outcome.
     assert isinstance(rep["verdict"]["accept"], bool)
-    assert rep["evidence"]["promotion_status"] in ("PROMOTED", "NO_EDGE")
+    assert rep["evidence"]["promotion_status"] == "SYNTHETIC_DIAGNOSTIC"
     # F1 registered as a StrategySpec through the EvidenceRegistry ledger.
     import json
     ledger = json.loads(reg.read_text(encoding="utf-8"))

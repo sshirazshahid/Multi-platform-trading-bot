@@ -1,0 +1,214 @@
+{
+  "candidate": "staked_eth_wrapper_discount",
+  "hypothesis": "Wrapper/ETH CEX-spot discounts vs slow fair trend exceed the 4-leg round-trip cost floor often enough to be harvestable (buy wrapper, ETH-perp hedge, exit at convergence).",
+  "stage": "stage1_descriptive",
+  "pre_registration": "_workspace/strategy_pipeline/15d_screen_wrapper.md",
+  "n": {
+    "WBETH": 8762,
+    "STETH": 8762
+  },
+  "after_cost_metrics": {
+    "WBETH": {
+      "p95_disc_bps": 21.26,
+      "floor_min_bps": 49.9639,
+      "margin_bps": -28.7
+    },
+    "STETH": {
+      "p95_disc_bps": 27.89,
+      "floor_min_bps": 49.9639,
+      "margin_bps": -22.07
+    }
+  },
+  "gates": {
+    "stage1_stop_rule": {
+      "rule": "p95_disc_bps < floor_min_bps on BOTH wrappers => NO_GO, no backtest",
+      "fired": true
+    },
+    "frozen_stage2_gates": "not reached"
+  },
+  "per_wrapper": [
+    {
+      "wrapper": "WBETH",
+      "n_matched_bars": 8762,
+      "window_utc": [
+        "2025-05-31 20:00:00",
+        "2026-05-31 21:00:00"
+      ],
+      "annual_drift_log_ratio": 0.025747,
+      "estimator_A_ols": {
+        "n_bars": 8762,
+        "n_discount_bars": 4049,
+        "share_in_discount": 0.4621,
+        "p50_bps": 5.02,
+        "p90_bps": 15.87,
+        "p95_bps": 21.26,
+        "p99_bps": 61.72,
+        "max_bps": 1760.61
+      },
+      "estimator_B_trailing_median": {
+        "n_bars": 8043,
+        "n_discount_bars": 4283,
+        "share_in_discount": 0.5325,
+        "p50_bps": 5.5,
+        "p90_bps": 15.23,
+        "p95_bps": 20.85,
+        "p99_bps": 55.98,
+        "max_bps": 1757.22
+      },
+      "best_estimator": "A_ols",
+      "p95_disc_bps": 21.26,
+      "episodes_best_estimator": {
+        ">=10bps": {
+          "n_episodes": 413,
+          "median_duration_h": 1.0,
+          "max_duration_h": 113,
+          "max_depth_bps": 1760.61
+        },
+        ">=20bps": {
+          "n_episodes": 95,
+          "median_duration_h": 1.0,
+          "max_duration_h": 95,
+          "max_depth_bps": 1760.61
+        },
+        ">=30bps": {
+          "n_episodes": 25,
+          "median_duration_h": 1.0,
+          "max_duration_h": 62,
+          "max_depth_bps": 1760.61
+        },
+        ">=40bps": {
+          "n_episodes": 13,
+          "median_duration_h": 2.0,
+          "max_duration_h": 36,
+          "max_depth_bps": 1760.61
+        },
+        ">=50bps": {
+          "n_episodes": 12,
+          "median_duration_h": 2.0,
+          "max_duration_h": 18,
+          "max_depth_bps": 1760.61
+        },
+        ">=75bps": {
+          "n_episodes": 8,
+          "median_duration_h": 1.5,
+          "max_duration_h": 16,
+          "max_depth_bps": 1760.61
+        },
+        ">=100bps": {
+          "n_episodes": 3,
+          "median_duration_h": 1.0,
+          "max_duration_h": 15,
+          "max_depth_bps": 1760.61
+        }
+      },
+      "d_ref_h": 1.0,
+      "n_ge20bps_episodes": 95,
+      "mean_8h_funding_window": 2.887e-05,
+      "n_funding_settlements_in_window": 1095,
+      "cost_floors": {
+        "fixed_cost_bps": 50.0,
+        "funding_credit_bps_at_dref": 0.0361,
+        "floor_nofunding_bps": 50.0,
+        "floor_funding_adj_bps": 49.9639,
+        "floor_min_bps": 49.9639
+      },
+      "liquidity": {
+        "median_quote_vol_usdt_all": 43466.0,
+        "median_quote_vol_usdt_in_ge20bps_episodes": 206438.0
+      },
+      "stop_rule_fired": true
+    },
+    {
+      "wrapper": "STETH",
+      "n_matched_bars": 8762,
+      "window_utc": [
+        "2025-05-31 20:00:00",
+        "2026-05-31 21:00:00"
+      ],
+      "annual_drift_log_ratio": 0.000619,
+      "estimator_A_ols": {
+        "n_bars": 8762,
+        "n_discount_bars": 3629,
+        "share_in_discount": 0.4142,
+        "p50_bps": 7.07,
+        "p90_bps": 21.08,
+        "p95_bps": 25.57,
+        "p99_bps": 40.9,
+        "max_bps": 183.2
+      },
+      "estimator_B_trailing_median": {
+        "n_bars": 8043,
+        "n_discount_bars": 3951,
+        "share_in_discount": 0.4912,
+        "p50_bps": 5.33,
+        "p90_bps": 20.82,
+        "p95_bps": 27.89,
+        "p99_bps": 43.7,
+        "max_bps": 183.32
+      },
+      "best_estimator": "B_trailing_median",
+      "p95_disc_bps": 27.89,
+      "episodes_best_estimator": {
+        ">=10bps": {
+          "n_episodes": 437,
+          "median_duration_h": 1.0,
+          "max_duration_h": 145,
+          "max_depth_bps": 183.32
+        },
+        ">=20bps": {
+          "n_episodes": 116,
+          "median_duration_h": 1.0,
+          "max_duration_h": 56,
+          "max_depth_bps": 183.32
+        },
+        ">=30bps": {
+          "n_episodes": 62,
+          "median_duration_h": 1.0,
+          "max_duration_h": 41,
+          "max_depth_bps": 183.32
+        },
+        ">=40bps": {
+          "n_episodes": 19,
+          "median_duration_h": 1.0,
+          "max_duration_h": 33,
+          "max_depth_bps": 183.32
+        },
+        ">=50bps": {
+          "n_episodes": 9,
+          "median_duration_h": 2.0,
+          "max_duration_h": 7,
+          "max_depth_bps": 183.32
+        },
+        ">=75bps": {
+          "n_episodes": 1,
+          "median_duration_h": 2.0,
+          "max_duration_h": 2,
+          "max_depth_bps": 183.32
+        },
+        ">=100bps": {
+          "n_episodes": 1,
+          "median_duration_h": 2.0,
+          "max_duration_h": 2,
+          "max_depth_bps": 183.32
+        }
+      },
+      "d_ref_h": 1.0,
+      "n_ge20bps_episodes": 116,
+      "mean_8h_funding_window": 2.887e-05,
+      "n_funding_settlements_in_window": 1095,
+      "cost_floors": {
+        "fixed_cost_bps": 50.0,
+        "funding_credit_bps_at_dref": 0.0361,
+        "floor_nofunding_bps": 50.0,
+        "floor_funding_adj_bps": 49.9639,
+        "floor_min_bps": 49.9639
+      },
+      "liquidity": {
+        "median_quote_vol_usdt_all": 119545.0,
+        "median_quote_vol_usdt_in_ge20bps_episodes": 112252.0
+      },
+      "stop_rule_fired": true
+    }
+  ],
+  "verdict": "NO_GO"
+}

@@ -15,6 +15,10 @@ _GOOD = dict(
     funding_per_settlement=0.0004, hold_settlements=9,
     round_trip_cost_frac=0.0002, depth_ratio=30.0, liq_buffer_x=5.0,
     funding_age_sec=30.0, both_legs_fillable=True,
+    trailing_funding_rates=[0.0004] * 21,
+    perp_mark=100.1, spot_mid=100.0,
+    spot_spread_bps=1.0, perp_spread_bps=1.0,
+    time_to_next_funding_min=60.0, feeds_fresh=True,
 )
 
 
@@ -26,47 +30,64 @@ def test_entry_rejects_nonpositive_funding_rate():
 
 
 def test_entry_rejects_negative_7d_average_funding():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, avg_funding_7d=-0.0001)
+    ok, reason, _ = fc.f1_entry_gate(**{**_GOOD, "avg_funding_7d": -0.0001})
     assert ok is False and "avg_funding_7d" in reason
-    assert fc.f1_entry_gate(**_GOOD, avg_funding_7d=0.0002)[0] is True
+    assert fc.f1_entry_gate(**{**_GOOD, "avg_funding_7d": 0.0002})[0] is True
 
 
 def test_entry_rejects_perp_mark_below_spot_mid():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, perp_mark=99.9, spot_mid=100.0)
+    ok, reason, _ = fc.f1_entry_gate(**{**_GOOD, "perp_mark": 99.9})
     assert ok is False and "perp_mark" in reason
-    assert fc.f1_entry_gate(**_GOOD, perp_mark=100.1, spot_mid=100.0)[0] is True
+    assert fc.f1_entry_gate(**_GOOD)[0] is True
 
 
 def test_entry_rejects_wide_spot_spread():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, spot_spread_bps=6.0)
+    ok, reason, _ = fc.f1_entry_gate(**{**_GOOD, "spot_spread_bps": 6.0})
     assert ok is False and "spot_spread" in reason
-    assert fc.f1_entry_gate(**_GOOD, spot_spread_bps=4.9)[0] is True
+    assert fc.f1_entry_gate(**{**_GOOD, "spot_spread_bps": 4.9})[0] is True
 
 
 def test_entry_rejects_wide_perp_spread():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, perp_spread_bps=6.0)
+    ok, reason, _ = fc.f1_entry_gate(**{**_GOOD, "perp_spread_bps": 6.0})
     assert ok is False and "perp_spread" in reason
-    assert fc.f1_entry_gate(**_GOOD, perp_spread_bps=4.9)[0] is True
+    assert fc.f1_entry_gate(**{**_GOOD, "perp_spread_bps": 4.9})[0] is True
 
 
 @pytest.mark.parametrize("minutes", [10.0, 200.0])
 def test_entry_rejects_time_to_next_funding_out_of_window(minutes):
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, time_to_next_funding_min=minutes)
+    ok, reason, _ = fc.f1_entry_gate(
+        **{**_GOOD, "time_to_next_funding_min": minutes}
+    )
     assert ok is False and "time_to_next_funding" in reason
 
 
 def test_entry_accepts_time_to_next_funding_in_window():
-    assert fc.f1_entry_gate(**_GOOD, time_to_next_funding_min=60.0)[0] is True
+    assert fc.f1_entry_gate(**_GOOD)[0] is True
 
 
 def test_entry_rejects_stale_feeds_flag():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD, feeds_fresh=False)
+    ok, reason, _ = fc.f1_entry_gate(**{**_GOOD, "feeds_fresh": False})
     assert ok is False and "feeds" in reason
 
 
-def test_entry_backward_compatible_defaults_still_pass():
-    ok, reason, _ = fc.f1_entry_gate(**_GOOD)
-    assert ok is True and reason == "ok"
+def test_entry_missing_authoritative_history_fails_closed():
+    ok, reason, _ = fc.f1_entry_gate(
+        **{**_GOOD, "trailing_funding_rates": None}
+    )
+    assert ok is False and "trailing_funding_history" in reason
+
+
+def test_entry_rejects_nonpositive_95pct_funding_lower_bound():
+    rates = [0.0012] * 18 + [-0.004] * 3
+    ok, reason, details = fc.f1_entry_gate(
+        **{
+            **_GOOD,
+            "funding_per_settlement": 0.0012,
+            "trailing_funding_rates": rates,
+        }
+    )
+    assert details["funding_lower_bound_bps"] <= 0
+    assert ok is False and "lower_bound" in reason
 
 
 # ── NEW exit gates ─────────────────────────────────────────────────────
@@ -117,13 +138,13 @@ def test_sizing_rejects_over_20pct_total_carry():
     assert ok is False and "total_carry" in reason
 
 
-def test_sizing_leverage_1x_initial_2x_max():
+def test_sizing_leverage_is_always_capped_at_1x():
     base = dict(paper_equity=10_000.0, symbol_notional=400.0,
                 total_carry_notional=1_000.0)
     ok, reason = fc.f1_sizing_gate(**base, leverage=1.5, is_initial_entry=True)
     assert ok is False and "leverage" in reason
-    assert fc.f1_sizing_gate(**base, leverage=2.0, is_initial_entry=False)[0] is True
-    ok2, reason2 = fc.f1_sizing_gate(**base, leverage=2.5, is_initial_entry=False)
+    assert fc.f1_sizing_gate(**base, leverage=1.0, is_initial_entry=False)[0] is True
+    ok2, reason2 = fc.f1_sizing_gate(**base, leverage=1.1, is_initial_entry=False)
     assert ok2 is False and "leverage" in reason2
 
 
@@ -141,12 +162,11 @@ def test_sizing_passes_within_all_caps():
 
 
 # ── Concentration bump 40 -> 60 (per symbol AND per venue) ────────────
-def test_concentration_default_is_60_pct():
-    assert fc.F1_MAX_PNL_CONCENTRATION_PCT == 60.0
-    # 55% share passes at the new 60% default, would have failed at 40%.
+def test_concentration_default_is_35_pct():
+    assert fc.F1_MAX_PNL_CONCENTRATION_PCT == 35.0
     ok, share, _ = fc.pnl_concentration_ok({"a": 5.5, "b": 4.5})
-    assert ok is True and share == pytest.approx(55.0)
-    assert fc.pnl_concentration_ok({"a": 6.5, "b": 3.5})[0] is False
+    assert ok is False and share == pytest.approx(55.0)
+    assert fc.pnl_concentration_ok({"a": 3.4, "b": 3.3, "c": 3.3})[0] is True
 
 
 # ── build_f1_spec universe latch ───────────────────────────────────────

@@ -27,6 +27,8 @@ call; nothing here is wired to the live order path; no daemon is started.
 from __future__ import annotations
 
 import json
+import math
+import random
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -496,6 +498,12 @@ def f2_entry_gate(
     slippage_bps: float = 5.0,
     latency_buffer_bps: float = 2.0,
     failed_leg_buffer_bps: float = 5.0,
+    synchronized_spread_history_bps_per_hour=None,
+    long_book_age_ms: float | None = None,
+    short_book_age_ms: float | None = None,
+    intervenue_skew_ms: float | None = None,
+    long_depth_ratio: float | None = None,
+    short_depth_ratio: float | None = None,
     min_edge_bps: float = F2_MIN_NET_EDGE_BPS,
     cost_mult: float = F2_COST_MULT_FLOOR,
 ) -> dict[str, Any]:
@@ -509,19 +517,111 @@ def f2_entry_gate(
     if spread_bps_per_hour is None:
         return {"enter": False, "net_edge_bps": None, "floor_bps": None,
                 "reason": "missing spread (stale/insufficient venues)"}
+    quality = {
+        "long_book_age_ms": long_book_age_ms,
+        "short_book_age_ms": short_book_age_ms,
+        "intervenue_skew_ms": intervenue_skew_ms,
+        "long_depth_ratio": long_depth_ratio,
+        "short_depth_ratio": short_depth_ratio,
+    }
+    if any(value is None for value in quality.values()):
+        return {
+            "enter": False,
+            "net_edge_bps": None,
+            "floor_bps": None,
+            "reason": "synchronized book quality unavailable",
+            **quality,
+        }
+    try:
+        numeric_quality = {key: float(value) for key, value in quality.items()}
+    except (TypeError, ValueError):
+        numeric_quality = {}
+    if (
+        len(numeric_quality) != len(quality)
+        or any(not math.isfinite(value) or value < 0
+               for value in numeric_quality.values())
+    ):
+        return {"enter": False, "net_edge_bps": None, "floor_bps": None,
+                "reason": "synchronized book quality invalid", **quality}
+    if max(numeric_quality["long_book_age_ms"],
+           numeric_quality["short_book_age_ms"]) > 500.0:
+        return {"enter": False, "net_edge_bps": None, "floor_bps": None,
+                "reason": "book age exceeds 500ms", **numeric_quality}
+    if numeric_quality["intervenue_skew_ms"] > 250.0:
+        return {"enter": False, "net_edge_bps": None, "floor_bps": None,
+                "reason": "intervenue skew exceeds 250ms", **numeric_quality}
+    if min(numeric_quality["long_depth_ratio"],
+           numeric_quality["short_depth_ratio"]) < 20.0:
+        return {"enter": False, "net_edge_bps": None, "floor_bps": None,
+                "reason": "book depth below 20x", **numeric_quality}
+
     cost_bps = float(two_leg_cost_frac) * 1e4
     gross_bps = float(spread_bps_per_hour) * float(hold_hours)
     net = (gross_bps - cost_bps - float(slippage_bps)
            - float(latency_buffer_bps) - float(failed_leg_buffer_bps))
     floor = max(float(min_edge_bps), float(cost_mult) * cost_bps)
+    raw_history = (
+        ()
+        if synchronized_spread_history_bps_per_hour is None
+        else synchronized_spread_history_bps_per_hour
+    )
+    history = tuple(float(value) for value in raw_history)
+    lower_bound = _f2_net_edge_lower_bound_bps(
+        history,
+        hold_hours=float(hold_hours),
+        total_cost_bps=(
+            cost_bps + float(slippage_bps) + float(latency_buffer_bps)
+            + float(failed_leg_buffer_bps)
+        ),
+    ) if len(history) >= 50 else float("-inf")
+    lower_bound_ok = lower_bound > 0.0
+    enter = net >= floor and lower_bound_ok
     return {
-        "enter": net >= floor,
+        "enter": enter,
         "net_edge_bps": net,
+        "net_edge_95pct_lower_bound_bps": lower_bound,
+        "synchronized_history_points": len(history),
         "gross_bps": gross_bps,
         "cost_bps": cost_bps,
         "floor_bps": floor,
-        "reason": "ok" if net >= floor else f"net {net:.1f}bps < floor {floor:.1f}bps",
+        "reason": (
+            "ok"
+            if enter
+            else (
+                f"net {net:.1f}bps < floor {floor:.1f}bps"
+                if net < floor
+                else f"95pct lower bound {lower_bound:.1f}bps <= 0"
+            )
+        ),
+        **numeric_quality,
     }
+
+
+def _f2_net_edge_lower_bound_bps(
+    history: tuple[float, ...],
+    *,
+    hold_hours: float,
+    total_cost_bps: float,
+    n_paths: int = 2_000,
+    block: int = 3,
+    seed: int = 0,
+) -> float:
+    """Deterministic one-sided 95% block-bootstrap net-edge bound."""
+    if not history or any(not math.isfinite(value) for value in history):
+        return float("-inf")
+    rng = random.Random(seed)
+    n = len(history)
+    outcomes: list[float] = []
+    for _ in range(n_paths):
+        sample: list[float] = []
+        while len(sample) < n:
+            start = rng.randrange(n)
+            sample.extend(history[(start + offset) % n] for offset in range(block))
+        outcomes.append(
+            (sum(sample[:n]) / n) * hold_hours - total_cost_bps
+        )
+    outcomes.sort()
+    return outcomes[math.ceil(0.05 * n_paths) - 1]
 
 
 def run_one_leg_failure_sims(
@@ -555,16 +655,17 @@ def run_one_leg_failure_sims(
 def f2_activation_allowed(
     *,
     registry_path: Any = None,
-    min_paper_days: float = 30.0,
+    min_shadow_days: float = 90.0,
+    min_independent_episodes: int = 50,
     maker_fee_frac: float | None = None,
     max_maker_fee_frac: float = F2_MAX_MAKER_FEE_FRAC,
     taker_economics_acknowledged: bool = False,
 ) -> dict[str, Any]:
-    """ACTIVATION LATCH: F2 may only activate on >=30d of CLEAN F1 paper evidence.
+    """Paper-eligibility latch over F2's own synchronized shadow evidence.
 
-    Reads the F1 EvidenceRegistry row: requires ``oos_metrics.paper_span_days
-    >= min_paper_days``, ``paper_cycles > 0`` and ZERO ``failed_leg_events``
-    (no unresolved one-leg events). Fail-closed on any missing data.
+    Requires at least 90 synchronized days, 50 independent spread episodes,
+    and zero unresolved leg failures. This does not override the frozen
+    strategy catalog: F2 remains SHADOW_ONLY until a reviewed code change.
 
     Fee-tier precondition (applied AFTER evidence checks pass): either the
     verified maker fee tier is <= ``max_maker_fee_frac``, or the operator
@@ -575,20 +676,24 @@ def f2_activation_allowed(
         from core.decision.promotion_loop import ACTIVE_STRATEGIES_PATH, load_registry
 
         reg = load_registry(registry_path or ACTIVE_STRATEGIES_PATH)
-        rec = (reg.get("strategies") or {}).get("F1") or {}
+        rec = (reg.get("strategies") or {}).get("F2_XVENUE_FUNDING_SPREAD") or {}
         m = rec.get("oos_metrics") or {}
-        span = float(m.get("paper_span_days") or 0.0)
-        cycles = int(m.get("paper_cycles") or 0)
-        failed = int(m.get("failed_leg_events") or 0)
+        span = float(m.get("synchronized_shadow_days") or 0.0)
+        episodes = int(m.get("independent_episodes") or 0)
+        failed = int(m.get("unresolved_leg_failures") or 0)
+        version = str(m.get("strategy_version") or "")
     except Exception:
         return {"allowed": False, "reason": "F1 evidence unreadable (fail-closed)"}
-    if cycles <= 0 or span < float(min_paper_days):
+    if version != "shadow-v1":
+        return {"allowed": False, "reason": "F2 shadow-v1 evidence missing"}
+    if span < float(min_shadow_days) or episodes < int(min_independent_episodes):
         return {"allowed": False,
-                "reason": f"F1 clean paper span {span:.1f}d/{cycles} cycles "
-                          f"< required {min_paper_days:.0f}d"}
+                "reason": f"F2 synchronized shadow evidence {span:.1f}d/"
+                          f"{episodes} episodes < required "
+                          f"{min_shadow_days:.0f}d/{min_independent_episodes}"}
     if failed > 0:
         return {"allowed": False,
-                "reason": f"{failed} unresolved one-leg event(s) in F1 evidence"}
+                "reason": f"{failed} unresolved one-leg event(s) in F2 evidence"}
     # Fee-tier precondition — evidence is clean; now require verified maker
     # economics OR an explicit taker/taker acknowledgement (fail-closed).
     if taker_economics_acknowledged:
@@ -604,7 +709,8 @@ def f2_activation_allowed(
     else:
         fee_note = f"maker fee {float(maker_fee_frac):.6f} <= {float(max_maker_fee_frac):.6f}"
     return {"allowed": True,
-            "reason": f"F1 evidence clean over {span:.1f}d ({cycles} cycles); {fee_note}"}
+            "reason": f"F2 evidence clean over {span:.1f}d "
+                      f"({episodes} episodes); {fee_note}"}
 
 
 def build_f2_spec():
@@ -629,6 +735,10 @@ def build_f2_spec():
             "buffers": ["slippage", "latency", "failed_leg"],
             "pre_funded_venues_assumed": True,
             "atomic_two_leg_fill": True,
+            "max_book_age_ms": 500,
+            "max_intervenue_skew_ms": 250,
+            "min_depth_ratio": 20,
+            "positive_95pct_lower_bound": True,
         },
         exit_rules={
             "spread_decay_below_floor": True,
@@ -637,7 +747,9 @@ def build_f2_spec():
         sizing={"per_venue_pre_funded_margin_required": True},
         risk_limits={
             "activation_latch": "f2_activation_allowed",
-            "requires_f1_clean_paper_days": 30,
+            "requires_synchronized_shadow_days": 90,
+            "requires_independent_episodes": 50,
+            "requires_zero_unresolved_leg_failures": True,
             "maker_fee_precondition_frac": F2_MAX_MAKER_FEE_FRAC,
             "taker_taker_floor_ack_alternative": True,
             "live_execution_notes": [
@@ -645,8 +757,8 @@ def build_f2_spec():
                 "the paper floor prices taker/taker both legs"
             ],
         },
-        validation_status="untested",
-        promotion_status="disabled_until_f1_stable",
+        validation_status="shadow_unproven",
+        promotion_status="shadow_only",
     )
 
 

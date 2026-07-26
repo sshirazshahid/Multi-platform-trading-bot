@@ -25,6 +25,17 @@ except ImportError:
     print("ERROR: requests library not found. Install with: pip install requests", file=sys.stderr)
     sys.exit(1)
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
 
 class ApiCallBudgetExceeded(Exception):
     """Raised when the API call budget has been exhausted."""
@@ -40,7 +51,7 @@ class FMPClient:
     US_EXCHANGES = ["NYSE", "NASDAQ", "AMEX", "NYSEArca", "BATS", "NMS", "NGM", "NCM"]
 
     def __init__(self, api_key: Optional[str] = None, max_api_calls: int = 200):
-        self.api_key = api_key or os.getenv("FMP_API_KEY")
+        self.api_key = resolve_fmp_key(api_key)
         if not self.api_key:
             raise ValueError(
                 "FMP API key required. Set FMP_API_KEY environment variable "

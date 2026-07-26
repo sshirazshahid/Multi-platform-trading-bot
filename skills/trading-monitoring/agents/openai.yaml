@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trading Monitoring"
+  short_description: "Audit heartbeat, provenance, and alerts"
+  default_prompt: "Use $trading-monitoring to audit this bot's heartbeat, decision provenance, and durable alert delivery."

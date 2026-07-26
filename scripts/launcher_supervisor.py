@@ -123,8 +123,11 @@ def _safe_worker_env(
     profile = normalize_paper_profile(
         child_env.get("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
     )
+    # Mirror config.py: research profiles are PAPER-only. Coerce under
+    # OBSERVATION so set-mode can flip OPERATING_MODE without rewriting
+    # PAPER_TRADING_PROFILE (and without bricking the next spawn).
     if mode != "PAPER" and profile != STANDARD_PAPER_PROFILE:
-        raise RuntimeError(f"PAPER profile {profile!r} requires PAPER mode")
+        profile = STANDARD_PAPER_PROFILE
     child_env["OPERATING_MODE"] = mode
     child_env["CONTROLLED_LIVE_ENABLED"] = "false"
     child_env["DRY_RUN"] = "true"

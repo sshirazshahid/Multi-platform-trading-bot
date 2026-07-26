@@ -12,11 +12,11 @@ collaborators, a directly-constructed scalp Position aged into the stale window
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import time
 from unittest.mock import MagicMock
 
 from config import SCALP_MODE
-from core.order_manager import OrderManager
+from core.order_manager import OrderManager, _position_age_minutes
 from core.position_tracker import Position
 
 
@@ -37,9 +37,8 @@ def _om(monkeypatch):
 
 
 def _scalp_pos(*, age_min: float, entry=100.0, tp=200.0, side="buy"):
-    # open_time as a tz-aware datetime so the scalp block computes a real age
-    # (a float epoch would fail datetime.fromisoformat and yield age 0).
-    ot = datetime.now(timezone.utc) - timedelta(minutes=age_min)
+    # Production Position.open_time is an epoch float persisted to JSON.
+    ot = time.time() - age_min * 60.0
     p = Position(
         id="s1", exchange="Binance", symbol="BTC/USDT", side=side,
         market_type="futures", strategy="scalp",
@@ -74,6 +73,11 @@ def _closed_reason(close_mock):
 # stale window: stale_close_min <= age < time_wall_min
 _STALE_AGE = (SCALP_MODE["stale_close_min"] + SCALP_MODE["time_wall_min"]) / 2
 _FLOOR = SCALP_MODE["stale_min_profit"]
+
+
+def test_position_age_minutes_accepts_production_epoch_float():
+    now = 1_800_000_000.0
+    assert _position_age_minutes(now - 45 * 60, now=now) == 45.0
 
 
 def test_profitable_aged_scalp_is_NOT_stale_closed(monkeypatch):

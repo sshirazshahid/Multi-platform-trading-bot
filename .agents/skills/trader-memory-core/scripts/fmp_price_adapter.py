@@ -17,11 +17,25 @@ logger = logging.getLogger(__name__)
 FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
 
 
+import sys
+
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+
 class FMPPriceAdapter:
     """Fetch daily adjusted close prices from FMP API."""
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("FMP_API_KEY")
+        self.api_key = resolve_fmp_key(api_key)
         if not self.api_key:
             raise ValueError("FMP API key required. Set FMP_API_KEY env var or pass api_key.")
 

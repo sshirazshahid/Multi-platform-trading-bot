@@ -6,7 +6,8 @@ Extends the shipped S1 carry lab (``research/funding_carry_lab.py``) into an F1
     build F1 StrategySpec (fed by MarketDataLedger fields) -> per-cycle LAB-SIM
     of the delta-neutral spot-long/perp-short carry over N funding cycles ->
     resolved-only per-cycle net carry -> walk-forward OOS -> accept() verdict ->
-    register the spec through the EvidenceRegistry ledger.
+    emit a synthetic diagnostic verdict. Synthetic runs are never registered as
+    promotion evidence.
 
 A correct NO_GO is success; the deliverable is pipeline correctness, NOT alpha.
 
@@ -14,7 +15,7 @@ LAB-SIM ONLY: no real legs are ever placed. The F1 entry gate requires an atomic
 two-leg fill, so every recorded cycle is fully hedged (zero unresolved one-leg
 events by construction). The plan pipeline gate is recorded alongside accept():
 >=60 funding cycles, net carry positive after 2x cost stress, zero unresolved
-one-leg events, and no venue/symbol > 40% of PnL. Live is INFEASIBLE at $420
+one-leg events, and no venue/symbol > 35% of PnL. Live is INFEASIBLE at $420
 (two-leg spot+perp min-notional exceeds the account).
 
 CLI:  venv/Scripts/python.exe scripts/f1_carry_slice.py [N_CYCLES]
@@ -29,7 +30,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.cost_model import round_trip_cost  # noqa: E402
+from core.cost_model import round_trip_fee, slippage_rt  # noqa: E402
 from core.decision.promotion_loop import ACTIVE_STRATEGIES_PATH, accept  # noqa: E402
 from core.walk_forward import WalkForward  # noqa: E402
 from research import funding_carry_lab as fc  # noqa: E402
@@ -52,9 +53,10 @@ def _synthetic_funding_cycles(n_cycles: int, cycle_settlements: int, seed: int):
     """
     rng = random.Random(seed)
     n = n_cycles * cycle_settlements
-    # Rich-carry regime (~+0.05%/8h mean) so a multi-day hold clears the 3x-cost
-    # entry floor; bear tail still occasionally flips negative.
-    return [max(-0.0005, 0.0005 + rng.gauss(0, 0.0001)) for _ in range(n)]
+    # Deliberately rich synthetic regime (~+0.12%/settlement) so this mechanics
+    # diagnostic exercises entries despite the conservative 3x-cost gate. It is
+    # never admissible as promotion evidence.
+    return [max(-0.0005, 0.0012 + rng.gauss(0, 0.0001)) for _ in range(n)]
 
 
 def simulate_f1_carry(
@@ -75,21 +77,36 @@ def simulate_f1_carry(
     to be opened; a cycle that fails the atomic-two-leg-fill check is recorded as
     an unresolved one-leg event (NOT added to the resolved return stream).
     """
-    rt = round_trip_cost(venue, slip_mult=slip_mult, tier_mult=tier_mult)
+    rt = (
+        round_trip_fee(venue, "spot", tier_mult=tier_mult)
+        + round_trip_fee(venue, "futures", tier_mult=tier_mult)
+        + 2.0 * slippage_rt(slip_mult)
+    )
     cycles: list[dict] = []
     n = len(funding_rates)
     unresolved = 0
-    for start in range(0, n - cycle_settlements + 1, cycle_settlements):
+    for start in range(
+        fc.F1_TRAILING_SETTLEMENTS,
+        n - cycle_settlements + 1,
+        cycle_settlements,
+    ):
         window = funding_rates[start:start + cycle_settlements]
-        avg = sum(window) / len(window)
+        trailing = funding_rates[start - fc.F1_TRAILING_SETTLEMENTS:start]
         ok, _reason, _det = fc.f1_entry_gate(
-            funding_per_settlement=avg,
+            funding_per_settlement=window[0],
             hold_settlements=cycle_settlements,
             round_trip_cost_frac=rt,
             depth_ratio=30.0,          # LAB-SIM: liquid-major book assumption
             liq_buffer_x=5.0,          # sized so short-perp is well above maintenance
             funding_age_sec=0.0,       # fresh synthetic quote
             both_legs_fillable=True,   # atomic hedge fill (LAB-SIM)
+            trailing_funding_rates=trailing,
+            perp_mark=100.1,
+            spot_mid=100.0,
+            spot_spread_bps=1.0,
+            perp_spread_bps=1.0,
+            time_to_next_funding_min=60.0,
+            feeds_fresh=True,
         )
         if not ok:
             continue  # gate declined to OPEN this cycle (no exposure taken)
@@ -144,7 +161,11 @@ def run_f1_slice(
     )
 
     # ── F1 plan pipeline gate (recorded alongside the accept() verdict) ──
-    rt_2x = round_trip_cost(venue) * fc.F1_STRESS_COST_MULT
+    rt_2x = (
+        round_trip_fee(venue, "spot")
+        + round_trip_fee(venue, "futures")
+        + 2.0 * slippage_rt()
+    ) * fc.F1_STRESS_COST_MULT
     net_2x = float(sum(c["gross_funding"] - rt_2x for c in cycles))
     pnl_by_venue = {venue: float(arr.sum())}
     pnl_by_symbol = {symbol: float(arr.sum())}
@@ -173,7 +194,8 @@ def run_f1_slice(
         "live_feasibility": fc.F1_LIVE_FEASIBILITY,
     }
 
-    promotion_status = "PROMOTED" if verdict["accept"] else "NO_EDGE"
+    # Generated paths validate mechanics only and can never authorize risk.
+    promotion_status = "SYNTHETIC_DIAGNOSTIC"
     failure_reason = None
     if not verdict["accept"]:
         failed = [k for k, g in verdict["sub_gates"].items() if not g["pass"]]

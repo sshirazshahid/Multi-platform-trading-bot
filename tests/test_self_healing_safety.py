@@ -1,64 +1,133 @@
-"""Regressions for three SelfHealingSupervisor defects (audit 2026-07-07).
+"""Failure-mode regressions for bounded self-healing."""
 
-4a. Retrain (~60 min) / replay (4x3 min) subprocesses ran synchronously inside
-    ``tick()`` — which the bot schedules on the shared ``schedule`` thread that
-    also drives the portfolio cycle, position monitor and watchdog. A slow
-    retrain stalled EVERYTHING scheduled. With ``async_heavy`` the heavy phase
-    runs on a single-flight daemon thread and ``tick()`` returns immediately.
-
-4b. Kill-then-respawn didn't wait for the wedged holder's singleton lock to
-    release, so the respawn could exit instantly ('already running') — a no-op
-    repair that still reported ok=True. It must poll for release and report
-    honestly when the lock stays held.
-
-4c. ``_terminate_pids`` recorded a pid as killed even when ``taskkill`` failed
-    (returncode != 0). Only confirmed kills may be recorded.
-"""
 from __future__ import annotations
 
+import json
+import sys
 import threading
-import time
+from types import SimpleNamespace
 
 import core.self_healing_supervisor as sh
+from core.self_healing_policy import SelfHealingPolicy
 
 
-def test_async_heavy_does_not_block_and_is_single_flight(tmp_path, monkeypatch):
-    release = threading.Event()
-    started = threading.Event()
+def _policy(tmp_path):
+    return SelfHealingPolicy(sh.ROOT, runtime_root=tmp_path)
 
-    def slow_retrain(self):
-        started.set()
-        release.wait(5)
-        return {"type": "retrain_if_stale", "ok": True}
 
-    monkeypatch.setattr(sh.SelfHealingSupervisor, "_maybe_retrain", slow_retrain)
+def _all_feed_processes():
+    return [
+        {
+            "ProcessId": index,
+            "ParentProcessId": 0,
+            "CommandLine": f"python scripts/harvest_{name}.py",
+            "WorkingDirectory": str(sh.ROOT),
+        }
+        for index, name in enumerate(("l2", "liquidations", "skew", "tv"), start=1)
+    ]
 
-    sup = sh.SelfHealingSupervisor(sh.config_from_mapping({
-        "dry_run": True,
-        "state_path": tmp_path / "state.json",
-        "report_dir": tmp_path / "reports",
-        "repair_enabled": False,
-        "retrain_enabled": True,
-        "adapt_enabled": False,
-        "async_heavy": True,
-        "min_interval_sec": 0,
-    }))
 
-    t0 = time.time()
+def test_process_snapshot_failure_never_spawns_duplicate_feed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sh,
+        "_process_snapshot",
+        lambda: sh.ProcessSnapshot(False, error="snapshot_returncode:1"),
+    )
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("spawned a feed without a trustworthy process snapshot")
+
+    monkeypatch.setattr(sh, "_start_process", forbidden_spawn)
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": True, "min_interval_sec": 0},
+        policy=_policy(tmp_path),
+    )
+
     report = sup.tick(force=True)
-    assert time.time() - t0 < 2.0, "tick blocked on the heavy subprocess"
-    hb = [a for a in report["actions"] if a.get("type") == "heavy_async"]
-    assert hb and hb[0]["dispatched"] is True
-    assert started.wait(2.0), "heavy worker never started"
 
-    # Single-flight: a second tick while the worker is busy does not re-dispatch.
-    report2 = sup.tick(force=True)
-    hb2 = [a for a in report2["actions"] if a.get("type") == "heavy_async"]
-    assert hb2 and hb2[0]["dispatched"] is False
+    assert report["verdict"] == "ACTION_FAILED"
+    assert report["actions"] == [
+        {
+            "type": "repair_feeds",
+            "ok": False,
+            "reason": "snapshot_returncode:1",
+        }
+    ]
 
-    release.set()
-    if sup._heavy_thread is not None:
-        sup._heavy_thread.join(5)
+
+def test_process_inventory_error_fails_closed(monkeypatch):
+    class InventoryError(Exception):
+        pass
+
+    def failed_inventory(*args, **kwargs):
+        raise InventoryError("unavailable")
+
+    fake_psutil = SimpleNamespace(process_iter=failed_inventory, Error=InventoryError)
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    snapshot = sh._process_snapshot()
+
+    assert snapshot.ok is False
+    assert snapshot.error == "snapshot_error:InventoryError"
+
+
+def test_state_budget_failure_prevents_any_recovery_side_effect(tmp_path, monkeypatch):
+    def failed_save(*args, **kwargs):
+        raise OSError("read-only state")
+
+    def forbidden_repair(*args, **kwargs):
+        raise AssertionError("recovery ran before its budget was persisted")
+
+    monkeypatch.setattr(sh, "_save_state", failed_save)
+    monkeypatch.setattr(sh, "_process_snapshot", forbidden_repair)
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": False, "min_interval_sec": 0},
+        policy=_policy(tmp_path),
+    )
+
+    report = sup.tick(force=True)
+
+    assert report["verdict"] == "ACTION_FAILED"
+    assert report["actions"][0]["type"] == "persist_state"
+
+
+def test_unconfirmed_feed_termination_prevents_respawn(tmp_path, monkeypatch):
+    processes = _all_feed_processes()
+    monkeypatch.setattr(
+        sh,
+        "_process_snapshot",
+        lambda: sh.ProcessSnapshot(True, tuple(processes)),
+    )
+    monkeypatch.setattr(
+        sh,
+        "read_forward_feed_status",
+        lambda root: [
+            {
+                "name": name,
+                "exists": True,
+                "connected": True,
+                "fresh": name != "l2",
+                "error": None,
+            }
+            for name in ("l2", "liquidations", "skew", "tv")
+        ],
+    )
+    monkeypatch.setattr(sh, "_terminate_feed_processes", lambda *args: [])
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("feed respawned after an unconfirmed termination")
+
+    monkeypatch.setattr(sh, "_start_process", forbidden_spawn)
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": False, "min_interval_sec": 0, "repair_cooldown_sec": 0},
+        policy=_policy(tmp_path),
+    )
+
+    report = sup.tick(force=True)
+
+    assert report["verdict"] == "ACTION_FAILED"
+    failed = [action for action in report["actions"] if action.get("target") == "l2"]
+    assert failed[0]["reason"] == "feed_termination_unconfirmed"
 
 
 def test_wait_for_lock_release_distinguishes_held_from_free(tmp_path):
@@ -68,59 +137,129 @@ def test_wait_for_lock_release_distinguishes_held_from_free(tmp_path):
 
     held = acquire_process_lock("harvest_l2", root=tmp_path)
     assert held is not None
-    # Still held by us -> the respawn would no-op, so report False (not released).
-    assert sh._wait_for_lock_release(
-        "harvest_l2", cfg, root=tmp_path, attempts=3, delay_sec=0.01) is False
+    assert (
+        sh._wait_for_lock_release("harvest_l2", cfg, root=tmp_path, attempts=3, delay_sec=0.01)
+        is False
+    )
 
     held.close()
-    # Released -> True (respawn can now take the lock).
-    assert sh._wait_for_lock_release(
-        "harvest_l2", cfg, root=tmp_path, attempts=3, delay_sec=0.01) is True
+    assert (
+        sh._wait_for_lock_release("harvest_l2", cfg, root=tmp_path, attempts=3, delay_sec=0.01)
+        is True
+    )
 
 
 def test_save_state_concurrent_writers_never_corrupt(tmp_path):
-    """The real production concurrency is two writer threads (main tick +
-    async_heavy worker) in one process. _save_state must serialize them so no
-    write raises, the final file is valid JSON, and no stray .tmp leaks."""
-    import json as _json
-
-    path = tmp_path / "state.json"
-    st = sh._load_state(path)  # fresh default state
-
+    policy = _policy(tmp_path)
+    path = tmp_path / "data/self_healing_state.json"
+    state = sh.SelfHealingState()
     errors: list[Exception] = []
 
-    def writer(n: int) -> None:
+    def writer(number: int) -> None:
         try:
-            for i in range(60):
-                st.last_repair_at[f"feed{n}"] = float(i)
-                sh._save_state(path, st)
-        except Exception as exc:  # a failed write (e.g. Windows replace) surfaces
+            for index in range(60):
+                state.last_repair_at["feed:l2"] = float(number * 100 + index)
+                sh._save_state(path, state, policy)
+        except Exception as exc:
             errors.append(exc)
 
-    threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(10)
+    threads = [threading.Thread(target=writer, args=(number,)) for number in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
 
-    assert not errors, f"concurrent writers corrupted the state file: {errors}"
-    _json.loads(path.read_text(encoding="utf-8"))  # final file parses
-    assert not list(tmp_path.glob("*.tmp")), "atomic write left a temp file behind"
+    assert not errors
+    json.loads(path.read_text(encoding="utf-8"))
+    assert not list(path.parent.glob("*.tmp"))
 
 
-def test_terminate_pids_records_only_confirmed_kills(monkeypatch):
+def test_terminate_feed_records_only_confirmed_allowlisted_kills(monkeypatch):
     cfg = sh.config_from_mapping({"dry_run": False})
+    checked = []
 
-    class _Res:
-        def __init__(self, rc):
-            self.returncode = rc
+    def fake_kill(record, feed):
+        checked.append((record["ProcessId"], feed))
+        return record["ProcessId"] == 111
 
-    def fake_run(args, **kw):
-        pid = args[2]  # ["taskkill", "/PID", "<pid>", ...]
-        return _Res(0 if pid == "111" else 1)
+    processes = [
+        {
+            "ProcessId": 111,
+            "CommandLine": r"python scripts\harvest_l2.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
+        {
+            "ProcessId": 999,
+            "CommandLine": r"python scripts\harvest_l2.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
+        {
+            "ProcessId": 555,
+            "CommandLine": r"python main.py scripts\harvest_l2.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
+    ]
+    monkeypatch.setattr(sh, "_kill_validated_feed_root", fake_kill)
 
-    monkeypatch.setattr(sh.os, "name", "nt")
-    monkeypatch.setattr(sh.subprocess, "run", fake_run)
+    killed = sh._terminate_feed_processes(processes, "l2", cfg)
 
-    killed = sh._terminate_pids([111, 999], cfg)
-    assert killed == [111], "a failed taskkill must not be recorded as a kill"
+    assert killed == [111]
+    assert checked == [(111, "l2"), (999, "l2")]
+
+
+def test_corrupt_state_blocks_recovery_and_is_not_overwritten(tmp_path, monkeypatch):
+    state_path = tmp_path / "data/self_healing_state.json"
+    state_path.parent.mkdir(parents=True)
+    original = b"{not-json"
+    state_path.write_bytes(original)
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("recovery ran with untrusted cooldown state")
+
+    monkeypatch.setattr(sh, "_start_process", forbidden_spawn)
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": False, "min_interval_sec": 0},
+        policy=_policy(tmp_path),
+    )
+
+    report = sup.tick(force=True)
+
+    assert report["verdict"] == "BLOCKED_STATE"
+    assert report["state_error"].startswith("state_unreadable")
+    assert state_path.read_bytes() == original
+
+
+def test_manual_incident_latches_and_allowlists_are_byte_preserved(tmp_path, monkeypatch):
+    protected = {
+        "data/KILL_SWITCH": b"operator halt\n",
+        "data/active_strategies.json": b'{"approved": ["baseline"]}\n',
+        "data/risk_incident_latch.json": b'{"reason": "manual review"}\n',
+    }
+    for relative, content in protected.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    monkeypatch.setattr(
+        sh,
+        "_process_snapshot",
+        lambda: sh.ProcessSnapshot(True, tuple(_all_feed_processes())),
+    )
+    monkeypatch.setattr(
+        sh,
+        "read_forward_feed_status",
+        lambda root: [
+            {"name": name, "exists": True, "connected": True, "fresh": True, "error": None}
+            for name in ("l2", "liquidations", "skew", "tv")
+        ],
+    )
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": False, "min_interval_sec": 0},
+        policy=_policy(tmp_path),
+    )
+
+    report = sup.tick(force=True)
+
+    assert report["verdict"] == "OK"
+    for relative, content in protected.items():
+        assert (tmp_path / relative).read_bytes() == content

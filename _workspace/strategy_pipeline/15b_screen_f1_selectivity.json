@@ -1,0 +1,276 @@
+{
+  "candidate": "15b \u2014 funding-percentile persistence selectivity for F1",
+  "hypothesis": "percentile+persistence entry selection (+decay exit) beats the incumbent Rev-5 f1_entry_gate after costs on net carry per settlement-deployed, without gutting total harvest",
+  "prereg": "_workspace/strategy_pipeline/15b_screen_f1_selectivity.md",
+  "universe": {
+    "bases": [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "LINK",
+      "TRX",
+      "SUI",
+      "ATOM",
+      "DOGE",
+      "ALGO",
+      "ZEC",
+      "ADA",
+      "XRP",
+      "LTC",
+      "GRT"
+    ],
+    "venues": [
+      "binance",
+      "bybit"
+    ]
+  },
+  "cost_frac": {
+    "binance": 0.005,
+    "bybit": 0.0052
+  },
+  "n_trials_dsr": 2,
+  "data": {
+    "missing_series": [],
+    "stale_series": [],
+    "n_series_loaded": 30
+  },
+  "n": {
+    "incumbent": 95,
+    "V1": 46,
+    "V2": 103
+  },
+  "unresolved_data_end_episodes": {
+    "incumbent": 0,
+    "V1": 0,
+    "V2": 0
+  },
+  "after_cost_metrics": {
+    "incumbent": {
+      "n": 95,
+      "total_net_bps": 33097.37700000001,
+      "mean_bps_per_episode": 348.39344210526326,
+      "wr_per_episode": 0.9894736842105263,
+      "mean_held_settlements": 40.50526315789474,
+      "eff_bps_per_settlement": 8.60118944906445,
+      "exit_reasons": {
+        "consec_negative": 10,
+        "max_hold": 85
+      }
+    },
+    "V1": {
+      "n": 46,
+      "total_net_bps": 6964.4632999999985,
+      "mean_bps_per_episode": 151.4013760869565,
+      "wr_per_episode": 0.8260869565217391,
+      "mean_held_settlements": 14.065217391304348,
+      "eff_bps_per_settlement": 10.764240030911902,
+      "exit_reasons": {
+        "consec_negative": 1,
+        "funding_decay": 42,
+        "max_hold": 3
+      }
+    },
+    "V2": {
+      "n": 103,
+      "total_net_bps": 19632.846400000002,
+      "mean_bps_per_episode": 190.610159223301,
+      "wr_per_episode": 0.8737864077669902,
+      "mean_held_settlements": 15.21359223300971,
+      "eff_bps_per_settlement": 12.5289383535418,
+      "exit_reasons": {
+        "consec_negative": 2,
+        "funding_decay": 96,
+        "max_hold": 5
+      }
+    }
+  },
+  "after_cost_metrics_2x_cost_stress": {
+    "incumbent": {
+      "n": 18,
+      "total_net_bps": 5707.7719,
+      "mean_bps_per_episode": 317.0984388888889,
+      "wr_per_episode": 0.8888888888888888,
+      "mean_held_settlements": 38.111111111111114,
+      "eff_bps_per_settlement": 8.32036720116618,
+      "exit_reasons": {
+        "consec_negative": 3,
+        "max_hold": 15
+      }
+    },
+    "V1": {
+      "n": 5,
+      "total_net_bps": -49.28660000000002,
+      "mean_bps_per_episode": -9.857320000000005,
+      "wr_per_episode": 0.4,
+      "mean_held_settlements": 7.2,
+      "eff_bps_per_settlement": -1.369072222222223,
+      "exit_reasons": {
+        "consec_negative": 1,
+        "funding_decay": 4
+      }
+    },
+    "V2": {
+      "n": 17,
+      "total_net_bps": 2321.1655000000005,
+      "mean_bps_per_episode": 136.53914705882354,
+      "wr_per_episode": 0.8235294117647058,
+      "mean_held_settlements": 11.705882352941176,
+      "eff_bps_per_settlement": 11.66414824120603,
+      "exit_reasons": {
+        "consec_negative": 1,
+        "funding_decay": 16
+      }
+    }
+  },
+  "per_venue": {
+    "binance": {
+      "incumbent": {
+        "n": 54,
+        "total_net_bps": 18859.8273,
+        "mean_bps_per_episode": 349.25606111111114,
+        "wr_per_episode": 0.9814814814814815,
+        "mean_held_settlements": 39.48148148148148,
+        "eff_bps_per_settlement": 8.846072842401501,
+        "exit_reasons": {
+          "consec_negative": 7,
+          "max_hold": 47
+        }
+      },
+      "V1": {
+        "n": 26,
+        "total_net_bps": 4908.0793,
+        "mean_bps_per_episode": 188.77228076923078,
+        "wr_per_episode": 0.9230769230769231,
+        "mean_held_settlements": 15.76923076923077,
+        "eff_bps_per_settlement": 11.970925121951222,
+        "exit_reasons": {
+          "consec_negative": 1,
+          "funding_decay": 23,
+          "max_hold": 2
+        }
+      },
+      "V2": {
+        "n": 62,
+        "total_net_bps": 12887.919800000001,
+        "mean_bps_per_episode": 207.86967419354838,
+        "wr_per_episode": 0.9516129032258065,
+        "mean_held_settlements": 16.79032258064516,
+        "eff_bps_per_settlement": 12.380326416906822,
+        "exit_reasons": {
+          "consec_negative": 2,
+          "funding_decay": 56,
+          "max_hold": 4
+        }
+      }
+    },
+    "bybit": {
+      "incumbent": {
+        "n": 41,
+        "total_net_bps": 14237.549699999998,
+        "mean_bps_per_episode": 347.25730975609747,
+        "wr_per_episode": 1.0,
+        "mean_held_settlements": 41.853658536585364,
+        "eff_bps_per_settlement": 8.296940384615384,
+        "exit_reasons": {
+          "consec_negative": 3,
+          "max_hold": 38
+        }
+      },
+      "V1": {
+        "n": 20,
+        "total_net_bps": 2056.384,
+        "mean_bps_per_episode": 102.8192,
+        "wr_per_episode": 0.7,
+        "mean_held_settlements": 11.85,
+        "eff_bps_per_settlement": 8.676725738396625,
+        "exit_reasons": {
+          "funding_decay": 19,
+          "max_hold": 1
+        }
+      },
+      "V2": {
+        "n": 41,
+        "total_net_bps": 6744.9266,
+        "mean_bps_per_episode": 164.51040487804877,
+        "wr_per_episode": 0.7560975609756098,
+        "mean_held_settlements": 12.829268292682928,
+        "eff_bps_per_settlement": 12.823054372623576,
+        "exit_reasons": {
+          "funding_decay": 40,
+          "max_hold": 1
+        }
+      }
+    }
+  },
+  "delta_analysis": {
+    "primary_endpoint": "after-cost net carry bps per settlement-deployed",
+    "incumbent_eff_bps": 8.60118944906445,
+    "v1_eff_bps": 10.764240030911902,
+    "pooled_delta_bps": 2.163050581847453,
+    "bootstrap_delta_ci_lb_bps": -0.18182258523997094,
+    "calendar_folds": {
+      "deltas_bps": [
+        2.7178027114545245,
+        -0.5286809090909071,
+        null,
+        null,
+        0.801404010025064
+      ],
+      "signs": [
+        1,
+        -1,
+        null,
+        null,
+        1
+      ],
+      "all_positive": false
+    },
+    "venue_deltas": {
+      "binance": {
+        "n_v1": 26,
+        "delta_bps": 3.12485227954972
+      },
+      "bybit": {
+        "n_v1": 20,
+        "delta_bps": 0.37978535378123923
+      }
+    },
+    "total_net_bps": {
+      "incumbent": 33097.377,
+      "V1": 6964.4633
+    },
+    "v2_robustness": {
+      "eff_bps": 12.5289383535418,
+      "pooled_delta_bps": 3.9277489044773524
+    }
+  },
+  "gates": {
+    "checks": {
+      "incumbent_min_episodes": true,
+      "v1_min_episodes": true,
+      "dsr>=0.10": true,
+      "pbo<=0.5": true,
+      "oos_wr>=0.55": true,
+      "mc_P>0>=0.95": true,
+      "mc_maxDD_p95<=0.25": true,
+      "mc_min_trades": true,
+      "delta>0_pooled": true,
+      "delta_ci_lb>0_bonferroni_m2": false,
+      "fold_sign_stable_all5": false,
+      "venue_sign_stable": true,
+      "harvest_guard": false
+    },
+    "dsr_prob": 1.0,
+    "pbo": 0.0,
+    "oos_wr_5fold": 0.7714285714285715,
+    "monte_carlo_v1_episodes": {
+      "n_trades": 46,
+      "p_total_positive": 1.0,
+      "max_drawdown_p95": 0.005517510000000003,
+      "passes": true
+    }
+  },
+  "verdict": "NO_GO",
+  "reason": "Failed: delta_ci_lb>0_bonferroni_m2, fold_sign_stable_all5, harvest_guard"
+}

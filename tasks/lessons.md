@@ -157,3 +157,13 @@ suite run, spot-check that no files under data/ were modified by tests
   When changing a limit, grep for everything calibrated AGAINST it.
 - **A quiet `except: pass` around evidence writes hid 5 days of no-op.** Evidence/bookkeeping
   failures must log loudly even when they must not crash the caller.
+
+## 2026-07-23 — WR band dual goal
+- **59–67% WR + profit needs BE_WR ≤ 0.59.** AccBand compressed TP can put WR in band
+  while avg_win/avg_loss stays too low (cohort BE_WR ~0.67–0.70). Measure W/L before
+  celebrating WR. Joint gates: BE_WR≤0.59 ∧ WR∈[0.59,0.67] ∧ EV>0 ∧ PF>1.
+- **Do not install MA/RSI/MACD/SuperTrend to “fix accuracy.”** Ledger STOP; probe-only
+  for owner pullback rules. Next edge research = VPIN veto / F1 after-cost, not indicators.
+- **`.env` flips need a real process kill** — schtasks End alone can leave a long-lived
+  main.py with stale env; kill main/launcher PIDs then Run the 24x7 task.
+

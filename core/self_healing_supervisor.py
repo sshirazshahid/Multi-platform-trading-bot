@@ -1,103 +1,161 @@
-"""Bounded self-healing and strategy-adaptation supervisor.
+"""Bounded runtime recovery with no trading or self-modification authority.
 
-The supervisor is intentionally conservative:
-
-* it can restart missing/stale auxiliary feed harvesters;
-* it can ask the existing retrain wrapper to repair stale model pointers;
-* it can generate machine-strategy parameter candidates and backtest them;
-* it can write a PAPER-only adaptive machine config consumed by MachineSignal.
-
-It cannot bypass live gates, mutate Python strategy code, or raise leverage/size.
+The supervisor may restart a small, static set of market-data harvesters.  The
+policy reserves additional recovery classes for future in-process adapters, but
+unknown actions and unregistered implementations are denied.  It never runs
+audits, training, promotion, strategy mutation, the trading engine, or an order
+path.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.adaptive_config import ADAPTIVE_MACHINE_CONFIG_PATH, sanitize_adaptive_machine_payload
-from core.feed_health import FORWARD_FEEDS, read_forward_feed_status, unhealthy_forward_feeds
+from core.feed_health import read_forward_feed_status, unhealthy_forward_feeds
+from core.self_healing_policy import (
+    FEED_SCRIPTS,
+    PolicyViolation,
+    RecoveryAction,
+    SelfHealingPolicy,
+    WriteScope,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SELF_HEAL_STATE_PATH = Path("data/self_healing_state.json")
 SELF_HEAL_REPORT_DIR = Path("reports/self_healing")
-CONFLUENCE_PAPER_SCRIPT = ROOT / "run_confluence_paper.py"
+
+_DEFAULT_POLICY = SelfHealingPolicy(ROOT)
+_ACTIVE_CONFIG_KEYS = frozenset(
+    {
+        "dry_run",
+        "enabled",
+        "min_interval_sec",
+        "repair_cooldown_sec",
+        "repair_enabled",
+        "report_dir",
+        "state_path",
+    }
+)
+_FORBIDDEN_FLAG_CAPABILITIES = {
+    "adapt_enabled": "promote_or_mutate_strategy",
+    "restart_main": "restart_trading_engine",
+    "retrain_enabled": "train_model",
+}
+_INERT_LEGACY_KEYS = frozenset(
+    {
+        "adapt_cooldown_sec",
+        "adaptive_ttl_hours",
+        "async_heavy",
+        "min_avg_ret",
+        "min_positive_folds",
+        "min_profit_factor",
+        "min_trades",
+        "replay_max_bars",
+        "replay_max_files",
+        "replay_timeframe",
+        "retrain_cooldown_sec",
+    }
+)
+
+
+class SelfHealingStateError(RuntimeError):
+    """The persisted cooldown state cannot be trusted."""
 
 
 @dataclass(frozen=True)
 class SelfHealingConfig:
     enabled: bool = True
     repair_enabled: bool = True
-    restart_main: bool = False
-    retrain_enabled: bool = True
-    adapt_enabled: bool = True
     dry_run: bool = False
     min_interval_sec: int = 15 * 60
     repair_cooldown_sec: int = 10 * 60
-    retrain_cooldown_sec: int = 12 * 60 * 60
-    adapt_cooldown_sec: int = 4 * 60 * 60
-    replay_timeframe: str = "15m"
-    replay_max_files: int = 8
-    replay_max_bars: int = 1500
-    min_trades: int = 100
-    min_profit_factor: float = 1.05
-    min_avg_ret: float = 0.0
-    min_positive_folds: int = 2
-    adaptive_ttl_hours: int = 24
-    # Run the heavy retrain/replay phase on a background daemon thread so the
-    # caller (the bot's shared `schedule` thread) never blocks for the full
-    # subprocess timeout. Default False keeps the standalone self_heal.py script
-    # + existing tests synchronous; bot_engine opts in (audit 2026-07-07).
-    async_heavy: bool = False
-    python_executable: str = sys.executable
     state_path: Path = SELF_HEAL_STATE_PATH
     report_dir: Path = SELF_HEAL_REPORT_DIR
-    adaptive_config_path: Path = ADAPTIVE_MACHINE_CONFIG_PATH
+    policy_blocks: tuple[str, ...] = ()
 
 
 @dataclass
 class SelfHealingState:
     last_run_at: float = 0.0
     last_repair_at: dict[str, float] = field(default_factory=dict)
-    last_retrain_at: float = 0.0
-    last_adapt_at: float = 0.0
-    active_candidate_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ProcessSnapshot:
+    ok: bool
+    processes: tuple[dict[str, Any], ...] = ()
+    error: str | None = None
+
+
+def _strict_bool(value: Any, *, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{key} must be a bool")
+
+
+def _non_negative_int(value: Any, *, key: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be a non-negative integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a non-negative integer") from None
+    if parsed < 0:
+        raise ValueError(f"{key} must be a non-negative integer")
+    return parsed
 
 
 def config_from_mapping(raw: dict[str, Any] | None = None) -> SelfHealingConfig:
-    raw = dict(raw or {})
+    """Parse active settings and neutralize all legacy privileged settings."""
+    values = dict(raw or {})
+    policy_blocks: set[str] = set()
+
+    for key, capability in _FORBIDDEN_FLAG_CAPABILITIES.items():
+        if key in values and _strict_bool(values[key], key=key):
+            policy_blocks.add(capability)
+
+    if "adaptive_config_path" in values:
+        policy_blocks.add("write_strategy_parameters")
+    if "python_executable" in values:
+        requested = Path(str(values["python_executable"])).resolve(strict=False)
+        current = Path(sys.executable).resolve(strict=False)
+        if requested != current:
+            policy_blocks.add("override_recovery_executable")
+
+    known = (
+        _ACTIVE_CONFIG_KEYS
+        | frozenset(_FORBIDDEN_FLAG_CAPABILITIES)
+        | _INERT_LEGACY_KEYS
+        | {"adaptive_config_path", "python_executable"}
+    )
+    unknown = sorted(values.keys() - known)
+    if unknown:
+        raise ValueError(f"unknown self-healing config keys: {', '.join(unknown)}")
+
     return SelfHealingConfig(
-        enabled=bool(raw.get("enabled", True)),
-        repair_enabled=bool(raw.get("repair_enabled", True)),
-        restart_main=bool(raw.get("restart_main", False)),
-        retrain_enabled=bool(raw.get("retrain_enabled", True)),
-        adapt_enabled=bool(raw.get("adapt_enabled", True)),
-        dry_run=bool(raw.get("dry_run", False)),
-        min_interval_sec=int(raw.get("min_interval_sec", 15 * 60)),
-        repair_cooldown_sec=int(raw.get("repair_cooldown_sec", 10 * 60)),
-        retrain_cooldown_sec=int(raw.get("retrain_cooldown_sec", 12 * 60 * 60)),
-        adapt_cooldown_sec=int(raw.get("adapt_cooldown_sec", 4 * 60 * 60)),
-        replay_timeframe=str(raw.get("replay_timeframe", "15m")),
-        replay_max_files=int(raw.get("replay_max_files", 8)),
-        replay_max_bars=int(raw.get("replay_max_bars", 1500)),
-        min_trades=int(raw.get("min_trades", 100)),
-        min_profit_factor=float(raw.get("min_profit_factor", 1.05)),
-        min_avg_ret=float(raw.get("min_avg_ret", 0.0)),
-        min_positive_folds=int(raw.get("min_positive_folds", 2)),
-        adaptive_ttl_hours=int(raw.get("adaptive_ttl_hours", 24)),
-        async_heavy=bool(raw.get("async_heavy", False)),
-        python_executable=str(raw.get("python_executable") or sys.executable),
-        state_path=Path(raw.get("state_path", SELF_HEAL_STATE_PATH)),
-        report_dir=Path(raw.get("report_dir", SELF_HEAL_REPORT_DIR)),
-        adaptive_config_path=Path(raw.get("adaptive_config_path", ADAPTIVE_MACHINE_CONFIG_PATH)),
+        enabled=_strict_bool(values.get("enabled", True), key="enabled"),
+        repair_enabled=_strict_bool(values.get("repair_enabled", True), key="repair_enabled"),
+        dry_run=_strict_bool(values.get("dry_run", False), key="dry_run"),
+        min_interval_sec=_non_negative_int(
+            values.get("min_interval_sec", 15 * 60), key="min_interval_sec"
+        ),
+        repair_cooldown_sec=_non_negative_int(
+            values.get("repair_cooldown_sec", 10 * 60), key="repair_cooldown_sec"
+        ),
+        state_path=Path(values.get("state_path", SELF_HEAL_STATE_PATH)),
+        report_dir=Path(values.get("report_dir", SELF_HEAL_REPORT_DIR)),
+        policy_blocks=tuple(sorted(policy_blocks)),
     )
 
 
@@ -105,47 +163,69 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _load_state(path: Path) -> SelfHealingState:
-    if not path.exists():
-        return SelfHealingState()
+def _timestamp(value: Any, *, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise SelfHealingStateError(f"invalid {field_name}")
     try:
+        parsed = float(value or 0.0)
+    except (TypeError, ValueError):
+        raise SelfHealingStateError(f"invalid {field_name}") from None
+    if not math.isfinite(parsed) or parsed < 0:
+        raise SelfHealingStateError(f"invalid {field_name}")
+    return parsed
+
+
+def _load_state(path: Path) -> SelfHealingState:
+    try:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return SelfHealingState()
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return SelfHealingState()
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SelfHealingStateError(f"state_unreadable:{type(exc).__name__}") from exc
+    if not isinstance(payload, dict):
+        raise SelfHealingStateError("state_not_an_object")
+    raw_repairs = payload.get("last_repair_at") or {}
+    if not isinstance(raw_repairs, dict):
+        raise SelfHealingStateError("invalid last_repair_at")
+    allowed_keys = {f"feed:{name}" for name in FEED_SCRIPTS}
+    repairs: dict[str, float] = {}
+    for key, value in raw_repairs.items():
+        normalized = str(key)
+        if normalized in allowed_keys:
+            repairs[normalized] = _timestamp(value, field_name=f"last_repair_at.{normalized}")
     return SelfHealingState(
-        last_run_at=float(payload.get("last_run_at") or 0.0),
-        last_repair_at=dict(payload.get("last_repair_at") or {}),
-        last_retrain_at=float(payload.get("last_retrain_at") or 0.0),
-        last_adapt_at=float(payload.get("last_adapt_at") or 0.0),
-        active_candidate_id=payload.get("active_candidate_id"),
+        last_run_at=_timestamp(payload.get("last_run_at"), field_name="last_run_at"),
+        last_repair_at=repairs,
     )
 
 
-_STATE_WRITE_LOCK = threading.Lock()
+_WRITE_LOCK = threading.Lock()
 
 
-def _save_state(path: Path, state: SelfHealingState) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(asdict(state), indent=2, default=str)
-    # Concurrency (audit 2026-07-07): the async_heavy worker can call this at
-    # the same time as the main tick thread. A bare write_text truncates then
-    # writes, so the other writer (or a cross-process _load_state) could see a
-    # torn JSON file. Serialize in-process writers with a lock, then swap via a
-    # per-writer temp + os.replace (atomic on POSIX and Windows). os.replace can
-    # raise PermissionError on Windows when the destination is momentarily open
-    # by a reader, so retry briefly and fall back to a direct write.
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    with _STATE_WRITE_LOCK:
+    with _WRITE_LOCK:
+        descriptor, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            text=True,
+        )
+        tmp = Path(tmp_name)
         try:
-            tmp.write_text(payload, encoding="utf-8")
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
             for _ in range(5):
                 try:
                     os.replace(tmp, path)
-                    break
+                    return
                 except PermissionError:
                     time.sleep(0.02)
-            else:
-                path.write_text(payload, encoding="utf-8")  # last-resort in-place
+            raise OSError(f"atomic replace failed for {path}")
         finally:
             try:
                 tmp.unlink()
@@ -153,103 +233,194 @@ def _save_state(path: Path, state: SelfHealingState) -> None:
                 pass
 
 
-def _run_command(
-    cmd: list[str],
-    *,
-    timeout_sec: int,
-    dry_run: bool,
-) -> dict[str, Any]:
-    if dry_run:
-        return {"cmd": cmd, "returncode": 0, "stdout": "", "dry_run": True}
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=timeout_sec,
-            check=False,
-        )
-        return {
-            "cmd": cmd,
-            "returncode": int(proc.returncode),
-            "stdout": (proc.stdout or "")[-4000:],
-            "stderr": (proc.stderr or "")[-4000:],
-            "dry_run": False,
-        }
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "cmd": cmd,
-            "returncode": 124,
-            "stdout": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
-            "stderr": "timeout",
-            "dry_run": False,
-        }
+def _save_state(path: Path, state: SelfHealingState, policy: SelfHealingPolicy) -> None:
+    bounded = policy.require_write(WriteScope.SELF_HEALING_STATE, path)
+    _atomic_write_text(bounded, json.dumps(asdict(state), indent=2, sort_keys=True))
 
 
-def _start_process(script: str, cfg: SelfHealingConfig) -> dict[str, Any]:
-    cmd = [cfg.python_executable, script]
+def _feed_environment() -> dict[str, str]:
+    """Minimal environment for keyless feed scripts; trading secrets stay out."""
+    keep = {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "WINDIR",
+    }
+    env = {key: value for key, value in os.environ.items() if key.upper() in keep}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
+def _start_process(script: str | Path, cfg: SelfHealingConfig) -> dict[str, Any]:
+    """Start one exact allowlisted feed script; all other scripts are denied."""
+    feed = _DEFAULT_POLICY.feed_for_script(script)
+    if feed is None:
+        return {
+            "script": str(script),
+            "started": False,
+            "blocked": "feed_script_not_allowlisted",
+            "dry_run": cfg.dry_run,
+        }
+    decision = _DEFAULT_POLICY.feed_decision(feed)
+    if not decision.allowed or decision.path is None:
+        return {
+            "script": str(script),
+            "started": False,
+            "blocked": decision.reason,
+            "dry_run": cfg.dry_run,
+        }
     if cfg.dry_run:
-        return {"script": script, "started": True, "dry_run": True}
+        return {
+            "feed": feed,
+            "script": str(decision.path),
+            "started": True,
+            "dry_run": True,
+        }
     try:
         subprocess.Popen(
-            cmd,
-            cwd=ROOT,
+            [sys.executable, "-I", str(decision.path)],
+            cwd=_DEFAULT_POLICY.workspace_root,
+            env=_feed_environment(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            close_fds=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        return {"script": script, "started": True, "dry_run": False}
-    except Exception as exc:
-        return {"script": script, "started": False, "error": str(exc), "dry_run": False}
+        return {
+            "feed": feed,
+            "script": str(decision.path),
+            "started": True,
+            "dry_run": False,
+        }
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return {
+            "feed": feed,
+            "script": str(decision.path),
+            "started": False,
+            "error": f"{type(exc).__name__}:{exc}",
+            "dry_run": False,
+        }
 
 
-def _pids_for_script(processes: list[dict[str, Any]], script: str) -> list[int]:
-    """PIDs from the snapshot whose command line runs ``script`` (basename match)."""
-    base = os.path.basename(str(script)).lower()
+def _pid(proc: dict[str, Any]) -> int | None:
+    try:
+        parsed = int(proc.get("ProcessId"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _pids_for_feed(processes: list[dict[str, Any]], feed: str) -> list[int]:
+    if not _DEFAULT_POLICY.feed_decision(feed).allowed:
+        return []
     out: list[int] = []
-    if not base:
-        return out
-    for p in processes:
-        cl = str(p.get("CommandLine") or "").lower()
-        if base in cl:
-            try:
-                out.append(int(p.get("ProcessId")))
-            except (TypeError, ValueError):
-                continue
+    for proc in processes:
+        pid = _pid(proc)
+        command_line = str(proc.get("CommandLine") or "")
+        if pid is not None and _DEFAULT_POLICY.command_line_runs_feed(
+            command_line,
+            feed,
+            working_directory=proc.get("WorkingDirectory"),
+        ):
+            out.append(pid)
     return out
 
 
-def _terminate_pids(pids: list[int], cfg: SelfHealingConfig) -> list[int]:
-    """Best-effort kill of wedged feed processes (singleton-lock holders).
+def _root_pids_for_feed(processes: list[dict[str, Any]], feed: str) -> list[int]:
+    allowed_pids = set(_pids_for_feed(processes, feed))
+    matching = [
+        proc for proc in processes if (pid := _pid(proc)) is not None and pid in allowed_pids
+    ]
+    ids = {pid for proc in matching if (pid := _pid(proc)) is not None}
+    roots: list[int] = []
+    for proc in matching:
+        pid = _pid(proc)
+        try:
+            parent = int(proc.get("ParentProcessId") or 0)
+        except (TypeError, ValueError):
+            parent = 0
+        if pid is not None and parent not in ids:
+            roots.append(pid)
+    return roots
 
-    Since utils.process_lock made the harvesters singletons, respawning while a
-    wedged-but-alive holder keeps the OS lock makes the replacement exit
-    instantly ('already running' -> DEVNULL, exit 0) — the repair would no-op
-    forever while reporting ok=True. The wedged holder must die first.
-    """
+
+def _pids_for_script(processes: list[dict[str, Any]], script: str) -> list[int]:
+    """Compatibility helper with an allowlisted-script boundary."""
+    feed = _DEFAULT_POLICY.feed_for_script(script)
+    return _pids_for_feed(processes, feed) if feed is not None else []
+
+
+def _command_line(argv: list[str]) -> str:
+    if os.name == "nt":
+        return subprocess.list2cmdline(argv)
+    import shlex
+
+    return shlex.join(argv)
+
+
+def _kill_validated_feed_root(record: dict[str, Any], feed: str) -> bool:
+    """Revalidate a snapshotted process, then terminate its process tree."""
+    try:
+        import psutil
+    except ImportError:
+        return False
+
+    pid = _pid(record)
+    try:
+        expected_created = float(record.get("CreateTime"))
+    except (TypeError, ValueError):
+        return False
+    if pid is None or not math.isfinite(expected_created):
+        return False
+    try:
+        process = psutil.Process(pid)
+        if abs(float(process.create_time()) - expected_created) > 0.001:
+            return False
+        argv = [str(part) for part in process.cmdline()]
+        working_directory = process.cwd()
+        if not _DEFAULT_POLICY.command_line_runs_feed(
+            _command_line(argv),
+            feed,
+            working_directory=working_directory,
+        ):
+            return False
+        children = process.children(recursive=True)
+        process.kill()
+        for child in reversed(children):
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                continue
+        _, alive = psutil.wait_procs([process, *children], timeout=5)
+        return not alive
+    except (OSError, ValueError, psutil.Error):
+        return False
+
+
+def _terminate_feed_processes(
+    processes: list[dict[str, Any]],
+    feed: str,
+    cfg: SelfHealingConfig,
+) -> list[int]:
+    """Terminate only PIDs proven to run the exact allowlisted feed script."""
     killed: list[int] = []
-    for pid in pids:
+    roots = set(_root_pids_for_feed(processes, feed))
+    records = [proc for proc in processes if _pid(proc) in roots]
+    for record in records:
+        pid = _pid(record)
+        if pid is None:
+            continue
         if cfg.dry_run:
             continue
-        try:
-            if os.name == "nt":
-                res = subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True, timeout=15, check=False,
-                )
-                # taskkill runs with check=False, so a failure (process gone,
-                # access denied → returncode != 0) used to still record a
-                # phantom kill (audit 2026-07-07). Only record confirmed kills.
-                if res.returncode != 0:
-                    continue
-            else:
-                import signal
-
-                os.kill(pid, signal.SIGKILL)
+        if _kill_validated_feed_root(record, feed):
             killed.append(pid)
-        except Exception:
-            continue
     return killed
 
 
@@ -261,17 +432,6 @@ def _wait_for_lock_release(
     attempts: int = 15,
     delay_sec: float = 0.2,
 ) -> bool:
-    """Poll for a wedged holder's singleton lock to free up after a kill.
-
-    ``taskkill /F`` returns BEFORE the OS tears the process down, so the
-    ``utils.process_lock`` file can still be held for a beat. Respawning then
-    makes the replacement exit instantly ('already running'), so the repair
-    silently no-ops for a whole cooldown while reporting ok=True (audit
-    2026-07-07). We probe by acquiring the lock ourselves (non-blocking) and
-    releasing it immediately; success means the holder let go and the respawn
-    can take it. Returns False if it stayed held within the budget so the
-    caller can report the repair honestly instead of claiming a phantom win.
-    """
     if cfg.dry_run:
         return True
     from utils.process_lock import acquire_process_lock
@@ -279,153 +439,145 @@ def _wait_for_lock_release(
     for _ in range(max(1, attempts)):
         handle = acquire_process_lock(lock_name, root=root)
         if handle is not None:
-            handle.close()  # release so the real respawn can acquire it
+            handle.close()
             return True
         time.sleep(delay_sec)
     return False
 
 
-def _powershell_process_snapshot() -> list[dict[str, Any]]:
-    if os.name != "nt":
-        return []
-    ps = (
-        "$items = Get-CimInstance Win32_Process | "
-        "Where-Object { $_.Name -match 'python|py.exe' -and "
-        "($_.CommandLine -match 'Trading_Bot' -or $_.CommandLine -match 'main.py' "
-        "-or $_.CommandLine -match 'harvest_' -or $_.CommandLine -match 'run_confluence') } | "
-        "Select-Object ProcessId,ParentProcessId,CommandLine; "
-        "$items | ConvertTo-Json -Compress"
-    )
+def _process_snapshot() -> ProcessSnapshot:
+    """Read exact feed identities without invoking a shell or external command."""
     try:
-        proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=15,
-            check=False,
+        import psutil
+    except ImportError:
+        return ProcessSnapshot(False, error="process_identity_dependency_unavailable")
+
+    feed_basenames = {path.name.lower() for path in FEED_SCRIPTS.values()}
+    identified: list[dict[str, Any]] = []
+    try:
+        iterator = psutil.process_iter(
+            attrs=["pid", "ppid", "name", "exe", "cmdline", "create_time"],
+            ad_value=None,
         )
-    except Exception:
-        return []
-    try:
-        payload = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError:
-        return []
-    if isinstance(payload, dict):
-        return [payload]
-    return payload if isinstance(payload, list) else []
+        for process in iterator:
+            info = process.info
+            name = str(info.get("name") or "").lower()
+            if not (name in {"py", "py.exe", "python", "python.exe"} or name.startswith("python")):
+                continue
+            raw_argv = info.get("cmdline")
+            if not isinstance(raw_argv, list) or not raw_argv:
+                return ProcessSnapshot(
+                    False,
+                    error=f"process_identity_unavailable:{info.get('pid')}:cmdline",
+                )
+            argv = [str(part) for part in raw_argv]
+            token_names = {
+                Path(part.strip().strip('"').strip("'").replace("\\", os.sep)).name.lower()
+                for part in argv
+            }
+            if not token_names.intersection(feed_basenames):
+                continue
+            try:
+                working_directory = process.cwd()
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+            except (OSError, psutil.AccessDenied) as exc:
+                return ProcessSnapshot(
+                    False,
+                    error=(f"process_identity_unavailable:{info.get('pid')}:{type(exc).__name__}"),
+                )
+            command_line = _command_line(argv)
+            if not any(
+                _DEFAULT_POLICY.command_line_runs_feed(
+                    command_line,
+                    feed,
+                    working_directory=working_directory,
+                )
+                for feed in FEED_SCRIPTS
+            ):
+                continue
+            created = info.get("create_time")
+            if created is None:
+                return ProcessSnapshot(
+                    False,
+                    error=f"process_identity_unavailable:{info.get('pid')}:create_time",
+                )
+            identified.append(
+                {
+                    "ProcessId": info.get("pid"),
+                    "ParentProcessId": info.get("ppid"),
+                    "ExecutablePath": info.get("exe"),
+                    "CommandLine": command_line,
+                    "WorkingDirectory": working_directory,
+                    "CreateTime": created,
+                }
+            )
+    except (OSError, ValueError, psutil.Error) as exc:
+        return ProcessSnapshot(False, error=f"snapshot_error:{type(exc).__name__}")
+    return ProcessSnapshot(True, tuple(identified))
+
+
+def _coerce_snapshot(value: ProcessSnapshot | list[dict[str, Any]]) -> ProcessSnapshot:
+    if isinstance(value, ProcessSnapshot):
+        return value
+    if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        return ProcessSnapshot(True, tuple(value))
+    return ProcessSnapshot(False, error="snapshot_invalid_shape")
 
 
 def _logical_counts(processes: list[dict[str, Any]]) -> dict[str, int]:
-    scripts = {
-        "main": "main.py",
-        "confluence_paper": "run_confluence_paper.py",
-        "liquidations": "harvest_liquidations.py",
-        "skew": "harvest_skew.py",
-        "l2": "harvest_l2.py",
-        "tv": "harvest_tv.py",
-    }
-    grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in scripts}
-    for proc in processes:
-        cl = str(proc.get("CommandLine") or "").lower().replace("/", "\\")
-        for key, leaf in scripts.items():
-            if leaf.lower() in cl:
-                grouped[key].append(proc)
     out: dict[str, int] = {}
-    for key, group in grouped.items():
+    for feed in FEED_SCRIPTS:
+        group = [
+            proc
+            for proc in processes
+            if _DEFAULT_POLICY.command_line_runs_feed(
+                str(proc.get("CommandLine") or ""),
+                feed,
+                working_directory=proc.get("WorkingDirectory"),
+            )
+        ]
         if not group:
-            out[key] = 0
+            out[feed] = 0
             continue
-        ids = {int(p.get("ProcessId")) for p in group if p.get("ProcessId") is not None}
-        roots = [p for p in group if int(p.get("ParentProcessId") or 0) not in ids]
-        out[key] = len(roots) if roots else 1
+        ids = {pid for proc in group if (pid := _pid(proc)) is not None}
+        roots = []
+        for proc in group:
+            try:
+                parent = int(proc.get("ParentProcessId") or 0)
+            except (TypeError, ValueError):
+                parent = 0
+            if parent not in ids:
+                roots.append(proc)
+        out[feed] = len(roots) if roots else 1
     return out
 
 
-def _summary_ok(summary: dict[str, Any], cfg: SelfHealingConfig) -> bool:
-    return (
-        int(summary.get("n") or 0) >= cfg.min_trades
-        and float(summary.get("avg_ret") or 0.0) > cfg.min_avg_ret
-        and float(summary.get("profit_factor") or 0.0) >= cfg.min_profit_factor
-    )
-
-
-def _positive_folds(folds: dict[str, dict[str, Any]]) -> int:
-    count = 0
-    for fold in (folds or {}).values():
-        if int(fold.get("n") or 0) < 10:
-            continue
-        if float(fold.get("avg_ret") or 0.0) > 0.0 and float(fold.get("profit_factor") or 0.0) >= 1.0:
-            count += 1
-    return count
-
-
-def _candidate_configs() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": "baseline_confirmed_rr22",
-            "args": {
-                "min_score": 0.34,
-                "unconfirmed_min_score": 0.40,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-            },
-            "config": {
-                "min_score": 0.34,
-                "unconfirmed_min_score": 0.40,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-            },
-        },
-        {
-            "id": "strict_confirmed_rr22",
-            "args": {
-                "min_score": 0.40,
-                "unconfirmed_min_score": 0.45,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-            },
-            "config": {
-                "min_score": 0.40,
-                "unconfirmed_min_score": 0.45,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-            },
-        },
-        {
-            "id": "ema_rsi_heavier",
-            "args": {
-                "min_score": 0.34,
-                "unconfirmed_min_score": 0.45,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-            },
-            "config": {
-                "min_score": 0.34,
-                "unconfirmed_min_score": 0.45,
-                "rr": 2.2,
-                "atr_stop_mult": 2.0,
-                "weights": {
-                    "valuation": 0.10,
-                    "harmonic": 0.10,
-                    "stochastic": 0.08,
-                    "ict": 0.14,
-                    "asian_range": 0.06,
-                    "dow_swing": 0.08,
-                    "bb_squeeze": 0.12,
-                    "ema_rsi": 0.32,
-                },
-            },
-        },
-    ]
-
-
 class SelfHealingSupervisor:
-    def __init__(self, config: SelfHealingConfig | dict[str, Any] | None = None):
-        self.config = config if isinstance(config, SelfHealingConfig) else config_from_mapping(config)
-        self.state = _load_state(self.config.state_path)
-        # Single-flight guard for the async heavy phase (audit 2026-07-07).
-        self._heavy_thread: threading.Thread | None = None
+    def __init__(
+        self,
+        config: SelfHealingConfig | dict[str, Any] | None = None,
+        *,
+        policy: SelfHealingPolicy | None = None,
+    ):
+        self.config = (
+            config if isinstance(config, SelfHealingConfig) else config_from_mapping(config)
+        )
+        self.policy = policy or _DEFAULT_POLICY
+        if self.policy.workspace_root != _DEFAULT_POLICY.workspace_root:
+            raise PolicyViolation("supervisor workspace root is immutable")
+        self.state_path = self.policy.require_write(
+            WriteScope.SELF_HEALING_STATE, self.config.state_path
+        )
+        self.report_dir = self.policy.require_write(
+            WriteScope.SELF_HEALING_REPORT, self.config.report_dir
+        )
+        self._state_error: str | None = None
+        try:
+            self.state = _load_state(self.state_path)
+        except SelfHealingStateError as exc:
+            self.state = SelfHealingState()
+            self._state_error = str(exc)
 
     def tick(self, *, force: bool = False) -> dict[str, Any]:
         cfg = self.config
@@ -433,306 +585,255 @@ class SelfHealingSupervisor:
             "generated_at": _utc_now().isoformat(),
             "enabled": cfg.enabled,
             "dry_run": cfg.dry_run,
+            "policy": self.policy.describe(),
+            "policy_blocks": list(cfg.policy_blocks),
             "actions": [],
         }
         if not cfg.enabled:
             report["verdict"] = "DISABLED"
             return report
+        if self._state_error:
+            report["verdict"] = "BLOCKED_STATE"
+            report["state_error"] = self._state_error
+            self._write_report(report)
+            return report
+
         now = time.time()
         if not force and now - self.state.last_run_at < cfg.min_interval_sec:
             report["verdict"] = "SKIPPED_COOLDOWN"
-            report["next_run_after_sec"] = int(cfg.min_interval_sec - (now - self.state.last_run_at))
+            report["next_run_after_sec"] = int(
+                cfg.min_interval_sec - (now - self.state.last_run_at)
+            )
             return report
 
         if not cfg.dry_run:
             self.state.last_run_at = now
-        audit = _run_command([cfg.python_executable, "scripts/trading_system_audit.py"], timeout_sec=120, dry_run=cfg.dry_run)
-        report["audit"] = audit
+            try:
+                _save_state(self.state_path, self.state, self.policy)
+            except (OSError, PolicyViolation) as exc:
+                report["actions"].append(
+                    {
+                        "type": "persist_state",
+                        "ok": False,
+                        "reason": f"{type(exc).__name__}:{exc}",
+                    }
+                )
+                report["verdict"] = "ACTION_FAILED"
+                self._write_report(report)
+                return report
         if cfg.repair_enabled:
             report["actions"].extend(self._repair_runtime())
-        if cfg.async_heavy and (cfg.retrain_enabled or cfg.adapt_enabled):
-            # The retrain (~60 min) and replay (4x3 min) subprocesses must not
-            # block the caller: tick() runs on the bot's shared `schedule`
-            # thread that also drives the portfolio cycle, position monitor and
-            # watchdog. Dispatch the heavy phase to a single-flight daemon
-            # thread and return immediately (audit 2026-07-07).
-            dispatched = self._dispatch_heavy_async()
-            report["actions"].append(
-                {"type": "heavy_async", "ok": True, "dispatched": dispatched})
-        else:
-            if cfg.retrain_enabled:
-                action = self._maybe_retrain()
-                if action:
-                    report["actions"].append(action)
-            if cfg.adapt_enabled:
-                action = self._maybe_adapt_strategy()
-                if action:
-                    report["actions"].append(action)
 
-        report["verdict"] = "OK" if all(a.get("ok", True) for a in report["actions"]) else "ACTION_FAILED"
-        if not cfg.dry_run:
-            _save_state(cfg.state_path, self.state)
+        action_failed = any(action.get("ok") is False for action in report["actions"])
+        if action_failed:
+            report["verdict"] = "ACTION_FAILED"
+        elif cfg.policy_blocks:
+            report["verdict"] = "POLICY_BLOCKED"
+        else:
+            report["verdict"] = "OK"
         self._write_report(report)
         return report
 
-    def _dispatch_heavy_async(self) -> bool:
-        """Start the retrain+adapt phase on a daemon thread, at most one at a
-        time. Returns True when a fresh worker was launched, False when a prior
-        heavy run is still in progress (skipped this tick)."""
-        t = self._heavy_thread
-        if t is not None and t.is_alive():
-            return False
-        self._heavy_thread = threading.Thread(
-            target=self._heavy_worker, daemon=True, name="self-heal-heavy")
-        self._heavy_thread.start()
-        return True
-
-    def _heavy_worker(self) -> None:
-        """Background retrain+adapt run. Owns its own cooldown-state persistence
-        and writes a distinct report file so it never clobbers the main tick's
-        report. A crash here stays contained — it must never take down the bot."""
-        cfg = self.config
-        report: dict[str, Any] = {
-            "generated_at": _utc_now().isoformat(),
-            "source": "self_healing_heavy_async",
-            "dry_run": cfg.dry_run,
-            "actions": [],
+    def execute_recovery(self, action: RecoveryAction | str, *, target: str) -> dict[str, Any]:
+        """Execute one registered recovery capability; deny all generic actions."""
+        decision = self.policy.action_decision(action)
+        if not decision.allowed:
+            return {
+                "type": "policy_block",
+                "target": str(target),
+                "ok": False,
+                "reason": decision.reason,
+            }
+        try:
+            normalized = (
+                action if isinstance(action, RecoveryAction) else RecoveryAction(str(action))
+            )
+        except ValueError:
+            return {
+                "type": "policy_block",
+                "target": str(target),
+                "ok": False,
+                "reason": "action_not_allowlisted",
+            }
+        if normalized is not RecoveryAction.RESTART_FEED:
+            return {
+                "type": "policy_block",
+                "target": str(target),
+                "ok": False,
+                "reason": "recovery_adapter_not_registered",
+            }
+        if not self.config.enabled or not self.config.repair_enabled:
+            return {
+                "type": "policy_block",
+                "target": str(target),
+                "ok": False,
+                "reason": "recovery_disabled",
+            }
+        feed = self.policy.feed_decision(target)
+        if not feed.allowed or feed.path is None:
+            return {
+                "type": "policy_block",
+                "target": str(target),
+                "ok": False,
+                "reason": feed.reason,
+            }
+        result = _start_process(str(feed.path), self.config)
+        return {
+            "type": RecoveryAction.RESTART_FEED.value,
+            "target": str(target),
+            "ok": bool(result.get("started")),
+            "result": result,
         }
-        try:
-            if cfg.retrain_enabled:
-                action = self._maybe_retrain()
-                if action:
-                    report["actions"].append(action)
-            if cfg.adapt_enabled:
-                action = self._maybe_adapt_strategy()
-                if action:
-                    report["actions"].append(action)
-            if not cfg.dry_run:
-                _save_state(cfg.state_path, self.state)
-        except Exception as exc:
-            report["error"] = str(exc)
-        try:
-            cfg.report_dir.mkdir(parents=True, exist_ok=True)
-            (cfg.report_dir / "self_healing_heavy_latest.json").write_text(
-                json.dumps(report, indent=2, default=str), encoding="utf-8")
-        except Exception:
-            pass
 
     def _repair_runtime(self) -> list[dict[str, Any]]:
         cfg = self.config
-        actions: list[dict[str, Any]] = []
-        now = time.time()
-        processes = _powershell_process_snapshot()
+        snapshot = _coerce_snapshot(_process_snapshot())
+        if not snapshot.ok:
+            return [
+                {
+                    "type": "repair_feeds",
+                    "ok": False,
+                    "reason": snapshot.error or "process_snapshot_unavailable",
+                }
+            ]
+
+        processes = list(snapshot.processes)
         counts = _logical_counts(processes)
-        script_by_feed = {spec.name: spec.script for spec in FORWARD_FEEDS}
+        try:
+            records = read_forward_feed_status(self.policy.workspace_root)
+            reported_bad = unhealthy_forward_feeds(records)
+        except Exception as exc:
+            return [
+                {
+                    "type": "repair_feeds",
+                    "ok": False,
+                    "reason": f"feed_health_unavailable:{type(exc).__name__}",
+                }
+            ]
 
-        records = read_forward_feed_status(ROOT)
-        bad_feeds = set(unhealthy_forward_feeds(records))
-        for name in ("liquidations", "skew", "l2", "tv"):
-            if counts.get(name, 0) < 1:
-                bad_feeds.add(name)
-        for name in sorted(bad_feeds):
-            key = f"feed:{name}"
-            if now - self.state.last_repair_at.get(key, 0.0) < cfg.repair_cooldown_sec:
-                actions.append({"type": "repair_feed", "target": name, "ok": True, "skipped": "cooldown"})
-                continue
-            # Unhealthy feed with a LIVE process = wedged holder (suspended,
-            # console-paused, stuck DNS). It still owns the singleton lock, so
-            # a bare respawn exits instantly and the repair silently no-ops
-            # forever. Kill the wedged holder(s) first, then respawn.
-            killed: list[int] = []
-            lock_released = True
-            if counts.get(name, 0) >= 1:
-                pids = _pids_for_script(processes, script_by_feed[name])
-                killed = _terminate_pids(pids, cfg)
-                # Wait for the killed holder's singleton lock to release before
-                # respawning; a bare respawn against a still-held lock no-ops
-                # (audit 2026-07-07). lock name == script stem (harvest_<feed>).
-                lock_released = _wait_for_lock_release(
-                    Path(script_by_feed[name]).stem, cfg)
-            result = _start_process(script_by_feed[name], cfg)
-            if not cfg.dry_run:
-                self.state.last_repair_at[key] = now
-            # Honest ok: the respawn only succeeds if it was started AND the
-            # wedged lock actually freed (else the replacement exits instantly).
-            action = {"type": "repair_feed", "target": name,
-                      "ok": bool(result.get("started")) and lock_released,
-                      "result": result}
-            if counts.get(name, 0) >= 1:
-                action["wedged_holder"] = True
-                action["killed_pids"] = killed
-                action["lock_released"] = lock_released
-            actions.append(action)
-
-        if CONFLUENCE_PAPER_SCRIPT.exists() and counts.get("confluence_paper", 0) < 1:
-            key = "confluence_paper"
-            if now - self.state.last_repair_at.get(key, 0.0) >= cfg.repair_cooldown_sec:
-                result = _start_process("run_confluence_paper.py", cfg)
-                if not cfg.dry_run:
-                    self.state.last_repair_at[key] = now
-                actions.append(
-                    {
-                        "type": "repair_auxiliary",
-                        "target": "confluence_paper",
-                        "ok": bool(result.get("started")),
-                        "result": result,
-                    }
-                )
+        actions: list[dict[str, Any]] = []
+        bad_feeds: set[str] = set()
+        for name in reported_bad:
+            decision = self.policy.feed_decision(name)
+            if decision.allowed:
+                bad_feeds.add(str(name))
             else:
                 actions.append(
                     {
-                        "type": "repair_auxiliary",
-                        "target": "confluence_paper",
+                        "type": "policy_block",
+                        "target": str(name),
+                        "ok": False,
+                        "reason": decision.reason,
+                    }
+                )
+        for name in FEED_SCRIPTS:
+            if counts.get(name, 0) < 1:
+                bad_feeds.add(name)
+
+        now = time.time()
+        for name in sorted(bad_feeds):
+            key = f"feed:{name}"
+            if now - self.state.last_repair_at.get(key, 0.0) < cfg.repair_cooldown_sec:
+                actions.append(
+                    {
+                        "type": RecoveryAction.RESTART_FEED.value,
+                        "target": name,
                         "ok": True,
                         "skipped": "cooldown",
                     }
                 )
+                continue
 
-        if cfg.restart_main and counts.get("main", 0) < 1:
-            key = "main"
-            if now - self.state.last_repair_at.get(key, 0.0) >= cfg.repair_cooldown_sec:
-                result = _start_process("main.py", cfg)
-                if not cfg.dry_run:
-                    self.state.last_repair_at[key] = now
-                actions.append({"type": "repair_main", "ok": bool(result.get("started")), "result": result})
+            if not cfg.dry_run:
+                self.state.last_repair_at[key] = now
+                try:
+                    _save_state(self.state_path, self.state, self.policy)
+                except (OSError, PolicyViolation) as exc:
+                    actions.append(
+                        {
+                            "type": "persist_repair_budget",
+                            "target": name,
+                            "ok": False,
+                            "reason": f"{type(exc).__name__}:{exc}",
+                        }
+                    )
+                    continue
+
+            killed: list[int] = []
+            lock_released = True
+            wedged = counts.get(name, 0) >= 1
+            if wedged:
+                holder_pids = _root_pids_for_feed(processes, name)
+                if not holder_pids:
+                    actions.append(
+                        {
+                            "type": RecoveryAction.RESTART_FEED.value,
+                            "target": name,
+                            "ok": False,
+                            "reason": "feed_process_identity_unavailable",
+                        }
+                    )
+                    continue
+                killed = _terminate_feed_processes(processes, name, cfg)
+                if not cfg.dry_run and set(killed) != set(holder_pids):
+                    actions.append(
+                        {
+                            "type": RecoveryAction.RESTART_FEED.value,
+                            "target": name,
+                            "ok": False,
+                            "reason": "feed_termination_unconfirmed",
+                            "holder_pids": holder_pids,
+                            "killed_pids": killed,
+                        }
+                    )
+                    continue
+                script = self.policy.feed_decision(name).path
+                if script is None:
+                    actions.append(
+                        {
+                            "type": "policy_block",
+                            "target": name,
+                            "ok": False,
+                            "reason": "feed_script_unavailable",
+                        }
+                    )
+                    continue
+                lock_released = _wait_for_lock_release(
+                    script.stem,
+                    cfg,
+                    root=self.policy.workspace_root,
+                )
+
+            action = self.execute_recovery(RecoveryAction.RESTART_FEED, target=name)
+            if wedged:
+                action["wedged_holder"] = True
+                action["killed_pids"] = killed
+                action["lock_released"] = lock_released
+                action["ok"] = bool(action.get("ok")) and lock_released
+            actions.append(action)
         return actions
 
-    def _maybe_retrain(self) -> dict[str, Any] | None:
-        cfg = self.config
-        now = time.time()
-        if now - self.state.last_retrain_at < cfg.retrain_cooldown_sec:
-            return None
-        cmd = [
-            cfg.python_executable,
-            "scripts/retrain_if_stale.py",
-            "--market",
-            "both",
-            "--quick",
-            "--step-timeout-sec",
-            "1800",
-        ]
-        if cfg.dry_run:
-            cmd.append("--dry-run")
-        # _run_command always spawns the script (dry_run=False) — when cfg.dry_run
-        # the safe behaviour is delegated to the script's own --dry-run flag
-        # (appended above) so its stdout still reports retrain=skipped vs needed.
-        result = _run_command(cmd, timeout_sec=3600, dry_run=False)
-        needs_retrain = "retrain=skipped" not in str(result.get("stdout") or "")
-        # Stamp the cooldown whenever the check actually RAN the script — not only
-        # when a retrain was needed. Previously a "retrain=skipped" result left
-        # last_retrain_at unchanged (0.0), so the 12h cooldown never engaged and the
-        # script re-spawned every supervisor tick (~15 min). Stamp unconditionally.
-        self.state.last_retrain_at = now
-        return {"type": "retrain_if_stale", "ok": result.get("returncode") == 0,
-                "needs_retrain": needs_retrain, "result": result}
-
-    def _run_replay_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        cfg = self.config
-        args = candidate["args"]
-        out_path = cfg.report_dir / f"replay_{candidate['id']}_{_utc_now().strftime('%Y%m%d_%H%M%S')}.json"
-        cmd = [
-            cfg.python_executable,
-            "scripts/machine_strategy_replay.py",
-            "--timeframe",
-            cfg.replay_timeframe,
-            "--max-files",
-            str(cfg.replay_max_files),
-            "--max-bars",
-            str(cfg.replay_max_bars),
-            "--min-score-grid",
-            str(args["min_score"]),
-            "--rr-grid",
-            str(args["rr"]),
-            "--atr-stop-mult-grid",
-            str(args["atr_stop_mult"]),
-            "--unconfirmed-min-score",
-            str(args["unconfirmed_min_score"]),
-            "--output",
-            str(out_path),
-        ]
-        result = _run_command(cmd, timeout_sec=180, dry_run=cfg.dry_run)
-        payload: dict[str, Any] = {}
-        if not cfg.dry_run and out_path.exists():
-            try:
-                payload = json.loads(out_path.read_text(encoding="utf-8"))
-            except Exception:
-                payload = {}
-        label = next(iter((payload.get("results") or {}).keys()), "")
-        metrics = (payload.get("results") or {}).get(label, {})
-        return {"candidate": candidate, "cmd_result": result, "path": str(out_path), "label": label, "metrics": metrics}
-
-    def _maybe_adapt_strategy(self) -> dict[str, Any] | None:
-        cfg = self.config
-        now = time.time()
-        if now - self.state.last_adapt_at < cfg.adapt_cooldown_sec:
-            return None
-        runs = [self._run_replay_candidate(c) for c in _candidate_configs()]
-        best: dict[str, Any] | None = None
-        for run in runs:
-            summary = (run.get("metrics") or {}).get("summary") or {}
-            folds = (run.get("metrics") or {}).get("folds") or {}
-            if not _summary_ok(summary, cfg):
-                continue
-            if _positive_folds(folds) < cfg.min_positive_folds:
-                continue
-            if best is None:
-                best = run
-                continue
-            best_summary = (best.get("metrics") or {}).get("summary") or {}
-            if float(summary.get("avg_ret") or 0.0) > float(best_summary.get("avg_ret") or 0.0):
-                best = run
-
-        action = {"type": "adapt_strategy", "ok": True, "candidate_runs": runs, "promoted": False}
-        if best is None:
-            if not cfg.dry_run:
-                self.state.last_adapt_at = now
-            action["reason"] = "no_candidate_passed"
-            return action
-
-        candidate = best["candidate"]
-        payload = {
-            "enabled": True,
-            "source": "self_healing_supervisor",
-            "candidate_id": candidate["id"],
-            "generated_at": _utc_now().isoformat(),
-            "expires_at": (_utc_now() + timedelta(hours=cfg.adaptive_ttl_hours)).isoformat(),
-            "apply_scope": "paper",
-            "evidence": {
-                "replay_path": best["path"],
-                "label": best["label"],
-                "summary": (best.get("metrics") or {}).get("summary") or {},
-                "folds": (best.get("metrics") or {}).get("folds") or {},
-            },
-            "config": candidate["config"],
-        }
-        validated = sanitize_adaptive_machine_payload(payload)
-        if not validated.applied:
-            action["ok"] = False
-            action["reason"] = validated.reason
-            return action
-        if not cfg.dry_run:
-            cfg.adaptive_config_path.parent.mkdir(parents=True, exist_ok=True)
-            cfg.adaptive_config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        if not cfg.dry_run:
-            self.state.last_adapt_at = now
-            self.state.active_candidate_id = candidate["id"]
-        action.update(
-            {
-                "promoted": True,
-                "candidate_id": candidate["id"],
-                "adaptive_config_path": str(cfg.adaptive_config_path),
-                "evidence": payload["evidence"],
-                "dry_run": cfg.dry_run,
-            }
-        )
-        return action
-
     def _write_report(self, report: dict[str, Any]) -> None:
-        out = self.config.report_dir
-        out.mkdir(parents=True, exist_ok=True)
+        report_dir = self.policy.require_write(WriteScope.SELF_HEALING_REPORT, self.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
         stamp = _utc_now().strftime("%Y%m%d_%H%M%S")
-        path = out / f"self_healing_{stamp}.json"
-        latest = out / "self_healing_latest.json"
-        text = json.dumps(report, indent=2, default=str)
-        path.write_text(text, encoding="utf-8")
-        latest.write_text(text, encoding="utf-8")
+        text = json.dumps(report, indent=2, default=str, sort_keys=True)
+        path = self.policy.require_write(
+            WriteScope.SELF_HEALING_REPORT,
+            report_dir / f"self_healing_{stamp}.json",
+        )
+        latest = self.policy.require_write(
+            WriteScope.SELF_HEALING_REPORT,
+            report_dir / "self_healing_latest.json",
+        )
+        _atomic_write_text(path, text)
+        _atomic_write_text(latest, text)
+
+
+__all__ = [
+    "ProcessSnapshot",
+    "SelfHealingConfig",
+    "SelfHealingState",
+    "SelfHealingSupervisor",
+    "config_from_mapping",
+]

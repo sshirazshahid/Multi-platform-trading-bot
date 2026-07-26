@@ -1,47 +1,85 @@
-# start_all.ps1 — launch the trading bot's PERSISTENT auxiliary processes (dedup-safe).
-#
-# Started by start_all.bat, which is called from auto_restart.bat (before its restart loop)
-# and TradingBot.bat (menu option [1] Start bot). Does NOT start main.py — each entry point
-# manages the bot itself (auto_restart.bat = crash-restart loop; TradingBot.bat = foreground).
-#
-# Dedup: a script is only launched if no running python.exe already has it in its command
-# line, so clicking the launcher twice (or having a scheduled task already up) will NOT spawn
-# duplicates (two harvesters would double-count the same hour bucket).
-#
-# Periodic research (market-intel / weekly / etf-monthly / daily-scan) is NOT here — those run
-# on their own scheduled-task cadence; running weekly jobs on every click would be wrong.
+# Launch persistent paper/read-only collectors without duplicate workers.
+# TradingBot.bat owns bot supervision; this script owns auxiliary startup only.
 $ErrorActionPreference = 'SilentlyContinue'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 $py = Join-Path $root 'venv\Scripts\python.exe'
-if (-not (Test-Path $py)) { Write-Host "[start_all] venv python not found: $py"; exit 1 }
-
-# (label, script path relative to repo root) — persistent loops only
-$procs = @()
-if (Test-Path (Join-Path $root 'run_confluence_paper.py')) {
-  $procs += @{ name = 'confluence-paper'; script = 'run_confluence_paper.py' }
-} else {
-  Write-Host "[start_all] confluence-paper skipped (run_confluence_paper.py not present)"
+if (-not (Test-Path -LiteralPath $py)) {
+  Write-Host "[start_all] venv python not found: $py"
+  exit 1
 }
-$procs += @(
-  @{ name = 'liq-harvester';    script = 'scripts\harvest_liquidations.py' },
-  @{ name = 'skew-harvester';   script = 'scripts\harvest_skew.py' },
-  @{ name = 'l2-harvester';     script = 'scripts\harvest_l2.py' },
-  @{ name = 'tv-harvester';     script = 'scripts\harvest_tv.py' }
-)
 
-$running = @(Get-CimInstance Win32_Process -Filter "name='python.exe'" -ErrorAction SilentlyContinue |
-             Select-Object -ExpandProperty CommandLine)
-
-foreach ($p in $procs) {
-  $base = Split-Path $p.script -Leaf
-  $isUp = $false
-  foreach ($cl in $running) { if ($cl -and $cl -match [regex]::Escape($base)) { $isUp = $true; break } }
-  if ($isUp) {
-    Write-Host ("[start_all] {0,-18} already running" -f $p.name)
-  } else {
-    Start-Process -FilePath $py -ArgumentList $p.script -WindowStyle Hidden -WorkingDirectory $root
-    Write-Host ("[start_all] {0,-18} STARTED" -f $p.name)
+# Serialize discovery plus launch. This closes the race between two launchers
+# that both observe a collector as absent before either has started it.
+$mutex = [Threading.Mutex]::new($false, 'Local\TradingBot.StartAll')
+$ownsMutex = $false
+try {
+  try {
+    $ownsMutex = $mutex.WaitOne([TimeSpan]::FromSeconds(30))
+  } catch [Threading.AbandonedMutexException] {
+    $ownsMutex = $true
   }
+  if (-not $ownsMutex) {
+    Write-Host '[start_all] another startup pass is active; not starting workers'
+    exit 0
+  }
+
+  $procs = @()
+  if (Test-Path -LiteralPath (Join-Path $root 'run_confluence_paper.py')) {
+    $procs += @{ name = 'confluence-paper'; script = 'run_confluence_paper.py' }
+  } else {
+    Write-Host '[start_all] confluence-paper skipped (run_confluence_paper.py not present)'
+  }
+  $procs += @(
+    @{ name = 'liq-harvester';  script = 'scripts\harvest_liquidations.py' },
+    @{ name = 'skew-harvester'; script = 'scripts\harvest_skew.py' },
+    @{ name = 'l2-harvester';   script = 'scripts\harvest_l2.py' },
+    @{ name = 'tv-harvester';   script = 'scripts\harvest_tv.py' }
+  )
+
+  try {
+    $running = @(Get-CimInstance Win32_Process `
+                 -Filter "name='python.exe' or name='pythonw.exe'" -ErrorAction Stop |
+                 Select-Object -ExpandProperty CommandLine)
+  } catch {
+    Write-Host '[start_all] cannot verify existing workers; refusing auxiliary startup'
+    throw
+  }
+
+  foreach ($proc in $procs) {
+    $scriptPath = Join-Path $root $proc.script
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+      Write-Host ("[start_all] {0,-18} skipped (script missing)" -f $proc.name)
+      continue
+    }
+
+    $base = Split-Path $scriptPath -Leaf
+    $isRunning = $false
+    foreach ($commandLine in $running) {
+      if ($commandLine -and $commandLine -match [regex]::Escape($base)) {
+        $isRunning = $true
+        break
+      }
+    }
+    if ($isRunning) {
+      Write-Host ("[start_all] {0,-18} already running" -f $proc.name)
+      continue
+    }
+
+    $quotedScript = '"{0}"' -f $scriptPath
+    $child = Start-Process -FilePath $py -ArgumentList $quotedScript -WindowStyle Hidden `
+                           -WorkingDirectory $root -PassThru
+    if ($null -ne $child) {
+      $running += "$py $quotedScript"
+      Write-Host ("[start_all] {0,-18} STARTED (pid {1})" -f $proc.name, $child.Id)
+    } else {
+      Write-Host ("[start_all] {0,-18} failed to start" -f $proc.name)
+    }
+  }
+  Write-Host '[start_all] done. main.py is owned by TradingBot.bat.'
+} finally {
+  if ($ownsMutex) {
+    $mutex.ReleaseMutex()
+  }
+  $mutex.Dispose()
 }
-Write-Host "[start_all] done. (main.py is started by the caller: auto_restart.bat / TradingBot.bat [1].)"

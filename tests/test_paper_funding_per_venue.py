@@ -8,7 +8,7 @@ looked free whenever bitget happened to settle first that window.
 """
 from __future__ import annotations
 
-import datetime as _dt
+from core.funding_history import FundingSettlement
 
 
 class _Pos:
@@ -17,11 +17,19 @@ class _Pos:
     market_type = "futures"
     entry_price = 100.0
     funding_paid = 0.0
+    open_time = 0.0
+    last_funding_ts = 0.0
 
 
 class _Tracker:
+    def __init__(self):
+        self.positions = {}
+
     def get_open(self, exchange=None):
-        return [_Pos()]
+        return [self.positions.setdefault(exchange, _Pos())]
+
+    def _save(self):
+        pass
 
 
 class _Sim:
@@ -47,14 +55,17 @@ class _Ex:
 
 def test_funding_accrues_on_every_venue_in_same_window(monkeypatch):
     from core.order_manager import OrderManager
+    monkeypatch.setattr("core.order_manager.time.time", lambda: 200.0)
 
-    # Freeze time to a real 8h funding boundary so the method proceeds.
-    class _FakeDatetime(_dt.datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return _dt.datetime(2026, 7, 9, 8, 30, tzinfo=tz)
+    def _history(venue, coin, *, start_ts, end_ts):
+        if start_ts <= 100.0 <= end_ts:
+            return (FundingSettlement(100.0, 0.0001),)
+        return ()
 
-    monkeypatch.setattr(_dt, "datetime", _FakeDatetime)
+    monkeypatch.setattr("core.funding_history.load_realized_settlements", _history)
+    monkeypatch.setattr(
+        OrderManager, "_paper_funding_mark_at", staticmethod(lambda *args: 100.0)
+    )
 
     applied: list[str] = []
 

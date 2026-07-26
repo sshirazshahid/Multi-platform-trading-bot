@@ -31,7 +31,9 @@ def test_rejects_overfit_profile(tmp_path):
     row = {"model_version": "ens_overfit", "oos_wr": 0.80,
            "deflated_sharpe": 0.0008, "pbo": 1.0,
            "artifact_path": _artifact(tmp_path)}
-    promote, reason, diag = pg.evaluate_model_version(row, market_type="futures")
+    promote, reason, diag = pg.evaluate_model_version(
+        row, market_type="futures", require_manifest=False
+    )
     assert promote is False, f"overfit model must be rejected; reason={reason}"
     assert ("PBO" in reason) or ("DSR" in reason), (
         f"rejection should cite PBO/DSR; got: {reason}")
@@ -43,7 +45,9 @@ def test_accepts_honest_strong_model(tmp_path):
     row = {"model_version": "ens_honest", "oos_wr": 0.62,
            "deflated_sharpe": 0.30, "pbo": 0.25,
            "artifact_path": _artifact(tmp_path, auc=0.66, wr_train=0.35)}
-    promote, reason, diag = pg.evaluate_model_version(row, market_type="futures")
+    promote, reason, diag = pg.evaluate_model_version(
+        row, market_type="futures", require_manifest=False
+    )
     assert promote is True, f"honest strong model must promote; reason={reason}"
 
 
@@ -52,6 +56,8 @@ def test_rejects_zero_dsr_even_if_pbo_ok(tmp_path):
     row = {"model_version": "ens_zero_dsr", "oos_wr": 0.62,
            "deflated_sharpe": 0.0, "pbo": 0.20,
            "artifact_path": _artifact(tmp_path, auc=0.66, wr_train=0.35)}
-    promote, reason, diag = pg.evaluate_model_version(row, market_type="futures")
+    promote, reason, diag = pg.evaluate_model_version(
+        row, market_type="futures", require_manifest=False
+    )
     assert promote is False
     assert "DSR" in reason

@@ -59,13 +59,11 @@ def test_dead_flat_coin_low_roc_flagged():
     assert roc < uf.MIN_RANGE_OF_CHANGE, f"dead coin should have low roc, got {roc}"
 
 
-def test_missing_data_is_neutral():
-    """No candles → (0,0) → caller must NOT reject on missing data."""
+def test_missing_data_is_explicitly_unavailable():
+    """No candles must not be represented as a real zero range/efficiency."""
     uf = UniverseFilter()
     roc, eff = uf._check_range_stability(_ex_with_daily([]), "X/USDT:USDT", "futures")
-    assert roc == 0.0 and eff == 0.0
-    # The check() wiring uses `0 < roc < MIN` and `0 < eff < MIN`, so a 0.0
-    # value cannot trigger a rejection — verified by the strict-greater guard.
+    assert roc is None and eff is None
 
 
 def test_filter_is_config_gated():
@@ -76,10 +74,7 @@ def test_filter_is_config_gated():
     assert config.RANGE_STABILITY_FILTER_ENABLED is True
 
 
-def test_zero_value_cannot_reject():
-    """Pin the strict-greater guard semantics: roc/eff of exactly 0
-    (missing data) must be neutral, not a rejection."""
-    # mirrors the check() condition: `0 < x < MIN`
+def test_real_zero_efficiency_is_conservatively_rejected():
+    """A computed zero is severe chop; only missing data uses None."""
     MIN = UniverseFilter.MIN_TREND_EFFICIENCY
-    assert not (0 < 0.0 < MIN)        # missing → no reject
-    assert (0 < 0.10 < MIN)            # real low value → reject
+    assert 0.0 < MIN

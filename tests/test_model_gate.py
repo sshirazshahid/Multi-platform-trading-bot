@@ -68,6 +68,70 @@ def _valid_latest_payload(version: str, art: Path) -> dict:
     }
 
 
+def _write_manifestable_bundle(
+    path: Path,
+    *,
+    version: str,
+    feature_keys: list[str] | None = None,
+    n_oos: int = 300,
+    auc: float = 0.67,
+    wr_train: float = 0.35,
+) -> None:
+    from core.calibration import IsotonicCalibrator
+    from core.models import GBMModel, LRModel
+
+    keys = feature_keys or ["a", "b", "c"]
+    rng = np.random.default_rng(123)
+    X = rng.standard_normal((160, len(keys)))
+    y = (X[:, 0] + 0.2 * X[:, 1] > 0).astype(int)
+    lr = LRModel().fit(X, y)
+    gbm = GBMModel(max_iter=40).fit(X, y)
+    iso_lr = IsotonicCalibrator(min_samples=10).fit(lr.p_win(X), y)
+    iso_gbm = IsotonicCalibrator(min_samples=10).fit(gbm.p_win(X), y)
+
+    base = path.parent
+    lr.save(base / "lr.pkl", model_version=f"{version}::lr", feature_keys=keys)
+    gbm.save(
+        base / "gbm.pkl", model_version=f"{version}::gbm", feature_keys=keys
+    )
+    iso_lr.save(base / "iso_lr.pkl")
+    iso_gbm.save(base / "iso_gbm.pkl")
+    path.write_text(json.dumps({
+        "model_version": version,
+        "market_type": "futures",
+        "trained_at": int(__import__("time").time()),
+        "feature_keys": keys,
+        "weights": {"lr": 0.4, "gbm": 0.6, "mcp_rule": 0.25},
+        "artifacts": {
+            "lr": "lr.pkl", "gbm": "gbm.pkl",
+            "iso_lr": "iso_lr.pkl", "iso_gbm": "iso_gbm.pkl",
+        },
+        "metrics": {
+            "n_oos_ensemble": n_oos,
+            "auc_ensemble": auc,
+            "brier_ensemble": 0.18,
+            "n_train": len(X),
+            "wr_train": wr_train,
+        },
+    }))
+
+
+def _eligible_row(version: str, artifact: Path, *, oos_wr: float = 0.62) -> dict:
+    now = int(__import__("time").time())
+    return {
+        "model_version": version,
+        "trained_at": now,
+        "train_window_start": now - 10_000,
+        "train_window_end": now - 100,
+        "oos_window_start": now - 2_000,
+        "oos_window_end": now - 100,
+        "oos_wr": oos_wr,
+        "deflated_sharpe": 0.30,
+        "pbo": 0.25,
+        "artifact_path": str(artifact),
+    }
+
+
 def test_promotion_gate_refuses_low_oos_wr(tmp_path: Path, monkeypatch):
     """Gate must refuse a model that fails the WR floor regardless of how
     healthy the other metrics look."""
@@ -121,15 +185,10 @@ def test_promotion_gate_promotes_good_model(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
     art = tmp_path / "ensemble_good.json"
-    _make_ensemble_json(art, n_oos=300, auc=0.62)
-
-    row = {
-        "model_version": "good_v1",
-        "oos_wr": 0.59,
-        "deflated_sharpe": 0.80,
-        "pbo": 0.30,
-        "artifact_path": str(art),
-    }
+    _write_manifestable_bundle(art, version="good_v1", auc=0.62)
+    row = _eligible_row("good_v1", art, oos_wr=0.59)
+    row["deflated_sharpe"] = 0.80
+    row["pbo"] = 0.30
     promote = pg.promote_if_eligible(row, market_type="futures",
                                      models_dir=tmp_path)
     assert promote is True
@@ -139,6 +198,7 @@ def test_promotion_gate_promotes_good_model(tmp_path: Path, monkeypatch):
     payload = json.loads(latest.read_text())
     assert payload["model_version"] == "good_v1"
     assert payload["artifact_path"].endswith("ensemble_good.json")
+    assert payload["manifest"] == json.loads(art.read_text())["manifest"]
 
 
 def test_promotion_gate_keeps_prior_on_reject(tmp_path: Path, monkeypatch):
@@ -272,13 +332,10 @@ def test_promotion_gate_rejects_overfit_despite_strong_uplift(tmp_path: Path, mo
         f"profile still shows ≥5x uplift, got {diag['wr_uplift']}")
 
 
-def test_promotion_gate_legacy_artifact_without_wr_train_passes(
+def test_promotion_gate_legacy_artifact_without_wr_train_is_rejected(
     tmp_path: Path, monkeypatch,
 ):
-    """Legacy artifacts (pre wr_train) must still be able to promote on
-    AUC + n_oos + oos_wr alone. WR-uplift check is fail-open when
-    base_rate is unknown — we don't punish callers for missing optional
-    metadata."""
+    """Legacy metadata cannot silently authorize a production model."""
     from core import promotion_gate as pg
 
     monkeypatch.setattr(pg, "AUDIT_LOG", tmp_path / "audit.jsonl")
@@ -295,7 +352,10 @@ def test_promotion_gate_legacy_artifact_without_wr_train_passes(
     }
     promote = pg.promote_if_eligible(row, market_type="futures",
                                      models_dir=tmp_path)
-    assert promote is True
+    assert promote is False
+    assert not (tmp_path / "ensemble_futures_latest.json").exists()
+    audit_line = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[-1])
+    assert "manifest" in audit_line["reason"].lower()
 
 
 def test_module_constants_match_documented_intent():
@@ -343,35 +403,15 @@ def test_load_model_bundle_recovers_after_retry_window(tmp_path: Path, monkeypat
     out2 = b._load_model_bundle("futures")
     assert out2 == {}
 
-    # Now: weekly retrain "appears" — write a minimal valid bundle on disk.
-    from core.calibration import IsotonicCalibrator
-    from core.models import GBMModel, LRModel
+    # Now: weekly retrain "appears" and passes production authorization.
+    from core import promotion_gate as pg
 
-    rng = np.random.default_rng(1)
-    X = rng.standard_normal((100, 3))
-    y = (X[:, 0] > 0).astype(int)
-    lr = LRModel().fit(X, y)
-    gbm = GBMModel(max_iter=50).fit(X, y)
-    iso_l = IsotonicCalibrator(min_samples=10).fit(lr.p_win(X), y)
-    iso_g = IsotonicCalibrator(min_samples=10).fit(gbm.p_win(X), y)
     md = tmp_path / "data" / "models"
-    lr.save(md / "lr.pkl")
-    gbm.save(md / "gbm.pkl")
-    iso_l.save(md / "iso_lr.pkl")
-    iso_g.save(md / "iso_gbm.pkl")
     art = md / "ensemble_futures_v_x.json"
-    art.write_text(json.dumps({
-        "model_version": "fresh",
-        "feature_keys": ["a", "b", "c"],
-        "weights": {"lr": 0.4, "gbm": 0.6, "mcp_rule": 0.25},
-        "artifacts": {
-            "lr": "lr.pkl", "gbm": "gbm.pkl",
-            "iso_lr": "iso_lr.pkl", "iso_gbm": "iso_gbm.pkl",
-        },
-        "metrics": {"n_oos_ensemble": 300, "auc_ensemble": 0.62},
-    }))
-    (md / "ensemble_futures_latest.json").write_text(
-        json.dumps(_valid_latest_payload("fresh", art)))
+    _write_manifestable_bundle(art, version="fresh")
+    assert pg.promote_if_eligible(
+        _eligible_row("fresh", art), market_type="futures", models_dir=md
+    )
 
     # 3rd call: still inside retry window, NEW pointer ignored.
     out3 = b._load_model_bundle("futures")
@@ -439,44 +479,25 @@ def test_score_via_model_rule_fallback(tmp_path: Path, monkeypatch):
 
 def test_score_via_model_with_bundle(tmp_path: Path, monkeypatch):
     """Trained bundle on disk => calibrated blend returns finite p_win_lr/gbm."""
-    from core.calibration import IsotonicCalibrator
+    from core import promotion_gate as pg
     from core.mcp_brain import MCPBrain
-    from core.models import GBMModel, LRModel
 
     monkeypatch.chdir(tmp_path)
     models_dir = tmp_path / "data" / "models"
     models_dir.mkdir(parents=True)
 
-    # Train tiny LR + GBM so the bundle is real.
-    rng = np.random.default_rng(42)
+    # Train and authorize a tiny LR + GBM bundle.
     feature_keys = ["score", "rsi_1h", "adx_1h"]
-    X = rng.standard_normal((200, 3))
-    y = (X[:, 0] + 0.3 * X[:, 1] > 0).astype(int)
-
-    lr = LRModel().fit(X, y)
-    gbm = GBMModel(max_iter=80).fit(X, y)
-    iso_lr = IsotonicCalibrator(min_samples=10).fit(lr.p_win(X), y)
-    iso_gbm = IsotonicCalibrator(min_samples=10).fit(gbm.p_win(X), y)
-
     art = lambda name: models_dir / name  # noqa: E731
-    lr.save(art("lr.pkl"))
-    gbm.save(art("gbm.pkl"))
-    iso_lr.save(art("iso_lr.pkl"))
-    iso_gbm.save(art("iso_gbm.pkl"))
-
     ens_path = art("ensemble_futures_v_x.json")
-    ens_path.write_text(json.dumps({
-        "model_version": "test_bundle",
-        "feature_keys": feature_keys,
-        "weights": {"lr": 0.4, "gbm": 0.6, "mcp_rule": 0.25},
-        "artifacts": {
-            "lr": "lr.pkl", "gbm": "gbm.pkl",
-            "iso_lr": "iso_lr.pkl", "iso_gbm": "iso_gbm.pkl",
-        },
-        "metrics": {"n_oos_ensemble": 200, "auc_ensemble": 0.62},
-    }))
-    art("ensemble_futures_latest.json").write_text(
-        json.dumps(_valid_latest_payload("test_bundle", ens_path)))
+    _write_manifestable_bundle(
+        ens_path, version="test_bundle", feature_keys=feature_keys
+    )
+    assert pg.promote_if_eligible(
+        _eligible_row("test_bundle", ens_path),
+        market_type="futures",
+        models_dir=models_dir,
+    )
 
     b = MCPBrain()
     out = b.score_via_model(

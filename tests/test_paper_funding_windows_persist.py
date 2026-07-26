@@ -51,12 +51,13 @@ def test_non_dict_payload_ignored():
     assert _om()._last_funding_hour == {}
 
 
-def test_accrue_persists_after_marking_window():
+def test_accrue_persists_per_position_settlement_cursor():
     src = Path(__file__).resolve().parents[1].joinpath(
         "core", "order_manager.py").read_text(encoding="utf-8")
     body = src[src.index("def accrue_paper_funding"):]
-    i_mark = body.find("_last_funding_hour[venue] = window_key")
-    i_save = body.find("_save_funding_windows()")
+    i_mark = body.find("pos.last_funding_ts = settlement.settlement_ts")
+    i_save = body.find('getattr(self.tracker, "_save", None)')
     assert 0 < i_mark < i_save, (
-        "accrue_paper_funding must persist the settled window right after "
-        "marking it, or a restart double-charges the same window")
+        "accrue_paper_funding must persist each position's realized-settlement "
+        "cursor after accounting, or a restart can double-charge it"
+    )

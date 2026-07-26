@@ -304,3 +304,17 @@ def test_close_hook_failure_does_not_lose_close():
     closed = tracker.close(pos.id, exit_price=90.0, reason="stop_loss")
     assert closed is not None
     assert pos.id not in tracker._open
+
+
+def test_scalp_routing_metadata_survives_tracker_restart():
+    tracker = PositionTracker()
+    pos = _make_open_position("SOL/USDT:USDT")
+    pos._scalp = True
+    pos.tp_pct = 1.8
+    tracker.add(pos)
+
+    restored = PositionTracker()._open.get(pos.id)
+
+    assert restored is not None
+    assert restored._scalp is True
+    assert restored.tp_pct == pytest.approx(1.8)

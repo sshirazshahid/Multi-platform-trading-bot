@@ -1,0 +1,212 @@
+=== Cross-venue funding-dispersion screen (rev3: binance∩bybit, hold-until-flip) ===
+coins with binance∩bybit coverage: ['ADA', 'ALGO', 'ATOM', 'BNB', 'BTC', 'DOGE', 'ETH', 'GRT', 'LINK', 'LTC', 'SOL', 'SUI', 'TRX', 'XRP', 'ZEC']
+aligned settlements/coin: {'ADA': 5816, 'ALGO': 5249, 'ATOM': 5195, 'BNB': 5507, 'BTC': 6044, 'DOGE': 5587, 'ETH': 6044, 'GRT': 5026, 'LINK': 6044, 'LTC': 6044, 'SOL': 5579, 'SUI': 3487, 'TRX': 5317, 'XRP': 5647, 'ZEC': 5063}
+days/coin: {'ADA': 1938.33, 'ALGO': 1749.33, 'ATOM': 1731.33, 'BNB': 1835.33, 'BTC': 2014.33, 'DOGE': 1862.0, 'ETH': 2014.33, 'GRT': 1675.0, 'LINK': 2014.33, 'LTC': 2014.33, 'SOL': np.float64(1835.33), 'SUI': 1162.0, 'TRX': 1772.0, 'XRP': 1882.0, 'ZEC': 1687.33}
+coin-pair strategies (n_trials): 15
+
+VERDICT: NO_GO
+REASON: Hold-model OOS gates fail: ['OOS_WR>=0.55']. Best pair ZEC:binanceL/bybitS OOS mean 0.4491bps, DSR 1.000, OOS-WR 0.378.
+
+JSON_VERDICT_START
+{
+  "candidate": "A_cross_venue_funding_dispersion_rev3_binance_bybit_hold",
+  "hypothesis": "Delta-neutral binance/bybit funding differential, held until the train-chosen direction flips, clears the after-cost hurdle out-of-sample",
+  "universe": "binance\u2229bybit only (Bitget dropped); one venue-pair per coin",
+  "n": {
+    "ADA": 5816,
+    "ALGO": 5249,
+    "ATOM": 5195,
+    "BNB": 5507,
+    "BTC": 6044,
+    "DOGE": 5587,
+    "ETH": 6044,
+    "GRT": 5026,
+    "LINK": 6044,
+    "LTC": 6044,
+    "SOL": 5579,
+    "SUI": 3487,
+    "TRX": 5317,
+    "XRP": 5647,
+    "ZEC": 5063
+  },
+  "sample_days": {
+    "ADA": 1938.33,
+    "ALGO": 1749.33,
+    "ATOM": 1731.33,
+    "BNB": 1835.33,
+    "BTC": 2014.33,
+    "DOGE": 1862.0,
+    "ETH": 2014.33,
+    "GRT": 1675.0,
+    "LINK": 2014.33,
+    "LTC": 2014.33,
+    "SOL": 1835.33,
+    "SUI": 1162.0,
+    "TRX": 1772.0,
+    "XRP": 1882.0,
+    "ZEC": 1687.33
+  },
+  "coins_cross_venue": [
+    "ADA",
+    "ALGO",
+    "ATOM",
+    "BNB",
+    "BTC",
+    "DOGE",
+    "ETH",
+    "GRT",
+    "LINK",
+    "LTC",
+    "SOL",
+    "SUI",
+    "TRX",
+    "XRP",
+    "ZEC"
+  ],
+  "n_coin_pair_strategies": 15,
+  "n_trials_dsr": 15,
+  "after_cost_metrics": {
+    "cost_model": "hold-until-sign-flip: ONE 42bps 4-leg round-trip per held position, amortized over its settlements (decoupled from n_splits)",
+    "best_pair_oos": "ZEC:binanceL/bybitS",
+    "best_pair_oos_mean_bps": 0.4491,
+    "best_pair_oos_wr": 0.3782
+  },
+  "gates": {
+    "DSR": 0.9998,
+    "PBO": 0.4209,
+    "OOS_WR": 0.3782,
+    "monte_carlo": {
+      "n_trades": 4048,
+      "p_total_positive": 1.0,
+      "max_drawdown_p95": 0.032563,
+      "passes": true
+    },
+    "n_trials_penalty": 15,
+    "checks": {
+      "oos_mean>0": true,
+      "DSR>=0.10": true,
+      "PBO<=0.50": true,
+      "OOS_WR>=0.55": false,
+      "MC_P(>0)>=0.95": true,
+      "MC_maxDD_p95<=0.25": true
+    },
+    "fail_closed_on_nan": true
+  },
+  "oos_walk_forward": {
+    "best_pair": "ZEC:binanceL/bybitS",
+    "best_oos_mean_bps": 0.4491,
+    "best_oos_wr": 0.3782,
+    "best_oos_sharpe": 0.1148,
+    "n_oos_best": 4048,
+    "per_pair": [
+      {
+        "key": "ADA:binanceL/bybitS",
+        "oos_mean_bps": 0.1068,
+        "oos_wr": 0.3882,
+        "oos_sharpe": 0.0936,
+        "n_oos": 4652
+      },
+      {
+        "key": "ALGO:binanceL/bybitS",
+        "oos_mean_bps": 0.1874,
+        "oos_wr": 0.3553,
+        "oos_sharpe": 0.1291,
+        "n_oos": 4196
+      },
+      {
+        "key": "ATOM:binanceL/bybitS",
+        "oos_mean_bps": 0.3124,
+        "oos_wr": 0.5154,
+        "oos_sharpe": 0.2826,
+        "n_oos": 4156
+      },
+      {
+        "key": "BNB:binanceL/bybitS",
+        "oos_mean_bps": 0.1455,
+        "oos_wr": 0.6256,
+        "oos_sharpe": 0.1238,
+        "n_oos": 4404
+      },
+      {
+        "key": "BTC:binanceL/bybitS",
+        "oos_mean_bps": -0.0083,
+        "oos_wr": 0.4259,
+        "oos_sharpe": -0.0112,
+        "n_oos": 4832
+      },
+      {
+        "key": "DOGE:binanceL/bybitS",
+        "oos_mean_bps": 0.13,
+        "oos_wr": 0.4174,
+        "oos_sharpe": 0.0989,
+        "n_oos": 4468
+      },
+      {
+        "key": "ETH:binanceL/bybitS",
+        "oos_mean_bps": 0.0114,
+        "oos_wr": 0.4313,
+        "oos_sharpe": 0.0155,
+        "n_oos": 4832
+      },
+      {
+        "key": "GRT:binanceL/bybitS",
+        "oos_mean_bps": 0.1515,
+        "oos_wr": 0.3746,
+        "oos_sharpe": 0.1705,
+        "n_oos": 4020
+      },
+      {
+        "key": "LINK:binanceL/bybitS",
+        "oos_mean_bps": 0.0266,
+        "oos_wr": 0.3529,
+        "oos_sharpe": 0.0203,
+        "n_oos": 4832
+      },
+      {
+        "key": "LTC:binanceL/bybitS",
+        "oos_mean_bps": 0.0548,
+        "oos_wr": 0.4034,
+        "oos_sharpe": 0.062,
+        "n_oos": 4832
+      },
+      {
+        "key": "SOL:binanceL/bybitS",
+        "oos_mean_bps": 0.1527,
+        "oos_wr": 0.47,
+        "oos_sharpe": 0.0437,
+        "n_oos": 4460
+      },
+      {
+        "key": "SUI:binanceL/bybitS",
+        "oos_mean_bps": 0.2571,
+        "oos_wr": 0.5262,
+        "oos_sharpe": 0.1896,
+        "n_oos": 2788
+      },
+      {
+        "key": "TRX:binanceL/bybitS",
+        "oos_mean_bps": 0.1725,
+        "oos_wr": 0.4438,
+        "oos_sharpe": 0.1717,
+        "n_oos": 4252
+      },
+      {
+        "key": "XRP:binanceL/bybitS",
+        "oos_mean_bps": 0.1974,
+        "oos_wr": 0.4604,
+        "oos_sharpe": 0.1594,
+        "n_oos": 4516
+      },
+      {
+        "key": "ZEC:binanceL/bybitS",
+        "oos_mean_bps": 0.4491,
+        "oos_wr": 0.3782,
+        "oos_sharpe": 0.1148,
+        "n_oos": 4048
+      }
+    ]
+  },
+  "verdict": "NO_GO",
+  "reason": "Hold-model OOS gates fail: ['OOS_WR>=0.55']. Best pair ZEC:binanceL/bybitS OOS mean 0.4491bps, DSR 1.000, OOS-WR 0.378."
+}
+JSON_VERDICT_END

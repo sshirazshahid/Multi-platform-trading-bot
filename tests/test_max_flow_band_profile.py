@@ -3,8 +3,9 @@
 New PAPER-only research profile MAX_FLOW_BAND: identical risk envelope to
 AGGRESSIVE_RESEARCH (6 slots, 0.125% risk/trade, same aggregate risk, gross
 exposure, and leverage) — the profile is a cohort/epoch label plus the gate
-key for the T3 geometry guard, NOT a risk expansion. It is deliberately
-invalid outside PAPER (fails closed like AGGRESSIVE_RESEARCH).
+key for the T3 geometry guard, NOT a risk expansion. Explicit mode_profile_for
+calls still fail closed outside PAPER; config/launcher coerce leftover .env
+profiles to STANDARD under OBSERVATION so set-mode does not brick startup.
 
 Env selection: the launcher resolves the default profile from the .env
 PAPER_TRADING_PROFILE line (unset -> standard, today's behavior) so the T5
@@ -13,6 +14,9 @@ PAPER_TRADING_PROFILE line (unset -> standard, today's behavior) so the T5
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +51,39 @@ def test_profile_fails_closed_outside_paper():
             mode_profile_for(mode, MAX_FLOW_BAND_PAPER_PROFILE)
 
 
+def test_config_coerces_research_profile_under_observation():
+    """OBSERVATION + leftover MAX_FLOW_BAND in env must import, not ValueError."""
+    env = os.environ.copy()
+    for key in (
+        "OPERATING_MODE",
+        "ENTRY_POLICY",
+        "APPROVED_PAPER_STRATEGIES",
+        "APPROVED_LIVE_STRATEGIES",
+        "CONTROLLED_LIVE_ENABLED",
+        "PAPER_TRADING_PROFILE",
+        "PAPER_PROFILE_STARTED_AT",
+    ):
+        env.pop(key, None)
+    env["PYTHON_DOTENV_DISABLED"] = "1"
+    env["OPERATING_MODE"] = "OBSERVATION"
+    env["PAPER_TRADING_PROFILE"] = "MAX_FLOW_BAND"
+    root = Path(__file__).resolve().parents[1]
+    code = (
+        "import config\n"
+        "assert config.OPERATING_MODE == 'OBSERVATION'\n"
+        "assert config.PAPER_TRADING_PROFILE == 'STANDARD'\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_launcher_worker_env_accepts_profile_in_paper_only(tmp_path):
     from scripts import launcher_supervisor
 
@@ -59,10 +96,12 @@ def test_launcher_worker_env_accepts_profile_in_paper_only(tmp_path):
     assert child["CONTROLLED_LIVE_ENABLED"] == "false"
 
     (tmp_path / ".env").write_text("OPERATING_MODE=OBSERVATION\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="requires PAPER mode"):
-        launcher_supervisor._safe_worker_env(
-            tmp_path, environ={"PAPER_TRADING_PROFILE": "max-flow-band"}
-        )
+    # Coerce (don't raise): leftover research profile in env must not brick OBSERVATION.
+    obs = launcher_supervisor._safe_worker_env(
+        tmp_path, environ={"PAPER_TRADING_PROFILE": "max-flow-band"}
+    )
+    assert obs["OPERATING_MODE"] == "OBSERVATION"
+    assert obs["PAPER_TRADING_PROFILE"] == "STANDARD"
 
 
 def test_launcher_cli_accepts_max_flow_band_choice():

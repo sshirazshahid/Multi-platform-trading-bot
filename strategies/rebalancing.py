@@ -160,6 +160,18 @@ class RebalancingStrategy(BaseStrategy):
                  side: str, usdt_amount: float, price: float):
         """Execute a single rebalancing trade."""
         symbol = f"{coin}/USDT"
+        if str(side).lower() == "buy":
+            from core.entry_policy import authorize_runtime_entry
+
+            authorization = authorize_runtime_entry(
+                "spot_rebalance", strategy_version="spot-rebalance-v1"
+            )
+            if not authorization.allowed:
+                logger.info(
+                    f"[EntryPolicy] rebalance buy blocked for {symbol}: "
+                    f"{authorization.reason}"
+                )
+                return
         if price <= 0:
             logger.warning(f"[Rebalance] Invalid price {price} for {coin} — skipping")
             return

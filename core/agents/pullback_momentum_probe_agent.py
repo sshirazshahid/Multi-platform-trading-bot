@@ -66,10 +66,9 @@ the shadow_decisions rows this probe writes. This module performs NO PnL
 math on outcomes — custom PnL math in a probe is a bug. closed_hint fields
 are OCCUPANCY BOOKKEEPING; shadow_outcomes stays the only readable outcome.
 Per the TP-probe precedent: never read a win- or hit-rate here without the
-resolved shadow_outcomes.net_pnl next to it. Known gap, documented: the
-resolver runner's probe funding provider does not yet query
-shadow_pullback_probe, so resolved funding stays 0 (the resolver's
-documented optimistic bound) even though funding is accrued here.
+resolved shadow_outcomes.net_pnl next to it. Funding provider key
+``shadow_pullback_probe`` is wired in scripts/resolve_shadow_outcomes.py;
+resolved funding is charged when the history series covers the hold.
 """
 
 from __future__ import annotations

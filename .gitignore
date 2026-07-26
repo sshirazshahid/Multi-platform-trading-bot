@@ -176,3 +176,8 @@ claude_md_replaced_backup_*.md
 # data CSVs — reviewed pieces are PORTED into the main tree, never committed
 # from here. The public repo must not swallow it.
 Codex/
+
+# Harden plan surgical quarantine (2026-07-24)
+_quarantine_harden_*/
+_to_delete/
+

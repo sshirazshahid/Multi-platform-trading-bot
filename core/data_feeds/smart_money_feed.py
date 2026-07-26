@@ -80,6 +80,9 @@ class SmartMoneyFeed:
         # Fetch both feeds
         sm_data = self._fetch_smart_money()
         social_data = self._fetch_social_hype()
+        # The combined snapshot is fresh only when neither half is a neutral
+        # fallback. Absence from populated rankings remains a valid neutral.
+        sources_complete = bool(sm_data) and bool(social_data)
 
         result: dict[str, dict] = {}
 
@@ -115,7 +118,7 @@ class SmartMoneyFeed:
                 "social_sentiment": soc_sentiment,
                 "social_hype_extreme": soc_extreme,
                 "crowd_signal": crowd,
-                "stale": False,
+                "stale": not sources_complete,
             }
 
         self._cache = result

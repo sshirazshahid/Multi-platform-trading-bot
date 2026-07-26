@@ -22,6 +22,7 @@ def _make_client():
     """Create an FMPClient with a fake API key and zero rate-limit delay."""
     client = FMPClient(api_key="test_key")
     client.RATE_LIMIT_DELAY = 0
+    client.yahoo_fallback = False
     return client
 
 
@@ -170,7 +171,7 @@ class TestResponseNormalization:
         assert client.session.get.call_count == 2
 
     def test_historical_batch_no_match_returns_none_when_v3_also_fails(self):
-        """Stable batch no match + v3 403 -> None."""
+        """Stable batch no match + remaining endpoints 403 -> None."""
         client = _make_client()
         batch_data = {
             "historicalStockList": [
@@ -180,13 +181,18 @@ class TestResponseNormalization:
                 }
             ]
         }
-        stable_resp = _mock_response(200, batch_data)
-        v3_resp = _mock_response(403)
-
-        client.session.get = MagicMock(side_effect=[stable_resp, v3_resp])
+        # 3 historical endpoints: eod/full, stable hist, v3
+        client.session.get = MagicMock(
+            side_effect=[
+                _mock_response(200, batch_data),
+                _mock_response(403),
+                _mock_response(403),
+            ]
+        )
 
         result = client.get_historical_prices("^GSPC", days=80)
         assert result is None
+        assert client.session.get.call_count == 3
 
 
 # =========================================================================
@@ -214,23 +220,62 @@ class TestShapeValidation:
         assert client.session.get.call_count == 2
 
     def test_historical_rejects_non_dict_response(self):
-        """Stable returns truthy list -> skipped, falls back to v3."""
+        """Stable returns non-bar list -> skipped, falls back to next endpoints."""
         client = _make_client()
-        # Stable returns a list (wrong shape for historical)
+        # Garbage list must not be treated as EOD bars (Bugbot high finding)
         wrong_data = [1, 2, 3]
         v3_data = {
             "symbol": "^GSPC",
             "historical": [{"date": "2026-03-20", "close": 5000.0}],
         }
 
-        stable_resp = _mock_response(200, wrong_data)
+        # endpoints: eod/full, stable historical-price-full, v3
+        stable_eod = _mock_response(200, wrong_data)
+        stable_hist = _mock_response(403)
         v3_resp = _mock_response(200, v3_data)
 
-        client.session.get = MagicMock(side_effect=[stable_resp, v3_resp])
+        client.session.get = MagicMock(side_effect=[stable_eod, stable_hist, v3_resp])
 
         result = client.get_historical_prices("^GSPC", days=80)
         assert result == v3_data
-        assert client.session.get.call_count == 2
+        assert client.session.get.call_count == 3
+
+    def test_historical_accepts_stable_eod_bar_list(self):
+        """Stable EOD bare list of OHLCV bars is the current free-tier shape."""
+        client = _make_client()
+        bars = [
+            {
+                "symbol": "AAPL",
+                "date": "2025-12-31",
+                "open": 273.06,
+                "high": 273.68,
+                "low": 271.75,
+                "close": 271.86,
+                "volume": 27293639,
+            }
+        ]
+        resp = _mock_response(200, bars)
+        client.session.get = MagicMock(return_value=resp)
+
+        result = client.get_historical_prices("AAPL", days=80)
+        assert result is not None
+        assert result["symbol"] == "AAPL"
+        assert result["historical"] == bars
+        assert client.session.get.call_count == 1
+
+    def test_historical_rejects_error_message_list(self):
+        """[{Error Message: ...}] must fall through, not wrap as historical."""
+        client = _make_client()
+        err = [{"Error Message": "Limit Reach"}]
+        ok = {
+            "symbol": "^GSPC",
+            "historical": [{"date": "2026-03-20", "close": 5000.0}],
+        }
+        client.session.get = MagicMock(
+            side_effect=[_mock_response(200, err), _mock_response(403), _mock_response(200, ok)]
+        )
+        result = client.get_historical_prices("^GSPC", days=80)
+        assert result == ok
 
 
 # =========================================================================
@@ -255,13 +300,18 @@ class TestSymbolMismatch:
     def test_historical_symbol_mismatch_falls_back(self):
         """Single-symbol historical returning wrong symbol is rejected."""
         client = _make_client()
-        wrong = _mock_response(200, {"symbol": "SPY", "historical": [{"close": 500}]})
-        correct = _mock_response(200, {"symbol": "^GSPC", "historical": [{"close": 5000}]})
-        client.session.get = MagicMock(side_effect=[wrong, correct])
+        wrong = _mock_response(200, {"symbol": "SPY", "historical": [{"date": "2026-03-20", "close": 500}]})
+        correct = _mock_response(
+            200, {"symbol": "^GSPC", "historical": [{"date": "2026-03-20", "close": 5000}]}
+        )
+        # eod list misshape not used; dict mismatch on first usable dict endpoints
+        client.session.get = MagicMock(
+            side_effect=[_mock_response(403), wrong, correct]
+        )
 
         result = client.get_historical_prices("^GSPC", days=80)
         assert result["symbol"] == "^GSPC"
-        assert client.session.get.call_count == 2
+        assert client.session.get.call_count == 3
 
     def test_batch_quote_skips_symbol_check(self):
         """Multi-symbol (batch) quote does not apply symbol mismatch check."""

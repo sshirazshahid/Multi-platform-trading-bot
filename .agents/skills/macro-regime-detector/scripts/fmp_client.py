@@ -24,6 +24,17 @@ except ImportError:
     print("ERROR: requests library not found. Install with: pip install requests", file=sys.stderr)
     sys.exit(1)
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
 
 class FMPClient:
     """Client for Financial Modeling Prep API with rate limiting and caching"""
@@ -33,7 +44,7 @@ class FMPClient:
     RATE_LIMIT_DELAY = 0.3  # 300ms between requests
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("FMP_API_KEY")
+        self.api_key = resolve_fmp_key(api_key)
         if not self.api_key:
             raise ValueError(
                 "FMP API key required. Set FMP_API_KEY environment variable "
@@ -47,6 +58,7 @@ class FMPClient:
         self.retry_count = 0
         self.max_retries = 1
         self.api_calls_made = 0
+        self.yahoo_fallback = True
 
     def _rate_limited_get(self, url: str, params: Optional[dict] = None) -> Optional[dict]:
         if self.rate_limit_reached:
@@ -54,6 +66,8 @@ class FMPClient:
 
         if params is None:
             params = {}
+        params = dict(params)
+        params.setdefault("apikey", self.api_key)
 
         elapsed = time.time() - self.last_call_time
         if elapsed < self.RATE_LIMIT_DELAY:
@@ -88,14 +102,39 @@ class FMPClient:
             return None
 
     def get_historical_prices(self, symbol: str, days: int = 600) -> Optional[dict]:
-        """Fetch historical daily OHLCV data"""
+        """Fetch historical daily OHLCV data.
+
+        Free FMP plans 402 most ETFs and rate-limit quickly, so prefer Yahoo
+        chart data for ETF history; keep FMP only as a secondary source.
+        """
         cache_key = f"prices_{symbol}_{days}"
         if cache_key in self.cache:
             return self.cache[cache_key]
 
-        url = f"{self.BASE_URL}/historical-price-full/{symbol}"
-        params = {"timeseries": days}
-        data = self._rate_limited_get(url, params)
+        data = None
+        if self.yahoo_fallback:
+            try:
+                import sys
+                from pathlib import Path
+
+                shared = Path(__file__).resolve().parents[2] / "_shared_fmp_yahoo_patch.py"
+                if str(shared.parent) not in sys.path:
+                    sys.path.insert(0, str(shared.parent))
+                from _shared_fmp_yahoo_patch import yahoo_historical
+
+                data = yahoo_historical(symbol, days=days)
+            except Exception as exc:
+                print(f"WARN: Yahoo fallback failed for {symbol}: {exc}", file=sys.stderr)
+                data = None
+
+        if (not data or "historical" not in data) and not self.rate_limit_reached:
+            url = f"{self.STABLE_URL}/historical-price-eod/full"
+            raw = self._rate_limited_get(url, {"symbol": symbol})
+            if isinstance(raw, list) and raw:
+                data = {"symbol": symbol, "historical": raw[:days]}
+            elif isinstance(raw, dict) and "historical" in raw:
+                data = raw
+
         if data:
             self.cache[cache_key] = data
         return data

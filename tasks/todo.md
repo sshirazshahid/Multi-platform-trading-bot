@@ -582,3 +582,47 @@ Exec/safety cluster = **bf0b3e9**; data-integrity cluster = **8bead2a**. Entry g
       reconcile/startup path re-fires the close hook for phantom spot rows whose warehouse
       write dedupes but whose journal write does not. Fix: dedupe journal CLOSE by trade
       identity, or gate the journal write on the warehouse close actually recording.
+
+---
+
+# Trading Bot Correctness and Paper-Edge Rebuild (2026-07-13)
+
+- [ ] Contain every new-entry path with a typed entry policy; preserve monitoring, exits, reconciliation, and emergency closes.
+- [ ] Replace contradictory risk toggles with typed mode profiles and expose the real unified halt state.
+- [ ] Add immutable venue-aware market, decision, order, execution, and model contracts.
+- [ ] Add append-only market snapshot, decision, order, and funding settlement provenance.
+- [ ] Correct order-book walking, feed freshness, venue identity, throttling, and settlement history.
+- [ ] Route paper execution through validated intents with idempotency and terminal outcomes.
+- [ ] Fail closed on stale or incompatible model artifacts and keep research systems out of order authority.
+- [ ] Make launcher/supervision behavior singular, secret-safe, non-destructive, and live-blocked.
+- [ ] Add focused safety/chaos/replay tests and run the full regression, lint, security, and runtime checks.
+- [ ] Record final evidence, residual risks, and readiness state; do not claim profitability without forward evidence.
+
+---
+
+# WR-band dual goal implement (2026-07-23) — DONE
+
+Plan: What’s Missing for 59–67% Futures Accuracy (and Profit).
+
+- [x] Measure cohort BE_WR — `30_cohort_bel_measure_2026-07-23.{md,json}` (cohort BE_WR 0.671, fails ≤0.59)
+- [x] Prereg AccBand frac dual-goal sweep — `30_prereg_accband_frac_dual_goal.{md,json}` hashed (`sha256_md=f5de9f0a…`)
+- [x] Bleed controls — `BAND_REGIME_FILTER_ENABLED=true`; maker-first kept; boot logs `BandRegime`; `30_bleed_controls_2026-07-23.md`
+- [x] Edge queue — `30_edge_queue_2026-07-23.md`; `23_candidate_queue` Phase C update (VPIN veto next UTC day; F1 conditional)
+- [x] Refuse indicators — `30_refuse_indicators_2026-07-23.md` + `21_refused_installs.md` update
+
+**Review:** Dual goal not met yet (math). Next: run hashed frac sweep offline/PAPER on a scheduled heavy stage; VPIN veto prereg on a fresh UTC day. No CONTROLLED_LIVE. No indicator installs.
+
+---
+
+# Harden Existing Trading Bot — Statistical Contract (2026-07-24) — DONE
+
+Plan: Harden Existing Trading Bot (Statistical Contract). Scope = HARDEN only (no nuclear delete).
+
+- [x] Phase 1 — Surgical quarantine → `_quarantine_harden_2026-07-24/` (zips, html junk, docx, paper_bundle_test, bak envs). KEEP: `core/`, `exchanges/`, `data/`, `tests/`, pipeline skills. `strategies/legacy/` left in place (not decision authority).
+- [x] Phase 2 — `SIGNAL_SOURCE=mcp` locked in `.env`; boot banner adds `SignalSrc`; routing pin test `tests/test_signal_source_mcp_routing.py`.
+- [x] Phase 3 — AccBandNote on boot when AccBand ON (WR geometry only; dual-goal CONFIRMED_NO_GO screen 30_*; ~−0.24R class). Smart-money gate kept PAPER experiment. No scalp/pattern live installs.
+- [x] Phase 4 — `promotion_funnel.py` smoke OK; `test_self_healing_safety` 9✓; VPIN jump-risk veto prereg FROZEN+hashed `27_prereg_vpin_jump_veto.*` (no live install; screen = next heavy UTC day).
+- [x] Phase 5 — Targeted pytest (boot log, smart money, mcp routing, self-heal) green.
+
+**Restart:** Kill `launcher_supervisor` / `main.py` if running, then `auto_restart.bat` or `TradingBot.bat --supervise`. Verify boot lines: `SignalSrc : mcp`, Profile MAX_FLOW_BAND, AccBandNote, BandRegime ON, SmartMoney ON, EconGate paper_fallback.
+

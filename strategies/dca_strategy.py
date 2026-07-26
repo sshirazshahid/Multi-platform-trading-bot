@@ -100,6 +100,16 @@ class DCAStrategy(BaseStrategy):
         if not should_buy:
             return
 
+        from core.entry_policy import authorize_runtime_entry
+
+        authorization = authorize_runtime_entry("spot_dca", strategy_version="spot-dca-v1")
+        if not authorization.allowed:
+            logger.info(
+                f"[EntryPolicy] DCA buy blocked for {ex_name}:{symbol}: "
+                f"{authorization.reason}"
+            )
+            return
+
         # Check balance before buying
         balance = self.get_usdt_balance(exchange)
         if balance < amount_usdt:

@@ -18,6 +18,7 @@ class TestVixTermStructure:
             from fmp_client import FMPClient
 
             client = FMPClient(api_key="test_key")
+        client.yahoo_fallback = False
         return client
 
     def test_steep_contango(self):
@@ -87,6 +88,8 @@ class TestEndpointFallback:
 
             client = FMPClient(api_key="test_key")
         client.RATE_LIMIT_DELAY = 0  # disable rate limiting in tests
+        client.yahoo_fallback = False
+        return client
         return client
 
     # ------------------------------------------------------------------

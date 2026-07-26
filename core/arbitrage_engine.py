@@ -367,6 +367,16 @@ class ArbitrageEngine:
         return scores, round(confidence, 3), "; ".join(rejects) if rejects else ""
 
     def _execute(self, opp: ArbOpportunity) -> bool:
+        from core.entry_policy import authorize_runtime_entry
+
+        authorization = authorize_runtime_entry(
+            "cross_venue_spread", strategy_version="f2-shadow-v1"
+        )
+        if not authorization.allowed:
+            logger.info(
+                f"[EntryPolicy] cross-venue entry blocked: {authorization.reason}"
+            )
+            return False
         buy_ex  = self.exchanges.get(opp.buy_exchange)
         sell_ex = self.exchanges.get(opp.sell_exchange)
         if not buy_ex or not sell_ex:

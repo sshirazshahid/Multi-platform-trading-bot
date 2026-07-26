@@ -57,6 +57,16 @@ class DirectExecutor:
         mtype    = opp.market_type    # "spot" or "futures"
         strategy = opp.strategy
 
+        from core.entry_policy import authorize_runtime_entry
+
+        authorization = authorize_runtime_entry(str(strategy))
+        if not authorization.allowed:
+            logger.info(
+                f"[{self.name}] entry policy blocked {strategy}:{base_sym}: "
+                f"{authorization.reason}"
+            )
+            return False
+
         # Guard: spot cannot short
         if mtype == "spot" and side == "sell":
             logger.debug(f"[{self.name}] Spot SHORT blocked for {base_sym}")

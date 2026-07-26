@@ -1753,6 +1753,13 @@ class OrderManager:
             if isinstance(_maker_first_ctx, dict)
             else None
         )
+        if isinstance(_provenance_intent, dict):
+            # Pending-maker intents persist provenance as to_dict() (JSON-safe
+            # across restarts). Rebuild the contract object — every downstream
+            # consumer accesses .intent_id (2026-07-23 12:05Z: the raw dict
+            # raised AttributeError in _append_execution_event and latched an
+            # execution-incident HALT on the first maker resolution).
+            _provenance_intent = self._maker_provenance_intent(_maker_first_ctx)
         if _provenance_intent is None:
             _provenance_intent = self._append_order_intent(
                 exchange,
@@ -4271,8 +4278,13 @@ class OrderManager:
                 ran = ((cross_px - signal_px) / signal_px if side == "buy"
                        else (signal_px - cross_px) / signal_px)
             if ran > _MAKER_CHASE_GUARD_PCT:
-                self._pending_maker.pop(key, None)
+                abandoned = self._pending_maker.pop(key, None) or intent
                 self._maker_counters["abandoned"] += 1
+                self._record_maker_nonfill(
+                    abandoned,
+                    outcome="cancelled",
+                    reason="maker_chase_abandoned",
+                )
                 self._persist_pending_maker()
                 self.last_open_reject = "maker_chase_abandoned"
                 logger.info(
@@ -4291,8 +4303,10 @@ class OrderManager:
         fill_type 'maker' fills AT the resting limit with the venue maker
         fee and no slippage; 'taker_fallback' pays the full current-price
         taker fill like any market order.
+
+        Intent is removed from pending only after a successful open OR after
+        a recorded nonfill — never silently dropped mid-flight (2026-07-23 audit).
         """
-        self._pending_maker.pop(key, None)
         side = intent["side"]
         limit_px = float(intent["limit_px"])
         sl_pct = float(intent.get("sl_pct") or 0.0)
@@ -4307,8 +4321,16 @@ class OrderManager:
         # provenance write reads ctx["maker_intent"]; an empty dict raised
         # "candidate symbol is missing" and latched an execution-incident HALT
         # after the very first maker fill.
-        ctx = {"fill_type": fill_type, "fill_px": limit_px,
-               "sl_pct": sl_pct, "tp_pct": tp_pct, "maker_intent": intent}
+        # 2026-07-23: also carry provenance_intent + authorization strategy_id
+        # so entry policy and append-only intent lineage stay consistent.
+        ctx = {
+            "fill_type": fill_type,
+            "fill_px": limit_px,
+            "sl_pct": sl_pct,
+            "tp_pct": tp_pct,
+            "maker_intent": intent,
+            "provenance_intent": intent.get("provenance_intent"),
+        }
         resolved_snapshot = intent.get("execution_snapshot")
         if getattr(self, "enforce_event_provenance", False):
             try:
@@ -4341,6 +4363,12 @@ class OrderManager:
                     f"[MakerFirst] {intent['symbol']}: fresh execution book "
                     f"required at resolution: {exc}"
                 )
+                self._pending_maker.pop(key, None)
+                self._record_maker_nonfill(
+                    intent,
+                    outcome="cancelled",
+                    reason="maker_resolution_book_invalid",
+                )
                 self._persist_pending_maker()
                 return
         pos = self.open_position(
@@ -4352,14 +4380,25 @@ class OrderManager:
             model_version=intent.get("model_version"),
             decision_id=intent.get("decision_id"),
             execution_snapshot=resolved_snapshot,
+            authorization_strategy_id=intent.get("strategy_id"),
+            decision_confidence=intent.get("decision_confidence"),
+            decision_parent_id=intent.get("parent_decision_id"),
             _maker_first_ctx=ctx)
         if pos is None:
+            reject = self.last_open_reject or "maker_finalize_open_rejected"
             logger.warning(
                 f"[MakerFirst] {intent['symbol']} {side.upper()}: resolved as "
                 f"{fill_type} but the open was rejected "
-                f"({self.last_open_reject}) — intent dropped")
+                f"({reject}) — intent dropped with nonfill record")
+            self._pending_maker.pop(key, None)
+            self._record_maker_nonfill(
+                intent,
+                outcome="rejected",
+                reason=str(reject),
+            )
             self._persist_pending_maker()
             return
+        self._pending_maker.pop(key, None)
         self._maker_counters[fill_type] = (
             self._maker_counters.get(fill_type, 0) + 1)
         elapsed = time.time() - float(intent.get("created_ts") or time.time())

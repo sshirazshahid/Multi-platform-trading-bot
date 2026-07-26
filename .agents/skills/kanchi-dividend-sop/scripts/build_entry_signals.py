@@ -19,6 +19,18 @@ import requests
 FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
 
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or resolve_fmp_key()
+
+
 def parse_ticker_csv(raw: str) -> list[str]:
     tickers: list[str] = []
     for part in raw.split(","):

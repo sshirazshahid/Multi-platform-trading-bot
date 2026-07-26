@@ -1,0 +1,62 @@
+{
+  "id": "c2_gamma_expiry_v1",
+  "status": "FROZEN_PREREG",
+  "date_utc": "2026-07-24",
+  "candidate": "C2 (18_final_pair_verdicts adjudication 2026-07-22, INSUFFICIENT_DATA reopen path)",
+  "expectation": "lean_NO_GO",
+  "evidence_trigger": "Weiss et al., Finance Research Letters 107 (2026) 110340, doi:10.1016/j.frl.2026.110340",
+  "symbol": "BTCUSDT",
+  "venue": "binance_usdtm",
+  "signal_data": "data/deribit_chain_snapshots/ (self-archived 07:30/19:30 UTC, started 2026-07-24)",
+  "event": "daily 08:00 UTC Deribit expiry",
+  "condition": {
+    "atm_band_pct": 2.5,
+    "atm_oi_percentile_min": 0.9,
+    "atm_oi_percentile_window_days": 60,
+    "atm_oi_percentile_min_history_days": 30,
+    "gex": "black76 gamma x OI x (+1 call / -1 put), full chain, r=0, sign<0 required"
+  },
+  "trade": {
+    "pre_expiry_move": "log(close_0750/close_0700) 1m closes",
+    "noise_floor_bps": 10,
+    "entry_utc": "07:50 taker",
+    "exit_utc": "09:30 taker",
+    "sl_tp": "none - bounded horizon is the risk bound"
+  },
+  "variants": [
+    "conditioned_fade",
+    "conditioned_follow",
+    "unconditioned_fade",
+    "unconditioned_follow"
+  ],
+  "n_trials": 4,
+  "multiplicity": "Holm on after-cost mean>0",
+  "costs": {
+    "taker_fee": "config.FEE.binance.futures_taker per side",
+    "slippage_bps_per_side": 5,
+    "funding": "BTCUSDT 08:00 settlement always charged",
+    "stress_leg": "1.5x fee + 2x slippage must keep passing cell mean > 0"
+  },
+  "gates": {
+    "min_dsr": 0.1,
+    "max_pbo": 0.5,
+    "min_oos_wr": 0.55,
+    "mc_p_pos": 0.95,
+    "mc_maxdd_p95": 0.25,
+    "min_n_per_cell": 30,
+    "fold_stability": "half-split same-sign"
+  },
+  "verdict_rules": {
+    "go": "conditioned_fade passes ALL gates AND unconditioned_fade same-sign AND stress holds",
+    "no_go": "any conditioned_fade gate failure, follow-only pass, or stress flip",
+    "insufficient_data": "conditioned cell n<30"
+  },
+  "adjacency_disclosure": [
+    "hour-of-day seasonality REFUTED 2026-06-02 - event-anchored construct; indistinguishable conditioning collapses to NO_GO",
+    "quarter-hour imbalance REFUTED 2026-07-23 - distinct construct"
+  ],
+  "non_goals": "no live install / no probe / no MCP change from prereg alone; GO -> shadow probe -> frozen promotion_gate + owner sign-off",
+  "md_path": "_workspace/strategy_pipeline/33_prereg_c2_gamma_expiry.md",
+  "sha256_md": "a3feb1bfd67d5e7238cc7b2a2a9710fc81cb4fe6e59b2dd63ffd602634652df7",
+  "notes": "All outcome data is forward (post-prereg). Unconditioned cells reportable at ~4-6 weeks; conditioned cell ~3-4 months. Screen artifact: 33_screen_c2_gamma_expiry.*"
+}

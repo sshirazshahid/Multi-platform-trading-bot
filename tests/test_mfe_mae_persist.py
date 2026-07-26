@@ -20,6 +20,7 @@ for the real columns." This is that change.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -71,6 +72,36 @@ def test_update_trade_extremes_writes_and_rereads(wh):
     row = wh.query("SELECT mfe, mae FROM trades WHERE id=?", (tid,))[0]
     assert row["mfe"] == pytest.approx(0.031)
     assert row["mae"] == pytest.approx(0.012)
+
+
+def test_update_trade_extremes_matches_production_exchange_case(wh):
+    """Tracker positions use title-case venues; warehouse rows are lowercase."""
+    tid = wh.record_trade_open(
+        exchange="binance",
+        symbol="CASE/USDT:USDT",
+        side="buy",
+        ts_entry=2150.0,
+        entry_px=100.0,
+        size=1.0,
+        leverage=1,
+        market_type="futures",
+        strategy_family="algo_det",
+        fee=0.0,
+        mode="PAPER",
+    )
+    assert tid > 0
+
+    assert wh.update_trade_extremes(
+        exchange="Binance",
+        symbol="CASE/USDT:USDT",
+        side="buy",
+        ts_entry=2150.0,
+        mfe=0.025,
+        mae=0.01,
+    )
+    row = wh.query("SELECT mfe, mae FROM trades WHERE id=?", (tid,))[0]
+    assert row["mfe"] == pytest.approx(0.025)
+    assert row["mae"] == pytest.approx(0.01)
 
 
 def test_update_trade_extremes_missing_row_false(wh):
@@ -159,9 +190,10 @@ def test_extremes_never_raise_on_bad_inputs():
 
 
 def test_monitor_hook_wired_in_check_sl_tp():
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
-    i = src.index("def check_sl_tp")
-    assert "_update_trade_extremes" in src[i : i + 4000], (
+    from core.order_manager import OrderManager
+
+    src = inspect.getsource(OrderManager.check_sl_tp)
+    assert "_update_trade_extremes" in src, (
         "the 10s monitor must feed per-position extremes"
     )
 

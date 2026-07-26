@@ -199,6 +199,11 @@ class Position:
     # Restart-stable scalp routing metadata. These were dynamic attributes,
     # so dataclasses.asdict silently omitted them from positions.json.
     _scalp:        bool            = False
+    # AccBand marker (2026-07-25): must be a declared field so asdict()
+    # persists it — dynamic ``pos._accuracy_band = True`` was lost on
+    # restart, geometry fallback failed when min_tp floored TP≈SL, and
+    # partial-TP re-armed (band positions must stay first-touch only).
+    _accuracy_band: bool           = False
     tp_pct:        float           = 0.0
     # ── Booking-completeness fields (audit 2026-06-04) ────────────────
     # entry_stop_loss: the IMMUTABLE entry-time stop. r_multiple MUST be

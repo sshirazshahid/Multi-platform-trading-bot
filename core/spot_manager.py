@@ -47,12 +47,13 @@ class HoldingInfo:
 
 class SpotPortfolioManager:
 
-    def __init__(self, exchanges: dict, risk_manager=None, mcp_brain=None):
+    def __init__(self, exchanges: dict, risk_manager=None, mcp_brain=None,
+                 state_file: str | Path | None = None):
         self._exchanges = exchanges
         self._risk = risk_manager
         self._mcp_brain = mcp_brain  # optional — used by score_spot_candidate
         self._holdings: dict[str, dict[str, HoldingInfo]] = {}
-        self._state_file = STATE_FILE
+        self._state_file = Path(state_file) if state_file is not None else STATE_FILE
         self._load_state()
 
     def score_spot_candidate(
@@ -518,18 +519,18 @@ class SpotPortfolioManager:
 
     def _save_state(self):
         try:
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
             data = {}
             for ex_name, holdings in self._holdings.items():
                 data[ex_name] = {coin: asdict(h) for coin, h in holdings.items()}
-            STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            self._state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
             logger.debug(f"[SpotMgr] Save error: {e}")
 
     def _load_state(self):
         try:
-            if STATE_FILE.exists():
-                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if self._state_file.exists():
+                data = json.loads(self._state_file.read_text(encoding="utf-8"))
                 for ex_name, holdings in data.items():
                     self._holdings[ex_name] = {}
                     for coin, h in holdings.items():

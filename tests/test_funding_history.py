@@ -1,8 +1,15 @@
-"""core/funding_history — per-venue rolling funding series for the F1 gate."""
+"""core/funding_history — F1 gate observations and realized settlements."""
 
 import csv
 
-from core.funding_history import MIN_PERIODS_FOR_AVG, avg_7d, record
+from core.funding_history import (
+    MIN_PERIODS_FOR_AVG,
+    FundingSettlement,
+    avg_7d,
+    load_recent_realized_settlements,
+    load_realized_settlements,
+    record,
+)
 
 NOW = 1_783_100_000.0
 
@@ -68,3 +75,85 @@ def test_avg_7d_skips_malformed_rows(tmp_path):
         f.write("garbage,not,a,row\n")
     got = avg_7d("bybit", "BTC", base_dir=tmp_path, now=NOW)
     assert got is not None and abs(got - 0.0001) < 1e-12
+
+
+def test_load_realized_settlements_reads_exact_range_in_timestamp_order(tmp_path):
+    path = tmp_path / "binance_BTC.csv"
+    path.write_text(
+        "ts,funding_rate,venue,symbol\n"
+        f"{NOW + 8 * 3600},-0.0002,binance,BTC/USDT:USDT\n"
+        f"{NOW},0.0001,binance,BTC/USDT:USDT\n"
+        f"{NOW + 8 * 3600},-0.0002,binance,BTC/USDT:USDT\n"
+        f"{NOW + 16 * 3600},0.0003,binance,BTC/USDT:USDT\n",
+        encoding="utf-8",
+    )
+
+    got = load_realized_settlements(
+        "binance", "BTC", start_ts=NOW, end_ts=NOW + 8 * 3600,
+        base_dir=tmp_path,
+    )
+
+    assert got == (
+        FundingSettlement(settlement_ts=NOW, rate=0.0001),
+        FundingSettlement(settlement_ts=NOW + 8 * 3600, rate=-0.0002),
+    )
+
+
+def test_load_realized_settlements_fails_closed_on_non_realized_schema(tmp_path):
+    # Forward observations are predictions for next_funding_ts, not settlement
+    # records, and must never be accepted by reconciliation.
+    (tmp_path / "binance_BTC.csv").write_text(
+        "ts,rate,interval_hours,next_funding_ts\n"
+        f"{NOW},0.009,8,{NOW + 8 * 3600}\n",
+        encoding="utf-8",
+    )
+
+    assert load_realized_settlements(
+        "binance", "BTC", start_ts=NOW, end_ts=NOW,
+        base_dir=tmp_path,
+    ) is None
+
+
+def test_load_realized_settlements_fails_closed_on_conflicting_duplicate(tmp_path):
+    (tmp_path / "bybit_ETH.csv").write_text(
+        "ts,funding_rate,venue,symbol\n"
+        f"{NOW},0.0001,bybit,ETH/USDT:USDT\n"
+        f"{NOW},0.0002,bybit,ETH/USDT:USDT\n",
+        encoding="utf-8",
+    )
+
+    assert load_realized_settlements(
+        "bybit", "ETH", start_ts=NOW, end_ts=NOW,
+        base_dir=tmp_path,
+    ) is None
+
+
+def test_recent_realized_window_requires_all_21_authoritative_rows(tmp_path):
+    path = tmp_path / "binance_BTC.csv"
+    rows = [
+        f"{NOW + i * 3600},{0.0001 + i * 0.000001},binance,BTC/USDT:USDT"
+        for i in range(22)
+    ]
+    path.write_text(
+        "ts,funding_rate,venue,symbol\n" + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+
+    recent = load_recent_realized_settlements(
+        "binance",
+        "BTC",
+        limit=21,
+        before_ts=NOW + 30 * 3600,
+        base_dir=tmp_path,
+    )
+    assert recent is not None
+    assert len(recent) == 21
+    assert recent[0].settlement_ts == NOW + 3600
+
+    assert load_recent_realized_settlements(
+        "binance",
+        "BTC",
+        limit=23,
+        before_ts=NOW + 30 * 3600,
+        base_dir=tmp_path,
+    ) is None

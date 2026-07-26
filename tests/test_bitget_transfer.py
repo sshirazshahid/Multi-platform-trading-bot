@@ -69,6 +69,39 @@ def _client_with(fake) -> BitgetClient:
     return c
 
 
+def test_ccxt_error_diagnostics_redact_credentials(monkeypatch):
+    monkeypatch.setenv("BITGET_API_KEY", "ENV_KEY_SHOULD_NOT_LEAK")
+    monkeypatch.setenv("BITGET_SECRET_KEY", "ENV_SECRET_SHOULD_NOT_LEAK")
+    monkeypatch.setenv("BITGET_PASSPHRASE", "ENV_PASS_SHOULD_NOT_LEAK")
+
+    class _HttpState:
+        last_http_response = (
+            '{"accessToken":"TOKEN_SHOULD_NOT_LEAK",'
+            '"secret":"ENV_SECRET_SHOULD_NOT_LEAK"}'
+        )
+        last_request_url = (
+            "https://api.bitget.com/private?apiKey=ENV_KEY_SHOULD_NOT_LEAK"
+            "&signature=SIGNATURE_SHOULD_NOT_LEAK"
+        )
+
+    client = BitgetClient.__new__(BitgetClient)
+    client.exchange = _HttpState()
+    detail = client._describe_ccxt_error(
+        RuntimeError("Authorization: Bearer BEARER_SHOULD_NOT_LEAK")
+    )
+
+    for secret in (
+        "ENV_KEY_SHOULD_NOT_LEAK",
+        "ENV_SECRET_SHOULD_NOT_LEAK",
+        "ENV_PASS_SHOULD_NOT_LEAK",
+        "TOKEN_SHOULD_NOT_LEAK",
+        "SIGNATURE_SHOULD_NOT_LEAK",
+        "BEARER_SHOULD_NOT_LEAK",
+    ):
+        assert secret not in detail
+    assert "[REDACTED]" in detail
+
+
 def test_spot_to_futures_uses_unified_swap_name():
     fake = _FakeBitgetCcxt()
     client = _client_with(fake)

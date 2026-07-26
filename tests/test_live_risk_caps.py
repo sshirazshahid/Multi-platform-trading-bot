@@ -6,6 +6,8 @@ they don't silently regress.
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -84,6 +86,26 @@ def test_same_day_restart_keeps_start_balance_no_double_count(rm):
     fresh.set_start_balance(380.0)
     assert fresh._start_balance == 400.0, "start_balance overwritten -> today's PnL double-counted"
     assert abs((fresh._start_balance + fresh._daily_pnl) - 380.0) < 1e-6  # effective = 380, not 360
+
+
+def test_same_day_restart_repairs_zero_start_balance():
+    """A polluted/torn ledger must not silently disable the daily-loss breaker."""
+    Path("data/risk_state.json").write_text(json.dumps({
+        "daily_pnl": -1.0,
+        "start_balance": 0.0,
+        "peak_balance": 99.0,
+        "trading_day": datetime.now(timezone.utc).date().isoformat(),
+        "trades_today": 0,
+    }), encoding="utf-8")
+
+    fresh = RiskManager()
+    fresh.set_start_balance(15_595.18)
+
+    assert fresh._start_balance == pytest.approx(15_596.18)
+    assert fresh._peak_balance == pytest.approx(15_596.18)
+    assert fresh._daily_pnl == pytest.approx(-1.0)
+    persisted = json.loads(Path("data/risk_state.json").read_text(encoding="utf-8"))
+    assert persisted["start_balance"] == pytest.approx(15_596.18)
 
 
 def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):

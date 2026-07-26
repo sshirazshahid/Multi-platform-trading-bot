@@ -1,0 +1,583 @@
+{
+  "generated_at": "2026-07-18T14:52:35.754788+00:00",
+  "verdict": "NOT_READY",
+  "checks": [
+    {
+      "name": "config.mode",
+      "status": "PASS",
+      "detail": "OPERATING_MODE=PAPER, DRY_RUN=True",
+      "metrics": {
+        "operating_mode": "PAPER",
+        "dry_run": true,
+        "controlled_live_enabled": false
+      }
+    },
+    {
+      "name": "config.signal_source",
+      "status": "PASS",
+      "detail": "SIGNAL_SOURCE=mcp",
+      "metrics": {
+        "signal_source": "mcp",
+        "trading_mode": "all"
+      }
+    },
+    {
+      "name": "live_gate.readiness",
+      "status": "WARN",
+      "detail": "CONTROLLED_LIVE is not armed; this is expected for research/PAPER",
+      "metrics": {
+        "checklist_signed": false,
+        "checklist_message": "14 acceptance item(s) remain unchecked in docs\\CONTROLLED_LIVE_CHECKLIST.md \u2014 refusing to run CONTROLLED_LIVE",
+        "controlled_live_enabled": false
+      }
+    },
+    {
+      "name": "secrets.env_file",
+      "status": "PASS",
+      "detail": ".env is ignored by git",
+      "metrics": {
+        "populated_secret_fields": 11,
+        "git_tracked": false,
+        "git_ignored": true
+      }
+    },
+    {
+      "name": "secrets.tracked_scan",
+      "status": "PASS",
+      "detail": "no tracked hardcoded secret assignments detected",
+      "metrics": {
+        "matches": 0,
+        "files": []
+      }
+    },
+    {
+      "name": "runtime.processes",
+      "status": "PASS",
+      "detail": "runtime process layout is sane",
+      "metrics": {
+        "logical_counts": {
+          "main": 1,
+          "confluence_paper": 0,
+          "liquidations": 1,
+          "skew": 1,
+          "l2": 1,
+          "tv": 1
+        },
+        "raw_counts": {
+          "main": 2,
+          "confluence_paper": 0,
+          "liquidations": 2,
+          "skew": 2,
+          "l2": 2,
+          "tv": 2
+        },
+        "missing_harvesters": [],
+        "missing_auxiliaries": [],
+        "optional_runtime_missing": [
+          "confluence_paper"
+        ],
+        "duplicate_scripts": [],
+        "python_processes": 19
+      }
+    },
+    {
+      "name": "feeds.forward_harvesters",
+      "status": "PASS",
+      "detail": "forward feed harvesters are running and status files are fresh",
+      "metrics": {
+        "unhealthy_feeds": [],
+        "feeds": [
+          {
+            "name": "liquidations",
+            "script": "scripts\\harvest_liquidations.py",
+            "status_path": "D:\\Downloads\\Trading_Bot\\data\\liquidations_status.json",
+            "exists": true,
+            "connected": true,
+            "updated": 1784386236.864455,
+            "age_sec": 114.16,
+            "fresh": true,
+            "max_age_sec": 1200,
+            "total_events": 0,
+            "total_polls": null,
+            "error": null,
+            "process_count": 1
+          },
+          {
+            "name": "skew",
+            "script": "scripts\\harvest_skew.py",
+            "status_path": "D:\\Downloads\\Trading_Bot\\data\\skew_status.json",
+            "exists": true,
+            "connected": true,
+            "updated": 1784386246.9831712,
+            "age_sec": 104.05,
+            "fresh": true,
+            "max_age_sec": 1200,
+            "total_events": null,
+            "total_polls": 710,
+            "error": null,
+            "process_count": 1
+          },
+          {
+            "name": "l2",
+            "script": "scripts\\harvest_l2.py",
+            "status_path": "D:\\Downloads\\Trading_Bot\\data\\l2_status.json",
+            "exists": true,
+            "connected": true,
+            "updated": 1784386101.239777,
+            "age_sec": 249.79,
+            "fresh": true,
+            "max_age_sec": 1200,
+            "total_events": null,
+            "total_polls": 74050,
+            "error": null,
+            "process_count": 1
+          },
+          {
+            "name": "tv",
+            "script": "scripts\\harvest_tv.py",
+            "status_path": "D:\\Downloads\\Trading_Bot\\data\\tv_status.json",
+            "exists": true,
+            "connected": true,
+            "updated": 1784386328.5596583,
+            "age_sec": 22.47,
+            "fresh": true,
+            "max_age_sec": 1200,
+            "total_events": null,
+            "total_polls": 846,
+            "error": null,
+            "process_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime.heartbeat",
+      "status": "PASS",
+      "detail": "heartbeat age is 0.4 minutes",
+      "metrics": {
+        "age_minutes": 0.43,
+        "open_positions": 1,
+        "active_exchanges": [
+          "binance",
+          "bybit",
+          "bitget"
+        ],
+        "is_halted": false,
+        "halt_reason": null
+      }
+    },
+    {
+      "name": "warehouse.closed_trades",
+      "status": "PASS",
+      "detail": "2303 closed trades in warehouse",
+      "metrics": {
+        "n": 2303,
+        "pnl": -650.2581,
+        "avg_pnl": -0.2893,
+        "win_rate": 0.3356,
+        "profit_factor": 0.3387
+      }
+    },
+    {
+      "name": "strategy.paper_30d_expectancy",
+      "status": "FAIL",
+      "detail": "30d paper performance is not live-ready",
+      "metrics": {
+        "n": 987,
+        "pnl": -282.9734,
+        "avg_pnl": -0.2867,
+        "win_rate": 0.3029,
+        "profit_factor": 0.2936
+      }
+    },
+    {
+      "name": "warehouse.open_rows",
+      "status": "PASS",
+      "detail": "1 open warehouse rows, 0 older than 24h",
+      "metrics": {
+        "open_rows": 1,
+        "stuck_open_rows": 0
+      }
+    },
+    {
+      "name": "strategy.loss_forensics",
+      "status": "WARN",
+      "detail": "last 24h paper PnL is -0.2399",
+      "metrics": {
+        "last_24h": {
+          "n": 3,
+          "pnl": -0.2399,
+          "avg_pnl": -0.08,
+          "win_rate": 0.3333,
+          "profit_factor": 0.5637
+        },
+        "machine": {
+          "n": 13,
+          "pnl": -3.2726,
+          "avg_pnl": -0.2517,
+          "win_rate": 0.2308,
+          "profit_factor": 0.3117
+        },
+        "worst_strategies": [
+          {
+            "bucket": "claude_portfolio",
+            "n": 997,
+            "pnl": -273.731,
+            "avg_pnl": -0.2746,
+            "win_rate": 0.3541
+          },
+          {
+            "bucket": "claude",
+            "n": 770,
+            "pnl": -212.561,
+            "avg_pnl": -0.2761,
+            "win_rate": 0.3065
+          },
+          {
+            "bucket": "algo",
+            "n": 192,
+            "pnl": -58.6977,
+            "avg_pnl": -0.3057,
+            "win_rate": 0.3073
+          },
+          {
+            "bucket": "Supertrend",
+            "n": 39,
+            "pnl": -45.1761,
+            "avg_pnl": -1.1584,
+            "win_rate": 0.4103
+          },
+          {
+            "bucket": "reconciled_exchange",
+            "n": 108,
+            "pnl": -42.0103,
+            "avg_pnl": -0.389,
+            "win_rate": 0.4537
+          },
+          {
+            "bucket": "MultiTF",
+            "n": 58,
+            "pnl": -11.3253,
+            "avg_pnl": -0.1953,
+            "win_rate": 0.4828
+          },
+          {
+            "bucket": "tsmom",
+            "n": 4,
+            "pnl": -3.5341,
+            "avg_pnl": -0.8835,
+            "win_rate": 0.0
+          },
+          {
+            "bucket": "machine",
+            "n": 13,
+            "pnl": -3.2726,
+            "avg_pnl": -0.2517,
+            "win_rate": 0.2308
+          }
+        ],
+        "worst_exit_reasons": [
+          {
+            "bucket": "stop_loss",
+            "n": 1153,
+            "pnl": -651.4554,
+            "avg_pnl": -0.565,
+            "win_rate": 0.2663
+          },
+          {
+            "bucket": "trailing_stop",
+            "n": 379,
+            "pnl": -43.7098,
+            "avg_pnl": -0.1153,
+            "win_rate": 0.3404
+          },
+          {
+            "bucket": "reconciled_from_exchange",
+            "n": 106,
+            "pnl": -39.0103,
+            "avg_pnl": -0.368,
+            "win_rate": 0.4623
+          },
+          {
+            "bucket": "AGE_LIMIT",
+            "n": 15,
+            "pnl": -23.9342,
+            "avg_pnl": -1.5956,
+            "win_rate": 0.0
+          },
+          {
+            "bucket": "STALE",
+            "n": 145,
+            "pnl": -23.4039,
+            "avg_pnl": -0.1614,
+            "win_rate": 0.0897
+          },
+          {
+            "bucket": "entry_invalidated",
+            "n": 95,
+            "pnl": -22.7706,
+            "avg_pnl": -0.2397,
+            "win_rate": 0.2947
+          },
+          {
+            "bucket": "mcp_brain_close",
+            "n": 44,
+            "pnl": -20.0903,
+            "avg_pnl": -0.4566,
+            "win_rate": 0.2955
+          },
+          {
+            "bucket": "systematic_close",
+            "n": 21,
+            "pnl": -3.6968,
+            "avg_pnl": -0.176,
+            "win_rate": 0.0476
+          }
+        ],
+        "worst_utc_hours": [
+          {
+            "utc_hour": 0,
+            "n": 118,
+            "pnl": -62.754,
+            "avg_pnl": -0.5318,
+            "win_rate": 0.2458
+          },
+          {
+            "utc_hour": 23,
+            "n": 88,
+            "pnl": -54.3642,
+            "avg_pnl": -0.6178,
+            "win_rate": 0.2955
+          },
+          {
+            "utc_hour": 1,
+            "n": 107,
+            "pnl": -51.8508,
+            "avg_pnl": -0.4846,
+            "win_rate": 0.2804
+          },
+          {
+            "utc_hour": 9,
+            "n": 84,
+            "pnl": -50.5282,
+            "avg_pnl": -0.6015,
+            "win_rate": 0.2619
+          },
+          {
+            "utc_hour": 16,
+            "n": 82,
+            "pnl": -40.9958,
+            "avg_pnl": -0.4999,
+            "win_rate": 0.3049
+          },
+          {
+            "utc_hour": 14,
+            "n": 103,
+            "pnl": -40.3275,
+            "avg_pnl": -0.3915,
+            "win_rate": 0.3301
+          },
+          {
+            "utc_hour": 2,
+            "n": 92,
+            "pnl": -39.8854,
+            "avg_pnl": -0.4335,
+            "win_rate": 0.4239
+          },
+          {
+            "utc_hour": 3,
+            "n": 110,
+            "pnl": -35.8391,
+            "avg_pnl": -0.3258,
+            "win_rate": 0.2727
+          }
+        ]
+      }
+    },
+    {
+      "name": "warehouse.integrity",
+      "status": "PASS",
+      "detail": "warehouse trade keys and lifecycle fields are sane",
+      "metrics": {
+        "duplicate_open_keys": 0,
+        "duplicate_decision_ids": 0,
+        "invalid_status_rows": 0,
+        "bad_closed_rows": 0,
+        "unknown_recovery_closed_rows": 55,
+        "legacy_missing_exit_px_rows": 1,
+        "trade_events_table": true
+      }
+    },
+    {
+      "name": "execution.paper_live_parity",
+      "status": "PASS",
+      "detail": "paper/live pessimistic execution parity is covered",
+      "metrics": {
+        "sim_execution_model": true,
+        "parity_tests": true,
+        "recent_paper_rows": 100,
+        "recent_paper_rows_with_cost_fields": 100
+      }
+    },
+    {
+      "name": "strategy.promotion_gate",
+      "status": "FAIL",
+      "detail": "strict promotion-readiness gate blocks live promotion",
+      "metrics": {
+        "verdict": "PAPER_ONLY",
+        "reasons": [
+          "avg_pnl -0.242532 <= 0.000000",
+          "profit_factor 0.386234 < 1.20",
+          "positive_folds 0 < 2",
+          "max_drawdown_to_gross_profit 1.591461 > 1.50"
+        ],
+        "summary": {
+          "n": 987,
+          "pnl": -239.378902,
+          "avg_pnl": -0.242532,
+          "win_rate": 0.383992,
+          "gross_win": 150.637772,
+          "gross_loss": 390.016674,
+          "profit_factor": 0.386234,
+          "max_drawdown": 239.7341,
+          "max_drawdown_to_gross_profit": 1.591461
+        },
+        "positive_folds": 0,
+        "by_strategy": {
+          "algo": {
+            "n": 192,
+            "pnl": -50.611992,
+            "avg_pnl": -0.263604,
+            "win_rate": 0.364583,
+            "gross_win": 34.46746,
+            "gross_loss": 85.079452,
+            "profit_factor": 0.405121,
+            "max_drawdown": 53.669979,
+            "max_drawdown_to_gross_profit": 1.55712
+          },
+          "algo_det": {
+            "n": 3,
+            "pnl": -0.194638,
+            "avg_pnl": -0.064879,
+            "win_rate": 0.333333,
+            "gross_win": 0.355197,
+            "gross_loss": 0.549835,
+            "profit_factor": 0.646006,
+            "max_drawdown": 0.549835,
+            "max_drawdown_to_gross_profit": 1.547972
+          },
+          "claude": {
+            "n": 770,
+            "pnl": -177.300624,
+            "avg_pnl": -0.230261,
+            "win_rate": 0.394805,
+            "gross_win": 114.147988,
+            "gross_loss": 291.448612,
+            "profit_factor": 0.391657,
+            "max_drawdown": 181.008496,
+            "max_drawdown_to_gross_profit": 1.585735
+          },
+          "machine": {
+            "n": 13,
+            "pnl": -3.069559,
+            "avg_pnl": -0.23612,
+            "win_rate": 0.307692,
+            "gross_win": 1.667126,
+            "gross_loss": 4.736685,
+            "profit_factor": 0.35196,
+            "max_drawdown": 4.46678,
+            "max_drawdown_to_gross_profit": 2.679329
+          },
+          "reconciled_exchange": {
+            "n": 4,
+            "pnl": -4.66,
+            "avg_pnl": -1.165,
+            "win_rate": 0.0,
+            "gross_win": 0,
+            "gross_loss": 4.66,
+            "profit_factor": 0.0,
+            "max_drawdown": 4.66,
+            "max_drawdown_to_gross_profit": null
+          },
+          "systematic_v3_1": {
+            "n": 1,
+            "pnl": -0.007999,
+            "avg_pnl": -0.007999,
+            "win_rate": 0.0,
+            "gross_win": 0,
+            "gross_loss": 0.007999,
+            "profit_factor": 0.0,
+            "max_drawdown": 0.007999,
+            "max_drawdown_to_gross_profit": null
+          },
+          "tsmom": {
+            "n": 4,
+            "pnl": -3.534091,
+            "avg_pnl": -0.883523,
+            "win_rate": 0.0,
+            "gross_win": 0,
+            "gross_loss": 3.534091,
+            "profit_factor": 0.0,
+            "max_drawdown": 3.534091,
+            "max_drawdown_to_gross_profit": null
+          }
+        }
+      }
+    },
+    {
+      "name": "confluence.paper_log",
+      "status": "PASS",
+      "detail": "confluence paper CSV has no exact duplicate closes",
+      "metrics": {
+        "rows": 305,
+        "duplicate_rows_extra": 0,
+        "pnl": -1260.48,
+        "win_rate": 0.3016
+      }
+    },
+    {
+      "name": "learning.report",
+      "status": "FAIL",
+      "detail": "latest learning report is negative; do not promote live",
+      "metrics": {
+        "total_trades": 500,
+        "total_net_pnl": -154.1347,
+        "win_rate": 36.0,
+        "suggestions": [
+          "UNDERPERFORMING: 'claude' WR=36% (309 trades) \u2014 auto-disabled (below 50% threshold).",
+          "FEE_ALERT: 'claude' fees consume 61% of gross profit ($24.69 / $40.17). Auto-flagging.",
+          "UNDERPERFORMING: 'algo' WR=37% (188 trades) \u2014 auto-disabled (below 50% threshold).",
+          "FEE_ALERT: 'algo' fees consume 47% of gross profit ($16.06 / $34.46). Auto-flagging.",
+          "BEST HOURS: Most profitable trades at 20:00 UTC, 07:00 UTC, 10:00 UTC."
+        ]
+      }
+    },
+    {
+      "name": "model.pointer.futures",
+      "status": "FAIL",
+      "detail": "latest model pointer rejected: latest pointer missing ModelManifest",
+      "metrics": {
+        "diag": {
+          "model_version": "ens_futures_weekly_20260524_20260524_042557",
+          "market_type": "futures",
+          "artifact_path": "D:\\Downloads\\Trading_Bot\\data\\models\\ensemble_futures_weekly_20260524_20260524_042557.json"
+        }
+      }
+    },
+    {
+      "name": "model.pointer.spot",
+      "status": "WARN",
+      "detail": "latest model pointer missing for spot",
+      "metrics": {}
+    },
+    {
+      "name": "automation.retrain",
+      "status": "PASS",
+      "detail": "stale-model retrain automation scripts are present",
+      "metrics": {
+        "retrain_if_stale": true,
+        "retrain_weekly": true
+      }
+    }
+  ]
+}

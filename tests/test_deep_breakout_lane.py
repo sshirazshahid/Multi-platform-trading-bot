@@ -128,11 +128,19 @@ class _FakeWh:
 
 def _mk_lane(tmp_path, monkeypatch, *, ohlcv, om=None, tracker=None, risk=None,
              equity=10_000.0, wh=None, pause=None, cfg=None,
-             now=START + 401 * H4, exchanges=None):
+             now=START + 401 * H4, exchanges=None, entry_authorizer=None):
     import config
+    import core.kill_switch as kill_switch
 
     monkeypatch.setattr(config, "DRY_RUN", True, raising=False)
+    if kill_switch.KILL_SWITCH_PATH == Path("data/KILL_SWITCH"):
+        monkeypatch.setattr(
+            kill_switch, "KILL_SWITCH_PATH", tmp_path / "test_KILL_SWITCH"
+        )
+        monkeypatch.setattr(kill_switch._default, "_last", None)
+        monkeypatch.setattr(kill_switch._default, "_path", None)
     from core.deep_breakout_lane import DeepBreakoutLane
+    from core.entry_policy import EntryAuthorization
 
     base_cfg = {
         "enabled": True,
@@ -156,6 +164,9 @@ def _mk_lane(tmp_path, monkeypatch, *, ohlcv, om=None, tracker=None, risk=None,
         ohlcv_provider=ohlcv,
         warehouse=wh if wh is not None else _FakeWh(),
         entry_pause_check=pause,
+        entry_authorizer=entry_authorizer or (
+            lambda: EntryAuthorization(True, "test_approved", "APPROVED_PAPER", "deep_breakout")
+        ),
         cfg=base_cfg,
         now_fn=lambda: state["now"],
         state_path=tmp_path / "lane_state.json",
@@ -490,18 +501,18 @@ def _trades_conn(tmp_path):
     conn.row_factory = sqlite3.Row
     conn.execute(
         """CREATE TABLE trades (
-            ts_entry REAL, ts_exit REAL, realized_pnl REAL,
+            id INTEGER PRIMARY KEY, ts_entry REAL, ts_exit REAL, realized_pnl REAL,
             partial_realized_pnl REAL, strategy_family TEXT,
-            status TEXT, mode TEXT)"""
+            status TEXT, mode TEXT, market_type TEXT, decision_id TEXT)"""
     )
     import time as _t
 
     now = _t.time()
     rows = [
-        (now - 3600, now - 60, 5.0, 0.0, "claude_portfolio", "CLOSED", "PAPER"),
-        (now - 3600, now - 60, -7.0, 0.0, "deep_breakout", "CLOSED", "PAPER"),
+        (1, now - 3600, now - 60, 5.0, 0.0, "claude_portfolio", "CLOSED", "PAPER", "futures", "d1"),
+        (2, now - 3600, now - 60, -7.0, 0.0, "deep_breakout", "CLOSED", "PAPER", "futures", "d2"),
     ]
-    conn.executemany("INSERT INTO trades VALUES (?,?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT INTO trades VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
     return conn
 

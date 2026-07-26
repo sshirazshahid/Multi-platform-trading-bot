@@ -15,6 +15,8 @@ from __future__ import annotations
 
 def test_supervisor_kills_wedged_feed_holder_before_respawn(tmp_path, monkeypatch):
     import core.self_healing_supervisor as sh
+    from core.feed_health import FORWARD_FEEDS
+    from core.self_healing_policy import SelfHealingPolicy
 
     started: list[str] = []
     terminated: list[list[int]] = []
@@ -26,19 +28,24 @@ def test_supervisor_kills_wedged_feed_holder_before_respawn(tmp_path, monkeypatc
         lambda root: [
             {"name": spec.name, "exists": True, "connected": True,
              "fresh": spec.name != "l2", "error": None}
-            for spec in sh.FORWARD_FEEDS
+            for spec in FORWARD_FEEDS
         ],
     )
     monkeypatch.setattr(sh, "unhealthy_forward_feeds", lambda records: ["l2"])
-    fake_proc = {"ProcessId": 4242, "CommandLine": r"python scripts\harvest_l2.py"}
-    monkeypatch.setattr(sh, "_powershell_process_snapshot", lambda: [fake_proc])
+    fake_proc = {
+        "ProcessId": 4242,
+        "CommandLine": r"python scripts\harvest_l2.py",
+        "WorkingDirectory": str(sh.ROOT),
+    }
+    monkeypatch.setattr(sh, "_process_snapshot", lambda: [fake_proc])
     monkeypatch.setattr(
         sh, "_logical_counts",
         lambda procs: {"l2": 1, "skew": 1, "tv": 1, "liquidations": 1},
     )
     monkeypatch.setattr(
-        sh, "_terminate_pids",
-        lambda pids, cfg: terminated.append(list(pids)) or list(pids),
+        sh, "_terminate_feed_processes",
+        lambda procs, feed, cfg: terminated.append(sh._pids_for_feed(procs, feed))
+        or sh._pids_for_feed(procs, feed),
     )
     monkeypatch.setattr(
         sh, "_start_process",
@@ -50,14 +57,13 @@ def test_supervisor_kills_wedged_feed_holder_before_respawn(tmp_path, monkeypatc
         sh.config_from_mapping(
             {
                 "dry_run": True,
-                "state_path": tmp_path / "state.json",
-                "report_dir": tmp_path / "reports",
                 "repair_enabled": True,
                 "retrain_enabled": False,
                 "adapt_enabled": False,
                 "min_interval_sec": 0,
             }
-        )
+        ),
+        policy=SelfHealingPolicy(sh.ROOT, runtime_root=tmp_path),
     )
     report = sup.tick(force=True)
 
@@ -66,7 +72,7 @@ def test_supervisor_kills_wedged_feed_holder_before_respawn(tmp_path, monkeypatc
     assert any("harvest_l2.py" in s for s in started)
     l2_actions = [
         a for a in report["actions"]
-        if a.get("type") == "repair_feed" and a.get("target") == "l2"
+        if a.get("type") == "restart_feed" and a.get("target") == "l2"
         and not a.get("skipped")
     ]
     assert l2_actions, report["actions"]
@@ -78,10 +84,22 @@ def test_supervisor_pid_matching_is_script_scoped():
     import core.self_healing_supervisor as sh
 
     procs = [
-        {"ProcessId": 1, "CommandLine": r"python scripts\harvest_l2.py"},
-        {"ProcessId": 2, "CommandLine": r"python scripts\harvest_skew.py"},
-        {"ProcessId": 3, "CommandLine": r"python main.py"},
-        {"ProcessId": "bad", "CommandLine": r"python scripts\harvest_l2.py"},
+        {
+            "ProcessId": 1,
+            "CommandLine": r"python scripts\harvest_l2.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
+        {
+            "ProcessId": 2,
+            "CommandLine": r"python scripts\harvest_skew.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
+        {"ProcessId": 3, "CommandLine": r"python main.py", "WorkingDirectory": str(sh.ROOT)},
+        {
+            "ProcessId": "bad",
+            "CommandLine": r"python scripts\harvest_l2.py",
+            "WorkingDirectory": str(sh.ROOT),
+        },
     ]
     assert sh._pids_for_script(procs, "scripts/harvest_l2.py") == [1]
     assert sh._pids_for_script(procs, "scripts/harvest_tv.py") == []

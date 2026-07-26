@@ -1,0 +1,241 @@
+{
+  "generated_utc": "2026-07-23T17:54:47Z",
+  "profile": "MAX_FLOW_BAND",
+  "operating_mode": "PAPER",
+  "cohort_epoch": 1784809530.6491997,
+  "current_env_frac": {
+    "ACCURACY_TP_FRAC_OF_SL": 0.4,
+    "ACCURACY_TP_FRAC_BUY": 0.35,
+    "ACCURACY_TP_FRAC_SELL": 0.3
+  },
+  "cohort_since_profile": {
+    "n": 25,
+    "wins": 5,
+    "wr": 0.2,
+    "avg_win": 0.1993,
+    "avg_loss": 0.406,
+    "win_loss_ratio": 0.491,
+    "breakeven_wr": 0.6707,
+    "be_vs_59": 0.0807,
+    "clears_59_be_bar": false,
+    "needed_wl_for_59_be": 0.6949,
+    "sum_pnl": -7.1236,
+    "expectancy": -0.2849,
+    "profit_factor": 0.1227,
+    "avg_mfe": 0.002857,
+    "avg_mae": 0.004314,
+    "exits": {
+      "stop_loss": {
+        "n": 18,
+        "pnl": -7.9255,
+        "wins": 0
+      },
+      "take_profit": {
+        "n": 7,
+        "pnl": 0.8019,
+        "wins": 5
+      }
+    },
+    "fills": {
+      "taker_fallback": {
+        "n": 12,
+        "pnl": -3.2184,
+        "wr": 0.3333
+      },
+      "maker": {
+        "n": 13,
+        "pnl": -3.9052,
+        "wr": 0.0769
+      }
+    }
+  },
+  "rolling_30d": {
+    "n": 832,
+    "wins": 262,
+    "wr": 0.3149,
+    "avg_win": 0.3781,
+    "avg_loss": 0.6059,
+    "win_loss_ratio": 0.624,
+    "breakeven_wr": 0.6158,
+    "be_vs_59": 0.0258,
+    "clears_59_be_bar": false,
+    "needed_wl_for_59_be": 0.6949,
+    "sum_pnl": -246.3203,
+    "expectancy": -0.2961,
+    "profit_factor": 0.2868,
+    "avg_mfe": 0.003335,
+    "avg_mae": 0.004111,
+    "exits": {
+      "stop_loss": {
+        "n": 471,
+        "pnl": -234.2305,
+        "wins": 103
+      },
+      "trailing_stop": {
+        "n": 142,
+        "pnl": -33.9479,
+        "wins": 31
+      },
+      "take_profit": {
+        "n": 116,
+        "pnl": 56.46,
+        "wins": 112
+      },
+      "STALE": {
+        "n": 66,
+        "pnl": -14.2062,
+        "wins": 0
+      },
+      "mcp_take_profit": {
+        "n": 15,
+        "pnl": 8.4117,
+        "wins": 15
+      },
+      "AGE_LIMIT": {
+        "n": 13,
+        "pnl": -23.0549,
+        "wins": 0
+      },
+      "machine_time_stop": {
+        "n": 2,
+        "pnl": -0.7193,
+        "wins": 1
+      },
+      "reconciled_no_context": {
+        "n": 2,
+        "pnl": -3.0,
+        "wins": 0
+      },
+      "reconciled_from_exchange": {
+        "n": 2,
+        "pnl": -1.66,
+        "wins": 0
+      },
+      "claude_close": {
+        "n": 1,
+        "pnl": -0.2414,
+        "wins": 0
+      },
+      "sl_placement_failed": {
+        "n": 1,
+        "pnl": -0.008,
+        "wins": 0
+      },
+      "data_feed_failure": {
+        "n": 1,
+        "pnl": -0.1237,
+        "wins": 0
+      }
+    },
+    "fills": {
+      "unknown": {
+        "n": 729,
+        "pnl": -223.6677,
+        "wr": 0.3059
+      },
+      "maker": {
+        "n": 55,
+        "pnl": -17.4769,
+        "wr": 0.3273
+      },
+      "taker_fallback": {
+        "n": 48,
+        "pnl": -5.1758,
+        "wr": 0.4375
+      }
+    }
+  },
+  "rolling_7d": {
+    "n": 66,
+    "wins": 25,
+    "wr": 0.3788,
+    "avg_win": 0.1538,
+    "avg_loss": 0.3574,
+    "win_loss_ratio": 0.4304,
+    "breakeven_wr": 0.6991,
+    "be_vs_59": 0.1091,
+    "clears_59_be_bar": false,
+    "needed_wl_for_59_be": 0.6949,
+    "sum_pnl": -10.808,
+    "expectancy": -0.1638,
+    "profit_factor": 0.2624,
+    "avg_mfe": 0.003335,
+    "avg_mae": 0.004111,
+    "exits": {
+      "stop_loss": {
+        "n": 38,
+        "pnl": -14.3348,
+        "wins": 0
+      },
+      "take_profit": {
+        "n": 27,
+        "pnl": 3.6504,
+        "wins": 25
+      },
+      "data_feed_failure": {
+        "n": 1,
+        "pnl": -0.1237,
+        "wins": 0
+      }
+    },
+    "fills": {
+      "taker_fallback": {
+        "n": 33,
+        "pnl": -6.456,
+        "wr": 0.3636
+      },
+      "maker": {
+        "n": 33,
+        "pnl": -4.352,
+        "wr": 0.3939
+      }
+    }
+  },
+  "goal_lanes": [
+    {
+      "lane": "paper_futures_current_utc_day",
+      "closed_outcomes": 46,
+      "win_rate": 0.282609,
+      "expectancy_per_outcome": -0.189013,
+      "profit_factor": 0.189797,
+      "net_after_cost_pnl": -8.694587,
+      "target_status": "NEGATIVE_AFTER_COST_ECONOMICS"
+    },
+    {
+      "lane": "paper_futures_rolling_24h",
+      "closed_outcomes": 54,
+      "win_rate": 0.351852,
+      "expectancy_per_outcome": -0.16452,
+      "profit_factor": 0.233034,
+      "net_after_cost_pnl": -8.884055,
+      "target_status": "NEGATIVE_AFTER_COST_ECONOMICS"
+    },
+    {
+      "lane": "paper_futures_7d",
+      "closed_outcomes": 65,
+      "win_rate": 0.384615,
+      "expectancy_per_outcome": -0.148923,
+      "profit_factor": 0.289938,
+      "net_after_cost_pnl": -9.679967,
+      "target_status": "NEGATIVE_AFTER_COST_ECONOMICS"
+    },
+    {
+      "lane": "directional_paper_30d",
+      "closed_outcomes": 810,
+      "win_rate": 0.390123,
+      "expectancy_per_outcome": -0.246031,
+      "profit_factor": 0.383717,
+      "net_after_cost_pnl": -199.285087,
+      "target_status": "NEGATIVE_AFTER_COST_ECONOMICS"
+    },
+    {
+      "lane": "current_profile_directional",
+      "closed_outcomes": 22,
+      "win_rate": 0.227273,
+      "expectancy_per_outcome": -0.234834,
+      "profit_factor": 0.167252,
+      "net_after_cost_pnl": -5.166345,
+      "target_status": "INSUFFICIENT_SAMPLE"
+    }
+  ]
+}

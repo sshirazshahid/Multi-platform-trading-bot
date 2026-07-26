@@ -1,0 +1,4 @@
+interface:
+  display_name: "Futures Universe Edge Research"
+  short_description: "Screen all perpetuals and validate candidates without leakage"
+  default_prompt: "Use $futures-universe-edge-research to screen the broad futures universe, formulate bounded hypotheses, and produce promotion-safe evidence."

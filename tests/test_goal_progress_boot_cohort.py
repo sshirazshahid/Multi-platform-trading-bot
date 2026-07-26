@@ -26,13 +26,17 @@ def _conn_with_trades(rows):
     # strategy_family mirrors the real warehouse schema (2026-07-11): the
     # report now excludes the deep_breakout cohort, so the column must exist.
     conn.execute(
-        "CREATE TABLE trades (ts_entry REAL, ts_exit REAL, realized_pnl REAL,"
+        "CREATE TABLE trades (id INTEGER PRIMARY KEY, ts_entry REAL, ts_exit REAL, realized_pnl REAL,"
         " partial_realized_pnl REAL DEFAULT 0,"
-        " strategy_family TEXT DEFAULT 'claude_portfolio')")
+        " strategy_family TEXT DEFAULT 'claude_portfolio',"
+        " status TEXT DEFAULT 'CLOSED', mode TEXT DEFAULT 'PAPER',"
+        " market_type TEXT DEFAULT 'futures', decision_id TEXT)")
     rows4 = [r if len(r) == 4 else (*r, 0.0) for r in rows]
     conn.executemany(
-        "INSERT INTO trades (ts_entry, ts_exit, realized_pnl,"
-        " partial_realized_pnl) VALUES (?,?,?,?)", rows4)
+        "INSERT INTO trades (id, ts_entry, ts_exit, realized_pnl,"
+        " partial_realized_pnl, decision_id) VALUES (?,?,?,?,?,?)",
+        [(i, *row, f"d{i}") for i, row in enumerate(rows4, 1)],
+    )
     return conn
 
 
@@ -83,11 +87,13 @@ def test_render_journal_includes_cohort_line():
     report = {
         "goal": "g", "generated_utc": "t",
         "lanes": [{
-            "lane": "current_boot", "available": True,
-            "since_source": "boot_log", "since_epoch": 0.0,
-            "closed_trades": 3, "wins": 2, "wr": 0.6667, "net_pnl": 2.0,
+            "lane": "current_profile_directional", "available": True,
+            "closed_outcomes": 3, "wins": 2, "win_rate": 0.6667,
+            "net_after_cost_pnl": 2.0, "profit_factor": 2.0,
+            "no_losses": False, "expectancy_per_outcome": 0.6667,
+            "target_status": "INSUFFICIENT_SAMPLE",
         }],
     }
     text = render_journal(report)
-    assert "current-boot cohort" in text
+    assert "current_profile_directional" in text
     assert "66.7%" in text

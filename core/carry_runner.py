@@ -7,9 +7,10 @@ full Rev-5 ``f1_entry_gate`` (logging pass/fail every run), opens an atomic
 two-leg PAPER position on pass (pessimistic taker fills; one-leg failure and
 reconcile-timeout paths mark the trade FAILED and persist a venue/symbol block
 requiring manual review-clear), accrues funding at each passed settlement
-boundary using the venue's ACTUAL interval, evaluates every exit gate, and on
-exit writes a RESOLVED cycle row (warehouse ``carry_cycles``) and refreshes the
-F1 EvidenceRegistry record. State saves are atomic (tmp + replace).
+boundary from realized venue history (never from the latest quote), evaluates
+every exit gate, and on exit writes a RESOLVED cycle row (warehouse
+``carry_cycles``) and refreshes the F1 EvidenceRegistry record. State saves are
+atomic (tmp + replace).
 
 Rev 5.2: execution-integrity anomalies (one-leg failure / reconcile timeout,
 notional-mismatch exit) latch a portfolio-wide reduce-only RECOVERY mode in the
@@ -18,19 +19,34 @@ it (``scripts/run_f1_carry_paper.py --clear-recovery``); open positions keep
 being managed and closed.
 
 PAPER/SIM ONLY: no exchange order call and no directional fallback exists here.
+New paper positions additionally require the shared runtime entry policy;
+reconciliation and exits for held positions do not.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from core.contracts import FundingSettlement as FundingSettlementEvent
+from core.contracts import InstrumentId, MarketType
 from core.cost_model import fee_rate
+from core.entry_policy import authorize_runtime_entry
 from core.fill_reality import failed_leg_outcome, perp_short_margin_buffer_x
+from core.funding_history import (
+    DEFAULT_REALIZED_DIR,
+    FundingSettlement,
+    load_realized_settlements,
+)
 from research.funding_carry_lab import (
+    DEFAULT_MAX_HEDGE_STALENESS_SEC,
     F1_DEFAULT_SYMBOLS,
+    F1_MAX_FUNDING_AGE_SEC,
     F1_MAX_PNL_CONCENTRATION_PCT,
     F1_MIN_CYCLES,
     CarryPositionState,
@@ -40,6 +56,7 @@ from research.funding_carry_lab import (
     f1_sizing_gate,
     pnl_concentration_ok,
 )
+from utils.process_lock import acquire_process_lock
 
 DEFAULT_STATE_PATH = Path("data/carry_positions.json")
 DEFAULT_GATE_LOG = Path("data/carry_gate_log.jsonl")
@@ -52,21 +69,32 @@ RECONCILE_TIMEOUT_SEC = 10.0
 # funding_carry_lab.per_leg_liquidation_price defaults; conservative vs
 # Binance/Bybit tier-1 0.4-0.5% for BTC/ETH at these notionals.
 F1_MMR_FRAC = 0.005
-# Maker-first execution (research report actionable update): the spot leg is
-# modeled as a post-only maker fill at MID (conservative vs the touch) with the
-# venue maker fee, and NO slippage — but ONLY when the spot leg spread is wide
-# enough to plausibly rest an order. Below this, fall back to a taker cross so
-# the model never credits a fill that could not happen. The perp hedge ALWAYS
-# stays taker (immediate cross to lock delta-neutrality). NOTE: on Binance/Bybit
-# spot maker fee == spot taker fee, so the maker saving here is slippage +
-# half-spread, NOT fees; the futures maker discount is only reachable via a fee
-# tier (see F2 latch). Default execution mode stays "taker" (unchanged evidence).
-F1_MAKER_MIN_SPREAD_BPS = 2.0
+# This single-shot runner has no resting-order queue/trade-event evidence.
+# ``maker_first`` therefore records intent only and books taker fills/costs;
+# maker economics must not be credited until an event-driven simulator proves
+# that a post-only order actually filled before the hedge timeout.
+F1_STRATEGY_VERSION = "correctness-v1"
+_SETTLEMENT_TS_RESOLUTION_SEC = 0.001
 
 _EMPTY_STATE: dict[str, Any] = {
     "positions": {}, "blocks": {}, "cycles": [],
     "recovery": {"active": False},
 }
+
+
+def acquire_carry_state_lock(state_path: Path | str):
+    """Lock one shared carry ledger for its full load-mutate-save transaction."""
+
+    resolved = Path(state_path).resolve()
+    lock_root = (
+        resolved.parent.parent
+        if resolved.parent.name.lower() == "data"
+        else resolved.parent
+    )
+    digest = hashlib.sha256(
+        str(resolved).casefold().encode("utf-8")
+    ).hexdigest()[:20]
+    return acquire_process_lock(f"carry_state_{digest}", root=lock_root)
 
 # Static preconditions that MUST be independently verified before ANY live
 # activation of the carry strategy. Rendered (always UNMET) in the report;
@@ -102,6 +130,9 @@ class CarryRunner:
         slip_frac: float = DEFAULT_SLIP_FRAC,
         heartbeat_path: Path | str | None = DEFAULT_HEARTBEAT_PATH,
         execution_mode: str = "taker",
+        entry_authorizer: Callable[..., Any] | None = None,
+        settlement_history_provider: Callable[..., Any] | None = None,
+        settlement_history_dir: Path | str = DEFAULT_REALIZED_DIR,
     ):
         self.state_path = Path(state_path)
         self.snapshot_provider = snapshot_provider
@@ -120,6 +151,10 @@ class CarryRunner:
         if execution_mode not in ("taker", "maker_first"):
             raise ValueError(f"execution_mode must be taker|maker_first, got {execution_mode!r}")
         self.execution_mode = execution_mode
+        self.entry_authorizer = (
+            authorize_runtime_entry if entry_authorizer is None else entry_authorizer)
+        self.settlement_history_provider = settlement_history_provider
+        self.settlement_history_dir = Path(settlement_history_dir)
 
     # ── state I/O (atomic) ─────────────────────────────────────────────
     def load_state(self) -> dict:
@@ -185,9 +220,32 @@ class CarryRunner:
     # ── one run ────────────────────────────────────────────────────────
     def run_once(self) -> dict:
         now = float(self.now_fn())
+        state_lock = acquire_carry_state_lock(self.state_path)
+        if state_lock is None:
+            return {
+                "ts": now,
+                "venue": self.venue,
+                "opened": 0,
+                "closed": 0,
+                "failed": 0,
+                "blocked": 0,
+                "held": 0,
+                "gate_evals": 0,
+                "funding_deferred": 0,
+                "skipped": 1,
+                "reason": "state_lock_busy",
+                "recovery_active": None,
+            }
+        try:
+            return self._run_once_locked(now)
+        finally:
+            state_lock.close()
+
+    def _run_once_locked(self, now: float) -> dict:
         state = self.load_state()
         summary = {"ts": now, "venue": self.venue, "opened": 0, "closed": 0,
-                   "failed": 0, "blocked": 0, "held": 0, "gate_evals": 0}
+                   "failed": 0, "blocked": 0, "held": 0, "gate_evals": 0,
+                   "funding_deferred": 0}
         for symbol in self.symbols:
             key = f"{self.venue}:{symbol}"
             if key in state["blocks"]:
@@ -243,6 +301,54 @@ class CarryRunner:
             pass
 
     # ── open path ──────────────────────────────────────────────────────
+    @staticmethod
+    def _observed_age_sec(
+        record: Mapping[str, Any],
+        now: float,
+        *,
+        field: str = "observed_at",
+    ) -> float:
+        """Age an exchange/source observation; receipt time is never a proxy.
+
+        Missing, non-finite, negative, or future source timestamps fail closed.
+        ``received_at`` remains useful provenance but cannot make old data fresh.
+        """
+        value = record.get(field)
+        if isinstance(value, bool):
+            return float("inf")
+        if not math.isfinite(now):
+            return float("inf")
+        try:
+            observed_at = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return float("inf")
+        if not math.isfinite(observed_at) or observed_at < 0.0 or observed_at > now:
+            return float("inf")
+        return now - observed_at
+
+    def _entry_depth_state(
+        self,
+        snap: Mapping[str, Any],
+    ) -> tuple[float, bool]:
+        """Return actual spot-buy/perp-sell executable depth for this clip."""
+        clip_notional = self.paper_equity * 0.05
+        try:
+            spot_buy = float(snap["spot_buy_depth_notional"])
+            perp_sell = float(snap["perp_sell_depth_notional"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return 0.0, False
+        if (
+            not math.isfinite(clip_notional)
+            or clip_notional <= 0.0
+            or not math.isfinite(spot_buy)
+            or not math.isfinite(perp_sell)
+            or spot_buy < 0.0
+            or perp_sell < 0.0
+        ):
+            return 0.0, False
+        executable = min(spot_buy, perp_sell)
+        return executable / clip_notional, executable >= clip_notional
+
     def _gate_inputs(self, snap: Mapping[str, Any], now: float) -> dict:
         f = snap.get("funding") or {}
         spot_mid = (float(snap["spot_bid"]) + float(snap["spot_ask"])) / 2.0
@@ -251,8 +357,15 @@ class CarryRunner:
         perp_spread_bps = (float(snap["perp_ask"]) - float(snap["perp_bid"])) / perp_mid * 1e4
         next_ts = f.get("next_funding_ts")
         ttf_min = (float(next_ts) - now) / 60.0 if next_ts is not None else None
-        snap_age = now - float(snap.get("ts", now))
-        feeds_fresh = (not f.get("stale", True)) and snap_age <= 300.0
+        snap_age = self._observed_age_sec(snap, now)
+        funding_age = self._observed_age_sec(f, now)
+        feeds_fresh = (
+            not bool(snap.get("stale", False))
+            and snap_age <= DEFAULT_MAX_HEDGE_STALENESS_SEC
+            and not bool(f.get("stale", True))
+            and funding_age <= F1_MAX_FUNDING_AGE_SEC
+        )
+        depth_ratio, both_legs_fillable = self._entry_depth_state(snap)
         # W1: COMPUTE the entry liq buffer from the planned short entry price
         # (perp_bid net of slip, same as _maybe_open) via the per-position
         # liquidation model. NEVER fall back to snap["liq_buffer_x"] at entry;
@@ -267,27 +380,20 @@ class CarryRunner:
             )["buffer_x"]
         except Exception:  # noqa: BLE001 - fail-closed at entry
             liq_buffer_x, liq_uncomputable = 0.0, True
-        # maker-first: rest the spot leg at mid when the spread allows, and
-        # recompute the effective round-trip cost so the entry floor
-        # (max(15bps, 3x cost)) reflects the cheaper execution. The flat 15bps
-        # absolute floor is deliberately NOT lowered.
-        use_maker = (self.execution_mode == "maker_first"
-                     and spot_spread_bps >= F1_MAKER_MIN_SPREAD_BPS)
-        if use_maker:
-            m_spot_fee, m_perp_fee = self._fees_per_leg_frac(spot_liq="maker")
-            # spot legs rest at mid (no slip); only the 2 perp crossings pay slip.
-            rt_cost = 2.0 * m_spot_fee + 2.0 * m_perp_fee + 2.0 * self.slip_frac
-        else:
-            rt_cost = float(snap["round_trip_cost_frac"])
+        # Never infer a maker fill from spread width. A one-shot snapshot has
+        # no queue position or subsequent trade event, so it must retain the
+        # venue's pessimistic taker round-trip cost.
+        rt_cost = float(snap["round_trip_cost_frac"])
         out = {
             "funding_per_settlement": float(f.get("rate") or 0.0),
             "hold_settlements": self.hold_settlements,
             "round_trip_cost_frac": rt_cost,
-            "depth_ratio": float(snap.get("depth_ratio", 0.0)),
+            "depth_ratio": depth_ratio,
             "liq_buffer_x": liq_buffer_x,
-            "funding_age_sec": float(f.get("age_sec", float("inf"))),
-            "both_legs_fillable": bool(snap.get("both_legs_fillable", False)),
+            "funding_age_sec": funding_age,
+            "both_legs_fillable": both_legs_fillable,
             "avg_funding_7d": snap.get("avg_funding_7d"),
+            "trailing_funding_rates": snap.get("trailing_funding_rates"),
             "perp_mark": snap.get("perp_mark", perp_mid),
             "spot_mid": spot_mid,
             "spot_spread_bps": spot_spread_bps,
@@ -314,24 +420,42 @@ class CarryRunner:
                "ok": bool(ok), "reason": reason,
                "net_edge_bps": det.get("net_edge_bps"),
                "liq_buffer_x": gi["liq_buffer_x"],
-               "feeds_fresh": det.get("feeds_fresh")}
+               "feeds_fresh": det.get("feeds_fresh"),
+               "f1_gate_ok": bool(ok)}
         if liq_uncomputable:
             rec["liq_buffer_uncomputable"] = True
-        self._log_gate(rec)
         if not ok:
+            self._log_gate(rec)
             return
+
+        try:
+            authorization = self.entry_authorizer(
+                "F1", strategy_version=F1_STRATEGY_VERSION)
+            entry_allowed = bool(authorization.allowed)
+            policy_reason = str(authorization.reason)
+            policy = str(authorization.policy)
+        except Exception:  # noqa: BLE001 - authorization must fail closed
+            entry_allowed = False
+            policy_reason = "entry_policy_authorizer_error"
+            policy = ""
+        rec.update({
+            "entry_policy_allowed": entry_allowed,
+            "entry_policy": policy,
+            "strategy_id": "F1",
+            "strategy_version": F1_STRATEGY_VERSION,
+        })
+        if not entry_allowed:
+            rec["ok"] = False
+            rec["reason"] = policy_reason
+            self._log_gate(rec)
+            return
+        self._log_gate(rec)
+
         f = snap["funding"]
         slip = self.slip_frac
-        use_maker = (self.execution_mode == "maker_first"
-                     and gi["spot_spread_bps"] >= F1_MAKER_MIN_SPREAD_BPS)
-        if use_maker:
-            spot_px = gi["spot_mid"]                           # rest spot at mid (maker)
-            perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # taker hedge cross
-            spot_fee, perp_fee = self._fees_per_leg_frac(spot_liq="maker")
-        else:
-            spot_px = float(snap["spot_ask"]) * (1.0 + slip)   # buy spot: pay up
-            perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # sell perp: hit bid
-            spot_fee, perp_fee = self._fees_per_leg_frac()
+        spot_px = float(snap["spot_ask"]) * (1.0 + slip)   # buy spot: pay up
+        perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # sell perp: hit bid
+        spot_fee, perp_fee = self._fees_per_leg_frac()
         spot_qty = notional / spot_px
         perp_qty = notional / perp_px
         entry_fees = notional * (spot_fee + perp_fee)
@@ -354,6 +478,7 @@ class CarryRunner:
                 # close whatever filled, book the unwind cost, block the pair.
                 unwind_fees = notional * (spot_fee + perp_fee + 2.0 * slip)
                 self._book_cycle(state, {
+                    "strategy_version": F1_STRATEGY_VERSION,
                     "symbol": symbol, "venue": self.venue,
                     "opened_ts": now, "resolved_ts": now,
                     "notional": notional, "gross_funding": 0.0,
@@ -375,6 +500,10 @@ class CarryRunner:
                 return
 
         state["positions"][f"{self.venue}:{symbol}"] = {
+            "position_id": (
+                f"carry:{self.venue}:{symbol}:{int(round(now * 1000.0))}"
+            ),
+            "strategy_version": F1_STRATEGY_VERSION,
             "symbol": symbol, "venue": self.venue, "notional": notional,
             "spot_qty": spot_qty, "perp_qty": perp_qty,
             "spot_entry_px": spot_px, "perp_entry_px": perp_px,
@@ -387,41 +516,325 @@ class CarryRunner:
             "consec_negative_settlements": 0, "runs_seen": 0,
             "perp_leverage": 1.0, "mmr": F1_MMR_FRAC,
             "execution_mode": self.execution_mode,
+            "execution_liquidity": "taker",
+            "maker_fill_verified": False,
+            "perp_exchange_symbol": str(
+                snap.get("perp_exchange_symbol") or symbol.replace("/", "")
+            ),
         }
         summary["opened"] += 1
 
     # ── manage path (settlement accrual + exit gates) ──────────────────
+    @staticmethod
+    def _canonical_settlement_ts(value: Any) -> float:
+        ts = float(value)
+        if not math.isfinite(ts) or ts < 0.0:
+            raise ValueError("invalid settlement timestamp")
+        return int(round(ts * 1000.0)) / 1000.0
+
+    def _normalize_settlement_history(
+        self, raw: Any, *, start_ts: float, end_ts: float,
+    ) -> tuple[tuple[FundingSettlement, ...] | None, str | None]:
+        """Validate provider output and deterministically sort/dedupe it."""
+        if raw is None:
+            return None, "settlement_history_unavailable"
+        by_ts: dict[float, float] = {}
+        try:
+            for item in raw:
+                if isinstance(item, FundingSettlement):
+                    raw_ts, raw_rate = item.settlement_ts, item.rate
+                elif isinstance(item, Mapping):
+                    raw_ts = item.get("settlement_ts")
+                    if raw_ts is None:
+                        raw_ts = item.get("ts")
+                    raw_rate = item.get("rate")
+                    if raw_rate is None:
+                        raw_rate = item.get("funding_rate")
+                else:
+                    return None, "settlement_history_invalid"
+                ts = self._canonical_settlement_ts(raw_ts)
+                rate = float(raw_rate)
+                if not math.isfinite(rate):
+                    return None, "settlement_history_invalid"
+                if ts < start_ts or ts > end_ts:
+                    continue
+                prior = by_ts.get(ts)
+                if prior is not None and prior != rate:
+                    return None, "settlement_history_conflict"
+                by_ts[ts] = rate
+        except (TypeError, ValueError, OverflowError):
+            return None, "settlement_history_invalid"
+        return tuple(
+            FundingSettlement(settlement_ts=ts, rate=by_ts[ts])
+            for ts in sorted(by_ts)
+        ), None
+
+    def _defer_funding_reconciliation(
+        self, symbol: str, now: float, summary: dict, detail: str, **fields: Any,
+    ) -> bool:
+        summary["funding_deferred"] = summary.get("funding_deferred", 0) + 1
+        self._log_gate({
+            "ts": now, "symbol": symbol, "venue": self.venue,
+            "ok": False, "held": True,
+            "reason": "funding_reconciliation_deferred", "detail": detail,
+            **fields,
+        })
+        return False
+
+    def _append_funding_settlements(
+        self,
+        pos: dict,
+        symbol: str,
+        records: tuple[FundingSettlement, ...],
+        *,
+        notional: float,
+        received_ts: float,
+    ) -> None:
+        """Persist realized payments before advancing the position cursor."""
+        if self.warehouse is None:
+            return
+        position_id = str(
+            pos.get("position_id")
+            or f"carry:{self.venue}:{symbol}:{int(float(pos['opened_ts']) * 1000.0)}"
+        )
+        canonical = symbol if ":" in symbol else f"{symbol}:USDT"
+        instrument = InstrumentId(
+            venue=self.venue,
+            market=MarketType.PERPETUAL,
+            canonical_symbol=canonical,
+            exchange_symbol=str(
+                pos.get("perp_exchange_symbol") or symbol.replace("/", "")
+            ),
+        )
+        received_at = datetime.fromtimestamp(received_ts, tz=timezone.utc)
+        for record in records:
+            identity = (
+                f"{position_id}|{instrument.venue.value}|"
+                f"{record.settlement_ts:.3f}"
+            )
+            settlement_id = "funding:" + hashlib.sha256(
+                identity.encode("utf-8")
+            ).hexdigest()
+            self.warehouse.append_funding_settlement(FundingSettlementEvent(
+                settlement_id=settlement_id,
+                instrument=instrument,
+                position_id=position_id,
+                occurred_at=datetime.fromtimestamp(
+                    record.settlement_ts, tz=timezone.utc
+                ),
+                received_at=received_at,
+                rate=record.rate,
+                amount=record.rate * notional,
+                asset="USDT",
+                context={
+                    "strategy_id": "F1",
+                    "strategy_version": F1_STRATEGY_VERSION,
+                    "source": "authoritative_venue_history",
+                },
+            ))
+
+    def _reconcile_funding(
+        self, state: dict, pos: dict, symbol: str, funding: Mapping[str, Any],
+        now: float, summary: dict,
+    ) -> bool:
+        """Apply a complete realized-settlement batch, or leave ``pos`` untouched."""
+        try:
+            cursor = self._canonical_settlement_ts(pos["next_settlement_ts"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "invalid_position_settlement_cursor")
+        if cursor > now:
+            return True
+
+        try:
+            live_next = self._canonical_settlement_ts(funding["next_funding_ts"])
+            current_interval_hours = float(funding["interval_hours"])
+            if (not math.isfinite(current_interval_hours)
+                    or current_interval_hours <= 0.0):
+                raise ValueError("invalid interval")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "settlement_metadata_unavailable",
+                required_from_ts=cursor)
+        if live_next <= now:
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "settlement_metadata_not_advanced",
+                required_from_ts=cursor, venue_next_settlement_ts=live_next)
+
+        try:
+            latest_completed = self._canonical_settlement_ts(
+                live_next - current_interval_hours * 3600.0)
+        except (TypeError, ValueError, OverflowError):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "settlement_metadata_unavailable",
+                required_from_ts=cursor)
+        if latest_completed < cursor or latest_completed > now:
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "settlement_history_gap",
+                required_from_ts=cursor, required_through_ts=latest_completed)
+
+        coin = symbol.split("/", 1)[0]
+        try:
+            if self.settlement_history_provider is None:
+                raw = load_realized_settlements(
+                    self.venue, coin, start_ts=cursor, end_ts=now,
+                    base_dir=self.settlement_history_dir)
+            else:
+                raw = self.settlement_history_provider(
+                    venue=self.venue, coin=coin,
+                    start_ts=cursor, end_ts=now)
+        except Exception:  # noqa: BLE001 - history failure must defer, never guess
+            raw = None
+        records, invalid_detail = self._normalize_settlement_history(
+            raw, start_ts=cursor, end_ts=now)
+        if records is None:
+            return self._defer_funding_reconciliation(
+                symbol, now, summary,
+                invalid_detail or "settlement_history_unavailable",
+                required_from_ts=cursor, required_through_ts=latest_completed)
+        if (not records or records[0].settlement_ts != cursor
+                or records[-1].settlement_ts != latest_completed):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "settlement_history_gap",
+                required_from_ts=cursor, required_through_ts=latest_completed,
+                records_found=len(records))
+
+        try:
+            established_interval_sec = float(pos["interval_hours"]) * 3600.0
+            if (not math.isfinite(established_interval_sec)
+                    or established_interval_sec <= 0.0):
+                raise ValueError("invalid position interval")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "invalid_position_settlement_interval")
+
+        previous = records[0].settlement_ts
+        for record in records[1:]:
+            interval_sec = record.settlement_ts - previous
+            # A shorter interval is proven by the extra realized boundary. A
+            # longer interval is indistinguishable from a missing record, so it
+            # must defer unless authoritative interval provenance is available.
+            if (interval_sec <= 0.0
+                    or interval_sec > established_interval_sec
+                    + _SETTLEMENT_TS_RESOLUTION_SEC):
+                return self._defer_funding_reconciliation(
+                    symbol, now, summary, "settlement_history_gap",
+                    required_from_ts=cursor, required_through_ts=latest_completed,
+                    gap_after_ts=previous)
+            established_interval_sec = interval_sec
+            previous = record.settlement_ts
+
+        try:
+            funding_accrued = float(pos["funding_accrued"])
+            settlements_held = int(pos["settlements_held"])
+            consecutive_negative = int(pos["consec_negative_settlements"])
+            notional = float(pos["notional"])
+            if (not math.isfinite(funding_accrued) or not math.isfinite(notional)
+                    or notional <= 0.0 or settlements_held < 0
+                    or consecutive_negative < 0):
+                raise ValueError("invalid funding state")
+            for record in records:
+                funding_accrued += record.rate * notional
+                settlements_held += 1
+                consecutive_negative = consecutive_negative + 1 if record.rate < 0 else 0
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self._defer_funding_reconciliation(
+                symbol, now, summary, "invalid_position_funding_state")
+
+        try:
+            self._append_funding_settlements(
+                pos,
+                symbol,
+                records,
+                notional=notional,
+                received_ts=now,
+            )
+        except Exception as exc:  # noqa: BLE001 - accounting must fail closed
+            self._latch_recovery(
+                state,
+                now,
+                self.venue,
+                symbol,
+                "funding_event_persistence_failure",
+            )
+            return self._defer_funding_reconciliation(
+                symbol,
+                now,
+                summary,
+                "funding_event_persistence_failure",
+                error_type=type(exc).__name__,
+            )
+
+        # Commit only after the complete range validates and all new values have
+        # been computed. The caller atomically persists this cursor with PnL.
+        pos.update({
+            "funding_accrued": funding_accrued,
+            "settlements_held": settlements_held,
+            "consec_negative_settlements": consecutive_negative,
+            "last_settlement_ts": records[-1].settlement_ts,
+            "next_settlement_ts": live_next,
+            "interval_hours": current_interval_hours,
+        })
+        return True
+
     def _manage(self, state, symbol, snap, now, summary) -> None:
         pos = state["positions"][f"{self.venue}:{symbol}"]
         f = snap.get("funding") or {}
-        # Feed-staleness guard (mirror the _gate_inputs freshness check): a stale
-        # or None-rate funding frame coerces rate->0, drives net_edge negative,
-        # and would FORCE-CLOSE a healthy held position (booking full exit fees +
-        # poisoning RESOLVED evidence). SKIP management this pass -> HOLD. A
-        # genuinely stale hedge is still caught by the hedge-leg-age / stale exit
-        # when the frame is FRESH but old.
-        snap_age = now - float(snap.get("ts", now))
-        feeds_fresh = (
-            (not f.get("stale", True)) and snap_age <= 300.0 and f.get("rate") is not None
+        snapshot_age = self._observed_age_sec(snap, now)
+        if bool(snap.get("stale", False)):
+            snapshot_age = float("inf")
+        funding_age = self._observed_age_sec(f, now)
+        market_fresh = (
+            not bool(snap.get("stale", False))
+            and snapshot_age <= DEFAULT_MAX_HEDGE_STALENESS_SEC
         )
-        if not feeds_fresh:
-            self._log_gate({"ts": now, "symbol": symbol, "venue": self.venue,
-                            "ok": False, "held": True,
-                            "reason": "manage_skipped_stale_feed"})
-            return
-        rate = float(f.get("rate") or 0.0)
-        # accrue every PASSED settlement boundary at the venue's ACTUAL interval
-        # (the interval is re-read from the frame at each boundary so a mid-hold
-        # interval change takes effect from the next settlement).
-        while pos["next_settlement_ts"] <= now:
-            pay = rate * pos["notional"]
-            pos["funding_accrued"] += pay
-            pos["settlements_held"] += 1
-            pos["consec_negative_settlements"] = (
-                pos["consec_negative_settlements"] + 1 if rate < 0 else 0)
-            iv = float(f.get("interval_hours") or pos["interval_hours"])
-            pos["interval_hours"] = iv
-            pos["next_settlement_ts"] += iv * 3600.0
+        funding_fresh = (
+            not bool(f.get("stale", True))
+            and funding_age <= F1_MAX_FUNDING_AGE_SEC
+            and f.get("rate") is not None
+        )
+        try:
+            rate = float(f["rate"]) if funding_fresh else None
+            if rate is not None and not math.isfinite(rate):
+                raise ValueError("non-finite funding rate")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            rate = None
+            funding_fresh = False
+
+        if not market_fresh or not funding_fresh:
+            self._log_gate({
+                "ts": now,
+                "symbol": symbol,
+                "venue": self.venue,
+                "ok": False,
+                "held": True,
+                "reason": "manage_with_stale_data",
+                "market_fresh": market_fresh,
+                "funding_fresh": funding_fresh,
+                "snapshot_age_sec": snapshot_age,
+                "funding_age_sec": funding_age,
+                "safety_checks_continued": True,
+            })
+
+        if funding_fresh:
+            # Funding accounting may defer, but that must never suppress margin,
+            # basis, hedge mismatch, spread, stale-leg, or max-hold exits below.
+            self._reconcile_funding(state, pos, symbol, f, now, summary)
+        else:
+            try:
+                settlement_due = (
+                    self._canonical_settlement_ts(pos["next_settlement_ts"]) <= now
+                )
+            except (KeyError, TypeError, ValueError, OverflowError):
+                settlement_due = True
+            if settlement_due:
+                self._defer_funding_reconciliation(
+                    symbol,
+                    now,
+                    summary,
+                    "stale_funding_observation",
+                    funding_age_sec=funding_age,
+                )
         pos["runs_seen"] += 1
 
         spot_mid = (float(snap["spot_bid"]) + float(snap["spot_ask"])) / 2.0
@@ -451,12 +864,20 @@ class CarryRunner:
             consec_negative_settlements=pos["consec_negative_settlements"],
             adverse_basis_move_bps=max(0.0, cur_basis_bps - pos["entry_basis_bps"]),
             margin_buffer_x=margin_buffer_x,
-            hedge_leg_age_sec=now - float(snap.get("ts", now)),
+            hedge_leg_age_sec=snapshot_age,
             notional_mismatch_pct=mismatch_pct,
             spread_bps=spread_bps,
-            net_edge_bps=f1_net_expected_edge_bps(
-                funding_per_settlement=rate, hold_settlements=remaining,
-                round_trip_cost_frac=pos["round_trip_cost_frac"]),
+            # A stale funding quote cannot prove edge deterioration. Disable only
+            # this data-dependent exit; every safety-critical gate still runs.
+            net_edge_bps=(
+                f1_net_expected_edge_bps(
+                    funding_per_settlement=rate,
+                    hold_settlements=remaining,
+                    round_trip_cost_frac=pos["round_trip_cost_frac"],
+                )
+                if funding_fresh and rate is not None
+                else 0.0
+            ),
             settlements_held=pos["settlements_held"],
         )
         should_exit, why = carry_exit_signal(cs)
@@ -476,18 +897,9 @@ class CarryRunner:
     def _close(self, state, symbol, snap, now, exit_reason) -> None:
         pos = state["positions"].pop(f"{self.venue}:{symbol}")
         slip = self.slip_frac
-        spot_mid = (float(snap["spot_bid"]) + float(snap["spot_ask"])) / 2.0
-        spot_spread_bps = (float(snap["spot_ask"]) - float(snap["spot_bid"])) / spot_mid * 1e4
-        use_maker = (pos.get("execution_mode") == "maker_first"
-                     and spot_spread_bps >= F1_MAKER_MIN_SPREAD_BPS)
-        if use_maker:
-            spot_exit = spot_mid                                # rest spot at mid (maker)
-            perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: taker
-            spot_fee, perp_fee = self._fees_per_leg_frac(spot_liq="maker")
-        else:
-            spot_exit = float(snap["spot_bid"]) * (1.0 - slip)  # sell spot: hit bid
-            perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: pay up
-            spot_fee, perp_fee = self._fees_per_leg_frac()
+        spot_exit = float(snap["spot_bid"]) * (1.0 - slip)  # sell spot: hit bid
+        perp_exit = float(snap["perp_ask"]) * (1.0 + slip)  # buy perp back: pay up
+        spot_fee, perp_fee = self._fees_per_leg_frac()
         spot_pnl = (spot_exit - pos["spot_entry_px"]) * pos["spot_qty"]
         perp_pnl = (pos["perp_entry_px"] - perp_exit) * pos["perp_qty"]
         basis_pnl = spot_pnl + perp_pnl
@@ -495,6 +907,9 @@ class CarryRunner:
         fees = pos["entry_fees"] + exit_fees
         gross_funding = pos["funding_accrued"]
         self._book_cycle(state, {
+            "strategy_version": str(
+                pos.get("strategy_version") or "legacy_pre_correctness_v1"
+            ),
             "symbol": symbol, "venue": pos["venue"],
             "opened_ts": pos["opened_ts"], "resolved_ts": now,
             "notional": pos["notional"],
@@ -508,6 +923,7 @@ class CarryRunner:
 
     # ── cycle booking (state + warehouse + evidence registry) ──────────
     def _book_cycle(self, state, cyc: dict) -> None:
+        cyc.setdefault("strategy_version", F1_STRATEGY_VERSION)
         state["cycles"].append(cyc)
         if self.warehouse is not None:
             try:
@@ -519,14 +935,21 @@ class CarryRunner:
             try:
                 from core.decision.promotion_loop import register_evidence
 
-                resolved = [c for c in state["cycles"] if c["label_status"] == "RESOLVED"]
+                resolved = [
+                    c for c in state["cycles"]
+                    if c["label_status"] == "RESOLVED"
+                    and c.get("strategy_version") == F1_STRATEGY_VERSION
+                ]
                 register_evidence(
                     "F1",
                     oos_metrics={
+                        "strategy_version": F1_STRATEGY_VERSION,
                         "paper_cycles": len(resolved),
                         "paper_net_pnl": sum(c["net_pnl"] for c in resolved),
                         "failed_leg_events": sum(
-                            1 for c in state["cycles"] if c["label_status"] == "FAILED"),
+                            1 for c in state["cycles"]
+                            if c["label_status"] == "FAILED"
+                            and c.get("strategy_version") == F1_STRATEGY_VERSION),
                     },
                     promotion_status="lab_paper",
                     path=self.registry_path,
@@ -545,9 +968,21 @@ def _pf(nets: list[float]) -> float:
     return wins / losses if losses > 0 else float("inf") if wins > 0 else 0.0
 
 
-def promotion_checklist(cycles: list[dict], blocks: dict) -> dict:
+def promotion_checklist(
+    cycles: list[dict],
+    blocks: dict,
+    *,
+    strategy_version: str | None = None,
+) -> dict:
     """Rev-5 F1 promotion-gate checklist over the resolved cycle history."""
-    res = [c for c in cycles if c.get("label_status") == "RESOLVED"]
+    res = [
+        c for c in cycles
+        if c.get("label_status") == "RESOLVED"
+        and (
+            strategy_version is None
+            or c.get("strategy_version") == strategy_version
+        )
+    ]
     nets = [float(c["net_pnl"]) for c in res]
     total = sum(nets)
     n = len(res)
@@ -605,7 +1040,11 @@ def write_report(state: dict, *, out_dir: Path | str = "reports",
     cycles = state.get("cycles", [])
     res = [c for c in cycles if c.get("label_status") == "RESOLVED"]
     failed = [c for c in cycles if c.get("label_status") == "FAILED"]
-    chk = promotion_checklist(cycles, state.get("blocks", {}))
+    chk = promotion_checklist(
+        cycles,
+        state.get("blocks", {}),
+        strategy_version=F1_STRATEGY_VERSION,
+    )
     day = time.strftime("%Y%m%d", time.gmtime(float(now_fn())))
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)

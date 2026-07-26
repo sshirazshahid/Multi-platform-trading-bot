@@ -98,6 +98,7 @@ class NewsSentimentFeed:
         if now - self._raw_time > self._cache_ttl:
             self._raw_articles = self._fetch_articles()
             self._raw_time = now
+        source_backed = bool(self._raw_articles)
 
         result: dict[str, dict] = {}
 
@@ -183,7 +184,7 @@ class NewsSentimentFeed:
                 "veto_reason": veto_reason,
                 "positive_count": pos,
                 "negative_count": neg,
-                "stale": False,
+                "stale": not source_backed,
             }
 
         # Market-wide sentiment
@@ -200,7 +201,7 @@ class NewsSentimentFeed:
             "veto_reason": None,
             "positive_count": mkt_pos,
             "negative_count": mkt_neg,
-            "stale": False,
+            "stale": not source_backed,
         }
 
         self._cache = result

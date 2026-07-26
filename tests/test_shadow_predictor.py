@@ -24,6 +24,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+FEATURE_KEYS = [
+    "score", "layers_ok", "confidence", "sl_pct", "tp_pct",
+    "rsi_1h", "adx_1h", "adx_4h", "atr_pct_1h", "bb_width_4h",
+    "vol_ratio", "ema20_above_50_4h", "ema20_above_50_1h",
+    "funding_rate", "ob_imbalance",
+]
+
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
@@ -50,12 +57,12 @@ def _train_tiny_model(models_mod, tmp_path):
     """Fit a 15-feature LRModel on synthetic data, save to lr_v_latest.pkl."""
     rng = np.random.default_rng(0)
     n = 200
-    n_features = 15  # matches FEATURE_KEYS length
+    n_features = len(FEATURE_KEYS)
     X = rng.normal(0, 1, size=(n, n_features))
     y = (X[:, 0] + X[:, 1] > 0).astype(int)
     m = models_mod.LRModel().fit(X, y)
     out = tmp_path / "data" / "models" / "lr_v_latest.pkl"
-    m.save(out)
+    m.save(out, feature_keys=FEATURE_KEYS)
     return m, out
 
 
@@ -72,12 +79,7 @@ def test_predict_p_win_returns_float_when_model_loaded(env):
     sp_mod, wh_mod, models_mod, wh, tmp_path = env
     _train_tiny_model(models_mod, tmp_path)
     pred = sp_mod.ShadowPredictor()
-    feats = {k: 1.0 for k in [
-        "score", "layers_ok", "confidence", "sl_pct", "tp_pct",
-        "rsi_1h", "adx_1h", "adx_4h", "atr_pct_1h", "bb_width_4h",
-        "vol_ratio", "ema20_above_50_4h", "ema20_above_50_1h",
-        "funding_rate", "ob_imbalance",
-    ]}
+    feats = {k: 1.0 for k in FEATURE_KEYS}
     p = pred.predict_p_win(feats)
     assert p is not None
     assert 0.0 <= p <= 1.0

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from exchanges.base import BaseExchange, validate_ohlcv  # noqa: E402
+from exchanges.base import BaseExchange, closed_ohlcv, validate_ohlcv  # noqa: E402
 
 
 def _candles(n=5, tf_s=3600, end_s=None, vol=10.0):
@@ -90,6 +90,12 @@ def test_stale_series_rejected():
     assert validate_ohlcv(rows, "1h") == []
 
 
+def test_future_dated_series_rejected():
+    now = time.time()
+    rows = _candles(end_s=now + 10)
+    assert validate_ohlcv(rows, "1h", now_s=now) == []
+
+
 def test_recent_closed_bar_not_stale():
     # last candle open 1.5 timeframes ago = the just-closed bar — fine
     rows = _candles(end_s=time.time() - 1.5 * 3600)
@@ -102,6 +108,16 @@ def test_forming_bar_is_kept():
     rows = _candles()
     out = validate_ohlcv(rows, "1h")
     assert len(out) == len(rows)
+
+
+def test_closed_ohlcv_removes_forming_bar_without_mutating_input():
+    now = 1_800_000_000.0
+    rows = _candles(n=4, tf_s=3600, end_s=now)
+
+    out = closed_ohlcv(rows, "1h", now_s=now)
+
+    assert out == rows[:-1]
+    assert len(rows) == 4
 
 
 def test_unparseable_timeframe_skips_staleness_only():

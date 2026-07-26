@@ -6,7 +6,7 @@ added or reached WITHOUT a DRY_RUN gate, and each was caught in production
 conditions first, then point-tested after the fact:
   - 2026-05-31 bot_engine._replace_exchange_sl fired real cancel+SL on PAPER
   - 2026-06-03 _execute_open auto-transfer missed by the 05-31 sweep
-  - 2026-06-04 Bitget set_position_mode live POST at __init__
+  - 2026-06-04 Bitget set_position_mode live POST at __init__ (removed 2026-07-17)
   - 2026-06-05 arbitrage_engine._execute live branch gated only by ctor flag
 
 Those point guards live in test_paper_no_live_writes.py / test_arbitrage_dry_gate.py /
@@ -73,7 +73,6 @@ BASELINE = {
     "exchanges/binance_client.py::transfer": 1,
     "exchanges/bitget_client.py::create_order": 2,
     "exchanges/bitget_client.py::set_leverage": 2,
-    "exchanges/bitget_client.py::set_position_mode": 1,
     "exchanges/bitget_client.py::transfer": 1,
     "exchanges/bybit_client.py::cancel_all_orders": 1,
     "exchanges/bybit_client.py::create_order": 3,

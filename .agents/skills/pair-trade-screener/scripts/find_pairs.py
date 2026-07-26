@@ -52,11 +52,21 @@ from statsmodels.tsa.stattools import adfuller
 # =============================================================================
 
 
+# Shared FMP key resolver: explicit arg -> os.environ -> repo-root .env.
+_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SKILLS_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SKILLS_DIR))
+try:
+    from _shared_fmp_yahoo_patch import resolve_fmp_key
+except ImportError:  # pragma: no cover - path isolation in odd test layouts
+
+    def resolve_fmp_key(api_key=None):  # type: ignore[misc]
+        return api_key or os.getenv("FMP_API_KEY")
+
+
 def get_api_key(args_api_key):
-    """Get API key from args or environment variable"""
-    if args_api_key:
-        return args_api_key
-    api_key = os.environ.get("FMP_API_KEY")
+    """Get API key from args, environment variable, or repo-root .env"""
+    api_key = resolve_fmp_key(args_api_key)
     if not api_key:
         print("ERROR: FMP_API_KEY not found. Set environment variable or use --api-key")
         sys.exit(1)
@@ -64,19 +74,29 @@ def get_api_key(args_api_key):
 
 
 def fetch_sector_stocks(sector, api_key, min_market_cap=2_000_000_000):
-    """Fetch stocks in a sector from FMP API"""
+    """Fetch stocks in a sector from FMP stable company-screener API."""
     print(f"\n[1/5] Fetching {sector} sector stocks from FMP API...")
 
-    # Use stock screener to get sector stocks
-    url = "https://financialmodelingprep.com/api/v3/stock-screener"
+    # FMP retired legacy /api/v3/stock-screener for most plans (403 Legacy Endpoint).
+    # Stable company-screener requires a paid subscription (402 on free).
+    url = "https://financialmodelingprep.com/stable/company-screener"
     params = {
         "sector": sector,
-        "marketCapMoreThan": min_market_cap,
+        "marketCapMoreThan": int(min_market_cap),
         "limit": 1000,
+        "apikey": api_key,
     }
 
     try:
-        response = requests.get(url, params=params, headers={"apikey": api_key}, timeout=30)
+        response = requests.get(url, params=params, timeout=30)
+        if response.status_code == 402:
+            print(
+                "ERROR: Sector screener is not available on this FMP plan "
+                "(stable/company-screener returned 402).\n"
+                "  Use --symbols with an explicit ticker list instead, e.g.:\n"
+                "  --symbols AAPL,MSFT,GOOGL,META,NVDA,AVGO,ORCL,CRM,AMD,CSCO"
+            )
+            sys.exit(1)
         response.raise_for_status()
         data = response.json()
 
@@ -86,17 +106,18 @@ def fetch_sector_stocks(sector, api_key, min_market_cap=2_000_000_000):
             )
             sys.exit(1)
 
-        # Extract symbols and basic info
         stocks = []
         for item in data:
             if item.get("isActivelyTrading", True):
                 stocks.append(
                     {
                         "symbol": item["symbol"],
-                        "name": item.get("companyName", ""),
+                        "name": item.get("companyName", item.get("name", "")),
                         "marketCap": item.get("marketCap", 0),
                         "sector": item.get("sector", sector),
-                        "exchange": item.get("exchangeShortName", ""),
+                        "exchange": item.get(
+                            "exchangeShortName", item.get("exchange", "")
+                        ),
                     }
                 )
 
@@ -105,63 +126,118 @@ def fetch_sector_stocks(sector, api_key, min_market_cap=2_000_000_000):
 
     except requests.exceptions.RequestException as e:
         print(f"ERROR: Failed to fetch sector stocks: {e}")
+        print("  Tip: use --symbols if sector screening is plan-restricted.")
         sys.exit(1)
 
 
-def fetch_historical_prices(symbol, api_key, lookback_days=730):
-    """Fetch historical adjusted close prices for a symbol"""
-    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}"
+def fetch_historical_prices(symbol, api_key, lookback_days=730, *, mode="auto"):
+    """Fetch EOD closes via FMP stable endpoints (free-tier compatible).
 
-    try:
-        response = requests.get(url, headers={"apikey": api_key}, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+    ``mode``:
+      - ``"adj"`` — dividend-adjusted only (``adjClose``)
+      - ``"close"`` — unadjusted full EOD only (``close``)
+      - ``"auto"`` — try adj then close (single-symbol callers only).
 
-        if "historical" not in data:
-            return None
-
-        # Extract historical prices
-        historical = data["historical"][:lookback_days]
-        historical = historical[::-1]  # Reverse to chronological order
-
-        # Convert to pandas Series
-        prices = pd.Series(
-            [item["adjClose"] for item in historical],
-            index=[pd.to_datetime(item["date"]) for item in historical],
-            name=symbol,
+    Batch / pair callers MUST pass an explicit mode so every leg uses the
+    same adjustment convention (Bugbot: mixed adjClose/close corrupts hedge).
+    Returns ``(series, mode_used)`` or ``(None, None)``.
+    """
+    endpoints = []
+    if mode in ("auto", "adj"):
+        endpoints.append(
+            (
+                "adj",
+                "https://financialmodelingprep.com/stable/historical-price-eod/dividend-adjusted",
+                "adjClose",
+            )
+        )
+    if mode in ("auto", "close"):
+        endpoints.append(
+            (
+                "close",
+                "https://financialmodelingprep.com/stable/historical-price-eod/full",
+                "close",
+            )
         )
 
-        return prices
+    for used_mode, url, price_key in endpoints:
+        try:
+            response = requests.get(
+                url, params={"symbol": symbol, "apikey": api_key}, timeout=30
+            )
+            if response.status_code == 402:
+                continue
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, list) or not data:
+                continue
+            # Reject Error Message / garbage lists
+            sample = data[0]
+            if not isinstance(sample, dict) or "date" not in sample:
+                continue
+            if sample.get(price_key) is None:
+                continue
 
-    except requests.exceptions.RequestException:
-        return None
+            historical = data[:lookback_days][::-1]
+            prices = pd.Series(
+                [item[price_key] for item in historical],
+                index=[pd.to_datetime(item["date"]) for item in historical],
+                name=symbol,
+            )
+            return prices, used_mode
+        except (requests.exceptions.RequestException, KeyError, TypeError, ValueError):
+            continue
+
+    return None, None
 
 
 def fetch_price_data_batch(symbols, api_key, lookback_days=730):
-    """Fetch historical prices for multiple symbols"""
+    """Fetch historical prices for multiple symbols under ONE price mode.
+
+    Prefer dividend-adjusted for the whole universe; if any symbol cannot
+    get adj data, re-fetch the entire successful set with unadjusted close
+    so no pair mixes adjClose with close.
+    """
     print(f"\n[2/5] Fetching {lookback_days} days of price data for {len(symbols)} stocks...")
 
-    price_data = {}
-    failed_symbols = []
+    def _pull(mode):
+        out = {}
+        failed = []
+        for i, symbol in enumerate(symbols, 1):
+            print(
+                f"  [{i}/{len(symbols)}] Fetching {symbol} ({mode})...",
+                end="",
+                flush=True,
+            )
+            prices, used = fetch_historical_prices(
+                symbol, api_key, lookback_days, mode=mode
+            )
+            if prices is not None and len(prices) >= 250 and used == mode:
+                out[symbol] = prices
+                print(f" ✓ ({len(prices)} days)")
+            else:
+                failed.append(symbol)
+                print(" ✗ (insufficient data)")
+            time.sleep(0.55)
+        return out, failed
 
-    for i, symbol in enumerate(symbols, 1):
-        print(f"  [{i}/{len(symbols)}] Fetching {symbol}...", end="", flush=True)
+    price_data, failed_adj = _pull("adj")
+    if len(price_data) == len(symbols) and not failed_adj:
+        print(f"\n  → Successfully fetched {len(price_data)} stocks (dividend-adjusted)")
+        return price_data
 
-        prices = fetch_historical_prices(symbol, api_key, lookback_days)
+    if price_data and failed_adj:
+        print(
+            f"\n  → Adj incomplete ({len(failed_adj)} failed); "
+            "re-fetching ALL symbols with unadjusted close to keep series consistent"
+        )
+    elif not price_data:
+        print("\n  → Adj unavailable; fetching unadjusted close for all symbols")
 
-        if prices is not None and len(prices) >= 250:  # Require at least 250 days
-            price_data[symbol] = prices
-            print(f" ✓ ({len(prices)} days)")
-        else:
-            failed_symbols.append(symbol)
-            print(" ✗ (insufficient data)")
-
-        # Rate limiting
-        time.sleep(0.3)
-
-    print(f"\n  → Successfully fetched {len(price_data)} stocks")
-    if failed_symbols:
-        print(f"  → Failed: {', '.join(failed_symbols)}")
+    price_data, failed_close = _pull("close")
+    print(f"\n  → Successfully fetched {len(price_data)} stocks (unadjusted close)")
+    if failed_close:
+        print(f"  → Failed: {', '.join(failed_close)}")
 
     return price_data
 
@@ -316,14 +392,14 @@ def analyze_pair(symbol_a, symbol_b, prices_a, prices_b, min_correlation=0.70):
         "pair": f"{symbol_a}/{symbol_b}",
         "stock_a": symbol_a,
         "stock_b": symbol_b,
-        "correlation": round(correlation, 4),
-        "beta": round(beta, 4),
-        "cointegration_pvalue": round(coint_result["p_value"], 4),
-        "adf_statistic": round(coint_result["adf_statistic"], 4),
-        "critical_value_5pct": round(coint_result["critical_value_5pct"], 4),
-        "is_cointegrated": coint_result["is_cointegrated"],
-        "half_life_days": round(half_life, 1) if half_life else None,
-        "current_zscore": round(current_zscore, 2) if current_zscore else None,
+        "correlation": round(float(correlation), 4),
+        "beta": round(float(beta), 4),
+        "cointegration_pvalue": round(float(coint_result["p_value"]), 4),
+        "adf_statistic": round(float(coint_result["adf_statistic"]), 4),
+        "critical_value_5pct": round(float(coint_result["critical_value_5pct"]), 4),
+        "is_cointegrated": bool(coint_result["is_cointegrated"]),
+        "half_life_days": round(float(half_life), 1) if half_life is not None else None,
+        "current_zscore": round(float(current_zscore), 2) if current_zscore is not None else None,
         "signal": signal,
         "strength": strength,
         "timestamp": datetime.now().isoformat(),
@@ -342,6 +418,7 @@ def screen_all_pairs(price_data, min_correlation=0.70):
 
     pairs_analyzed = 0
     cointegrated_pairs = []
+    correlated_misses = []
 
     # Analyze all combinations
     for symbol_a, symbol_b in combinations(symbols, 2):
@@ -356,9 +433,24 @@ def screen_all_pairs(price_data, min_correlation=0.70):
 
         if result and result["is_cointegrated"]:
             cointegrated_pairs.append(result)
+        elif result:
+            correlated_misses.append(result)
 
     print(f"\n  → Found {len(cointegrated_pairs)} cointegrated pairs")
+    print(
+        f"  → Correlated but not cointegrated (ρ≥{min_correlation}): {len(correlated_misses)}"
+    )
+    if correlated_misses and not cointegrated_pairs:
+        top = sorted(correlated_misses, key=lambda x: x["cointegration_pvalue"])[:5]
+        print("  → Closest ADF p-values (not trade candidates):")
+        for row in top:
+            print(
+                f"     {row['pair']}: corr={row['correlation']:.3f} "
+                f"p={row['cointegration_pvalue']:.4f} z={row['current_zscore']}"
+            )
 
+    # Attach misses for optional JSON persistence by caller
+    screen_all_pairs.last_correlated_misses = correlated_misses
     return cointegrated_pairs
 
 
@@ -388,19 +480,36 @@ def rank_pairs(pairs):
 # =============================================================================
 
 
-def save_results(pairs, output_file):
+def save_results(pairs, output_file, correlated_misses=None):
     """Save results to JSON file"""
     print(f"\n[5/5] Saving results to {output_file}...")
 
-    output_data = {
-        "metadata": {
-            "generated_at": datetime.now().isoformat(),
-            "total_pairs": len(pairs),
-            "cointegrated_pairs": sum(1 for p in pairs if p["is_cointegrated"]),
-            "active_signals": sum(1 for p in pairs if p["signal"] != "NONE"),
-        },
-        "pairs": pairs,
-    }
+    def _jsonify(obj):
+        if isinstance(obj, dict):
+            return {k: _jsonify(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_jsonify(v) for v in obj]
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        return obj
+
+    output_data = _jsonify(
+        {
+            "metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "total_pairs": len(pairs),
+                "cointegrated_pairs": sum(1 for p in pairs if p["is_cointegrated"]),
+                "active_signals": sum(1 for p in pairs if p["signal"] != "NONE"),
+                "correlated_not_cointegrated": len(correlated_misses or []),
+            },
+            "pairs": pairs,
+            "correlated_not_cointegrated": correlated_misses or [],
+        }
+    )
 
     with open(output_file, "w") as f:
         json.dump(output_data, f, indent=2)
@@ -408,6 +517,8 @@ def save_results(pairs, output_file):
     print(f"  → Saved {len(pairs)} pairs to {output_file}")
     print(f"  → Cointegrated pairs: {output_data['metadata']['cointegrated_pairs']}")
     print(f"  → Active signals: {output_data['metadata']['active_signals']}")
+    if correlated_misses:
+        print(f"  → Correlated misses logged: {len(correlated_misses)}")
 
 
 def print_summary(pairs):
@@ -536,19 +647,25 @@ Examples:
 
     # Screen all pairs
     pairs = screen_all_pairs(price_data, args.min_correlation)
+    correlated_misses = getattr(screen_all_pairs, "last_correlated_misses", [])
 
     if not pairs:
         print("\nNo cointegrated pairs found. Try:")
         print("  - Lowering --min-correlation threshold")
         print("  - Expanding stock universe (--sector or --symbols)")
         print("  - Increasing --lookback-days")
+        if correlated_misses:
+            # Persist diagnostics so callers still get a report artifact
+            diag_path = args.output
+            save_results([], diag_path, correlated_misses=correlated_misses)
+            print(f"\nWrote correlation near-miss diagnostics to {diag_path}")
         sys.exit(0)
 
     # Rank pairs
     ranked_pairs = rank_pairs(pairs)
 
     # Save results
-    save_results(ranked_pairs, args.output)
+    save_results(ranked_pairs, args.output, correlated_misses=correlated_misses)
 
     # Print summary
     print_summary(ranked_pairs)
