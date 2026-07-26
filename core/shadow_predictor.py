@@ -42,6 +42,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 LATEST_MODEL = Path("data/models/lr_v_latest.pkl")
+MAX_SHADOW_MODEL_AGE_DAYS = 7
 
 
 def _safe_float(v) -> float:
@@ -73,7 +74,13 @@ class ShadowPredictor:
         self._model = None
         self._model_version: Optional[str] = None
         self._feature_keys: Optional[list[str]] = None
+        self._disabled_reason: Optional[str] = None
         self._load_attempted = False
+
+    @property
+    def disabled_reason(self) -> Optional[str]:
+        """Why prediction is inactive, or ``None`` after a successful load."""
+        return self._disabled_reason
 
     def _ensure_model(self) -> bool:
         """Lazy load the latest LR model. Returns True on success."""
@@ -83,40 +90,44 @@ class ShadowPredictor:
             return False
         self._load_attempted = True
         try:
-            from core.models import LRModel
-            self._model = LRModel.load(LATEST_MODEL)
-            # Phase 13.5b: read the actual model_version from the saved
-            # joblib payload (set by scripts/train_models). On Windows the
-            # symlink-stem fallback is "lr_v_latest" which loses the
-            # version metadata, so we read it from inside the artifact.
-            try:
-                import joblib
-                payload = joblib.load(LATEST_MODEL)
-                self._model_version = str(
-                    payload.get("model_version")
-                    or payload.get("version_name")
-                    or LATEST_MODEL.resolve().stem
-                )
-            except Exception:
-                try:
-                    self._model_version = LATEST_MODEL.resolve().stem
-                except Exception:
-                    self._model_version = LATEST_MODEL.stem
             try:
                 from scripts.train_models import FEATURE_KEYS
                 self._feature_keys = list(FEATURE_KEYS)
             except Exception as e:
-                logger.debug(f"[Shadow] feature_keys import failed: {e}")
+                self._disabled_reason = f"feature schema import failed: {e}"
+                logger.warning(f"[Shadow] disabled: {self._disabled_reason}")
                 return False
+
+            from core.models import LRModel
+            self._model = LRModel.load(
+                LATEST_MODEL,
+                expected_feature_keys=self._feature_keys,
+                max_age_days=MAX_SHADOW_MODEL_AGE_DAYS,
+            )
+            self._model_version = self._model.model_version_
+            if not self._model_version:
+                self._disabled_reason = "model manifest has no model_version"
+                self._model = None
+                logger.warning(f"[Shadow] disabled: {self._disabled_reason}")
+                return False
+            self._disabled_reason = None
             logger.info(
                 f"[Shadow] loaded LR model {self._model_version} "
                 f"({len(self._feature_keys)} features)")
             return True
         except FileNotFoundError:
-            logger.debug("[Shadow] no model artifact yet — predictor inactive")
+            self._disabled_reason = f"model artifact not found: {LATEST_MODEL}"
+            # WARNING, matching every sibling disable path above (2026-07-26).
+            # Nothing in the repo writes LATEST_MODEL, so this is the branch
+            # taken on every real boot: at DEBUG it hid the fact that the LR
+            # size multiplier has been pinned at a constant 1.0x.
+            logger.warning(f"[Shadow] disabled: {self._disabled_reason}")
             return False
         except Exception as e:
-            logger.warning(f"[Shadow] model load failed: {e}")
+            self._model = None
+            self._model_version = None
+            self._disabled_reason = str(e)
+            logger.warning(f"[Shadow] disabled: {self._disabled_reason}")
             return False
 
     def predict_p_win(self, features: dict) -> Optional[float]:

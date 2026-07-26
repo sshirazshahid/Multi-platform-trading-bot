@@ -224,6 +224,12 @@ MAX_ACTIONS_PER_CYCLE = CLAUDE_PORTFOLIO.get("max_actions_per_cycle", 4)
 from core.balance_utils import UNIFIED_EXCHANGES as _UNIFIED_EXCHANGES
 from core.balance_utils import deployable_total as _deployable_total
 
+# Wiring/skew failures — a missing symbol, a renamed attribute, a typo in a
+# lazily-imported path. These are never per-venue noise: they break the same
+# way on every call until someone ships a fix, so they must be loud wherever
+# a broad `except Exception` would otherwise swallow them (2026-07-26).
+_STRUCTURAL_ERRORS = (ImportError, AttributeError, NameError)
+
 
 def _boot_profile_log_lines() -> list:
     """One in-process boot log line per max-flow knob (2026-07-19 spec T5).
@@ -249,6 +255,9 @@ def _boot_profile_log_lines() -> list:
             PAPER_TRADING_PROFILE as _profile,
         )
         from config import (
+            SIGNAL_SOURCE as _sig,
+        )
+        from config import (
             SL_COOLDOWN_ENABLED as _sl_cd,
         )
     except Exception as exc:  # pragma: no cover — config import is load-bearing
@@ -257,7 +266,17 @@ def _boot_profile_log_lines() -> list:
     acc_on = bool(_acc.get("enabled"))
     frac_buy = _acc.get("tp_frac_buy") or _acc.get("tp_frac_of_sl")
     frac_sell = _acc.get("tp_frac_sell") or _acc.get("tp_frac_of_sl")
-    return [
+    try:
+        from config import BAND_REGIME_FILTER_ENABLED as _brf
+    except Exception:  # pragma: no cover
+        _brf = False
+    try:
+        from config import SMART_MONEY_ENTRY_GATE as _smg_cfg
+        _smg = bool(_smg_cfg.get("enabled"))
+    except Exception:  # pragma: no cover
+        _smg = False
+    lines = [
+        f"  SignalSrc : {_sig}",
         f"  Profile   : {_profile} (epoch={_epoch or 'n/a'})",
         f"  EntryFloor: MCP_ENTRY_MIN_SCORE={floor_txt}",
         f"  SLCooldown: {'enabled' if _sl_cd else 'DISABLED (sl_cooldown_disabled_by_profile)'}",
@@ -265,8 +284,48 @@ def _boot_profile_log_lines() -> list:
             f"  AccBand   : {'ON' if acc_on else 'OFF'}"
             + (f" (fracs buy={frac_buy}/sell={frac_sell})" if acc_on else "")
         ),
+        f"  BandRegime: {'ON (ADX>30 / BTC vol<0.7 veto)' if _brf else 'OFF'}",
+        (
+            f"  SmartMoney: {'ON (hard entry gate)' if _smg else 'OFF'}"
+        ),
         f"  EconGate  : mode={_egate.get('mode', 'strict')}",
     ]
+    # Statistical contract (2026-07-24 harden): AccBand shapes WR by geometry;
+    # dual-goal (band WR + profit) is CONFIRMED_NO_GO on the measured no-edge path.
+    if acc_on:
+        lines.append(
+            "  AccBandNote: WR geometry research only; dual-goal profit "
+            "CONFIRMED_NO_GO (screen 30_*); expectancy ~-0.24R class - not edge"
+        )
+    return lines
+
+
+def smart_money_entry_rejection(
+    side: str,
+    sm: dict | None,
+    *,
+    enabled: bool,
+    fail_open_stale: bool = True,
+) -> str:
+    """Pure gate for Approach-1 smart-money hard entry (2026-07-24).
+
+    Returns reject_reason or "" to allow. When ``enabled`` is False → "".
+    Missing/stale feed → "" if fail_open_stale else ``smart_money_feed_stale``.
+    buy requires smart_money_inflow; sell rejects while inflow is True.
+    """
+    if not enabled:
+        return ""
+    side = (side or "").lower()
+    if side not in ("buy", "sell"):
+        return "smart_money_invalid_side"
+    if not sm or sm.get("stale", True):
+        return "" if fail_open_stale else "smart_money_feed_stale"
+    inflow = bool(sm.get("smart_money_inflow", False))
+    if side == "buy" and not inflow:
+        return "smart_money_required_inflow"
+    if side == "sell" and inflow:
+        return "smart_money_block_short_while_inflow"
+    return ""
 
 
 class BotEngine:
@@ -718,6 +777,10 @@ class BotEngine:
             import config
             cfg = getattr(config, spec["config"])
             if not cfg.get("enabled"):
+                logger.info(
+                    f"[Engine] {spec['warn_label']} probe skipped "
+                    f"(config {spec['config']}.enabled=false)"
+                )
                 return []
             import importlib
             mod_name, cls_name = spec["import_path"].split(":")
@@ -3183,6 +3246,35 @@ class BotEngine:
             action["reject_reason"] = "live_latch_missing"
             return False
 
+        # ── SMART-MONEY HARD ENTRY (2026-07-24 Approach 1) ─────────────
+        # PAPER+MAX_FLOW_BAND only (config-gated). Fail-open on stale feed.
+        try:
+            from config import SMART_MONEY_ENTRY_GATE as _sm_gate
+            if _sm_gate.get("enabled"):
+                _base = symbol.split("/")[0].replace(":USDT", "") if symbol else ""
+                _sm = None
+                try:
+                    from core.data_coordinator import get_coordinator
+                    _coord = get_coordinator()
+                    if _coord is not None:
+                        _sm = _coord.get_market_context(_base).smart_money
+                except Exception:
+                    _sm = None
+                _sm_reason = smart_money_entry_rejection(
+                    side,
+                    _sm,
+                    enabled=True,
+                    fail_open_stale=bool(_sm_gate.get("fail_open_stale", True)),
+                )
+                if _sm_reason:
+                    logger.info(
+                        f"[SmartMoney] BLOCKED {ex_name}:{symbol} {side} — {_sm_reason}"
+                    )
+                    action["reject_reason"] = _sm_reason
+                    return False
+        except Exception as _sm_exc:
+            logger.debug(f"[SmartMoney] gate skipped on error: {_sm_exc}")
+
         # (C) Universe gate. In TRADING_MODE=all the discovery pipeline
         # (pair_discovery.discover_all_mode) feeds the scanner every liquid
         # USDT perp on each exchange, and the downstream gates (MCP score
@@ -4729,7 +4821,18 @@ class BotEngine:
         def _check_one(ex_name, exchange, mtype):
             try:
                 self.order_mgr.check_sl_tp(exchange, mtype)
+            except _STRUCTURAL_ERRORS as e:
+                # 2026-07-26: a consumer/producer skew (order_manager
+                # importing a name funding_history does not define) killed
+                # the entire paper SL/TP monitor tick and hid at DEBUG,
+                # which also disarmed the f.result() rail below — a bare
+                # `except Exception` means the future never holds one.
+                logger.error(f"[Engine] SL/TP check {ex_name}/{mtype} "
+                             f"STRUCTURAL {type(e).__name__}: {e}")
+                raise
             except Exception as e:
+                # Operational (venue timeout / transient API error): stay
+                # isolated and quiet so one venue cannot abort the others.
                 logger.debug(f"[Engine] SL/TP check {ex_name}/{mtype}: {e}")
 
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -4745,6 +4848,12 @@ class BotEngine:
         while not stop_event.is_set():
             try:
                 self._check_all_sl_tp()
+            except _STRUCTURAL_ERRORS as e:
+                # Loud, but NEVER re-raised here: this is the thread top
+                # level, so raising would kill the 10s monitor for the rest
+                # of the process lifetime.
+                logger.error(f"[Engine] SL/TP monitor STRUCTURAL "
+                             f"{type(e).__name__}: {e}")
             except Exception as e:
                 logger.debug(f"[Engine] SL/TP monitor: {e}")
             stop_event.wait(10)  # Check every 10 seconds
