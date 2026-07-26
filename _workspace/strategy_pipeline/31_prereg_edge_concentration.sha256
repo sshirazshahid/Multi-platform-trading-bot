@@ -1,0 +1,22 @@
+48a2bab1e287769e5e74f4dd360a626f876b08e03a3595db7aa6cff339f89bb1  _workspace/strategy_pipeline/31_prereg_edge_concentration.md
+
+# Digest convention (see section 16 of the pre-registration):
+#   SHA-256 over the file bytes from the first byte up to and including the
+#   sentinel line "<!-- SHA256-BODY-END -->", after normalising CRLF -> LF.
+#   The hash line and everything after the sentinel are excluded.
+#   CRLF->LF normalisation is required: this repo has core.autocrlf=true and no
+#   .gitattributes, so a fresh checkout rewrites the file with CRLF endings.
+#
+# Verify (repo root):
+#   venv/Scripts/python.exe -c "import hashlib; b=open('_workspace/strategy_pipeline/31_prereg_edge_concentration.md','rb').read().replace(b'\r\n', b'\n'); s=b'<!-- SHA256-BODY-END -->'; i=b.index(s)+len(s); print(hashlib.sha256(b[:i]).hexdigest())"
+#
+# Frozen 2026-07-26, BEFORE any outcome statistic was computed.
+# Subject: uniform-vs-concentrated test of the 0.031 OOS AUC excess
+#          (ensemble refit ens_futures_v1_20260725_171507, pooled OOS AUC 0.5305).
+# Registered expectation: UNIFORM / NO-GO for any filter.
+#
+# Hash lineage: supersedes draft digest
+#   c45cbaee9c054419b4034a56eba27eee73124b972a2e045d0463cfcf588f2d13
+# which was amended pre-outcome and pre-publication for clarification only
+# (2-cell partition degeneracy, LCB percentile pinning, two citation fixes).
+# No axis, cut, bucket, floor, threshold, statistic or decision rule changed.
