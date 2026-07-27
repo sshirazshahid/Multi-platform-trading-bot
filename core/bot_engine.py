@@ -7275,6 +7275,23 @@ def sample_clock_drift_ms(exchange) -> float | None:
         server_ms = float(server_ms or 0)
         if server_ms <= 0:
             return None
+        # 2026-07-27: the midpoint cancels latency only on a SYMMETRIC round
+        # trip, so every sample carries an inherent +/-(rtt/2) error bar. Worse,
+        # exchanges/base.py retries 3x with exponential backoff and t0/t1
+        # straddle that whole sequence, so a retried call yields an "offset"
+        # that is pure latency — a venue whose clock is perfect reads as
+        # +rtt/2. Discard the sample when that error bar alone exceeds the
+        # alert threshold: it cannot distinguish drift from slowness. None
+        # already means "no sample" everywhere and is never counted as drift.
+        # (Bitget alerted +1507ms on 07-22 and +684ms on 07-27 while the other
+        # two venues stayed under 50ms; a wrong LOCAL clock offsets every venue
+        # together, so those were latency artifacts, not clock drift.)
+        try:
+            from config import CLOCK_DRIFT_ALERT_MS as _thr
+        except ImportError:
+            _thr = 500
+        if (t1 - t0) / 2.0 > _thr:
+            return None
         return server_ms - ((t0 + t1) / 2.0)
     except Exception:
         return None

@@ -295,12 +295,26 @@ class HealthWatchdog:
             from config import CLOCK_DRIFT_ALERT_MS as _thr
         except ImportError:
             _thr = 500
+        # 2026-07-27: each sample is (venue_clock - local_clock), so a wrong
+        # LOCAL clock offsets every venue by the same amount. The SHAPE of the
+        # map therefore says where to look, and blaming w32tm for a single
+        # drifting venue sends the operator after something they cannot fix
+        # (the 2026-07-22 and 2026-07-27 bitget alerts did exactly that).
+        _sampled = [d for d in drift_map.values() if isinstance(d, (int, float))]
+        _bad = [d for d in _sampled if abs(d) > _thr]
+        if len(_sampled) < 2:
+            _hint = "check venue status and local NTP/w32tm sync"
+        elif len(_bad) == len(_sampled):
+            _hint = "every sampled venue drifted together — check local NTP/w32tm sync"
+        else:
+            _hint = ("other venues are in sync — suspect this venue or its "
+                     "network path, not the local clock")
         for ex_name, drift in drift_map.items():
             is_bad = isinstance(drift, (int, float)) and abs(drift) > _thr
             self._edge_alert(
                 f"clock_drift_{ex_name}", is_bad, "WARN",
                 (f"{ex_name} clock drift {drift:+.0f}ms exceeds {_thr}ms — "
-                 f"signed requests at risk; check NTP/w32tm sync"
+                 f"signed requests at risk; {_hint}"
                  if is_bad else ""),
                 {"exchange": ex_name,
                  "drift_ms": round(drift, 1) if is_bad else None,

@@ -72,6 +72,52 @@ def test_sample_none_when_no_raw_client():
     assert sample_clock_drift_ms(ex) is None
 
 
+def _ex_with_roundtrip(monkeypatch, *, rtt_sec, server_offset_ms):
+    """Fake venue with a CONTROLLED round-trip duration and true clock offset.
+
+    The sampler reads time.time() twice around fetch_time(), so advancing a
+    frozen clock inside fetch_time() simulates a slow call deterministically —
+    no sleeping, no flakiness.
+    """
+    import time as _t
+
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(_t, "time", lambda: clock["now"])
+
+    ex = MagicMock()
+
+    def _fetch_time():
+        clock["now"] += rtt_sec
+        return (clock["now"] * 1000.0) + server_offset_ms
+
+    ex.exchange.fetch_time.side_effect = _fetch_time
+    return ex
+
+
+def test_sample_discards_slow_roundtrip(monkeypatch):
+    """A PERFECTLY synced venue must not read as drift just because it was slow.
+
+    offset = server - (t0+t1)/2 only cancels latency on a SYMMETRIC round trip.
+    With a 2s round trip and server_offset 0 — i.e. the venue clock is exactly
+    right — the formula still returns +1000ms, which is pure latency. That is
+    the shape of the 2026-07-22 (+1507ms) and 2026-07-27 (+684ms) bitget alerts.
+    """
+    ex = _ex_with_roundtrip(monkeypatch, rtt_sec=2.0, server_offset_ms=0.0)
+    assert sample_clock_drift_ms(ex) is None, (
+        "a 2000ms round trip carries a +/-1000ms error bar, which exceeds the "
+        "500ms alert threshold — the sample cannot distinguish drift from "
+        "slowness and must be discarded, not reported as +1000ms of drift")
+
+
+def test_sample_keeps_fast_roundtrip(monkeypatch):
+    """Control: a fast call must still report genuine drift (no over-rejection)."""
+    ex = _ex_with_roundtrip(monkeypatch, rtt_sec=0.100, server_offset_ms=300.0)
+    drift = sample_clock_drift_ms(ex)
+    assert drift is not None
+    # 300ms of real offset + the 50ms midpoint artifact of a 100ms round trip.
+    assert abs(drift - 350.0) < 1.0
+
+
 # ── config flag ──────────────────────────────────────────────────────────────
 def test_config_threshold_exists_default_500():
     assert getattr(config, "CLOCK_DRIFT_ALERT_MS", None) == 500
@@ -100,6 +146,32 @@ def test_watchdog_alerts_on_drift_above_threshold():
     assert notifier.alert.call_count == 1
     msg = notifier.alert.call_args[0][0]
     assert "binance" in msg and "800" in msg
+
+
+def test_watchdog_single_venue_drift_does_not_blame_local_clock():
+    """One venue adrift while the others are fine is NOT a local clock error.
+
+    A wrong local clock shifts every venue's offset by the same amount, because
+    each sample is (venue_clock - local_clock). So when only bitget breaches,
+    telling the operator to resync w32tm sends them after something that cannot
+    be the cause — which is exactly what the 2026-07-27 +684ms alert did.
+    """
+    wd, notifier = _watchdog({"binance": 46.5, "bybit": 43.5, "bitget": 684.0})
+    wd._check_clock_drift()
+    assert notifier.alert.call_count == 1
+    msg = notifier.alert.call_args[0][0]
+    assert "bitget" in msg
+    assert "w32tm" not in msg, (
+        "single-venue drift must not be attributed to the local clock")
+
+
+def test_watchdog_all_venues_drift_blames_local_clock():
+    """Every sampled venue adrift together IS the local-clock signature."""
+    wd, notifier = _watchdog({"binance": 900.0, "bybit": 880.0, "bitget": 910.0})
+    wd._check_clock_drift()
+    assert notifier.alert.call_count == 3
+    msgs = " ".join(c[0][0] for c in notifier.alert.call_args_list)
+    assert "w32tm" in msgs
 
 
 def test_watchdog_silent_below_threshold():
