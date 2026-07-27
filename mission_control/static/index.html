@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mission Control</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <header class="hero">
+    <p class="brand">MISSION CONTROL</p>
+    <p class="status-line" id="status-line">loading…</p>
+    <div class="actions" id="primary-actions">
+      <button type="button" data-op="restart">Restart</button>
+      <button type="button" data-op="kill-on">Kill switch ON</button>
+      <button type="button" data-op="kill-off">Kill switch OFF</button>
+      <button type="button" data-op="clear-incident">Clear incident</button>
+      <button type="button" data-op="refresh">Refresh</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel" id="panel-mode">
+      <h2>Mode &amp; profile</h2>
+      <div class="row">
+        <label>Mode
+          <select id="mode-select">
+            <option value="PAPER">PAPER</option>
+            <option value="OBSERVATION">OBSERVATION</option>
+          </select>
+        </label>
+        <button type="button" data-op="set-mode">Apply mode</button>
+      </div>
+      <div class="row">
+        <label>Paper profile
+          <select id="profile-select">
+            <option value="STANDARD">STANDARD</option>
+            <option value="AGGRESSIVE_RESEARCH">AGGRESSIVE_RESEARCH</option>
+            <option value="MAX_FLOW_BAND">MAX_FLOW_BAND</option>
+          </select>
+        </label>
+        <button type="button" data-op="set-profile">Apply profile</button>
+      </div>
+      <p class="hint">Soft modes only via supervisor. CONTROLLED_LIVE uses the Gates panel.</p>
+    </section>
+
+    <section class="panel" id="panel-positions">
+      <h2>Positions</h2>
+      <pre id="positions-body">—</pre>
+    </section>
+
+    <section class="panel" id="panel-risk">
+      <h2>Risk / latch</h2>
+      <pre id="risk-body">—</pre>
+    </section>
+
+    <section class="panel" id="panel-funnel">
+      <h2>Probes / funnel</h2>
+      <div class="row">
+        <button type="button" data-op="run-funnel">Run funnel now</button>
+        <button type="button" data-op="run-goals">Run goal report</button>
+      </div>
+      <pre id="funnel-body">—</pre>
+    </section>
+
+    <section class="panel" id="panel-gates">
+      <h2>CONTROLLED_LIVE gates</h2>
+      <pre id="gates-body">—</pre>
+      <div class="row danger">
+        <button type="button" data-op="live-arm">Arm</button>
+        <button type="button" data-op="live-disarm">Disarm</button>
+        <button type="button" data-op="live-start">Start live</button>
+        <button type="button" data-op="live-stop">Stop live</button>
+      </div>
+      <p class="hint">Arm/start require a signed checklist and typed phrase ENABLE CONTROLLED LIVE. Checklist is never edited here.</p>
+    </section>
+
+    <section class="panel" id="panel-tasks">
+      <h2>Scheduled tasks</h2>
+      <div id="tasks-actions" class="row"></div>
+      <pre id="tasks-body">—</pre>
+    </section>
+
+    <section class="panel" id="panel-audit">
+      <h2>Audit log</h2>
+      <pre id="audit-body">—</pre>
+    </section>
+  </main>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog" id="confirm-form">
+      <h3 id="confirm-title">Confirm</h3>
+      <p id="confirm-desc"></p>
+      <label>Operator note
+        <input id="confirm-note" required autocomplete="off" />
+      </label>
+      <label id="confirm-phrase-wrap">Confirm phrase
+        <input id="confirm-phrase" autocomplete="off" />
+      </label>
+      <menu>
+        <button value="cancel" type="submit">Cancel</button>
+        <button id="confirm-ok" value="ok" type="submit">Execute</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="token-dialog">
+    <form method="dialog" id="token-form">
+      <h3>Mission Control token</h3>
+      <p>Enter MISSION_CONTROL_TOKEN (stored in sessionStorage only).</p>
+      <label>Token
+        <input id="token-input" type="password" required autocomplete="off" />
+      </label>
+      <menu>
+        <button value="ok" type="submit">Continue</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
