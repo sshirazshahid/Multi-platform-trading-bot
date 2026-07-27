@@ -4825,20 +4825,29 @@ class OrderManager:
             # any positive price >= 0. Skip the SL/TP trigger *only* when
             # invalid, but let age-limit + hard-max-loss enforcement continue
             # below so an unprotected position isn't immortal.
+            # 2026-07-27: the two triggers are gated INDEPENDENTLY. A literal
+            # take_profit=0.0 is a "no TP" SENTINEL (bot_engine.py:4385 tsmom
+            # entries; position_tracker.py:748 manual/reconcile imports), not
+            # corruption — conjoining the gates let that sentinel disable the
+            # position's real stop, leaving it on the 3% hard-max-loss gate
+            # alone. TP stays gated on _tp_ok, so the cascade guard is intact.
             _tp_ok = pos.take_profit is not None and float(pos.take_profit) > 0
             _sl_ok = effective_sl is not None and float(effective_sl) > 0
-            _sltp_valid = _tp_ok and _sl_ok
-            if not _sltp_valid:
+            if not _sl_ok:
                 logger.warning(
-                    f"[Orders] Invalid SL/TP for {pos.symbol} "
+                    f"[Orders] Invalid SL for {pos.symbol} "
                     f"(SL={effective_sl}, TP={pos.take_profit}) — "
                     f"skipping SL/TP trigger this cycle (age/hard-loss still active)")
+            elif not _tp_ok:
+                logger.debug(
+                    f"[Orders] No take-profit for {pos.symbol} "
+                    f"(TP={pos.take_profit}) — TP trigger inert, stop-loss active")
 
             # Skip direct SL/TP price-trigger checks when the exchange
             # holds both conditionals — the exchange fires them on its own.
             # All OTHER monitoring (trailing, age limit, hard max loss,
             # entry invalidation) still runs above and below this block.
-            if _sltp_valid and not _exchange_handles_sltp and pos.side == "buy":
+            if _sl_ok and not _exchange_handles_sltp and pos.side == "buy":
                 if price <= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED. SL hit = close.
                     # No widening, no MCP hold consultation. Discipline > hope.
@@ -4848,7 +4857,7 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif self._target_traded_through(pos, price):
+                elif _tp_ok and self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED — always close at TP.
                     # The old "MCP says RIDE" gate collapsed R:R from 2.5:1 to 1.12:1
                     # by letting winning positions ride past TP, only to retrace and
@@ -4869,7 +4878,7 @@ class OrderManager:
                 # retrace case, and MCP advice now only applies to exits below
                 # the planned TP line (loss-cut / breakeven).
 
-            elif _sltp_valid and not _exchange_handles_sltp and pos.side == "sell":
+            elif _sl_ok and not _exchange_handles_sltp and pos.side == "sell":
                 if price >= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED for shorts too.
                     logger.warning(
@@ -4878,7 +4887,7 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif self._target_traded_through(pos, price):
+                elif _tp_ok and self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED for shorts too.
                     _, net_pct, _ = self._net_pnl_at_price(pos, price)
                     logger.info(
