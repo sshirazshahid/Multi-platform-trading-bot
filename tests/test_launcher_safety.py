@@ -308,6 +308,78 @@ def test_worker_environment_overrides_inherited_live_mode(tmp_path):
     assert child_env["PRESERVE_ME"] == "yes"
 
 
+def test_worker_environment_pins_research_knobs_from_dotenv(tmp_path):
+    """Stale inherited values must not override .env research knobs."""
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text(
+        "OPERATING_MODE=PAPER\n"
+        "PAPER_TRADING_PROFILE=MAX_FLOW_BAND\n"
+        "ENTRY_POLICY=APPROVED_PAPER\n"
+        "APPROVED_PAPER_STRATEGIES=F1\n"
+        "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE=paper_fallback\n"
+        "MCP_ENTRY_MIN_SCORE=66\n"
+        "ACCURACY_TARGET_MODE=true\n"
+        "BAND_REGIME_FILTER_ENABLED=true\n"
+        "SCALP_MODE_ENABLED=false\n"
+        "UNIVERSE_FLOW_LOOSEN_V1=true\n"
+        "SHADOW_PULLBACK_PROBE_ENABLED=false\n"
+        "BROAD_UNIVERSE_ABS_MOVE_USDT_MIN=5\n"
+        "BROAD_UNIVERSE_ABS_MOVE_USDT_MAX=200\n"
+        "BROAD_UNIVERSE_PREFER_ABS_USDT_RANK=true\n",
+        encoding="utf-8",
+    )
+    child = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={
+            "OPERATING_MODE": "PAPER",
+            # Stale A1 drift: inherited AGGRESSIVE_RESEARCH must lose to .env.
+            "PAPER_TRADING_PROFILE": "AGGRESSIVE_RESEARCH",
+            "ENTRY_POLICY": "SHADOW_ONLY",
+            "APPROVED_PAPER_STRATEGIES": "F1,mcp_registry,algo_det",
+            "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE": "strict",
+            "MCP_ENTRY_MIN_SCORE": "50",
+            "ACCURACY_TARGET_MODE": "false",
+            "BAND_REGIME_FILTER_ENABLED": "false",
+            "SCALP_MODE_ENABLED": "true",
+            "UNIVERSE_FLOW_LOOSEN_V1": "false",
+            "SHADOW_PULLBACK_PROBE_ENABLED": "true",
+            "BROAD_UNIVERSE_ABS_MOVE_USDT_MIN": "0",
+            "BROAD_UNIVERSE_ABS_MOVE_USDT_MAX": "999999",
+            "BROAD_UNIVERSE_PREFER_ABS_USDT_RANK": "false",
+        },
+    )
+    assert child["PAPER_TRADING_PROFILE"] == "MAX_FLOW_BAND"
+    assert child["ENTRY_POLICY"] == "APPROVED_PAPER"
+    assert child["APPROVED_PAPER_STRATEGIES"] == "F1"
+    assert child["MCP_DIRECTIONAL_ECONOMIC_GATE_MODE"] == "paper_fallback"
+    assert child["MCP_ENTRY_MIN_SCORE"] == "66"
+    assert child["ACCURACY_TARGET_MODE"] == "true"
+    assert child["BAND_REGIME_FILTER_ENABLED"] == "true"
+    assert child["SCALP_MODE_ENABLED"] == "false"
+    assert child["UNIVERSE_FLOW_LOOSEN_V1"] == "true"
+    assert child["SHADOW_PULLBACK_PROBE_ENABLED"] == "false"
+    assert child["BROAD_UNIVERSE_ABS_MOVE_USDT_MIN"] == "5"
+    assert child["BROAD_UNIVERSE_ABS_MOVE_USDT_MAX"] == "200"
+    assert child["BROAD_UNIVERSE_PREFER_ABS_USDT_RANK"] == "true"
+
+
+def test_worker_environment_coerces_pinned_research_profile_under_observation(tmp_path):
+    """Pin from .env must not leave MAX_FLOW_BAND active under OBSERVATION."""
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text(
+        "OPERATING_MODE=OBSERVATION\nPAPER_TRADING_PROFILE=MAX_FLOW_BAND\n",
+        encoding="utf-8",
+    )
+    obs = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={"PAPER_TRADING_PROFILE": "AGGRESSIVE_RESEARCH"},
+    )
+    assert obs["OPERATING_MODE"] == "OBSERVATION"
+    assert obs["PAPER_TRADING_PROFILE"] == "STANDARD"
+
+
 def test_worker_environment_accepts_aggressive_profile_only_in_paper(tmp_path):
     from scripts import launcher_supervisor
 

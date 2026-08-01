@@ -194,13 +194,17 @@ def _apply_accuracy_target(sl_pct: float, tp_pct: float, side: str = None) -> fl
         if frac <= 0 or frac >= 1.0:
             return tp_pct  # cannot form inverted band shape
         raw = sl_pct * frac
-        floor = float(_acc.get("min_tp_pct", 0.5))
-        tp = max(floor, raw)
+        # Binding cost clearance (2026-07-29): must clear stressed round-trip
+        # (~31.5bps under paper_fallback defaults) or economic_gate_stressed_
+        # breakeven starves AccBand OPENs. Prefer geometry hit-rate over the
+        # legacy min_tp_pct=0.5 inflate — clearance is the only soft floor.
+        cost_clearance = float(_acc.get("min_tp_cost_pct", 0.35))
+        tp = max(raw, cost_clearance)
         # Cost floor must NEVER put TP >= SL: that collapses theoretical WR
         # to ≤50% and breaks restart band detection (tp_frac < sl_frac).
         # Warehouse 2026-07-24: SL≈0.48% + min_tp=0.5% → measured TP/SL≈1.0
         # and daily WR≈37% instead of the 63-67% geometry band. Prefer the
-        # frac-compressed TP (may sit below min_tp_pct); stressed-cost entry
+        # frac-compressed TP (may sit below clearance); stressed-cost entry
         # gate still refuses hopeless brackets.
         if tp >= sl_pct:
             if raw > 0 and raw < sl_pct:
@@ -228,6 +232,86 @@ def _entry_score_floor(is_scalp: bool = False, scalp_mode: dict = None) -> float
     if is_scalp:
         return float((scalp_mode or {}).get("entry_threshold", 65))
     return 66.0
+
+
+def _format_scalp_rule_skip_reason(result: dict, *, floor: float) -> str:
+    """Stable family-prefixed skip reason when the scalp rule gate fails.
+
+    When all 4 required conditions pass but score < floor, mcp historically
+    wrote a bare ``vwap_near=… | rsi=…`` string — Mission Control could not
+    family-aggregate those (~25% of 6h SKIPs on 2026-07-30). Prefix them as
+    ``scalp_score_below_floor``; leave veto/req_fail/scope reasons intact.
+    """
+    raw = str(result.get("reason") or "gate_fail").strip() or "gate_fail"
+    if (
+        raw.startswith("scalp_veto:")
+        or raw.startswith("scalp_req_fail")
+        or raw.startswith("analysis_only_")
+        or raw.startswith("scalp_score_below_floor")
+    ):
+        return raw
+    try:
+        score = float(result.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    if score > 0:
+        return f"scalp_score_below_floor({score:.0f}<{floor:.0f}):{raw}"
+    return raw
+
+
+def _accband_tradfi_scope_reason(base: str) -> str | None:
+    """Skip ANALYSIS_ONLY bases in the directional decision funnel.
+
+    Does not flip global ANALYSIS_ONLY_ENFORCED — only keeps tokenized
+    equities/commodities out of the decision-funnel ALLOW count
+    (2026-07-30: all 27/7943 ALLOWs in a 6h window were MSFT).
+
+    2026-07-31: this was originally gated on ACCURACY_TARGET_MODE.enabled, which
+    is False on the live bot — so the guard returned None for every base and the
+    leak reopened: 18 of 41 ALLOWs in one hour were META/USDT. The rationale for
+    the exclusion (no screened edge, pollutes allow-rate) has nothing to do with
+    the exit geometry, so it must not depend on it. The reason string keeps its
+    original spelling because Mission Control and the warehouse already index it.
+    """
+    try:
+        from config import ANALYSIS_ONLY_BASES
+    except ImportError:
+        return None
+    b = str(base or "").upper().split("/")[0]
+    if b in ANALYSIS_ONLY_BASES:
+        return "analysis_only_accband_scope"
+    return None
+
+
+def _max_flow_scalp_fallback_enabled(
+    operating_mode: str | None = None,
+    paper_profile: str | None = None,
+) -> bool:
+    """PAPER + MAX_FLOW_BAND: allow standard scorer after scalp quiet/ranging.
+
+    2026-08-01 drought: SCALP_MODE ATR veto zeroed the AccBand allow funnel
+    (0/2430 ALLOW). Literature treats this as a regime switch (scalp off →
+    swing/standard on), not an invitation to loosen SCALP_MIN_ATR without a
+    hashed prereg. Defaults read live config when args omitted.
+    """
+    try:
+        import config as _cfg
+        mode = operating_mode if operating_mode is not None else getattr(
+            _cfg, "OPERATING_MODE", ""
+        )
+        profile = paper_profile if paper_profile is not None else getattr(
+            _cfg, "PAPER_TRADING_PROFILE", ""
+        )
+    except ImportError:
+        mode = operating_mode or ""
+        profile = paper_profile or ""
+    return str(mode).upper() == "PAPER" and str(profile).upper() == "MAX_FLOW_BAND"
+
+
+_SCALP_FALLBACK_VETO_PREFIXES = (
+    "scalp_veto:quiet",
+    "scalp_veto:ranging",
+)
 
 
 def _http_get(url: str, timeout: int = FETCH_TIMEOUT, headers: dict = None):
@@ -370,13 +454,18 @@ def fetch_coingecko(coins: list) -> dict:
 
 def _classify_news_sentiment(title: str) -> str:
     tl = title.lower()
+    # Kept aligned with core/news_scanner POSITIVE/NEGATIVE_WORDS (substring match).
     pos_words = ("bull", "surge", "rally", "soar", "jump", "gain",
                  "high", "break", "pump", "moon", "ath", "record",
-                 "buy", "strong", "upbeat", "optimis", "boost", "grow")
+                 "buy", "strong", "upbeat", "optimis", "boost", "grow",
+                 "inflow", "approval", "approve", "adoption", "partnership",
+                 "rebound", "outperform", "milestone", "institutional")
     neg_words = ("crash", "bear", "dump", "plunge", "fall", "drop",
                  "low", "fear", "hack", "exploit", "ban", "fraud",
                  "liquidat", "bankrupt", "sec ", "lawsuit", "sell",
-                 "weak", "pessimis", "slump", "tank", "warn")
+                 "weak", "pessimis", "slump", "tank", "warn",
+                 "outflow", "delist", "insolvent", "default", "indictment",
+                 "seize", "rug", "scam", "probe")
     pos_count = sum(1 for w in pos_words if w in tl)
     neg_count = sum(1 for w in neg_words if w in tl)
     if pos_count > neg_count:
@@ -387,8 +476,46 @@ def _classify_news_sentiment(title: str) -> str:
 
 
 def fetch_news() -> list:
-    """Fetch crypto news. Tries CoinGecko status/trending, then CryptoCompare."""
+    """Fetch crypto news. Prefer NewsScanner RSS cache, then live fallbacks."""
     results = []
+
+    # Source 0: unified RSS cache written by core/news_scanner.py (preferred).
+    try:
+        cache_path = Path("data/news_cache.json")
+        if cache_path.exists():
+            raw = json.loads(cache_path.read_text(encoding="utf-8"))
+            fetched_raw = raw.get("fetched_at")
+            age_ok = False
+            if fetched_raw:
+                try:
+                    dt = datetime.fromisoformat(str(fetched_raw).replace("Z", "+00:00"))
+                    age_ok = (time.time() - dt.timestamp()) <= 7200  # 2h
+                except (TypeError, ValueError):
+                    age_ok = False
+            if age_ok:
+                for a in (raw.get("news") or [])[:20]:
+                    title = (a.get("title") or "")[:140]
+                    if not title:
+                        continue
+                    score = a.get("sentiment", 0)
+                    if isinstance(score, (int, float)) and score != 0:
+                        sentiment = "positive" if score > 0 else "negative"
+                    else:
+                        sentiment = _classify_news_sentiment(title)
+                    results.append({
+                        "title": title,
+                        "category": a.get("categories") or a.get("impact") or "",
+                        "source": a.get("source") or "NewsScanner",
+                        "sentiment": sentiment,
+                        "timestamp": 0,
+                        "impact": a.get("impact") or "LOW",
+                        "breaking": bool(a.get("breaking")),
+                    })
+    except Exception:
+        pass
+
+    if results:
+        return results
 
     # Source A: CoinGecko trending (always free, no key)
     try:
@@ -411,7 +538,7 @@ def fetch_news() -> list:
     except Exception:
         pass
 
-    # Source B: CryptoCompare (free tier: 100k calls/month, ~2.3/min)
+    # Source B: CryptoCompare (often empty/key-gated — last network fallback)
     try:
         cc_key = os.getenv("CRYPTOCOMPARE_API_KEY", "").strip()
         cc_url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest"
@@ -436,7 +563,7 @@ def fetch_news() -> list:
     if results:
         return results
 
-    logger.debug("[MCP-Data] No news sources returned data")
+    logger.info("[MCP-Data] No news sources returned data (scanner cache + live fallbacks empty)")
     return []
 
 
@@ -3683,6 +3810,39 @@ class MCPBrain:
             "_scalp": True,
         }
 
+    def _route_score_coin(self, coin: str, data: dict, ei: dict) -> dict:
+        """Route to scalp or standard scorer; AccBand quiet fall-through.
+
+        When SCALP_MODE is enabled and the scalp path returns a protective
+        quiet/ranging veto, PAPER+MAX_FLOW_BAND falls through to
+        ``_score_coin`` so AccBand research is not starved by scalp ATR
+        gates. Does not loosen ``SCALP_MIN_ATR`` (hashed-prereg required).
+        """
+        try:
+            from config import SCALP_MODE as _SM_route
+        except ImportError:
+            _SM_route = {"enabled": False}
+        if not _SM_route.get("enabled", False) or not hasattr(
+            self, "_score_coin_scalp"
+        ):
+            return self._score_coin(coin, data, ei)
+
+        result = self._score_coin_scalp(coin, data, ei)
+        reason = str(result.get("reason") or "")
+        if not any(reason.startswith(p) for p in _SCALP_FALLBACK_VETO_PREFIXES):
+            return result
+        if not _max_flow_scalp_fallback_enabled():
+            return result
+
+        std = dict(self._score_coin(coin, data, ei) or {})
+        std["_scalp"] = False
+        std["_scalp_fallback"] = reason
+        prior = str(std.get("reason") or "").strip()
+        std["reason"] = (
+            f"scalp_fallback({reason})|{prior}" if prior else f"scalp_fallback({reason})"
+        )
+        return std
+
     def _algorithmic_portfolio(self, coins, data, exchange_indicators,
                                 open_positions, exchange_balances,
                                 risk_envelope) -> list:
@@ -3727,15 +3887,24 @@ class MCPBrain:
             ei = exchange_indicators.get(coin, {})
             if not ei:
                 continue  # No indicator data
-            # Scalp mode routing (v4)
-            try:
-                from config import SCALP_MODE as _SM_route
-            except ImportError:
-                _SM_route = {"enabled": False}
-            if _SM_route.get("enabled", False) and hasattr(self, '_score_coin_scalp'):
-                result = self._score_coin_scalp(coin, data, ei)
+            # AccBand PAPER funnel: do not ALLOW ANALYSIS_ONLY TradFi bases
+            # (MSFT/NVDA/…) — they pollute allow-rate without a screened edge.
+            _scope = _accband_tradfi_scope_reason(coin)
+            if _scope:
+                result = {
+                    "score": 0,
+                    "layers_ok": 0,
+                    "side": "buy",
+                    "sl_pct": 0.0,
+                    "tp_pct": 0.0,
+                    "confidence": 0.0,
+                    "reason": _scope,
+                    "_scalp": True,
+                }
             else:
-                result = self._score_coin(coin, data, ei)
+                # Scalp mode routing (v4) + quiet/ranging fall-through under
+                # PAPER+MAX_FLOW_BAND (2026-08-01 drought regression).
+                result = self._route_score_coin(coin, data, ei)
 
             # ── Calibrated p_win blend (Phase 6) ─────────────────────
             # Build the model-input feature dict from the snapshot keys the
@@ -3799,7 +3968,17 @@ class MCPBrain:
             gate_pass = rule_gate and model_pass
             decision = "ALLOW" if gate_pass else "SKIP"
             if not rule_gate:
-                skip_reason = result.get("reason") or "gate_fail"
+                if result.get("_scalp"):
+                    try:
+                        from config import SCALP_MODE as _SM_floor
+                    except ImportError:
+                        _SM_floor = {}
+                    _floor = _entry_score_floor(True, _SM_floor)
+                    skip_reason = _format_scalp_rule_skip_reason(
+                        result, floor=_floor
+                    )
+                else:
+                    skip_reason = result.get("reason") or "gate_fail"
             elif not model_pass:
                 skip_reason = (
                     f"model_gate(p_ens={result['p_win_ensemble']:.3f}<"

@@ -119,9 +119,14 @@ def _safe_worker_env(
     mode = _launcher_mode(root)
     if mode not in SAFE_MODES:
         raise RuntimeError(f"refusing worker environment for unsafe mode {mode!r}")
+    file_env = _read_env(root / ".env")
     child_env = dict(os.environ if environ is None else environ)
+    # .env is the single activation surface for profile (schtask must stay
+    # flag-less). Prefer file over inherited env so a stale parent
+    # AGGRESSIVE_RESEARCH cannot silently disable MAX_FLOW_BAND knobs.
     profile = normalize_paper_profile(
-        child_env.get("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
+        file_env.get("PAPER_TRADING_PROFILE")
+        or child_env.get("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
     )
     # Mirror config.py: research profiles are PAPER-only. Coerce under
     # OBSERVATION so set-mode can flip OPERATING_MODE without rewriting
@@ -131,6 +136,35 @@ def _safe_worker_env(
     child_env["OPERATING_MODE"] = mode
     child_env["CONTROLLED_LIVE_ENABLED"] = "false"
     child_env["DRY_RUN"] = "true"
+    child_env["PAPER_TRADING_PROFILE"] = profile
+    # Pin critical research knobs from .env so stale inherited values cannot
+    # silently override the owner's intent (dotenv never overrides inherited).
+    _PIN_KEYS = (
+        "PAPER_TRADING_PROFILE",
+        "ENTRY_POLICY",
+        "APPROVED_PAPER_STRATEGIES",
+        "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE",
+        "MCP_ENTRY_MIN_SCORE",
+        "ACCURACY_TARGET_MODE",
+        "BAND_REGIME_FILTER_ENABLED",
+        "SCALP_MODE_ENABLED",
+        "UNIVERSE_FLOW_LOOSEN_V1",
+        "SHADOW_PULLBACK_PROBE_ENABLED",
+        "BROAD_UNIVERSE_ABS_MOVE_USDT_MIN",
+        "BROAD_UNIVERSE_ABS_MOVE_USDT_MAX",
+        "BROAD_UNIVERSE_PREFER_ABS_USDT_RANK",
+    )
+    for key in _PIN_KEYS:
+        val = file_env.get(key)
+        if val is not None:
+            child_env[key] = val
+    # Re-coerce after pin: .env may still list MAX_FLOW_BAND while mode is
+    # OBSERVATION; research profiles remain PAPER-only.
+    profile = normalize_paper_profile(
+        child_env.get("PAPER_TRADING_PROFILE", STANDARD_PAPER_PROFILE)
+    )
+    if mode != "PAPER" and profile != STANDARD_PAPER_PROFILE:
+        profile = STANDARD_PAPER_PROFILE
     child_env["PAPER_TRADING_PROFILE"] = profile
     return child_env
 
