@@ -423,6 +423,16 @@ BROAD_UNIVERSE_MONITOR = {
     "max_contracts_per_venue": int(os.getenv(
         "BROAD_UNIVERSE_MAX_CONTRACTS_PER_VENUE", "5000"
     )),
+    # Absolute USDT move band (2026-07-30 owner deep-research): mid-priced
+    # coins moving ~$5–$200 over 1h/24h/7d. 0 / blank = no band filter.
+    "abs_move_usdt_min": float(os.getenv("BROAD_UNIVERSE_ABS_MOVE_USDT_MIN", "5")),
+    "abs_move_usdt_max": float(os.getenv("BROAD_UNIVERSE_ABS_MOVE_USDT_MAX", "200")),
+    "prefer_abs_usdt_rank": os.getenv(
+        "BROAD_UNIVERSE_PREFER_ABS_USDT_RANK", "true"
+    ).lower() == "true",
+    "prefer_crypto_shortlist": os.getenv(
+        "BROAD_UNIVERSE_PREFER_CRYPTO_SHORTLIST", "true"
+    ).lower() == "true",
 }
 
 # ── Listing-short shadow probe (pipeline rev3 CONFIRMED_GO, 2026-07-09) ──────
@@ -608,6 +618,11 @@ ACCURACY_TARGET_MODE = {
     "tp_frac_buy": float(os.getenv("ACCURACY_TP_FRAC_BUY", "0")) or None,
     "tp_frac_sell": float(os.getenv("ACCURACY_TP_FRAC_SELL", "0")) or None,
     "min_tp_pct": float(os.getenv("ACCURACY_MIN_TP_PCT", "0.5")),
+    # Soft clearance under min_tp_pct (2026-07-29): must clear stressed
+    # round-trip (~31.5bps paper_fallback default) so AccBand brackets are
+    # not systematically refused by economic_gate_stressed_breakeven.
+    # Override via ACCURACY_MIN_TP_COST_PCT.
+    "min_tp_cost_pct": float(os.getenv("ACCURACY_MIN_TP_COST_PCT", "0.35")),
     # Band time-exit horizon (2026-07-10 leak fix): the band's 63-67% WR was
     # audited on pure first-touch SL/TP with a 72h horizon, but the Phase-14
     # era STALE/AGE_LIMIT cutoffs (~60min-4h) were closing band trades BEFORE
@@ -943,6 +958,16 @@ TRADING_PAIRS = {
 }
 
 UNIVERSE_WHITELIST = set(_TOP_SPOT) | set(_TOP_FUTURES)
+
+# Dual-model pair adjudication FIT_BAND_PAPER bases (2026-07-22 dossier 18_*).
+# Soft OPEN priority only under PAPER research — not a promotion claim.
+FIT_BAND_PAPER_BASES = frozenset(
+    b.strip().upper()
+    for b in os.getenv(
+        "FIT_BAND_PAPER_BASES", "ALGO,ARB,AVAX,ETH,LINK"
+    ).split(",")
+    if b.strip()
+)
 
 
 MEME_COINS = {"DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "TURBO", "LOOM"}
@@ -1844,6 +1869,30 @@ MIN_TREND_EFFICIENCY = float(os.getenv("MIN_TREND_EFFICIENCY", "0.20"))
 if not 0.0 <= MIN_TREND_EFFICIENCY <= 1.0:
     raise ValueError(f"MIN_TREND_EFFICIENCY must be in [0,1], got {MIN_TREND_EFFICIENCY}")
 
+# 2026-07-27 — Universe Flow Loosen V1 (Approach 1 / hybrid bar).
+# Mild temporary PAPER flow loosen for UniverseFilter only. Band regime +
+# economic gate stay untouched. After 7 days run
+# scripts/review_universe_flow_loosen.py → KEEP or REVERT.
+# Spec: docs/superpowers/specs/2026-07-27-universe-flow-loosen-design.md
+UNIVERSE_FLOW_LOOSEN_V1 = (
+    os.getenv("UNIVERSE_FLOW_LOOSEN_V1", "false").lower() in {"1", "true", "yes"}
+)
+UNIVERSE_FLOW_LOOSEN = {
+    "enabled": UNIVERSE_FLOW_LOOSEN_V1,
+    "max_spread_pct": float(os.getenv("UNIVERSE_LOOSEN_MAX_SPREAD_PCT", "0.0075")),
+    "min_depth_usd": float(os.getenv("UNIVERSE_LOOSEN_MIN_DEPTH_USD", "1200")),
+    "min_range_of_change": float(
+        os.getenv("UNIVERSE_LOOSEN_MIN_RANGE_OF_CHANGE", "0.015")
+    ),
+    "min_trend_efficiency": float(
+        os.getenv("UNIVERSE_LOOSEN_MIN_TREND_EFFICIENCY", "0.12")
+    ),
+    "review_after_days": float(os.getenv("UNIVERSE_FLOW_LOOSEN_REVIEW_DAYS", "7")),
+    "cohort_path": os.getenv(
+        "UNIVERSE_FLOW_LOOSEN_COHORT_PATH", "data/universe_flow_loosen_cohort.json"
+    ),
+}
+
 # 2026-05-24 — Kill switch for the 2026-05-22 throughput-raise stack.
 # Default ON. Flip to false via env to revert: drops SCALP tier, restores
 # the pre-UNBLOCK_ALL blacklist + hour gates, and disables the mcp_brain
@@ -2396,6 +2445,19 @@ NEWS = {
     "max_headlines": 50,  # Max headlines to keep per scan
     "breaking_news_alert": True,  # Log breaking news at WARNING level
     "sentiment_history_days": 7,  # Days of per-coin sentiment history to keep
+    # X/Twitter curated accounts (2026-07-28): advisory headlines only.
+    # Official path needs X_BEARER_TOKEN or TWITTER_BEARER_TOKEN; RSSHub
+    # fallback is best-effort when TWITTER_RSS_FALLBACK=true (default).
+    "twitter_enabled": os.getenv("TWITTER_NEWS_ENABLED", "true").lower() == "true",
+    "twitter_rss_fallback": os.getenv("TWITTER_RSS_FALLBACK", "true").lower() == "true",
+    "twitter_max_results": int(os.getenv("TWITTER_MAX_RESULTS", "20")),
+    "twitter_rsshub_base": os.getenv("TWITTER_RSSHUB_BASE", "https://rsshub.app"),
+    # Empty → module DEFAULT_TWITTER_ACCOUNTS; override with comma handles.
+    "twitter_accounts": tuple(
+        a.strip().lstrip("@")
+        for a in os.getenv("TWITTER_ACCOUNTS", "").split(",")
+        if a.strip()
+    ),
 }
 
 # ==============================================================
