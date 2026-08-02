@@ -50,6 +50,16 @@ class UniverseMonitorConfig:
     reference_tolerance_s: float = 30 * 60.0
     retention_days: float = 8.0
     max_abs_return_pct: float = 5_000.0
+    # Owner 2026-07-30: prefer mid-priced movers whose absolute USDT move
+    # (price * |pct|/100) falls in [$5, $200] — filters out BTC-scale swings
+    # and sub-dollar dust while keeping the 1h/24h/7d shadow research set.
+    # Disabled (min=0, max=inf) restores pure %-ranking behavior.
+    abs_move_usdt_min: float = 0.0
+    abs_move_usdt_max: float = float("inf")
+    prefer_abs_usdt_rank: bool = False
+    # When True, shortlist fill prefers crypto-native bases over tradfi/RWA/
+    # disabled stock proxies (tagged, not hard-excluded — research honesty).
+    prefer_crypto_shortlist: bool = False
     per_direction_per_horizon: int = 3
     max_shortlist: int = 18
     max_contracts_per_venue: int = 5_000
@@ -68,6 +78,10 @@ class UniverseMonitorConfig:
             raise ValueError("reference_tolerance_s must not be negative")
         if self.max_abs_return_pct <= 0:
             raise ValueError("max_abs_return_pct must be positive")
+        if self.abs_move_usdt_min < 0:
+            raise ValueError("abs_move_usdt_min must not be negative")
+        if self.abs_move_usdt_max < self.abs_move_usdt_min:
+            raise ValueError("abs_move_usdt_max must be >= abs_move_usdt_min")
         if self.per_direction_per_horizon < 0:
             raise ValueError("per_direction_per_horizon must not be negative")
         if self.max_shortlist < 0:
@@ -151,6 +165,7 @@ class ShortlistEntry:
     selected_return_source: str
     returns_pct: Mapping[str, float]
     return_sources: Mapping[str, str]
+    asset_class: str = "crypto"
 
 
 @dataclass(frozen=True)
@@ -866,6 +881,34 @@ def _market_lookup(exchange: Any) -> Dict[str, Mapping[str, Any]]:
     return out
 
 
+def classify_mover_base(base: str, market: Optional[Mapping[str, Any]] = None) -> str:
+    """Tag research shortlist bases as crypto vs non_crypto (tradfi/RWA/etc).
+
+    Uses pair_discovery rejection reasons when available. Unknown bases stay
+    ``crypto`` so we do not invent tradfi from ticker spelling alone.
+    """
+    b = str(base or "").strip().upper()
+    if not b:
+        return "unknown"
+    try:
+        from core.pair_discovery import _asset_rejection_reason
+    except Exception:
+        return "crypto"
+    reason = _asset_rejection_reason(b, market or {})
+    if not reason:
+        return "crypto"
+    prefix = str(reason).split(":", 1)[0]
+    if prefix in {
+        "disabled_asset",
+        "tradfi_asset",
+        "leveraged_token",
+        "stable_or_wrapped",
+        "meme_token",
+    }:
+        return "non_crypto"
+    return "crypto"
+
+
 def _canonical_contract(
     raw_symbol: str,
     ticker: Mapping[str, Any],
@@ -1019,6 +1062,9 @@ class UniverseMonitor:
         rejections: Counter[str] = Counter()
         venue_errors: Dict[str, str] = {}
         records: list[NormalizedTicker] = []
+        # Venue market metadata per accepted contract, so ranking can classify
+        # tradfi from info.underlyingType instead of base-name lists alone.
+        markets_by_key: Dict[Tuple[str, str], Mapping[str, Any]] = {}
         contract_records: list[ContractMetadata] = []
         raw_count = 0
         fetch_count = 0
@@ -1072,6 +1118,8 @@ class UniverseMonitor:
                     rejections[str(reason or "invalid_ticker")] += 1
                 else:
                     records.append(normalized)
+                    if market is not None:
+                        markets_by_key[(venue, normalized.symbol)] = market
 
         contract_counts, contract_coverage = self._store.persist_contract_master(
             contract_records,
@@ -1094,7 +1142,7 @@ class UniverseMonitor:
             retention_ms=retention_ms,
         )
         observations = self._returns(records, references)
-        shortlist = self._rank(records, observations)
+        shortlist = self._rank(records, observations, markets_by_key)
         return UniverseScanResult(
             observed_at_ms=observed_at_ms,
             venues_requested=len(self.exchanges or {}),
@@ -1145,7 +1193,9 @@ class UniverseMonitor:
         self,
         records: Sequence[NormalizedTicker],
         observations: Mapping[Tuple[str, str], Mapping[str, ReturnPoint]],
+        markets: Optional[Mapping[Tuple[str, str], Mapping[str, Any]]] = None,
     ) -> list[ShortlistEntry]:
+        market_map = markets or {}
         # Consolidate duplicate venue listings by base and horizon using the
         # most liquid valid contract.  This prevents one asset consuming the
         # entire cap merely because it trades on several exchanges.
@@ -1170,10 +1220,25 @@ class UniverseMonitor:
 
         groups: Dict[Tuple[str, str], list[Tuple[NormalizedTicker, ReturnPoint]]] = {}
         for (_base, horizon), candidate in by_base_horizon.items():
-            direction = "gainer" if candidate[1].value_pct > 0 else "loser"
+            row, point = candidate
+            abs_usdt = abs(point.value_pct) / 100.0 * float(row.price)
+            if abs_usdt < self.config.abs_move_usdt_min:
+                continue
+            if abs_usdt > self.config.abs_move_usdt_max:
+                continue
+            direction = "gainer" if point.value_pct > 0 else "loser"
             groups.setdefault((horizon, direction), []).append(candidate)
         for (horizon, direction), rows in groups.items():
-            if direction == "gainer":
+            if self.config.prefer_abs_usdt_rank:
+                # Rank by absolute USDT move magnitude (owner $5–$200 band).
+                rows.sort(
+                    key=lambda item: (
+                        -(abs(item[1].value_pct) / 100.0 * float(item[0].price)),
+                        -item[0].quote_volume_usdt,
+                        item[0].base,
+                    )
+                )
+            elif direction == "gainer":
                 rows.sort(
                     key=lambda item: (
                         -item[1].value_pct,
@@ -1211,12 +1276,31 @@ class UniverseMonitor:
                     continue
                 candidates = groups.get(key, [])
                 chosen: Optional[Tuple[NormalizedTicker, ReturnPoint]] = None
-                while cursors[key] < len(candidates):
-                    candidate = candidates[cursors[key]]
-                    cursors[key] += 1
-                    if candidate[0].base not in selected_bases:
+                # Prefer crypto bases when configured; fall back to any unused.
+                search_order = (
+                    ("crypto", "any")
+                    if self.config.prefer_crypto_shortlist
+                    else ("any",)
+                )
+                for mode in search_order:
+                    if chosen is not None:
+                        break
+                    while cursors[key] < len(candidates):
+                        candidate = candidates[cursors[key]]
+                        cursors[key] += 1
+                        if candidate[0].base in selected_bases:
+                            continue
+                        cls = classify_mover_base(
+                            candidate[0].base,
+                            market_map.get((candidate[0].venue, candidate[0].symbol)),
+                        )
+                        if mode == "crypto" and cls != "crypto":
+                            continue
                         chosen = candidate
                         break
+                    if chosen is None and mode == "crypto":
+                        # Reset cursor to rescan for non_crypto fill.
+                        cursors[key] = 0
                 if chosen is None:
                     continue
                 row, selected_point = chosen
@@ -1239,6 +1323,9 @@ class UniverseMonitor:
                         return_sources={
                             label: point.source for label, point in returns.items()
                         },
+                        asset_class=classify_mover_base(
+                            row.base, market_map.get((row.venue, row.symbol))
+                        ),
                     )
                 )
                 selected_bases.add(row.base)

@@ -11,6 +11,7 @@ import pytest
 from core.universe_monitor import (
     UniverseMonitor,
     UniverseMonitorConfig,
+    classify_mover_base,
     normalize_ticker,
 )
 
@@ -254,6 +255,134 @@ def test_ranking_uses_percent_return_and_balances_gainers_and_losers(tmp_path):
     ]
     assert result.shortlist[0].selected_return_pct == pytest.approx(10.0)
     assert result.shortlist[1].selected_return_pct == pytest.approx(-20.0)
+
+
+def test_abs_usdt_band_filters_and_ranks_by_dollar_move(tmp_path):
+    """Owner $5–$200 absolute USDT band: drop dust + mega swings; rank by $."""
+    t0 = 1_800_000_000_000
+    symbols = {
+        "MID/USDT:USDT": 50.0,      # mid-priced
+        "DUST/USDT:USDT": 0.50,     # tiny abs $
+        "MEGA/USDT:USDT": 100_000.0,  # BTC-scale
+        "MIDLOSS/USDT:USDT": 40.0,
+    }
+    ex = _FakeExchange({s: _ticker(p, ts=t0) for s, p in symbols.items()})
+    cfg = _cfg(
+        per_direction_per_horizon=2,
+        max_shortlist=4,
+        abs_move_usdt_min=5.0,
+        abs_move_usdt_max=200.0,
+        prefer_abs_usdt_rank=True,
+    )
+    monitor = UniverseMonitor(
+        {"binance": ex}, db_path=tmp_path / "universe.sqlite", config=cfg
+    )
+    monitor.scan(now_ms=t0)
+    t1 = t0 + HOUR_MS
+    ex.set_tickers(
+        {
+            "MID/USDT:USDT": _ticker(60.0, ts=t1),       # +$10 (in band)
+            "DUST/USDT:USDT": _ticker(0.55, ts=t1),      # +$0.05 (below min)
+            "MEGA/USDT:USDT": _ticker(100_500.0, ts=t1),  # +$500 (above max)
+            "MIDLOSS/USDT:USDT": _ticker(32.0, ts=t1),   # -$8 (in band)
+        }
+    )
+    result = monitor.scan(now_ms=t1)
+    bases = [row.base for row in result.shortlist]
+    assert "DUST" not in bases
+    assert "MEGA" not in bases
+    assert "MID" in bases
+    assert "MIDLOSS" in bases
+    mid = next(r for r in result.shortlist if r.base == "MID")
+    # abs_usdt uses current price * |pct|/100 (50→60 = +20% → 0.20*60=$12)
+    assert abs(mid.selected_return_pct) / 100.0 * mid.price == pytest.approx(12.0)
+
+
+def test_prefer_crypto_shortlist_tags_and_deprioritizes_tradfi(tmp_path):
+    """META (disabled stock base) loses shortlist capacity to a crypto mover."""
+    t0 = 1_800_000_000_000
+    cfg = _cfg(
+        per_direction_per_horizon=1,
+        max_shortlist=1,
+        abs_move_usdt_min=5.0,
+        abs_move_usdt_max=200.0,
+        prefer_abs_usdt_rank=True,
+        prefer_crypto_shortlist=True,
+    )
+    # Same horizon/direction; META abs $ larger but non_crypto.
+    ex = _FakeExchange(
+        {
+            "META/USDT:USDT": _ticker(100.0, ts=t0),
+            "AAA/USDT:USDT": _ticker(50.0, ts=t0),
+        }
+    )
+    monitor = UniverseMonitor(
+        {"binance": ex}, db_path=tmp_path / "universe.sqlite", config=cfg
+    )
+    monitor.scan(now_ms=t0)
+    t1 = t0 + HOUR_MS
+    ex.set_tickers(
+        {
+            "META/USDT:USDT": _ticker(150.0, ts=t1),  # +$50
+            "AAA/USDT:USDT": _ticker(60.0, ts=t1),    # +$10
+        }
+    )
+    result = monitor.scan(now_ms=t1)
+    assert len(result.shortlist) == 1
+    assert result.shortlist[0].base == "AAA"
+    assert result.shortlist[0].asset_class == "crypto"
+    assert classify_mover_base("META") == "non_crypto"
+
+
+def test_venue_metadata_tradfi_is_tagged_without_static_list(tmp_path):
+    """Tokenized equities unknown to the static base lists must be tagged from
+    the venue's own market metadata (info.underlyingType), including the
+    HK_EQUITY variant. Measured live 2026-08-03: SKHYNIX/SNDK/MU shipped in the
+    mover shortlist as asset_class=crypto because _rank classified on base name
+    alone."""
+    t0 = 1_800_000_000_000
+    cfg = _cfg(
+        per_direction_per_horizon=2,
+        max_shortlist=2,
+        abs_move_usdt_min=5.0,
+        abs_move_usdt_max=200.0,
+        prefer_abs_usdt_rank=True,
+        prefer_crypto_shortlist=True,
+    )
+    sym = "SKHYNIX/USDT:USDT"
+    markets = {
+        sym: _market(
+            sym,
+            info={"underlyingType": "HK_EQUITY", "contractType": "PERPETUAL"},
+        ),
+        "AAA/USDT:USDT": _market("AAA/USDT:USDT"),
+    }
+    ex = _FakeExchange(
+        {sym: _ticker(1000.0, ts=t0), "AAA/USDT:USDT": _ticker(50.0, ts=t0)},
+        markets=markets,
+    )
+    monitor = UniverseMonitor(
+        {"binance": ex}, db_path=tmp_path / "universe.sqlite", config=cfg
+    )
+    monitor.scan(now_ms=t0)
+    t1 = t0 + HOUR_MS
+    ex.set_tickers(
+        {sym: _ticker(1080.0, ts=t1), "AAA/USDT:USDT": _ticker(60.0, ts=t1)}
+    )
+    result = monitor.scan(now_ms=t1)
+    by_base = _by_base(result)
+    # The crypto mover holds the crypto-preferred slot even though the equity
+    # perp moved more dollars (+$80 vs +$10)...
+    assert by_base["AAA"].asset_class == "crypto"
+    # ...and the tokenized equity, admitted only as fallback fill, carries the
+    # metadata-driven tag despite being absent from every static list.
+    assert by_base["SKHYNIX"].asset_class == "non_crypto"
+    # Direct unit pin: metadata alone flips the tag.
+    assert classify_mover_base("SKHYNIX") == "crypto"  # no metadata -> stays crypto
+    assert (
+        classify_mover_base("SKHYNIX", {"info": {"underlyingType": "EQUITY"}})
+        == "non_crypto"
+    )
 
 
 def test_shortlist_is_bounded_and_deduplicated_across_venues(tmp_path):
@@ -614,6 +743,15 @@ def test_botengine_wires_broad_monitor_only_to_shadow_symbols(
         config.BROAD_UNIVERSE_MONITOR, "min_quote_volume_usdt", 1_000_000.0
     )
     monkeypatch.setitem(config.BROAD_UNIVERSE_MONITOR, "shortlist_cap", 4)
+    # This test covers broad-universe wiring, not the optional absolute-USDT
+    # research band. Isolate it from the operator's .env profile.
+    monkeypatch.setitem(config.BROAD_UNIVERSE_MONITOR, "abs_move_usdt_min", 0.0)
+    monkeypatch.setitem(
+        config.BROAD_UNIVERSE_MONITOR, "abs_move_usdt_max", float("inf")
+    )
+    monkeypatch.setitem(
+        config.BROAD_UNIVERSE_MONITOR, "prefer_abs_usdt_rank", False
+    )
 
     engine = BotEngine.__new__(BotEngine)
     engine.current_pairs = {

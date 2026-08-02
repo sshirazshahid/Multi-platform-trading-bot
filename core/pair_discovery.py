@@ -264,7 +264,7 @@ def _is_leveraged_token(base: str, market: Mapping) -> bool:
     return bool(_LEVERAGED_BASE_RE.fullmatch(base))
 
 
-_TRADFI_UNDERLYING_TYPES = {"COMMODITY", "EQUITY", "STOCK", "TRADFI"}
+_TRADFI_UNDERLYING_TYPES = {"COMMODITY", "EQUITY", "HK_EQUITY", "STOCK", "TRADFI"}
 
 
 def _is_tradfi_market(market: Mapping) -> bool:
@@ -279,7 +279,10 @@ def _is_tradfi_market(market: Mapping) -> bool:
         info = {}
     if "tradifi" in str(info.get("contractType") or "").lower():
         return True
-    if _upper(info.get("underlyingType")) in _TRADFI_UNDERLYING_TYPES:
+    underlying = _upper(info.get("underlyingType"))
+    # Suffix rule: venues mint regional variants (HK_EQUITY observed live);
+    # anything *_EQUITY is definitionally a tokenized stock.
+    if underlying in _TRADFI_UNDERLYING_TYPES or underlying.endswith("_EQUITY"):
         return True
     subtypes = info.get("underlyingSubType")
     if not isinstance(subtypes, (list, tuple)):
@@ -571,6 +574,28 @@ class UniverseFilter:
             self.MIN_TREND_EFFICIENCY = float(configured_min_efficiency)
         except Exception:
             pass
+        # Optional mild PAPER flow loosen (band/econ gates untouched).
+        try:
+            from config import UNIVERSE_FLOW_LOOSEN as _ufl
+
+            if bool((_ufl or {}).get("enabled")):
+                self.MAX_SPREAD_PCT = float(
+                    _ufl.get("max_spread_pct", self.MAX_SPREAD_PCT)
+                )
+                self.MIN_DEPTH_USD = float(
+                    _ufl.get("min_depth_usd", self.MIN_DEPTH_USD)
+                )
+                self.MIN_RANGE_OF_CHANGE = float(
+                    _ufl.get("min_range_of_change", self.MIN_RANGE_OF_CHANGE)
+                )
+                self.MIN_TREND_EFFICIENCY = float(
+                    _ufl.get("min_trend_efficiency", self.MIN_TREND_EFFICIENCY)
+                )
+                self.flow_loosen_v1 = True
+            else:
+                self.flow_loosen_v1 = False
+        except Exception:
+            self.flow_loosen_v1 = False
 
     @staticmethod
     def _normalise_market_type(market_type: str) -> Optional[str]:
