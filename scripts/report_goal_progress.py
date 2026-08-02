@@ -1,6 +1,6 @@
 """Honest PAPER futures goal-progress reporting.
 
-The owner's 59-67% daily win-rate request is a target, never a promised or
+The owner's 63-67% daily win-rate request is a target, never a promised or
 manufactured result. This reporter counts deduplicated, fully closed PAPER
 futures outcomes with entry provenance, uses whole-trade after-cost PnL
 (runner plus partial realization), and requires both a mature sample and
@@ -29,12 +29,37 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 GOAL_LINE = (
-    "Target: mature PAPER futures WR 59-67% with positive after-cost "
-    "expectancy and profit factor > 1.0 (not guaranteed)"
+    "Target: mature PAPER futures with positive after-cost expectancy, "
+    "profit factor > 1.0, and max drawdown within cap (not guaranteed). "
+    "WR 63-67% is a diagnostic reference, not the target."
 )
 RESOLVED_FLOOR = 30
-TARGET_WR_LOW = 0.59  # owner directive 2026-07-20: band widened 63-67 -> 59-67
+# Reference band ONLY. Retained because the dashboards read
+# target.win_rate_band, and because a win rate is worth reporting beside the
+# breakeven it has to clear -- but it is no longer a pass/fail condition (see
+# _target_status). 2026-08-02: the band was the terminal success label, so a
+# PROFITABLE lane at 75% WR returned WIN_RATE_ABOVE_TARGET -- success reported
+# as a miss. That framing rewarded manufacturing a win rate: the AccBand
+# geometry compressed TP to ~0.35% against a ~0.48% stop to land in the band
+# and delivered 60%+ WR while losing money.
+TARGET_WR_LOW = 0.63
 TARGET_WR_HIGH = 0.67
+# Drawdown thresholding reuses the repo's EXISTING convention rather than
+# inventing another denominator: core/strategy_readiness.py:28 already grades
+# max_drawdown_to_gross_profit against 1.50 and feeds the promotion gate
+# (:170-175). Mirroring it keeps one definition instead of three.
+#
+# Why not the peak-relative percentage: a cumulative-PnL curve starts at zero,
+# so "% of peak" is unbounded (the live 7d lane reports 1782% -- literally what
+# it gave back relative to its best point, and useless as a dial) and is
+# undefined for a lane that never rose above zero. Gross profit always exists
+# once the lane has a single win, so the ratio is defined on LOSING lanes too --
+# which is exactly where the old flag was silently null.
+#
+# Distinct from RISK["max_drawdown_pct"] (config.py:1193), the 8% EQUITY halt
+# enforced live by core/drawdown_pause.py. That stops trading in real time off
+# account equity; this grades a finished lane's own PnL path. Do not collapse.
+DRAWDOWN_TO_GROSS_PROFIT_CAP = 1.50
 
 _DIRECTIONAL_FAMILIES = (
     "algo",
@@ -86,8 +111,95 @@ def _wilson_interval(wins: int, n: int, z: float = 1.959963984540054) -> tuple:
     return (max(0.0, centre - radius), min(1.0, centre + radius))
 
 
-def _target_status(n: int, wr: float | None, net: float, expectancy: float,
+def _breakeven_win_rate(gross_profit: float, gross_loss: float,
+                        wins: int, losses: int) -> float | None:
+    """Win rate this lane's OWN realized payoff requires just to break even.
+
+    b = mean_win / mean_loss; breakeven = 1 / (1 + b). The identity assumes a
+    two-outcome world, so it is compared against the decisive base
+    wins/(wins+losses), not wins/n -- see _decisive_win_rate.
+
+    Returns None rather than a fabricated number when it is undefined: no
+    losses to divide by (live: current_profile_directional had wins=1,
+    losses=0), or no wins, where mean_win=0 would yield a meaningless
+    breakeven of exactly 1.0.
+    """
+    if wins <= 0 or losses <= 0 or gross_loss <= 0 or gross_profit <= 0:
+        return None
+    b = (gross_profit / wins) / (gross_loss / losses)
+    if b <= 0:
+        return None
+    return 1.0 / (1.0 + b)
+
+
+def _decisive_win_rate(wins: int, losses: int) -> float | None:
+    """wins/(wins+losses) -- the base the breakeven identity assumes.
+
+    Equals ``win_rate`` whenever ties == 0, which is every live lane today.
+    """
+    decided = wins + losses
+    return (wins / decided) if decided else None
+
+
+def _max_drawdown(pnls: list) -> tuple:
+    """Worst peak-to-trough excursion of the cumulative net-PnL curve.
+
+    ``pnls`` must already be in exit order (the SQL orders by ts_exit, id).
+
+    A cumulative-PnL curve starts at zero, so it has no natural percentage
+    base. Dividing by the RUNNING peak explodes whenever an early trivial peak
+    precedes a large fall -- measured on the live 7d lane that produced 1782%,
+    which is noise, not a drawdown. Two guards instead:
+
+      * denominator is the curve's GLOBAL peak, not the running one;
+      * a percentage is emitted only for a lane that ends net-POSITIVE. For a
+        losing lane "gave back X% of its peak" is arithmetic theatre; the
+        dollar figure is the honest statement.
+
+    The absolute is always meaningful and is always returned.
+    """
+    peak = 0.0
+    worst_abs = 0.0
+    peak_at_worst = 0.0
+    cum = 0.0
+    for value in pnls:
+        cum += value
+        if cum > peak:
+            peak = cum
+        drop = peak - cum
+        if drop > worst_abs:
+            worst_abs = drop
+            # The denominator must be the peak STANDING AT THE TROUGH, not the
+            # curve's final peak. Using the final peak understates by whatever
+            # the lane recovered afterwards: [10, -9.5] reports 95% but
+            # [10, -9.5, +100] reported 9.45% for the identical 9.5 drop --
+            # a 10x understatement, biased downward exactly on the recovering
+            # (profitable) lanes that are the only ones with a defined pct.
+            peak_at_worst = peak
+    if peak_at_worst <= 0:
+        return worst_abs, None
+    return worst_abs, worst_abs / peak_at_worst
+
+
+def _target_status(n: int, net: float, expectancy: float,
                    profit_factor: float | None, gross_loss: float) -> str:
+    """After-cost economics decide the target. Win rate is a diagnostic.
+
+    Precedence: sample floor, then after-cost economics. A profitable lane is
+    TARGET_MET at ANY win rate -- winning too often is not a miss. Band
+    commentary lives in the non-blocking ``win_rate_note`` field.
+
+    DRAWDOWN IS DELIBERATELY NOT A STATUS. It is reported as
+    ``max_drawdown_abs`` / ``max_drawdown_pct`` / ``drawdown_exceeds_cap``, but
+    it does not gate this string, because scripts/promotion_funnel.py stages
+    GATE_READY off TARGET_MET -- so a new blocking status here would silently
+    change promotion behaviour, which is a governance act (hashed prereg +
+    owner sign-off), not a reporting change. Surface the breach, let a human
+    act on it.
+
+    ``TARGET_MET`` and ``NEGATIVE_AFTER_COST_ECONOMICS`` are load-bearing
+    literals; do not rename them.
+    """
     if n < RESOLVED_FLOOR:
         return "INSUFFICIENT_SAMPLE"
     profitable = (
@@ -97,11 +209,36 @@ def _target_status(n: int, wr: float | None, net: float, expectancy: float,
     )
     if not profitable:
         return "NEGATIVE_AFTER_COST_ECONOMICS"
-    if wr is None or wr < TARGET_WR_LOW:
-        return "WIN_RATE_BELOW_TARGET"
-    if wr > TARGET_WR_HIGH:
-        return "WIN_RATE_ABOVE_TARGET"
     return "TARGET_MET"
+
+
+def _win_rate_note(wr: float | None, breakeven: float | None,
+                   payoff_b: float | None = None) -> str:
+    """Advisory sentence. Never gates the status.
+
+    Phrased to indict EXIT GEOMETRY, not the win rate. The earlier wording
+    ("win rate 60.6% short of its 77.5% breakeven by 17.0 pp") reads as an
+    instruction to raise the win rate by 17 points -- which is the AccBand
+    trap verbatim: compressing take-profit to lift WR lowers mean_win/mean_loss,
+    which RAISES breakeven, so the target retreats as you chase it.
+
+    The identity inverted points at the lever that can actually move: at win
+    rate w, breaking even requires payoff b = mean_win/mean_loss >= (1-w)/w.
+    """
+    if wr is None:
+        return "no resolved outcomes yet"
+    band = f"reference band {TARGET_WR_LOW:.0%}-{TARGET_WR_HIGH:.0%} (diagnostic only)"
+    if breakeven is None or payoff_b is None:
+        return f"win rate {wr:.1%}; payoff undefined (no two-sided sample); {band}"
+    if wr <= 0:
+        return f"no wins yet; {band}"
+    required_b = (1.0 - wr) / wr
+    verdict = "clears" if payoff_b >= required_b else "short of"
+    return (
+        f"at {wr:.1%} win rate this lane needs mean_win/mean_loss >= "
+        f"{required_b:.2f} to break even; it has {payoff_b:.2f} "
+        f"({verdict}). Fix exit geometry, not the win rate; {band}"
+    )
 
 
 def performance_summary(
@@ -171,6 +308,16 @@ def performance_summary(
         expectancy = net / n if n else 0.0
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
         ci_low, ci_high = _wilson_interval(wins, n)
+        breakeven = _breakeven_win_rate(gross_profit, gross_loss, wins, losses)
+        decisive_wr = _decisive_win_rate(wins, losses)
+        # pnls preserves exit order (SQL: ORDER BY ts_exit, id), so the
+        # cumulative curve below is chronological.
+        dd_abs, dd_pct = _max_drawdown(pnls)
+        wr_gap = (
+            decisive_wr - breakeven
+            if (breakeven is not None and decisive_wr is not None)
+            else None
+        )
         out.update(
             {
                 "available": True,
@@ -179,6 +326,42 @@ def performance_summary(
                 "losses": losses,
                 "ties": ties,
                 "win_rate": round(wr, 6) if wr is not None else None,
+                "decisive_win_rate": round(decisive_wr, 6)
+                if decisive_wr is not None
+                else None,
+                "breakeven_win_rate": round(breakeven, 6)
+                if breakeven is not None
+                else None,
+                "win_rate_vs_breakeven": round(wr_gap, 6)
+                if wr_gap is not None
+                else None,
+                "max_drawdown_abs": round(dd_abs, 6),
+                # Peak-relative, informational only. Unbounded by construction
+                # on a curve that starts at zero -- do not threshold on it.
+                "max_drawdown_pct": round(dd_pct, 6) if dd_pct is not None else None,
+                # The thresholded metric, matching core/strategy_readiness.py.
+                # Defined whenever the lane has any gross profit, INCLUDING
+                # losing lanes -- the peak-relative pct was null on 6 of 7.
+                "max_drawdown_to_gross_profit": (
+                    round(dd_abs / gross_profit, 6) if gross_profit > 0 else None
+                ),
+                "drawdown_cap_to_gross_profit": DRAWDOWN_TO_GROSS_PROFIT_CAP,
+                # Reported, never gating -- see _target_status.
+                "drawdown_exceeds_cap": (
+                    bool((dd_abs / gross_profit) > DRAWDOWN_TO_GROSS_PROFIT_CAP)
+                    if gross_profit > 0
+                    else None
+                ),
+                # decisive_wr (not wr) is the base the breakeven identity
+                # assumes -- passing wr made the note contradict
+                # win_rate_vs_breakeven whenever ties existed.
+                "win_rate_note": _win_rate_note(
+                    decisive_wr,
+                    breakeven,
+                    ((gross_profit / wins) / (gross_loss / losses))
+                    if (wins and losses and gross_loss > 0)
+                    else None,
+                ),
                 "win_rate_ci95": [
                     round(ci_low, 6) if ci_low is not None else None,
                     round(ci_high, 6) if ci_high is not None else None,
@@ -193,7 +376,7 @@ def performance_summary(
                 "no_losses": bool(n and gross_loss == 0),
                 "sample_mature": n >= RESOLVED_FLOOR,
                 "target_status": _target_status(
-                    n, wr, net, expectancy, profit_factor, gross_loss
+                    n, net, expectancy, profit_factor, gross_loss
                 ),
             }
         )
