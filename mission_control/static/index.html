@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mission Control</title>
+  <link rel="stylesheet" href="/static/app.css?v=9" />
+</head>
+<body class="boot">
+  <div class="scanline" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand-block">
+        <span class="pulse warn" id="hb-pulse" title="Bot heartbeat"><i></i></span>
+        <h1 class="brand" aria-label="MISSION CONTROL">MISSION<span>CONTROL</span></h1>
+        <span class="mode-tag" id="mode-tag">—</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="clock" class="mono">—</span>
+        <span id="refresh-age" class="muted mono">connecting…</span>
+        <button type="button" class="ghost" id="btn-pause" aria-pressed="false" title="Pause the 12-second poll (P)">Pause</button>
+        <button type="button" class="ghost" id="btn-refresh" title="Refresh now (R)">Refresh</button>
+        <button type="button" class="ghost" id="btn-help">Help</button>
+        <button type="button" class="ghost rail-toggle" id="btn-rail" aria-expanded="false">Operations</button>
+      </div>
+    </div>
+    <div class="statusline mono" id="statusline">pid — · uptime — · loading state files…</div>
+    <p class="guidance" id="guidance">Connecting…</p>
+    <div id="feed-errors" class="feed-errors" hidden></div>
+    <div class="chips" id="status-chips">
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <div class="main-col">
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Mission Control sections">
+        <button type="button" class="tab active" data-tab="overview" id="tab-overview" role="tab" aria-selected="true" aria-controls="view-overview" tabindex="0">Overview</button>
+        <button type="button" class="tab" data-tab="positions" id="tab-positions" role="tab" aria-selected="false" aria-controls="view-positions" tabindex="-1">Positions</button>
+        <button type="button" class="tab" data-tab="history" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history" tabindex="-1">Trade history</button>
+        <button type="button" class="tab" data-tab="risk" id="tab-risk" role="tab" aria-selected="false" aria-controls="view-risk" tabindex="-1">Risk</button>
+        <button type="button" class="tab" data-tab="probes" id="tab-probes" role="tab" aria-selected="false" aria-controls="view-probes" tabindex="-1">Shadow probes</button>
+        <button type="button" class="tab" data-tab="decisions" id="tab-decisions" role="tab" aria-selected="false" aria-controls="view-decisions" tabindex="-1">Why no trades</button>
+        <button type="button" class="tab" data-tab="brain" id="tab-brain" role="tab" aria-selected="false" aria-controls="view-brain" tabindex="-1">Brain</button>
+        <button type="button" class="tab" data-tab="gates" id="tab-gates" role="tab" aria-selected="false" aria-controls="view-gates" tabindex="-1">Live gates</button>
+        <button type="button" class="tab" data-tab="tasks" id="tab-tasks" role="tab" aria-selected="false" aria-controls="view-tasks" tabindex="-1">Scheduled tasks</button>
+        <button type="button" class="tab" data-tab="audit" id="tab-audit" role="tab" aria-selected="false" aria-controls="view-audit" tabindex="-1">Audit</button>
+      </nav>
+
+      <main class="views">
+        <section class="view active" id="view-overview" data-view="overview" role="tabpanel" aria-labelledby="tab-overview">
+          <div id="hero-position" class="hero-slot">
+            <div class="skel tall"></div>
+          </div>
+          <div id="econ-banner"></div>
+          <div class="metric-grid" id="overview-metrics">
+            <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+            <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+          </div>
+          <article class="panel">
+            <div class="panel-head"><h2>Performance — daily / weekly / monthly</h2><span class="sync mono" id="perf-age"></span></div>
+            <div class="metric-grid compact" id="perf-strip">
+              <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+            </div>
+          </article>
+          <div class="split">
+            <article class="panel">
+              <div class="panel-head"><h2>Needs attention</h2><span class="sync mono" data-feed="status"></span></div>
+              <div id="overview-alerts" class="alert-list"></div>
+              <!-- Correct, protective, expected states live here, NOT above:
+                   an unsigned CONTROLLED_LIVE checklist or a probe lane that is
+                   idle by market is not a fault, and listing them beside real
+                   faults trains the owner to ignore the panel. -->
+              <h3 class="status-head">Status — expected, no action needed</h3>
+              <div id="overview-status" class="alert-list"></div>
+            </article>
+            <article class="panel">
+              <h2>What am I looking at?</h2>
+              <ul class="explain" id="overview-explain"></ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-positions" data-view="positions" role="tabpanel" aria-labelledby="tab-positions">
+          <div id="positions-hero" class="hero-slot"></div>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Open book</h2>
+                <p class="hint" id="positions-summary">—</p>
+              </div>
+              <span class="sync mono" data-feed="positions"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="data" id="positions-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th><th>Side</th><th>Exchange</th>
+                    <th class="num">Entry</th><th class="num">Stop loss</th><th class="num">Take profit</th>
+                    <th class="num">R:R</th><th class="num">Size</th><th class="num">Notional</th>
+                    <th class="num">Lev</th><th class="num">Age</th><th>Strategy</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="hint">Prices at full instrument precision. When no live mark price reaches this console, unrealized PnL is deliberately not shown rather than guessed.</p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><h2>Paper wallet — venues vs the $5k seeds</h2><span class="sync mono" data-feed="positions"></span></div>
+            <div class="metric-grid compact" id="wallet-metrics"></div>
+            <div id="wallet-bars" class="wallet-bars"></div>
+            <p class="hint" id="wallet-basis"></p>
+          </article>
+        </section>
+
+        <section class="view" id="view-history" data-view="history" role="tabpanel" aria-labelledby="tab-history">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Closed trades</h2>
+                <p class="hint" id="history-note">—</p>
+              </div>
+              <div class="row wrap">
+                <span class="sync mono" data-feed="positions"></span>
+                <label class="field">Window
+                  <select id="history-range">
+                    <option value="24">Last 24 hours</option>
+                    <option value="72">Last 3 days</option>
+                    <option value="168">Last 7 days</option>
+                    <option value="720">Last 30 days</option>
+                    <option value="all" selected>All tracked</option>
+                  </select>
+                </label>
+                <label class="field">Filter
+                  <input type="search" id="history-filter" placeholder="symbol / reason…" autocomplete="off" />
+                </label>
+              </div>
+            </div>
+            <div class="metric-grid compact" id="history-metrics"></div>
+            <div id="history-wr" class="wr-slot"></div>
+            <div class="chart-wrap">
+              <svg id="equity-chart" role="img" aria-label="Cumulative net PnL of closed trades" tabindex="0"></svg>
+              <p class="hint" id="equity-caption">—</p>
+            </div>
+            <div class="table-wrap tall">
+              <table class="data sortable" id="history-table">
+                <thead>
+                  <tr>
+                    <th data-sort="close_time">Closed <span class="arrow"></span></th>
+                    <th data-sort="symbol">Symbol <span class="arrow"></span></th>
+                    <th data-sort="side">Side <span class="arrow"></span></th>
+                    <th class="num" data-sort="entry_price">Entry <span class="arrow"></span></th>
+                    <th class="num" data-sort="exit_price">Exit <span class="arrow"></span></th>
+                    <th class="num" data-sort="pnl">Net PnL <span class="arrow"></span></th>
+                    <th class="num" data-sort="pnl_pct">Return <span class="arrow"></span></th>
+                    <th class="num" data-sort="total_fees">Fees <span class="arrow"></span></th>
+                    <th data-sort="close_reason">Exit reason <span class="arrow"></span></th>
+                    <th data-sort="strategy">Strategy <span class="arrow"></span></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="view-risk" data-view="risk" role="tabpanel" aria-labelledby="tab-risk">
+          <div class="split">
+            <article class="panel">
+              <div class="panel-head"><h2>Risk snapshot</h2><span class="sync mono" data-feed="risk"></span></div>
+              <div class="metric-grid compact" id="risk-metrics"></div>
+              <h3 class="sub">Recent results (newest right — filled = win, hollow = loss)</h3>
+              <div class="streak" id="risk-streak"></div>
+              <p class="hint" id="risk-basis"></p>
+            </article>
+            <article class="panel">
+              <h2>Incident latch</h2>
+              <div id="latch-card"></div>
+              <p class="hint">Clearing <code>is_halted</code> in risk_state.json does nothing — only removing <code>data/risk_incident_latch.json</code> resumes entries. The Danger rail's “Clear incident” does exactly that (archived first, audited).</p>
+              <h3 class="sub">Kill switch</h3>
+              <div id="kill-state" class="state-pill"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-probes" data-view="probes" role="tabpanel" aria-labelledby="tab-probes">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Promotion funnel — progress toward the 30-resolved floor</h2>
+                <p class="hint">Log-only shadow probes. Promotion needs the frozen gate to pass <em>and</em> owner sign-off. Nothing here can place an order.</p>
+              </div>
+              <p class="hint mono" id="funnel-age">—</p>
+            </div>
+            <div class="lane-legend" id="lane-legend"></div>
+            <div class="lane-grid" id="lane-grid"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Goal progress — the 59–67% win-rate band</h2>
+                <p class="hint" id="goal-target">—</p>
+              </div>
+              <p class="hint mono" id="goals-age">—</p>
+            </div>
+            <div id="goals-body" class="goal-list"></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-decisions" data-view="decisions" role="tabpanel" aria-labelledby="tab-decisions">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Decision funnel — why candidates were skipped</h2>
+                <p class="hint">Read-only query against <code>data/warehouse.sqlite</code> (<code>mode=ro</code>). Loaded on demand, never on the auto-refresh cycle.</p>
+              </div>
+              <div class="row wrap">
+                <label class="field">Window
+                  <select id="cand-hours">
+                    <option value="1">Last hour</option>
+                    <option value="6">Last 6 hours</option>
+                    <option value="24" selected>Last 24 hours</option>
+                    <option value="168">Last 7 days</option>
+                  </select>
+                </label>
+                <button type="button" id="btn-candidates">Load</button>
+              </div>
+            </div>
+            <div id="candidates-body"><p class="hint">Choose a window and press Load.</p></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-brain" data-view="brain" role="tabpanel" aria-labelledby="tab-brain">
+          <h3 class="status-head">Part 1 — live reasoning</h3>
+          <p class="guidance" id="brain-verdict">Waiting for the first successful brain poll…</p>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Decision cascade — scored → allowed → blocked → opened</h2>
+                <p class="hint" id="brain-window">—</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-cascade"><div class="skel tall"></div></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>The binding constraint</h2>
+                <p class="hint">The single condition rejecting the most candidates right now, at each stage. Some reason strings list only the conditions that <strong>passed</strong> — where they do, the deciding condition is derived from the one that is missing and the recorded values are labelled as passing values, not as the cause.</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-binding"><div class="skel"></div></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Live reasoning — decoded</h2>
+                <p class="hint">Entry intents from <code>data/mcp_decisions.jsonl</code> with the verbatim reason string kept alongside the translation. Nothing is hidden behind the plain-language line.</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-feed"><div class="skel tall"></div></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Meta-filter telemetry</h2>
+                <p class="hint">Annotations the meta-filter wrote on <strong>ALLOW</strong> rows. These are advisories, not rejections — they are counted separately from the causes above and never ranked as causes of death.</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-telemetry"><div class="skel"></div></div>
+          </article>
+
+          <h3 class="status-head">Part 2 — the research brain</h3>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Probe lanes — accruing → floor reached → gate verdict → promotion</h2>
+                <p class="hint"><strong>Probes are LOG-ONLY and cannot place an order.</strong> Promotion requires the frozen gate to pass <em>and</em> an owner signature. Nothing on this panel is about to be traded.</p>
+              </div>
+              <span class="sync mono" data-feed="funnel"></span>
+            </div>
+            <div id="brain-lanes"></div>
+            <p class="hint">Per-lane gate tables, ETAs and starvation triage live on the <strong>Shadow probes</strong> tab — this strip is a summary of the same snapshot, not a second computation.</p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Refuted families</h2>
+                <p class="hint">The ledger exists so refuted ideas are not re-litigated. Counts and names only — the binding verdict evidence stays in the file.</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-ledger"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Evidence pipeline — artifacts on disk</h2>
+                <p class="hint" id="brain-artifacts-caption">—</p>
+              </div>
+              <span class="sync mono" data-feed="brain"></span>
+            </div>
+            <div id="brain-artifacts"></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-gates" data-view="gates" role="tabpanel" aria-labelledby="tab-gates">
+          <article class="panel">
+            <div class="panel-head"><h2>CONTROLLED_LIVE path</h2><span class="sync mono" data-feed="gates"></span></div>
+            <p class="hint">Real-money gate status, read from disk. Arming lives in the <strong>Danger</strong> group of the Operations rail and stays fail-closed behind the signed checklist — signing <code>docs/CONTROLLED_LIVE_CHECKLIST.md</code> is a manual, deliberate act by you; this console never writes it.</p>
+            <div class="gate-grid" id="gate-grid"></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-tasks" data-view="tasks" role="tabpanel" aria-labelledby="tab-tasks">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Windows scheduled tasks</h2>
+                <p class="hint" id="tasks-note">—</p>
+              </div>
+              <div class="row wrap">
+                <input type="search" id="task-filter" placeholder="Filter tasks…" autocomplete="off" />
+                <button type="button" id="btn-load-tasks">Reload</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data" id="tasks-table">
+                <thead>
+                  <tr><th>Task</th><th>State</th><th>Last result</th><th>Last run (local)</th><th>Next run (local)</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="hint">“Run now” triggers <code>schtasks /Run</code> for TradingBot* tasks only, with an operator note, and is audited.</p>
+          </article>
+        </section>
+
+        <section class="view" id="view-audit" data-view="audit" role="tabpanel" aria-labelledby="tab-audit">
+          <article class="panel">
+            <div class="panel-head"><h2>Operator audit log</h2><span class="sync mono" data-feed="audit"></span></div>
+            <p class="hint">Every operator action taken from this console appends a line to <code>data/mission_control_audit.jsonl</code> — including refused ones. Newest first.</p>
+            <div class="audit-list" id="audit-list"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <aside class="ops-rail" id="ops-rail" aria-label="Operations">
+      <div class="rail-head">
+        <h2>Operations</h2>
+        <p class="hint">Every action needs an operator note and is written to the audit log. Destructive actions also need their exact confirm phrase.</p>
+      </div>
+      <div id="ops-body"></div>
+    </aside>
+  </div>
+  <div class="rail-scrim" id="rail-scrim" hidden></div>
+
+  <aside class="drawer" id="help-drawer" hidden>
+    <div class="drawer-inner" role="dialog" aria-label="How to use Mission Control">
+      <header>
+        <h2>How to use Mission Control</h2>
+        <button type="button" class="ghost" id="help-close">Close</button>
+      </header>
+      <p class="callout">Telemetry panels read the bot's own state files. The <strong>Operations rail</strong> is the only mutating surface: 9 audited endpoints, each requiring your token, an operator note, and — for destructive actions — an exact confirm phrase. CONTROLLED_LIVE stays fail-closed behind the signed checklist.</p>
+      <ol class="help-steps">
+        <li><strong>Overview</strong> — health at a glance. Mode and profile come from the bot's <em>heartbeat</em> (what the running process reports), not from <code>.env</code> intent.</li>
+        <li><strong>Positions</strong> — the open book with the bracket track (SL → entry → TP), plus the paper wallet vs its $5k per-venue seeds.</li>
+        <li><strong>Trade history</strong> — last 500 closed trades (a rolling cap), sortable, with the cumulative net-PnL curve and the win-rate band strip.</li>
+        <li><strong>Risk</strong> — daily PnL, drawdown, win/loss streak, incident latch.</li>
+        <li><strong>Shadow probes</strong> — research lanes and per-gate promotion verdicts. <code>GATE_BLOCKED</code> is the expected steady state; <code>STARVED</code> is the alarm.</li>
+        <li><strong>Why no trades</strong> — the skip reasons behind every candidate the bot rejected, over a window you choose.</li>
+        <li><strong>Brain</strong> — what it is thinking right now: the live decision cascade (scored → allowed → blocked → opened, counts that close because the two stages join on <code>candidate_id</code>), the binding constraint at each stage, reason strings decoded with the verbatim original kept alongside, and the research pipeline's own state. Probes there are log-only.</li>
+        <li><strong>Live gates</strong> — real-money path status. Blocked until you sign the checklist on disk yourself.</li>
+        <li><strong>Operations</strong> — Observe (reports), Operate (profile), Danger (restart, mode, kill switch, incident, CONTROLLED_LIVE).</li>
+      </ol>
+      <p class="hint">Keyboard: <kbd>R</kbd> refresh · <kbd>P</kbd> pause polling · arrow keys move between tabs. Token stays in this tab only (sessionStorage). Server binds to 127.0.0.1.</p>
+    </div>
+  </aside>
+
+  <div id="toast-host" aria-live="polite"></div>
+  <div id="tip" class="tip" hidden></div>
+
+  <dialog id="token-dialog">
+    <form method="dialog" id="token-form">
+      <h3>Unlock Mission Control</h3>
+      <p>Paste <code>MISSION_CONTROL_TOKEN</code> from your local <code>.env</code>. Stored only in this tab.</p>
+      <label>Token
+        <input id="token-input" type="password" required autocomplete="off" />
+      </label>
+      <menu>
+        <button value="ok" type="submit">Continue</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <form id="confirm-form">
+      <h3 id="confirm-title">Confirm</h3>
+      <p class="consequence" id="confirm-consequence"></p>
+      <div id="confirm-fields"></div>
+      <label id="confirm-phrase-wrap" hidden>Type <code id="confirm-phrase-expected"></code> to confirm
+        <input id="confirm-phrase" autocomplete="off" spellcheck="false" class="mono" />
+      </label>
+      <label>Operator note <span class="req">required — written to the audit log</span>
+        <textarea id="confirm-note" rows="2" required></textarea>
+      </label>
+      <p class="dialog-error" id="confirm-error" hidden></p>
+      <menu>
+        <button type="button" id="confirm-cancel">Cancel</button>
+        <button type="submit" id="confirm-ok" class="danger">Execute</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js?v=9"></script>
+</body>
+</html>

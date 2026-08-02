@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en" data-motion="on">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mission Deck</title>
+<link rel="stylesheet" href="/static/deck.css?v=1" />
+</head>
+<body>
+
+<!-- ══════════ top rail ══════════ -->
+<header class="rail" id="rail">
+  <div class="rail-left">
+    <span class="brand">MISSION<b>DECK</b></span>
+    <span class="pulse" id="hb-pulse" title="Bot heartbeat"><i></i></span>
+    <span class="badge" id="mode-badge">—</span>
+    <span class="badge ghost" id="profile-badge">—</span>
+  </div>
+  <div class="rail-right">
+    <span class="conn" id="conn-state" data-state="init">connecting</span>
+    <span class="mono dim" id="clock">--:--:--</span>
+    <button type="button" class="rbtn" id="btn-pause" aria-pressed="false" title="Pause polling (P)">Pause</button>
+    <button type="button" class="rbtn" id="btn-refresh" title="Refresh now (R)">Refresh</button>
+    <button type="button" class="rbtn kbd" id="btn-palette" title="Command palette">⌘K</button>
+  </div>
+</header>
+
+<!-- ══════════ verdict ══════════ -->
+<div class="verdict-wrap">
+  <p class="verdict" id="verdict">Reading state…</p>
+  <div class="alarms" id="alarms"></div>
+</div>
+
+<main class="deck" id="deck">
+
+  <!-- ─── row 1: three heroes ─── -->
+  <section class="panel span4" id="p-wr" data-panel="goals">
+    <div class="phead">
+      <h2>Win rate <span class="sub" id="wr-lane-label">7 days</span></h2>
+      <div class="seg" role="group" aria-label="Performance window">
+        <button type="button" data-win="paper_futures_current_utc_day">Day</button>
+        <button type="button" data-win="paper_futures_7d" class="on">7d</button>
+        <button type="button" data-win="paper_futures_30d">30d</button>
+      </div>
+    </div>
+    <div class="gauge-wrap">
+      <svg id="wr-gauge" viewBox="0 0 240 132" role="img" aria-labelledby="wr-gauge-desc"></svg>
+      <desc id="wr-gauge-desc" class="sr">Win rate against the 59 to 67 percent target band</desc>
+      <div class="gauge-center">
+        <span class="big mono" id="wr-value">—</span>
+        <span class="tiny dim" id="wr-ci">—</span>
+      </div>
+    </div>
+    <div class="statline" id="wr-stats"></div>
+    <p class="src" id="wr-src"></p>
+  </section>
+
+  <section class="panel span4" id="p-pnl" data-panel="goals">
+    <div class="phead"><h2>After-cost economics</h2><span class="pill" id="pnl-status">—</span></div>
+    <div class="kpi-row" id="pnl-kpis"></div>
+    <div class="gl-bars" id="gl-bars"></div>
+    <div class="spark-wrap">
+      <svg id="equity-spark" viewBox="0 0 320 68" preserveAspectRatio="none" role="img" aria-label="Cumulative net PnL curve"></svg>
+      <p class="src" id="equity-src"></p>
+    </div>
+  </section>
+
+  <section class="panel span4" id="p-wallet" data-panel="positions">
+    <div class="phead"><h2>Capital</h2><span class="pill ghost" id="wallet-basis">—</span></div>
+    <div class="kpi-row" id="wallet-kpis"></div>
+    <div class="venues" id="venue-bars"></div>
+    <p class="src" id="wallet-src"></p>
+  </section>
+
+  <!-- ─── row 2: the funnel ─── -->
+  <section class="panel span8" id="p-funnel" data-panel="candidates">
+    <div class="phead">
+      <h2>Decision funnel <span class="sub" id="funnel-window">24 h</span></h2>
+      <div class="seg" role="group" aria-label="Funnel window">
+        <button type="button" data-hours="6">6h</button>
+        <button type="button" data-hours="24" class="on">24h</button>
+        <button type="button" data-hours="168">7d</button>
+      </div>
+    </div>
+    <div class="funnel" id="funnel-stages"></div>
+    <div class="phead sub-head"><h3>What stopped them <span class="sub">grouped by reason family</span></h3></div>
+    <div class="reasons" id="skip-reasons"></div>
+    <p class="src" id="funnel-src"></p>
+  </section>
+
+  <section class="panel span4" id="p-live" data-panel="brain">
+    <div class="phead"><h2>Engine telemetry</h2><span class="pill ghost" id="live-age">—</span></div>
+    <div class="kpi-row" id="live-kpis"></div>
+    <div class="phead sub-head"><h3>Terminal outcomes</h3></div>
+    <div class="kpi-row" id="terminal-kpis"></div>
+    <p class="src" id="live-src"></p>
+  </section>
+
+  <!-- ─── row 3: binding constraint ─── -->
+  <section class="panel span8" id="p-binding" data-panel="brain">
+    <div class="phead">
+      <h2>Binding constraint <span class="sub" id="binding-sub">—</span></h2>
+      <span class="pill" id="binding-share">—</span>
+    </div>
+    <p class="lede" id="binding-plain">—</p>
+    <div class="conds" id="binding-conds"></div>
+    <div class="phead sub-head"><h3>Measured at the gate <span class="sub" id="meas-note"></span></h3></div>
+    <div class="meas" id="binding-meas"></div>
+    <p class="src" id="binding-src"></p>
+  </section>
+
+  <section class="panel span4" id="p-feed" data-panel="candidates">
+    <div class="phead"><h2>Live decisions</h2><span class="pill ghost" id="feed-count">—</span></div>
+    <ul class="feed" id="feed"></ul>
+    <p class="src">Newest rows from the decision log. New arrivals flash.</p>
+  </section>
+
+  <!-- ─── row 4: positions ─── -->
+  <section class="panel span12" id="p-pos" data-panel="positions">
+    <div class="phead">
+      <h2>Positions <span class="sub" id="pos-count">—</span></h2>
+      <span class="pill ghost" id="pos-src-pill">—</span>
+    </div>
+    <div class="tiles" id="pos-tiles"></div>
+    <div class="phead sub-head"><h3>Recently closed</h3></div>
+    <div class="tbl-wrap">
+      <table class="data" id="closed-table">
+        <thead><tr>
+          <th>Closed</th><th>Symbol</th><th>Side</th><th class="r">Net</th>
+          <th class="r">%</th><th class="r">Fees</th><th>Reason</th><th>Venue</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="src" id="pos-src"></p>
+  </section>
+
+  <!-- ─── row 5: research lanes ─── -->
+  <section class="panel span6" id="p-lanes" data-panel="funnel">
+    <div class="phead"><h2>Evidence lanes</h2><span class="pill ghost" id="lanes-age">—</span></div>
+    <div class="lanes" id="lane-list"></div>
+    <p class="src" id="lanes-src"></p>
+  </section>
+
+  <section class="panel span6" id="p-risk" data-panel="risk">
+    <div class="phead"><h2>Risk rails</h2><span class="pill" id="risk-halt">—</span></div>
+    <div class="kpi-row" id="risk-kpis"></div>
+    <div class="streak" id="risk-streak"></div>
+    <div class="pauses" id="risk-pauses"></div>
+    <p class="src" id="risk-src"></p>
+  </section>
+
+  <!-- ─── row 6: MTSI micro inventory (research) ─── -->
+  <section class="panel span12" id="p-mtsi" data-panel="mtsi">
+    <div class="phead">
+      <h2>MTSI micro inventory <span class="sub">≤ $1 gross · many small clips</span></h2>
+      <span class="pill ghost" id="mtsi-verdict">—</span>
+    </div>
+    <div class="kpi-row" id="mtsi-kpis"></div>
+    <div class="gl-bars" id="mtsi-hist" aria-label="Clip PnL histogram"></div>
+    <div class="spark-wrap">
+      <svg id="mtsi-candle" viewBox="0 0 320 48" preserveAspectRatio="none" role="img" aria-label="Optional mid sparkline"></svg>
+    </div>
+    <p class="src" id="mtsi-src"></p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span id="foot-note">Read-only console. Operator actions live in the <a href="/classic" id="classic-link">classic console</a>.</span>
+  <span class="mono dim" id="poll-note"></span>
+</footer>
+
+<!-- ══════════ command palette ══════════ -->
+<div class="palette-scrim" id="palette" hidden>
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" id="palette-input" placeholder="Jump to a panel, change a window, toggle motion…" autocomplete="off" spellcheck="false" />
+    <ul id="palette-list" role="listbox"></ul>
+    <p class="palette-foot mono dim">↑↓ move · ↵ run · esc close</p>
+  </div>
+</div>
+
+<!-- ══════════ token dialog ══════════ -->
+<dialog id="token-dialog">
+  <form method="dialog" id="token-form">
+    <h2>Mission Control token</h2>
+    <p class="dim">The API rejected this session. Paste the current <code>MISSION_CONTROL_TOKEN</code>.</p>
+    <input type="password" id="token-input" autocomplete="off" spellcheck="false" />
+    <menu>
+      <button value="cancel" type="submit" class="rbtn">Cancel</button>
+      <button value="ok" type="submit" class="rbtn primary" id="token-ok">Use token</button>
+    </menu>
+  </form>
+</dialog>
+
+<div class="toast-stack" id="toasts" aria-live="polite"></div>
+
+<script src="/static/deck.js?v=1"></script>
+</body>
+</html>
