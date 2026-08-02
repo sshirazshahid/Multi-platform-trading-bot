@@ -181,3 +181,6 @@ Codex/
 _quarantine_harden_*/
 _to_delete/
 
+# Knowledge-graph build artifact (41MB / 820 files). Never commit:
+# git add -A would otherwise stage all of it into this PUBLIC repo.
+graphify-out/
