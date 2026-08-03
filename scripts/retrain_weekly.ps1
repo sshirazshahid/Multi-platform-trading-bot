@@ -54,7 +54,22 @@ function RunStep {
     param([string]$Description, [string[]]$ArgList)
     Log "BEGIN $Description"
     Log ("  cmd: $Python " + ($ArgList -join ' '))
-    & $Python @ArgList 2>&1 | Tee-Object -FilePath $LogFile -Append
+    # PS 5.1 gotcha (measured 2026-08-02/03, both runs died at the identical
+    # point with no FAIL line): with $ErrorActionPreference='Stop', `2>&1` on
+    # a NATIVE command wraps each stderr line in a NativeCommandError record
+    # and the FIRST one becomes a TERMINATING error — python progress bars or
+    # warnings killed the whole retrain mid-step, bypassing the exit-code
+    # check below. Make stderr non-terminating for the call and stringify the
+    # records so the log still captures them verbatim.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Python @ArgList 2>&1 |
+            ForEach-Object { "$_" } |
+            Tee-Object -FilePath $LogFile -Append
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     if ($LASTEXITCODE -ne 0) {
         Log "FAIL  $Description (exit=$LASTEXITCODE) -- aborting weekly retrain"
         exit $LASTEXITCODE

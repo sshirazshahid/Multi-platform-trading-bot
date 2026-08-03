@@ -20,15 +20,64 @@ import math
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone
 from pathlib import Path
-from typing import Callable, Iterable
-
+from typing import Any, Callable, Iterable
 
 PREDICTION_PROMPT_HASH = "0d4d63fbc6965522"
+
+WAREHOUSE_PREDICTION_COLUMNS = (
+    "ts",
+    "model_version",
+    "symbol",
+    "side",
+    "p_win",
+    "raw_score",
+    "feature_hash",
+    "candidate_id",
+)
+WAREHOUSE_SHADOW_OUTCOME_COLUMNS = (
+    "proposal_id",
+    "exit_px",
+    "exit_reason",
+    "gross_pnl",
+    "net_pnl",
+    "fees",
+    "slippage",
+    "funding",
+    "mfe",
+    "mae",
+    "bars_held",
+    "r_multiple",
+    "resolved_ts",
+    "label_status",
+    "ltp_touched",
+    "ltp_filled",
+    "ltp_exit_reason",
+)
+EXACT_WAREHOUSE_PROP_C10 = (
+    "prop-c10",
+    104.9475,
+    "take_profit",
+    48.95052473763126,
+    47.721154422788686,
+    1.2293703148425785,
+    1.024487756121939,
+    0.0,
+    49.47526236881562,
+    0.0,
+    1,
+    0.9454458415841606,
+    123,
+    "RESOLVED",
+    1,
+    0,
+    "time",
+)
 
 SPOT_FIXTURE = {
     "binance": {
@@ -92,6 +141,7 @@ class RepairPaths:
     risk_state: Path = Path("data/risk_state.json")
     positions: Path = Path("data/positions.json")
     wallet: Path = Path("data/virtual_wallet.json")
+    warehouse: Path = Path("data/warehouse.sqlite")
     backup_root: Path = Path("data/backups")
 
 
@@ -105,11 +155,21 @@ class Change:
     description: str
 
 
+@dataclass(frozen=True)
+class WarehouseRepair:
+    """Exact SQLite rows approved for deletion as one transaction."""
+
+    path: Path
+    prediction_rows: tuple[tuple[Any, ...], ...] = ()
+    shadow_outcome_rows: tuple[tuple[Any, ...], ...] = ()
+
+
 @dataclass
 class RepairPlan:
     changes: list[Change] = field(default_factory=list)
     findings: dict[str, int] = field(default_factory=dict)
     ambiguities: list[str] = field(default_factory=list)
+    warehouse_repair: WarehouseRepair | None = None
     applied: bool = False
     backup_dir: Path | None = None
 
@@ -119,10 +179,13 @@ class RepairPlan:
         self.findings[change.label] = change.removed
 
     def as_dict(self) -> dict:
+        changed_files = [str(change.path) for change in self.changes]
+        if self.warehouse_repair is not None:
+            changed_files.append(str(self.warehouse_repair.path))
         return {
             "mode": "applied" if self.applied else "dry-run",
             "safe_to_apply": not self.ambiguities,
-            "changed_files": [str(change.path) for change in self.changes],
+            "changed_files": changed_files,
             "findings": dict(sorted(self.findings.items())),
             "ambiguities": list(self.ambiguities),
             "backup_dir": str(self.backup_dir) if self.backup_dir else None,
@@ -566,6 +629,125 @@ def _plan_journal(paths: RepairPaths, plan: RepairPlan) -> None:
     )
 
 
+def _expected_test_drift_predictions() -> tuple[tuple[Any, ...], ...]:
+    return tuple(
+        (
+            index,
+            "test_drift",
+            "BTC/USDT:USDT",
+            "buy",
+            0.85,
+            70.0,
+            "h",
+            index,
+        )
+        for index in range(50)
+    )
+
+
+def _sqlite_ro(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+
+
+def _warehouse_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")')}
+
+
+def _plan_warehouse(paths: RepairPaths, plan: RepairPlan) -> None:
+    """Plan deletion of two proven, exact SQLite fixtures only.
+
+    A partially present ``test_drift`` fixture is ambiguous: the production
+    incident was exactly the complete 0..49 set, so a subset is never silently
+    generalized into a new repair signature.  Rows that merely resemble either
+    fixture are retained.
+    """
+
+    prediction_label = "warehouse_test_drift_predictions"
+    outcome_label = "warehouse_prop_c10_outcome"
+    plan.findings.setdefault(prediction_label, 0)
+    plan.findings.setdefault(outcome_label, 0)
+    if not paths.warehouse.exists():
+        return
+    if not paths.warehouse.is_file():
+        plan.ambiguities.append(f"{paths.warehouse}: warehouse is not a regular file")
+        return
+
+    try:
+        conn = _sqlite_ro(paths.warehouse)
+    except sqlite3.Error as exc:
+        plan.ambiguities.append(f"{paths.warehouse}: warehouse is unreadable ({exc})")
+        return
+    try:
+        required = {
+            "predictions": set(WAREHOUSE_PREDICTION_COLUMNS),
+            "shadow_outcomes": set(WAREHOUSE_SHADOW_OUTCOME_COLUMNS),
+        }
+        for table, columns in required.items():
+            present = _warehouse_columns(conn, table)
+            missing = columns - present
+            if missing:
+                plan.ambiguities.append(
+                    f"{paths.warehouse}: {table} missing required columns "
+                    f"{sorted(missing)}"
+                )
+                return
+
+        prediction_sql = (
+            "SELECT "
+            + ", ".join(WAREHOUSE_PREDICTION_COLUMNS)
+            + " FROM predictions WHERE model_version='test_drift' "
+            "AND ts BETWEEN 0 AND 49 ORDER BY ts, symbol, side"
+        )
+        observed_predictions = tuple(tuple(row) for row in conn.execute(prediction_sql))
+        expected_predictions = _expected_test_drift_predictions()
+        expected_prediction_set = set(expected_predictions)
+        exact_predictions = tuple(
+            row for row in observed_predictions if row in expected_prediction_set
+        )
+        exact_prediction_set = set(exact_predictions)
+        ordered: tuple[tuple[Any, ...], ...] = ()
+        if len(exact_predictions) != len(exact_prediction_set):
+            plan.ambiguities.append(
+                f"{paths.warehouse}: duplicate exact test_drift fixture rows"
+            )
+        elif exact_prediction_set and exact_prediction_set != expected_prediction_set:
+            plan.ambiguities.append(
+                f"{paths.warehouse}: incomplete exact test_drift fixture "
+                f"({len(exact_prediction_set)}/50 rows)"
+            )
+        elif exact_prediction_set == expected_prediction_set:
+            ordered = tuple(sorted(exact_prediction_set, key=lambda row: int(row[0])))
+            plan.findings[prediction_label] = len(ordered)
+
+        outcome_sql = (
+            "SELECT "
+            + ", ".join(WAREHOUSE_SHADOW_OUTCOME_COLUMNS)
+            + " FROM shadow_outcomes WHERE proposal_id='prop-c10'"
+        )
+        observed_outcomes = tuple(tuple(row) for row in conn.execute(outcome_sql))
+        exact_outcomes = tuple(
+            row for row in observed_outcomes if row == EXACT_WAREHOUSE_PROP_C10
+        )
+        if len(exact_outcomes) > 1:
+            plan.ambiguities.append(
+                f"{paths.warehouse}: duplicate exact prop-c10 outcome rows"
+            )
+            exact_outcomes = ()
+        else:
+            plan.findings[outcome_label] = len(exact_outcomes)
+
+        if ordered or exact_outcomes:
+            plan.warehouse_repair = WarehouseRepair(
+                path=paths.warehouse,
+                prediction_rows=ordered,
+                shadow_outcome_rows=exact_outcomes,
+            )
+    except sqlite3.Error as exc:
+        plan.ambiguities.append(f"{paths.warehouse}: warehouse query failed ({exc})")
+    finally:
+        conn.close()
+
+
 def _utc_bounds(now: datetime) -> tuple[float, float, str]:
     current = now.astimezone(timezone.utc)
     day = current.date()
@@ -648,7 +830,7 @@ def _plan_risk_reconstruction(
         return
 
     day_start, day_end, trading_day = _utc_bounds(now)
-    closed_today: list[dict] = []
+    closed_today: list[tuple[dict, float]] = []
     opens_today = 0
     for index, row in enumerate(positions["closed"]):
         if not isinstance(row, dict):
@@ -676,9 +858,20 @@ def _plan_risk_reconstruction(
                     f"{paths.positions}: current-day row {index} has invalid pnl"
                 )
                 return
-            closed_today.append(row)
+            partial_pnl = row.get("realized_partial_pnl", 0.0)
+            if partial_pnl is None:
+                partial_pnl = 0.0
+            if not _finite_number(partial_pnl):
+                plan.ambiguities.append(
+                    f"{paths.positions}: current-day row {index} has invalid "
+                    "realized_partial_pnl"
+                )
+                return
+            closed_today.append(
+                (row, float(row["pnl"]) + float(partial_pnl))
+            )
 
-    daily_pnl = sum(float(row["pnl"]) for row in closed_today)
+    daily_pnl = sum(whole_pnl for _, whole_pnl in closed_today)
     start_balance = current_balance - daily_pnl
     if not math.isfinite(start_balance) or start_balance <= 0.0:
         plan.ambiguities.append("reconstructed start balance is not positive")
@@ -686,8 +879,10 @@ def _plan_risk_reconstruction(
 
     running = start_balance
     peak_balance = start_balance
-    for row in sorted(closed_today, key=lambda item: float(item["close_time"])):
-        running += float(row["pnl"])
+    for row, whole_pnl in sorted(
+        closed_today, key=lambda item: float(item[0]["close_time"])
+    ):
+        running += whole_pnl
         peak_balance = max(peak_balance, running)
     # The wallet is the final equity authority; require the ledger identity to
     # hold before proposing any write.
@@ -743,6 +938,7 @@ def build_plan(
     _plan_prediction_log(paths, plan)
     _plan_mcp_log(paths, plan)
     _plan_journal(paths, plan)
+    _plan_warehouse(paths, plan)
     if reconstruct_risk:
         _plan_risk_reconstruction(
             paths,
@@ -788,6 +984,150 @@ def _backup_name(index: int, change: Change) -> str:
     return f"{index:02d}_{change.label}_{safe}"
 
 
+def _warehouse_rowset_sha256(repair: WarehouseRepair) -> str:
+    payload = {
+        "predictions": repair.prediction_rows,
+        "shadow_outcomes": repair.shadow_outcome_rows,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    return _sha256(encoded)
+
+
+def _backup_warehouse(source_path: Path, backup_path: Path) -> None:
+    """Create a consistent SQLite backup, including committed WAL contents."""
+    if backup_path.exists():
+        raise RepairError(f"warehouse backup already exists: {backup_path}")
+    source = _sqlite_ro(source_path)
+    destination = sqlite3.connect(backup_path)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+
+
+def _select_exact_warehouse_rows(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[tuple[Any, ...], ...], tuple[tuple[Any, ...], ...]]:
+    prediction_sql = (
+        "SELECT "
+        + ", ".join(WAREHOUSE_PREDICTION_COLUMNS)
+        + " FROM predictions WHERE model_version='test_drift' "
+        "AND ts BETWEEN 0 AND 49 ORDER BY ts, symbol, side"
+    )
+    expected = set(_expected_test_drift_predictions())
+    exact_predictions = tuple(
+        sorted(
+            (tuple(row) for row in conn.execute(prediction_sql) if tuple(row) in expected),
+            key=lambda row: int(row[0]),
+        )
+    )
+    outcome_sql = (
+        "SELECT "
+        + ", ".join(WAREHOUSE_SHADOW_OUTCOME_COLUMNS)
+        + " FROM shadow_outcomes WHERE proposal_id='prop-c10'"
+    )
+    exact_outcomes = tuple(
+        tuple(row)
+        for row in conn.execute(outcome_sql)
+        if tuple(row) == EXACT_WAREHOUSE_PROP_C10
+    )
+    return exact_predictions, exact_outcomes
+
+
+def _apply_warehouse_repair(repair: WarehouseRepair) -> None:
+    """Revalidate and delete only the planned fixture rows atomically."""
+    conn = sqlite3.connect(repair.path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        current_predictions, current_outcomes = _select_exact_warehouse_rows(conn)
+        if current_predictions != repair.prediction_rows:
+            raise RepairError(
+                f"concurrent warehouse prediction change detected: {repair.path}"
+            )
+        if current_outcomes != repair.shadow_outcome_rows:
+            raise RepairError(
+                f"concurrent warehouse outcome change detected: {repair.path}"
+            )
+
+        prediction_predicate = " AND ".join(
+            f'"{column}" IS ?' for column in WAREHOUSE_PREDICTION_COLUMNS
+        )
+        removed_predictions = 0
+        for row in repair.prediction_rows:
+            cursor = conn.execute(
+                f"DELETE FROM predictions WHERE {prediction_predicate}", row
+            )
+            removed_predictions += cursor.rowcount
+
+        outcome_predicate = " AND ".join(
+            f'"{column}" IS ?' for column in WAREHOUSE_SHADOW_OUTCOME_COLUMNS
+        )
+        removed_outcomes = 0
+        for row in repair.shadow_outcome_rows:
+            cursor = conn.execute(
+                f"DELETE FROM shadow_outcomes WHERE {outcome_predicate}", row
+            )
+            removed_outcomes += cursor.rowcount
+
+        if removed_predictions != len(repair.prediction_rows):
+            raise RepairError("warehouse prediction delete count changed during repair")
+        if removed_outcomes != len(repair.shadow_outcome_rows):
+            raise RepairError("warehouse outcome delete count changed during repair")
+        remaining_predictions, remaining_outcomes = _select_exact_warehouse_rows(conn)
+        if remaining_predictions or remaining_outcomes:
+            raise RepairError("warehouse fixture rows remained after deletion")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _restore_warehouse_repair(repair: WarehouseRepair) -> None:
+    """Restore only rows deleted by ``_apply_warehouse_repair``."""
+    conn = sqlite3.connect(repair.path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        current_predictions, current_outcomes = _select_exact_warehouse_rows(conn)
+        if current_predictions or current_outcomes:
+            raise RepairError("warehouse rollback target is no longer empty")
+        prediction_columns = ", ".join(
+            f'"{column}"' for column in WAREHOUSE_PREDICTION_COLUMNS
+        )
+        prediction_values = ", ".join("?" for _ in WAREHOUSE_PREDICTION_COLUMNS)
+        if repair.prediction_rows:
+            conn.executemany(
+                f"INSERT INTO predictions ({prediction_columns}) "
+                f"VALUES ({prediction_values})",
+                repair.prediction_rows,
+            )
+        outcome_columns = ", ".join(
+            f'"{column}"' for column in WAREHOUSE_SHADOW_OUTCOME_COLUMNS
+        )
+        outcome_values = ", ".join("?" for _ in WAREHOUSE_SHADOW_OUTCOME_COLUMNS)
+        if repair.shadow_outcome_rows:
+            conn.executemany(
+                f"INSERT INTO shadow_outcomes ({outcome_columns}) "
+                f"VALUES ({outcome_values})",
+                repair.shadow_outcome_rows,
+            )
+        restored_predictions, restored_outcomes = _select_exact_warehouse_rows(conn)
+        if restored_predictions != repair.prediction_rows:
+            raise RepairError("warehouse prediction rollback verification failed")
+        if restored_outcomes != repair.shadow_outcome_rows:
+            raise RepairError("warehouse outcome rollback verification failed")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def apply_plan(
     plan: RepairPlan,
     backup_root: Path,
@@ -798,7 +1138,7 @@ def apply_plan(
     """Transactionally apply a previously built, unambiguous plan."""
     if plan.ambiguities:
         raise RepairError("ambiguous repair plan; no files were changed")
-    if not plan.changes:
+    if not plan.changes and plan.warehouse_repair is None:
         return None
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     stamp = current.strftime("%Y%m%dT%H%M%S%fZ")
@@ -828,6 +1168,27 @@ def apply_plan(
             }
         )
 
+    warehouse_backup_name = None
+    if plan.warehouse_repair is not None:
+        warehouse_backup_name = "warehouse.sqlite"
+        _backup_warehouse(
+            plan.warehouse_repair.path, backup_dir / warehouse_backup_name
+        )
+        manifest_files.append(
+            {
+                "label": "warehouse_exact_pytest_fixtures",
+                "target": str(plan.warehouse_repair.path.resolve()),
+                "backup": warehouse_backup_name,
+                "rowset_sha256": _warehouse_rowset_sha256(plan.warehouse_repair),
+                "removed": len(plan.warehouse_repair.prediction_rows)
+                + len(plan.warehouse_repair.shadow_outcome_rows),
+                "description": (
+                    "remove exact 50-row test_drift fixture and exact prop-c10 "
+                    "shadow outcome"
+                ),
+            }
+        )
+
     manifest_path = backup_dir / "manifest.json"
     manifest = {
         "created_at": current.isoformat(),
@@ -841,6 +1202,7 @@ def apply_plan(
 
     staged: dict[Path, Path] = {}
     committed: list[Change] = []
+    warehouse_committed = False
     try:
         for change in plan.changes:
             staged[change.path] = _stage(change.path, change.after)
@@ -850,6 +1212,10 @@ def apply_plan(
         for change in plan.changes:
             if not change.path.exists() or change.path.read_bytes() != change.before:
                 raise RepairError(f"concurrent target change detected: {change.path}")
+
+        if plan.warehouse_repair is not None:
+            _apply_warehouse_repair(plan.warehouse_repair)
+            warehouse_committed = True
 
         for change in plan.changes:
             replace_func(staged[change.path], change.path)
@@ -864,6 +1230,13 @@ def apply_plan(
                 _atomic_write(change.path, change.before)
             except Exception as rollback_exc:  # pragma: no cover - catastrophic I/O
                 rollback_errors.append(f"{change.path}: {rollback_exc}")
+        if warehouse_committed and plan.warehouse_repair is not None:
+            try:
+                _restore_warehouse_repair(plan.warehouse_repair)
+            except Exception as rollback_exc:  # pragma: no cover - catastrophic I/O
+                rollback_errors.append(
+                    f"{plan.warehouse_repair.path}: {rollback_exc}"
+                )
         manifest["status"] = "rollback_failed" if rollback_errors else "rolled_back"
         manifest["error"] = str(exc)
         manifest["rollback_errors"] = rollback_errors
@@ -936,6 +1309,7 @@ def _parser() -> argparse.ArgumentParser:
         ("risk-state-path", "risk_state"),
         ("positions-path", "positions"),
         ("wallet-path", "wallet"),
+        ("warehouse-path", "warehouse"),
         ("backup-root", "backup_root"),
     ):
         parser.add_argument(
@@ -960,6 +1334,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         risk_state=args.risk_state,
         positions=args.positions,
         wallet=args.wallet,
+        warehouse=args.warehouse,
         backup_root=args.backup_root,
     )
     operating_mode = None
