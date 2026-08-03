@@ -24,18 +24,15 @@ jobs:
       - name: Ruff check
         run: >
           ruff check skills/ scripts/
-          .agents/skills/{backtest-expert,data-quality-checker,dual-axis-skill-reviewer,ftd-detector,institutional-flow-tracker,macro-regime-detector,market-breadth-analyzer,market-top-detector,sector-analyst,stanley-druckenmiller-investment,uptrend-analyzer,vcp-screener,position-sizer,edge-strategy-reviewer,edge-pipeline-orchestrator,skill-designer,skill-idea-miner,theme-detector}/scripts/
 
       - name: Ruff format check
         run: >
           ruff format --check skills/ scripts/
-          .agents/skills/{backtest-expert,data-quality-checker,dual-axis-skill-reviewer,ftd-detector,institutional-flow-tracker,macro-regime-detector,market-breadth-analyzer,market-top-detector,sector-analyst,stanley-druckenmiller-investment,uptrend-analyzer,vcp-screener,position-sizer,edge-strategy-reviewer,edge-pipeline-orchestrator,skill-designer,skill-idea-miner,theme-detector}/scripts/
 
       # Use pyproject.toml config for skip/ignore-words-list
       - name: Codespell
         run: >
           codespell --toml pyproject.toml skills/ scripts/
-          .agents/skills/{backtest-expert,data-quality-checker,dual-axis-skill-reviewer,ftd-detector,institutional-flow-tracker,macro-regime-detector,market-breadth-analyzer,market-top-detector,sector-analyst,stanley-druckenmiller-investment,uptrend-analyzer,vcp-screener,position-sizer,edge-strategy-reviewer,edge-pipeline-orchestrator,skill-designer,skill-idea-miner,theme-detector}/
 
       # Phase 0e: byte-compile sweep over core/ + scripts/ (syntax-shape gate).
       - name: Compile sweep (core + scripts)
@@ -61,144 +58,59 @@ jobs:
       # Run each skill's tests in isolation to avoid module name collisions
       # (each skill has its own scorer.py, calculators/, helpers.py).
       # Order: alphabetical by skill name.
-      - name: Test backtest-expert
-        run: >
-          python -m pytest .agents/skills/backtest-expert/scripts/tests/ -v
-          --cov=.agents/skills/backtest-expert/scripts
-          --cov-report=term-missing
-
-      - name: Test data-quality-checker
-        run: >
-          python -m pytest .agents/skills/data-quality-checker/scripts/tests/ -v
-          --cov=.agents/skills/data-quality-checker/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test dual-axis-skill-reviewer
-        run: >
-          python -m pytest .agents/skills/dual-axis-skill-reviewer/scripts/tests/ -v
-          --cov=.agents/skills/dual-axis-skill-reviewer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test ftd-detector
-        run: >
-          python -m pytest .agents/skills/ftd-detector/scripts/tests/ -v
-          --cov=.agents/skills/ftd-detector/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test institutional-flow-tracker
-        run: >
-          python -m pytest .agents/skills/institutional-flow-tracker/scripts/tests/ -v
-          --cov=.agents/skills/institutional-flow-tracker/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test macro-regime-detector
-        run: >
-          python -m pytest .agents/skills/macro-regime-detector/scripts/tests/ -v
-          --cov=.agents/skills/macro-regime-detector/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test market-breadth-analyzer
-        run: >
-          python -m pytest .agents/skills/market-breadth-analyzer/scripts/tests/ -v
-          --cov=.agents/skills/market-breadth-analyzer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test market-top-detector
-        run: >
-          python -m pytest .agents/skills/market-top-detector/scripts/tests/ -v
-          --cov=.agents/skills/market-top-detector/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test sector-analyst
-        run: >
-          python -m pytest .agents/skills/sector-analyst/scripts/tests/ -v
-          --cov=.agents/skills/sector-analyst/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test stanley-druckenmiller-investment
-        run: >
-          python -m pytest .agents/skills/stanley-druckenmiller-investment/scripts/tests/ -v
-          --cov=.agents/skills/stanley-druckenmiller-investment/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test uptrend-analyzer
-        run: >
-          python -m pytest .agents/skills/uptrend-analyzer/scripts/tests/ -v
-          --cov=.agents/skills/uptrend-analyzer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test vcp-screener
-        run: >
-          python -m pytest .agents/skills/vcp-screener/scripts/tests/ -v
-          --cov=.agents/skills/vcp-screener/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test position-sizer
-        run: >
-          python -m pytest .agents/skills/position-sizer/scripts/tests/ -v
-          --cov=.agents/skills/position-sizer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test edge-strategy-reviewer
-        run: >
-          python -m pytest .agents/skills/edge-strategy-reviewer/scripts/tests/ -v
-          --cov=.agents/skills/edge-strategy-reviewer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test edge-pipeline-orchestrator
-        run: >
-          python -m pytest .agents/skills/edge-pipeline-orchestrator/scripts/tests/ -v
-          --cov=.agents/skills/edge-pipeline-orchestrator/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test skill-designer
-        run: >
-          python -m pytest .agents/skills/skill-designer/scripts/tests/ -v
-          --cov=.agents/skills/skill-designer/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test skill-idea-miner
-        run: >
-          python -m pytest .agents/skills/skill-idea-miner/scripts/tests/ -v
-          --cov=.agents/skills/skill-idea-miner/scripts
-          --cov-report=term-missing
-          --cov-append
-
-      - name: Test repo-level scripts
+      - name: Test repo scripts
         run: >
           python -m pytest scripts/tests/ -v
-          --cov=scripts
-          --cov-report=term-missing
-          --cov-append
+          --cov=scripts --cov-report=term-missing
 
-      # Known failures: theme-detector (27 pre-existing), canslim-screener (requires bs4).
-      # Run with continue-on-error so they don't block the pipeline.
-      - name: Install theme-detector extra deps
-        run: pip install pandas numpy
-
-      - name: Test theme-detector (known failures)
-        continue-on-error: true
+      - name: Test exchange-connectivity
         run: >
-          python -m pytest .agents/skills/theme-detector/scripts/tests/ -v
-          --cov=.agents/skills/theme-detector/scripts
+          python -m pytest skills/exchange-connectivity/scripts/tests/ -v
+          --cov=skills/exchange-connectivity/scripts
           --cov-report=term-missing
           --cov-append
 
+      - name: Test futures-universe-edge-research
+        run: >
+          python -m pytest skills/futures-universe-edge-research/scripts/tests/ -v
+          --cov=skills/futures-universe-edge-research/scripts
+          --cov-report=term-missing
+          --cov-append
+
+      - name: Test tp-precision-engine
+        run: >
+          python -m pytest skills/tp-precision-engine/scripts/tests/ -v
+          --cov=skills/tp-precision-engine/scripts
+          --cov-report=term-missing
+          --cov-append
+
+      - name: Test trading-backtest-validation
+        run: >
+          python -m pytest skills/trading-backtest-validation/scripts/tests/ -v
+          --cov=skills/trading-backtest-validation/scripts
+          --cov-report=term-missing
+          --cov-append
+
+      - name: Test trading-monitoring
+        run: >
+          python -m pytest skills/trading-monitoring/scripts/tests/ -v
+          --cov=skills/trading-monitoring/scripts
+          --cov-report=term-missing
+          --cov-append
+
+      - name: Test trading-risk-management
+        run: >
+          python -m pytest skills/trading-risk-management/scripts/tests/ -v
+          --cov=skills/trading-risk-management/scripts
+          --cov-report=term-missing
+          --cov-append
+
+      - name: Test windows-bot-deployment
+        run: >
+          python -m pytest skills/windows-bot-deployment/scripts/tests/ -v
+          --cov=skills/windows-bot-deployment/scripts
+          --cov-report=term-missing
+          --cov-append
       - name: Coverage summary
         if: always()
         run: python -m coverage report
@@ -312,8 +224,16 @@ jobs:
 
       - name: Bandit SAST scan
         run: >
-          bandit -c pyproject.toml -r skills/
-          .agents/skills/{backtest-expert,data-quality-checker,dual-axis-skill-reviewer,ftd-detector,institutional-flow-tracker,macro-regime-detector,market-breadth-analyzer,market-top-detector,sector-analyst,stanley-druckenmiller-investment,uptrend-analyzer,vcp-screener,position-sizer,edge-strategy-reviewer,edge-pipeline-orchestrator,skill-designer,skill-idea-miner,theme-detector}/
+          bandit -c pyproject.toml -r skills/ scripts/
+          --exclude "*/tests/*"
+
+      # New visibility baseline over the bot itself (2026-08-04). Advisory
+      # only: this code has never been bandit-scanned, so a hard gate would
+      # fail on legacy findings. Tighten once the backlog is triaged.
+      - name: Bandit SAST scan (bot core, advisory)
+        continue-on-error: true
+        run: >
+          bandit -c pyproject.toml -r core/ exchanges/ config.py
           --exclude "*/tests/*"
 
       # Compare a fresh scan against committed baseline (results only, ignore metadata)

@@ -1,71 +1,31 @@
-# Standalone Agent Skills
+# Governance skills
 
-**500 production-ready Agent Skills** organized into 20 categories.
+These are the skills that govern how strategy work is allowed to proceed in
+this repository. They are **binding process**, not reference material — read
+the ledger before proposing any strategy idea.
 
-## Categories
+| Skill | Role |
+|---|---|
+| [refuted-families-ledger](./refuted-families-ledger/) | The binding record of strategy families already refuted on this bot's own data, the one validated family, and the bar to reopen anything. **Consult first** for any strategy request. |
+| [strategy-evidence-pipeline](./strategy-evidence-pipeline/) | Orchestrates research → screen → audit → shadow-probe for a candidate. |
+| [after-cost-screening](./after-cost-screening/) | How a pre-registered screen is run and judged against the frozen gates. |
+| [investment-committee](./investment-committee/) | Bull/bear/debate/verdict roles for adjudicating a candidate. |
+| [shadow-probe-integration](./shadow-probe-integration/) | How a CONFIRMED-GO candidate is wired in as a **log-only** probe. |
 
-| Category | Skills | Description |
-|----------|--------|-------------|
-| [01-devops-basics](./01-devops-basics/) | 25 | CI/CD, containers, infrastructure basics |
-| [02-devops-advanced](./02-devops-advanced/) | 25 | GitOps, service mesh, observability |
-| [03-security-fundamentals](./03-security-fundamentals/) | 25 | Auth, encryption, vulnerability scanning |
-| [04-security-advanced](./04-security-advanced/) | 25 | Zero-trust, threat modeling, DevSecOps |
-| [05-frontend-dev](./05-frontend-dev/) | 25 | React, Vue, performance, accessibility |
-| [06-backend-dev](./06-backend-dev/) | 25 | API design, databases, microservices |
-| [07-ml-training](./07-ml-training/) | 25 | Data preprocessing, model training |
-| [08-ml-deployment](./08-ml-deployment/) | 25 | MLOps, model serving, inference |
-| [09-test-automation](./09-test-automation/) | 25 | Unit, integration, e2e testing |
-| [10-performance-testing](./10-performance-testing/) | 25 | Load testing, benchmarking, profiling |
-| [11-data-pipelines](./11-data-pipelines/) | 25 | ETL, streaming, orchestration |
-| [12-data-analytics](./12-data-analytics/) | 25 | SQL, BI, visualization |
-| [13-aws-skills](./13-aws-skills/) | 25 | Lambda, S3, EC2, managed services |
-| [14-gcp-skills](./14-gcp-skills/) | 25 | BigQuery, Vertex AI, Cloud Run |
-| [15-api-development](./15-api-development/) | 25 | REST, GraphQL, OpenAPI |
-| [16-api-integration](./16-api-integration/) | 25 | Webhooks, OAuth, SDK development |
-| [17-technical-docs](./17-technical-docs/) | 25 | API docs, READMEs, Docusaurus |
-| [18-visual-content](./18-visual-content/) | 25 | Diagrams, screenshots, video |
-| [19-business-automation](./19-business-automation/) | 25 | Workflow automation, reporting |
-| [20-enterprise-workflows](./20-enterprise-workflows/) | 25 | Governance, compliance, collaboration |
+`refuted-families-ledger/SKILL.md` is parsed programmatically by
+`mission_control/state.py` — its path and table structure must stay stable.
+Run `load_refuted_ledger()` after editing it.
 
-## How Skills Work
+Trading skills (exchange connectivity, TP precision, risk management,
+monitoring, backtest validation, universe research, Windows deployment) live in
+the top-level [`skills/`](../../skills/) directory. Committee agent definitions
+live in [`.claude/agents/`](../agents/).
 
-Agent Skills auto-activate when Claude Code detects relevant context. Simply describe what you need - no commands required.
+## History
 
-```
-You: "Set up a CI/CD pipeline for my Node.js app"
-Claude: *Activates relevant DevOps skills automatically*
-```
-
-## Installation
-
-Skills are included with the Claude Code Plugins marketplace:
-
-```bash
-/plugin marketplace add jeremylongshore/claude-code-plugins
-```
-
-## 2025 Schema Compliance
-
-All 500 skills follow the 2025 Agent Skills schema:
-
-```yaml
----
-name: skill-name
-description: |
-  What this skill does and trigger phrases.
-allowed-tools: Read, Write, Edit, Bash
-version: 1.0.0
-license: MIT
-author: Jeremy Longshore <jeremy@intentsolutions.io>
----
-```
-
-## Related
-
-- [239 Embedded Skills](../plugins/) - Skills bundled within plugins
-- [Learning Lab](../workspace/lab/) - Build your own agent workflows
-- [Tutorials](../tutorials/) - Interactive Jupyter notebooks
-
-## License
-
-MIT License - All skills are open source.
+Until 2026-08-04 this directory also held a vendored 500-skill general-purpose
+pack (DevOps, frontend, ML, AWS/GCP, docs, and so on) inherited from an
+unrelated project. None of it was used by the bot, it duplicated a second copy
+under `.agents/skills/`, and together they cost ~31 MB and dominated CI. Both
+trees were removed in the de-emotion overhaul; only the skills above and the
+trading skills survive.
