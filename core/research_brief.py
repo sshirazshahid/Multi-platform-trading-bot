@@ -645,6 +645,23 @@ def _volatility(em: Emitter, a: AssetInputs) -> dict:
     return _section(out)
 
 
+def _median_settlement_interval_s(rows) -> float | None:
+    """Median seconds between consecutive settlements, or None if unobservable.
+
+    None (fewer than two settlements, or degenerate/non-positive spacing) means
+    the interval cannot be measured — callers must omit the derived quantity
+    rather than assume a venue-wide constant.
+    """
+    deltas = sorted(
+        float(rows[i][0]) - float(rows[i - 1][0]) for i in range(1, len(rows))
+    )
+    if not deltas:
+        return None
+    mid = len(deltas) // 2
+    med = deltas[mid] if len(deltas) % 2 else (deltas[mid - 1] + deltas[mid]) / 2.0
+    return med if med > 0 else None
+
+
 def _funding(em: Emitter, a: AssetInputs) -> dict:
     sec = "funding"
     src = a.funding_source or f"data/funding_history/bybit_{a.base}.csv"
@@ -671,13 +688,19 @@ def _funding(em: Emitter, a: AssetInputs) -> dict:
     mean_f = em.fact(sec, "funding_rate_mean_recent", value=round(mean, 10),
                      numeric=round(mean, 10), unit="rate_per_interval", **kw)
     out.append(mean_f)
-    ann = mean * 3.0 * 365.0 * 100.0  # 8h settlements
-    out.append(em.inference(
-        sec, "funding_rate_annualized_pct", value=round(ann, 4), numeric=round(ann, 4),
-        unit="percent_per_year", derived_from=[mean_f["id"]],
-        as_of_utc=stamp, source=src, source_kind="local_csv",
-        source_fn="core.research_brief._funding", n=len(rows), min_n=MIN_FUNDING_SETTLEMENTS,
-    ))
+    # Settlements/year comes from the OBSERVED interval of these very rows, never
+    # a constant: the perp funding interval is time-varying per symbol (bases have
+    # switched 8h -> 4h mid-history), so any literal misstates some base by 2x.
+    interval_s = _median_settlement_interval_s(rows)
+    if interval_s is not None:
+        ann = mean * (365.0 * 24.0 * 3600.0 / interval_s) * 100.0
+        out.append(em.inference(
+            sec, "funding_rate_annualized_pct", value=round(ann, 4), numeric=round(ann, 4),
+            unit="percent_per_year", derived_from=[mean_f["id"]],
+            as_of_utc=stamp, source=src, source_kind="local_csv",
+            source_fn="core.research_brief._funding", n=len(rows),
+            min_n=MIN_FUNDING_SETTLEMENTS,
+        ))
     return _section(out)
 
 

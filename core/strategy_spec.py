@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Collection
 
 SPEC_DIR = Path("data/strategy_specs")
 
@@ -149,6 +150,8 @@ def _base_symbol(value: object) -> str:
 
 def approved_paper_futures_routes(
     specs: list[StrategySpec] | None,
+    *,
+    strategy_ids: Collection[str] | None = None,
 ) -> dict[str, frozenset[str]]:
     """Return the explicitly approved ``base -> venues`` execution routes.
 
@@ -156,7 +159,20 @@ def approved_paper_futures_routes(
     shadow, spot, and unversioned specs contribute nothing. An active spec that
     is malformed raises ``StrategySpecValidationError`` so the caller can deny
     all executable OPENs rather than use a partial or ambiguous universe.
+
+    ``strategy_ids`` binds a runtime scorer to its own spec(s).  Without this
+    filter the union of every active PAPER-futures artifact can accidentally
+    authorize one strategy to trade another strategy's universe.  ``None``
+    preserves the deliberate catalog-union behavior used by research tools.
     """
+
+    selected_ids = None
+    if strategy_ids is not None:
+        selected_ids = {
+            str(strategy_id or "").strip()
+            for strategy_id in strategy_ids
+            if str(strategy_id or "").strip()
+        }
 
     routes: dict[str, set[str]] = {}
     for spec in specs or []:
@@ -164,6 +180,8 @@ def approved_paper_futures_routes(
             raise StrategySpecValidationError(
                 f"unexpected strategy spec type: {type(spec).__name__}"
             )
+        if selected_ids is not None and str(spec.id or "").strip() not in selected_ids:
+            continue
         status = str(spec.promotion_status or "").strip().lower()
         if status not in _ACTIVE_PAPER_STATUSES:
             continue

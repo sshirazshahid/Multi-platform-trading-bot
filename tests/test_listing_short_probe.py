@@ -93,7 +93,11 @@ class _Providers:
         return self.now
 
 
-def _make_probe(wh, providers, state_path):
+def _make_probe(wh, providers, state_path, meta_provider=None):
+    """Build the probe. ``meta_provider`` defaults to a stub returning a market
+    dict with NO underlyingType — i.e. metadata IS available and says nothing
+    about tradfi, which must never exclude a crypto perp. Every test injects a
+    stub so the ccxt-backed default provider is never reached from the suite."""
     from core.agents.listing_short_probe_agent import ListingShortProbeAgent
     return ListingShortProbeAgent(
         warehouse=wh,
@@ -101,6 +105,7 @@ def _make_probe(wh, providers, state_path):
         market_data_provider=providers.market_data,
         ohlcv_provider=providers.ohlcv,
         account_balance_provider=providers.balance,
+        market_meta_provider=meta_provider or (lambda sym: {"info": {}}),
         now_fn=providers.now_fn,
         state_path=state_path,
     )
@@ -109,6 +114,23 @@ def _make_probe(wh, providers, state_path):
 def _md(bid=100.0, ask=100.1, last=100.0, qv=5_000_000.0, funding=0.0004, active=True):
     return {"bid": bid, "ask": ask, "last": last, "quoteVolume": qv,
             "funding_rate": funding, "active": active}
+
+
+def _md_no_book(last=100.0, qv=5_000_000.0, funding=0.0004, active=True):
+    """The SHAPE THE LIVE VENUE ACTUALLY RETURNS: binance USDT-M fetch_ticker
+    carries no bid/ask (the 24hr-ticker endpoint has none), only last +
+    quoteVolume. Measured 2026-07-28 on BTC/USDT:USDT (last=63638.4,
+    quoteVolume=9.69e9) and on all 25 rows the probe has logged."""
+    return {"bid": None, "ask": None, "last": last, "quoteVolume": qv,
+            "funding_rate": funding, "active": active}
+
+
+def _meta(underlying_type=None, **info_extra):
+    """A venue market dict as ccxt load_markets returns it."""
+    info = dict(info_extra)
+    if underlying_type is not None:
+        info["underlyingType"] = underlying_type
+    return {"info": info}
 
 
 # ── Pure math ────────────────────────────────────────────────────────────
@@ -338,6 +360,293 @@ def test_intra_hold_mtm_path_and_concurrent_logged(wh, tmp_path):
     assert all(s["max_drawdown"] is not None for s in snaps)
 
 
+# ── D1: shortability classifier (THE BRICK) ──────────────────────────────
+# Measured 2026-07-28: binance USDT-M ccxt fetch_ticker returns bid=None,
+# ask=None for EVERY symbol, so `active and bid and ask` was ALWAYS False and
+# the probe logged 25/25 SKIP_UNSHORTABLE in 19 days with 0 ENTER.
+def test_shortable_falls_back_to_last_and_volume_when_book_absent():
+    from core.agents.listing_short_probe_agent import classify_shortability
+
+    shortable, basis = classify_shortability(_md_no_book(last=63638.4, qv=9.69e9))
+    assert shortable is True
+    assert basis == "last_volume"     # provenance of the evidence path used
+
+
+def test_bid_ask_remains_authoritative_when_present():
+    from core.agents.listing_short_probe_agent import classify_shortability
+
+    shortable, basis = classify_shortability(_md())
+    assert shortable is True
+    assert basis == "bid_ask"         # no regression on the original path
+
+
+@pytest.mark.parametrize("md, basis", [
+    (_md(active=False), "inactive"),                       # dead market, book present
+    (_md_no_book(active=False), "inactive"),               # dead market, no book
+    (_md_no_book(last=None), "no_quote"),                  # no price at all
+    (_md_no_book(qv=0.0), "no_quote"),                     # zero traded volume
+    (_md_no_book(last=0.0, qv=1.0), "no_quote"),           # non-positive price
+    ({}, "no_quote"),                                      # provider returned nothing
+])
+def test_not_shortable_without_live_tradeable_evidence(md, basis):
+    from core.agents.listing_short_probe_agent import classify_shortability
+
+    shortable, got_basis = classify_shortability(md)
+    assert shortable is False
+    assert got_basis == basis
+
+
+def test_new_listing_with_no_book_enters_and_records_basis(wh, tmp_path):
+    """End-to-end unbrick: the live venue's bid/ask-less ticker must ENTER."""
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=7_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json")
+    probe.tick()  # seed
+
+    sym = "NEWCOIN/USDT:USDT"
+    listing_ts = 7_000_050
+    closes = [100.0 + i for i in range(40)]
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, closes, highs=[c * 1.5 for c in closes])
+    p._market_data[sym] = _md_no_book(funding=0.0006)
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + DAY + 2 * HOUR
+    stats = probe.tick()
+
+    assert stats["entered"] == 2      # 7d + 30d horizons
+    rows = wh.query(
+        "SELECT * FROM shadow_listing_probe WHERE symbol=? AND decision='ENTER'", (sym,))
+    assert len(rows) == 2
+    for r in rows:
+        assert r["shortable"] == 1
+        assert r["shortable_basis"] == "last_volume"
+    assert wh.query(
+        "SELECT COUNT(*) n FROM shadow_decisions WHERE symbol=?", (sym,))[0]["n"] == 2
+
+
+# ── D2: spread must be NULL, never a fabricated 0.0 ──────────────────────
+def test_day1_spread_is_null_when_book_absent(wh, tmp_path):
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=8_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json")
+    probe.tick()  # seed
+
+    sym = "NOBOOK/USDT:USDT"
+    listing_ts = 8_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book()
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + DAY + 2 * HOUR
+    probe.tick()
+
+    rows = wh.query("SELECT * FROM shadow_listing_probe WHERE symbol=?", (sym,))
+    assert rows
+    for r in rows:
+        # unknown spread is UNKNOWN — a 0.0 here would pass any "tight spread"
+        # quality gate trivially (fail-OPEN), which is worse than the brick
+        assert r["day1_spread_bps"] is None
+
+
+def test_day1_spread_still_measured_when_book_present(wh, tmp_path):
+    from core.agents.listing_short_probe_agent import day1_spread_bps
+
+    assert day1_spread_bps(_md(bid=100.0, ask=100.1)) == pytest.approx(
+        (100.1 - 100.0) / 100.05 * 1e4)
+    assert day1_spread_bps(_md_no_book()) is None
+    assert day1_spread_bps(_md(bid=100.1, ask=100.0)) is None  # crossed => unknown
+
+
+# ── D3: scope fidelity — tokenized equities/ETFs are OUT OF SCOPE ────────
+# All 25 observed events were binance tokenized equities (underlyingType
+# EQUITY x19 / HK_EQUITY x6). The frozen rev3 universe is crypto-only.
+@pytest.mark.parametrize("base, underlying", [
+    ("BNC", "EQUITY"), ("SKHY", "HK_EQUITY"), ("PANW", "EQUITY"),
+    ("BITO", "EQUITY"), ("TBT", "EQUITY"), ("TMF", "EQUITY"),
+])
+def test_tokenized_equity_skipped_as_not_crypto(wh, tmp_path, base, underlying):
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=9_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json",
+                        meta_provider=lambda sym: _meta(underlying))
+
+    probe.tick()  # seed
+    sym = f"{base}/USDT:USDT"
+    listing_ts = 9_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book()
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + DAY + 2 * HOUR
+    probe.tick()
+
+    decisions = {r["decision"] for r in wh.query(
+        "SELECT decision FROM shadow_listing_probe WHERE symbol=?", (sym,))}
+    assert decisions == {"SKIP_NOT_CRYPTO"}          # its OWN honest reason
+    assert "SKIP_UNSHORTABLE" not in decisions       # never mislabeled again
+    assert wh.query("SELECT COUNT(*) n FROM shadow_decisions")[0]["n"] == 0
+
+
+@pytest.mark.parametrize("meta", [
+    {"info": {}},                                    # no underlyingType at all
+    {"info": {"underlyingType": "COIN"}},            # binance crypto perp
+    {},                                              # venue publishes no metadata
+    {"info": None},                                  # malformed metadata
+])
+def test_missing_underlying_type_never_excludes_a_crypto_perp(wh, tmp_path, meta):
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=10_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json", meta_provider=lambda sym: meta)
+
+    probe.tick()  # seed
+    sym = "REALCOIN/USDT:USDT"
+    listing_ts = 10_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book()
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + DAY + 2 * HOUR
+    stats = probe.tick()
+
+    assert stats["entered"] == 2
+    assert wh.query(
+        "SELECT COUNT(*) n FROM shadow_listing_probe "
+        "WHERE symbol=? AND decision='SKIP_NOT_CRYPTO'", (sym,))[0]["n"] == 0
+
+
+def test_unavailable_metadata_fails_closed_with_its_own_reason(wh, tmp_path):
+    """A metadata OUTAGE must not silently read as 'crypto, proceed'.
+
+    It also must not BURN a genuine listing on one transient failure: while the
+    day-1 entry window is open the decision is retried (no row, nothing logged);
+    only once the window expires is the honest terminal skip written. Same
+    idiom as SKIP_NO_DATA. Entry timing is unaffected — the entry bar is picked
+    from the candle timestamps, not from the tick that resolves it."""
+    outage = {"on": True}
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=11_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json",
+                        meta_provider=lambda sym: None if outage["on"] else _meta("COIN"))
+
+    probe.tick()  # seed
+    sym = "UNKNOWN/USDT:USDT"
+    listing_ts = 11_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book()
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + DAY + 2 * HOUR
+    probe.tick()                      # metadata down -> retry, nothing decided
+    assert wh.query("SELECT COUNT(*) n FROM shadow_listing_probe "
+                    "WHERE symbol=?", (sym,))[0]["n"] == 0
+
+    outage["on"] = False              # metadata comes back inside the window
+    probe.tick()
+    assert wh.query("SELECT COUNT(*) n FROM shadow_listing_probe "
+                    "WHERE symbol=? AND decision='ENTER'", (sym,))[0]["n"] == 2
+
+
+def test_persistent_metadata_outage_logs_terminal_skip(wh, tmp_path):
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=12_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json", meta_provider=lambda sym: None)
+
+    probe.tick()  # seed
+    sym = "NOMETA/USDT:USDT"
+    listing_ts = 12_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book()
+
+    p.now = listing_ts + 60
+    probe.tick()
+    p.now = listing_ts + 5 * DAY      # past ENTRY_DELAY + MAX_ENTRY_WAIT (1d+3d)
+    probe.tick()
+
+    decisions = {r["decision"] for r in wh.query(
+        "SELECT decision FROM shadow_listing_probe WHERE symbol=?", (sym,))}
+    assert decisions == {"SKIP_NO_METADATA"}
+    assert wh.query("SELECT COUNT(*) n FROM shadow_decisions")[0]["n"] == 0
+
+
+def test_default_meta_provider_returns_none_on_unknown_venue():
+    """The ccxt-backed default must degrade to None (-> fail-closed skip), not
+    raise, when the venue has no ccxt class. No network is touched."""
+    from core.agents.listing_short_probe_agent import venue_market_meta
+
+    assert venue_market_meta("no_such_venue_xyz", "BTC/USDT:USDT") is None
+
+
+def test_tradfi_gate_runs_in_addition_to_the_frozen_mirror(wh, tmp_path):
+    """The is_crypto_base mirror still excludes its statics on its own — the
+    new gate is ADDITIVE, never a replacement."""
+    from core.agents.listing_short_probe_agent import is_crypto_base, is_tradfi_market
+
+    assert is_crypto_base("AAPL") is False          # mirror, untouched
+    assert is_tradfi_market(_meta("EQUITY")) is True
+    assert is_tradfi_market(_meta("HK_EQUITY")) is True
+    assert is_tradfi_market(_meta("COIN")) is False
+    assert is_tradfi_market({}) is False            # defensive: no metadata != tradfi
+    assert is_tradfi_market(None) is False
+    assert is_tradfi_market({"info": {"contractType": "TRADIFI_PERPETUAL"}}) is True
+
+
+# ── Idempotent additive migration (live table already has 25 rows) ───────
+_LEGACY_DDL = """
+CREATE TABLE shadow_listing_probe (
+    proposal_id                TEXT PRIMARY KEY,
+    symbol                     TEXT,
+    base                       TEXT,
+    horizon_days               INTEGER,
+    decision                   TEXT,
+    detected_ts                INTEGER,
+    entry_ts                   INTEGER,
+    entry_px                   REAL,
+    listing_px                 REAL,
+    stake_frac                 REAL,
+    notional_usd               REAL,
+    day1_spread_bps            REAL,
+    day1_funding_rate          REAL,
+    shortable                  INTEGER,
+    quote_volume_usd           REAL,
+    pump_pct                   REAL,
+    score                      REAL,
+    realized_funding_rate_sum  REAL,
+    last_funding_bucket        INTEGER,
+    concurrent_open_at_entry   INTEGER,
+    created_ts                 INTEGER
+);
+"""
+
+
+def test_migration_adds_shortable_basis_to_a_preexisting_table(wh, tmp_path):
+    conn = wh._conn()
+    conn.executescript(_LEGACY_DDL)
+    conn.execute("INSERT INTO shadow_listing_probe (proposal_id, decision) "
+                 "VALUES ('ls-legacy','SKIP_UNSHORTABLE')")
+    conn.commit()
+
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={})
+    # F3a (2026-07-29): migration is DEFERRED to the first tick — construction
+    # must never ALTER the live table (bot_engine._build_probe is fail-open,
+    # so a construction-time DB error silently removed the whole lane).
+    _make_probe(wh, p, tmp_path / "state.json").tick()   # first tick migrates
+    _make_probe(wh, p, tmp_path / "state2.json").tick()  # idempotent: no error
+
+    cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(shadow_listing_probe)").fetchall()}
+    assert "shortable_basis" in cols
+    legacy = wh.query("SELECT * FROM shadow_listing_probe WHERE proposal_id='ls-legacy'")
+    assert legacy[0]["shortable_basis"] is None          # pre-existing rows unharmed
+    conn.execute("INSERT INTO shadow_listing_probe (proposal_id, shortable_basis) "
+                 "VALUES ('ls-new','last_volume')")
+    conn.commit()
+
+
 def test_structural_log_only_no_order_path():
     """The probe module must contain no reference to any order/write path."""
     src = (ROOT / "core" / "agents" / "listing_short_probe_agent.py").read_text(
@@ -425,3 +734,227 @@ def test_shadow_runner_disabled_skips_extra_probes(wh):
     )
     runner.tick()
     assert probe.ticks == 0
+
+
+# ── F3a/F3b/F3c hardening (2026-07-29) ───────────────────────────────────────
+
+class _FlakyConnProxy:
+    """Passes everything to the real connection but fails PRAGMA/ALTER while
+    the shared flag is on — simulating 'database is locked' at boot."""
+
+    def __init__(self, real, fail):
+        self._real = real
+        self._fail = fail
+
+    def execute(self, sql, *a, **k):
+        if self._fail["on"] and (
+            "PRAGMA table_info" in sql or sql.lstrip().upper().startswith("ALTER")
+        ):
+            import sqlite3
+            raise sqlite3.OperationalError("database is locked")
+        return self._real.execute(sql, *a, **k)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _FlakyWarehouse:
+    def __init__(self, wh, fail):
+        self._real_wh = wh
+        self._fail = fail
+
+    def _conn(self):
+        return _FlakyConnProxy(self._real_wh._conn(), self._fail)
+
+    def __getattr__(self, name):
+        return getattr(self._real_wh, name)
+
+
+def test_migration_failure_leaves_probe_alive_and_retried(wh, tmp_path):
+    """F3a: a failed column migration must NOT kill construction (bot_engine's
+    fail-open _build_probe would silently drop the lane for the whole boot).
+    It must degrade loudly-but-alive and retry on a later tick."""
+    fail = {"on": True}
+    flaky = _FlakyWarehouse(wh, fail)
+    p = _Providers(universe=[], ohlcv={}, market_data={}, now=1_000_000)
+    probe = _make_probe(flaky, p, tmp_path / "st.json")   # must NOT raise
+    stats = probe.tick()                                   # migration fails
+    assert stats == {"detected": 0, "entered": 0, "skipped": 0, "mtm_rows": 0}
+    fail["on"] = False
+    probe.tick()                                           # DB recovered
+    cols = {r[1] for r in wh._conn().execute(
+        "PRAGMA table_info(shadow_listing_probe)").fetchall()}
+    assert "shortable_basis" in cols                       # migration completed
+
+
+def test_raising_market_data_does_not_consume_listing(wh, tmp_path):
+    """F3c: a raising market-data provider must not mark the listing decided
+    with NO row written (silent evidence loss). The pending entry stays
+    unconsumed and a later tick with a working provider writes its rows."""
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=1_000_000)
+    probe = _make_probe(wh, p, tmp_path / "state.json")
+    probe.tick()  # seed
+
+    new_sym = "SOMI/USDT:USDT"
+    listing_ts = 1_000_300
+    closes = [100.0] + [100.0 + i for i in range(1, 40)]
+    p._universe.append(new_sym)
+    p._ohlcv[new_sym] = _candles(listing_ts, closes)
+    p._market_data[new_sym] = _md(funding=0.0006)
+
+    p.now = listing_ts + 60
+    assert probe.tick()["detected"] == 1
+
+    def _raising_md(sym):
+        raise RuntimeError("provider outage")
+
+    good_md = probe._market_data
+    probe._market_data = _raising_md
+    p.now = listing_ts + DAY + 2 * HOUR
+    probe.tick()  # provider raises mid-entry
+    assert probe._state["pending"][new_sym]["entered"] is False, (
+        "a raising provider must not consume the listing")
+    n = wh.query("SELECT COUNT(*) n FROM shadow_listing_probe WHERE symbol=?",
+                 (new_sym,))[0]["n"]
+    assert n == 0
+
+    probe._market_data = good_md                  # provider recovers
+    stats = probe.tick()
+    assert stats["entered"] >= 2                  # evidence was not lost
+
+
+def test_negative_cache_suppresses_repeat_load_failures(monkeypatch):
+    """F3b: a failed load_markets is remembered per venue for a short TTL so a
+    persistent outage does not hammer the venue every tick for ~4 days."""
+    import core.agents.listing_short_probe_agent as mod
+    calls = {"n": 0}
+
+    def fake_load(venue):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(mod, "_load_venue_markets", fake_load)
+    monkeypatch.setattr(mod, "_MARKETS_CACHE", {})
+    monkeypatch.setattr(mod, "_MARKETS_ATTEMPT_TS", {}, raising=False)
+
+    assert mod.venue_market_meta("binance", "X/USDT:USDT", now=1000.0) is None
+    assert mod.venue_market_meta("binance", "X/USDT:USDT", now=1100.0) is None
+    assert calls["n"] == 1                         # inside NEG TTL: no re-load
+    later = 1000.0 + mod.MARKETS_NEG_TTL_S + 1
+    assert mod.venue_market_meta("binance", "X/USDT:USDT", now=later) is None
+    assert calls["n"] == 2                         # TTL elapsed: re-attempt
+
+
+def test_negative_cache_covers_symbol_miss(monkeypatch):
+    """A successful load that still lacks the symbol must not re-fetch every
+    call either (brand-new listing absent from the venue snapshot)."""
+    import core.agents.listing_short_probe_agent as mod
+    calls = {"n": 0}
+
+    def fake_load(venue):
+        calls["n"] += 1
+        return {"OTHER/USDT:USDT": {"info": {}}}
+
+    monkeypatch.setattr(mod, "_load_venue_markets", fake_load)
+    monkeypatch.setattr(mod, "_MARKETS_CACHE", {})
+    monkeypatch.setattr(mod, "_MARKETS_ATTEMPT_TS", {}, raising=False)
+
+    assert mod.venue_market_meta("binance", "NEW/USDT:USDT", now=1000.0) is None
+    assert mod.venue_market_meta("binance", "NEW/USDT:USDT", now=1100.0) is None
+    assert calls["n"] == 1
+    # the known symbol is still served from the cached snapshot
+    assert mod.venue_market_meta("binance", "OTHER/USDT:USDT", now=1100.0) == {"info": {}}
+    assert calls["n"] == 1
+
+
+def test_positive_cache_behavior_preserved(monkeypatch):
+    """Regression guard: a cached present symbol is served without re-loading."""
+    import core.agents.listing_short_probe_agent as mod
+    calls = {"n": 0}
+
+    def fake_load(venue):
+        calls["n"] += 1
+        return {"X/USDT:USDT": {"info": {"k": 1}}}
+
+    monkeypatch.setattr(mod, "_load_venue_markets", fake_load)
+    monkeypatch.setattr(mod, "_MARKETS_CACHE", {})
+    monkeypatch.setattr(mod, "_MARKETS_ATTEMPT_TS", {}, raising=False)
+
+    assert mod.venue_market_meta("binance", "X/USDT:USDT", now=1000.0) == {"info": {"k": 1}}
+    assert mod.venue_market_meta("binance", "X/USDT:USDT", now=2000.0) == {"info": {"k": 1}}
+    assert calls["n"] == 1
+
+
+# ── Detect-time TradFi filter + legacy reclassify (STARVED unbrick) ───────
+def test_tradfi_skipped_at_detection_without_day1_wait(wh, tmp_path):
+    """TradFi must not sit in pending for a day then look like a shortability fault."""
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=20_000_000)
+    probe = _make_probe(
+        wh, p, tmp_path / "state.json",
+        meta_provider=lambda sym: _meta("EQUITY", contractType="TRADIFI_PERPETUAL"),
+    )
+    probe.tick()  # seed
+    sym = "SOFI/USDT:USDT"
+    p._universe.append(sym)
+    p.now = 20_000_100
+    n = probe.tick()["detected"]
+    assert n == 0  # not counted as a crypto detect
+    decisions = {r["decision"] for r in wh.query(
+        "SELECT decision FROM shadow_listing_probe WHERE symbol=?", (sym,))}
+    assert decisions == {"SKIP_NOT_CRYPTO"}
+    st = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert st["pending"][sym]["entered"] is True
+
+
+def test_crypto_still_enters_after_tradfi_detect_filter(wh, tmp_path):
+    """Emit-path regression: genuine crypto with Binance-shaped no-book ticker ENTERs."""
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=21_000_000)
+    probe = _make_probe(
+        wh, p, tmp_path / "state.json",
+        meta_provider=lambda sym: _meta("COIN"),
+    )
+    probe.tick()
+    sym = "NEWCRYPTO/USDT:USDT"
+    listing_ts = 21_000_050
+    p._universe.append(sym)
+    p._ohlcv[sym] = _candles(listing_ts, [100.0 + i for i in range(40)])
+    p._market_data[sym] = _md_no_book(funding=0.0005)
+    p.now = listing_ts + 60
+    assert probe.tick()["detected"] == 1
+    p.now = listing_ts + DAY + 2 * HOUR
+    stats = probe.tick()
+    assert stats["entered"] == 2
+    assert wh.query(
+        "SELECT COUNT(*) n FROM shadow_listing_probe "
+        "WHERE symbol=? AND decision='ENTER'", (sym,))[0]["n"] == 2
+
+
+def test_legacy_unshortable_tradfi_rows_reclassified(wh, tmp_path):
+    """Historical SKIP_UNSHORTABLE on TradFi must become SKIP_NOT_CRYPTO once."""
+    from core.agents.probe_common import insert_row
+
+    p = _Providers(universe=["BTC/USDT:USDT"], ohlcv={}, market_data={}, now=22_000_000)
+    probe = _make_probe(
+        wh, p, tmp_path / "state.json",
+        meta_provider=lambda s: _meta("EQUITY", contractType="TRADIFI_PERPETUAL"),
+    )
+    probe.tick()  # seed + create schema
+
+    sym = "LEGACYEQ/USDT:USDT"
+    insert_row(wh, "shadow_listing_probe", {
+        "proposal_id": "ls-legacy01", "symbol": sym, "base": "LEGACYEQ",
+        "horizon_days": 0, "decision": "SKIP_UNSHORTABLE",
+        "detected_ts": 1, "entry_ts": 2, "entry_px": 1.0, "listing_px": 1.0,
+        "stake_frac": 0.03, "notional_usd": 10.0, "day1_spread_bps": None,
+        "day1_funding_rate": 0.0, "shortable": 0, "shortable_basis": None,
+        "quote_volume_usd": 1.0, "pump_pct": 0.0, "score": 0.0,
+        "realized_funding_rate_sum": 0.0, "last_funding_bucket": None,
+        "concurrent_open_at_entry": 0, "created_ts": int(__import__("time").time()),
+    }, replace=True)
+
+    probe.tick()  # reclassify
+    rows = wh.query(
+        "SELECT decision FROM shadow_listing_probe WHERE symbol=?", (sym,))
+    assert rows and rows[0]["decision"] == "SKIP_NOT_CRYPTO"
+    st = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert st.get("reclassified_tradfi_skips_v1") is True

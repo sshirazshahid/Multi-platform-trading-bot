@@ -150,6 +150,22 @@ def load_recent_realized_settlements(
     return rows[-limit:]
 
 
+def _observed_interval_hours(value) -> float | str:
+    """The venue-reported funding interval, or "" when it did not report one.
+
+    Never substitutes a default: the interval is time-varying per symbol (bases
+    have switched 8h -> 4h mid-history), so a fabricated literal would enter the
+    permanent record indistinguishable from an observation.
+    """
+    try:
+        hours = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(hours) or hours <= 0.0:
+        return ""
+    return hours
+
+
 def record(venue: str, coin: str, frame: dict, *,
            base_dir: Path | str = DEFAULT_DIR,
            now_fn=time.time) -> bool:
@@ -184,7 +200,7 @@ def record(venue: str, coin: str, frame: dict, *,
         w.writerow([
             float(now_fn()),
             float(rate),
-            float(frame.get("interval_hours") or 8.0),
+            _observed_interval_hours(frame.get("interval_hours")),
             float(next_ts) if next_ts is not None else "",
         ])
     return True

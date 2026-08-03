@@ -449,25 +449,51 @@ def test_time_exit_hint_after_max_hold(wh):
     assert n_mtm == 42
 
 
-def test_funding_accrues_once_per_8h_bucket(wh):
+def _settlement(ts, rate):
+    from core.funding_history import FundingSettlement
+
+    return FundingSettlement(settlement_ts=float(ts), rate=float(rate))
+
+
+def _stub_settlements(monkeypatch, entry_ts):
+    """Stub the realized-settlement source: two settlements just after entry."""
+    from core.agents import probe_common
+
+    book = [_settlement(entry_ts + 1200.0, 0.0001),
+            _settlement(entry_ts + 2400.0, 0.0001)]
+    monkeypatch.setattr(
+        probe_common, "load_realized_settlements",
+        lambda venue, coin, *, start_ts, end_ts, **kw: tuple(
+            s for s in book if start_ts <= s.settlement_ts <= end_ts),
+    )
+    return book
+
+
+def test_funding_books_every_realized_settlement_exactly_once(wh, monkeypatch):
+    """Replaces the old 8h-wall-clock-bucket contract: the funding interval is
+    time-varying per symbol, so accrual replays the venue's REALIZED settlements
+    and never books the live print. Hermetic: the source is stubbed, not data/."""
     closes = _uptrend(600)
     probe, p, start = _entered_probe(wh, closes)
-    pid = wh.query("SELECT proposal_id FROM shadow_tsmom_probe")[0]["proposal_id"]
+    row = wh.query("SELECT proposal_id, signal_bar_ts FROM shadow_tsmom_probe")[0]
+    pid, entry = row["proposal_id"], float(row["signal_bar_ts"])
+    book = _stub_settlements(monkeypatch, entry)
+
+    def _sum():
+        return wh.query(
+            "SELECT realized_funding_rate_sum s FROM shadow_tsmom_probe "
+            "WHERE proposal_id=?", (pid,)
+        )[0]["s"]
 
     p.now = start + 600 * HOUR + 60
-    probe.tick()  # first bucket booked
-    probe.tick()  # same bucket -> no double booking
-    frs1 = wh.query(
-        "SELECT realized_funding_rate_sum s FROM shadow_tsmom_probe WHERE proposal_id=?", (pid,)
-    )[0]["s"]
-    assert frs1 == pytest.approx(0.0001)
+    probe.tick()
+    probe.tick()  # replaying the same settlements must not double-book
+    assert _sum() == pytest.approx(0.0002)
 
+    book.append(_settlement(entry + 4 * HOUR, 0.0003))
     p.now += 8 * HOUR
-    probe.tick()  # next settlement bucket
-    frs2 = wh.query(
-        "SELECT realized_funding_rate_sum s FROM shadow_tsmom_probe WHERE proposal_id=?", (pid,)
-    )[0]["s"]
-    assert frs2 == pytest.approx(0.0002)
+    probe.tick()
+    assert _sum() == pytest.approx(0.0005)
 
 
 def test_resolver_funding_provider_reads_tsmom_probe(wh, tmp_path):

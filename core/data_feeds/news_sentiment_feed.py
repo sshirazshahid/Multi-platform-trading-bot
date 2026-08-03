@@ -245,7 +245,13 @@ class NewsSentimentFeed:
             self._health_mark("coindesk_api", ok=False)
             logger.debug(f"[NewsFeed] CoinDesk fetch failed: {e}")
 
-        # Fallback: CryptoCompare (already used by mcp_brain.fetch_news)
+        # Prefer NewsScanner RSS cache over dead CryptoCompare when CoinDesk
+        # is empty — same trusted multi-source path the bot already runs.
+        if not articles:
+            articles = self._articles_from_scanner_cache()
+            self._health_mark("scanner_cache", ok=bool(articles))
+
+        # Last network fallback: CryptoCompare (often empty / key-gated)
         if not articles:
             try:
                 import os
@@ -275,12 +281,6 @@ class NewsSentimentFeed:
             except Exception as e:
                 self._health_mark("cryptocompare", ok=False)
                 logger.debug(f"[NewsFeed] CryptoCompare fallback failed: {e}")
-
-        # Last resort: articles collected by core/news_scanner.py (RSS
-        # multi-source) and persisted to data/news_cache.json. Zero network.
-        if not articles:
-            articles = self._articles_from_scanner_cache()
-            self._health_mark("scanner_cache", ok=bool(articles))
 
         return articles
 
@@ -348,11 +348,13 @@ class NewsSentimentFeed:
         tl = title.lower()
         pos_words = ("bull", "surge", "rally", "soar", "jump", "gain",
                      "high", "break", "pump", "ath", "record",
-                     "buy", "strong", "boost", "grow", "adopt")
+                     "buy", "strong", "boost", "grow", "adopt",
+                     "inflow", "approval", "partnership", "rebound")
         neg_words = ("crash", "bear", "dump", "plunge", "fall", "drop",
                      "low", "fear", "hack", "exploit", "ban", "fraud",
                      "liquidat", "bankrupt", "sec ", "lawsuit", "sell",
-                     "weak", "slump", "tank", "warn", "delist")
+                     "weak", "slump", "tank", "warn", "delist",
+                     "outflow", "insolvent", "indictment", "scam", "rug")
         pos = sum(1 for w in pos_words if w in tl)
         neg = sum(1 for w in neg_words if w in tl)
         if pos > neg:

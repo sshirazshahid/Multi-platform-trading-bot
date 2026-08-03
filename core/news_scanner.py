@@ -9,6 +9,7 @@ Sources (2026-07-10: CryptoCompare + CryptoPanic replaced — both dead keyless)
   CoinDesk RSS       — major crypto news via RSS feed
   Cointelegraph RSS  — crypto news via RSS feed
   Decrypt RSS        — crypto news via RSS feed
+  X/Twitter          — curated trader/investor accounts (API bearer or RSSHub)
 
 Output written to:
   data/news_cache.json         — full structured data
@@ -93,12 +94,16 @@ POSITIVE_WORDS = {
     "adoption", "partnership", "launch", "upgrade", "gain", "rise",
     "record", "growth", "institutional", "etf", "approve", "approval",
     "positive", "strong", "buy", "accumulate", "soar", "moon",
+    "inflow", "inflows", "greenlight", "cleared", "wins", "won",
+    "recovery", "rebounds", "rebound", "outperform", "milestone",
 }
 NEGATIVE_WORDS = {
     "crash", "drop", "plunge", "bearish", "hack", "exploit", "ban",
     "regulation", "lawsuit", "sec", "sell-off", "fear", "liquidation",
     "collapse", "decline", "lose", "loss", "warning", "risk", "fraud",
     "scam", "dump", "rug", "panic", "correction", "tumble", "slide",
+    "outflow", "outflows", "probe", "charges", "indictment", "seize",
+    "seizure", "delist", "delisting", "insolvent", "default", "halt",
 }
 
 # ── Impact classification keyword patterns ─────────────────────────────
@@ -107,11 +112,13 @@ HIGH_IMPACT_KEYWORDS = [
     "hack", "exploit", "ban", "etf approve", "etf approval",
     "sec lawsuit", "halving", "fed rate", "crash", "all-time high",
     "ath", "black swan", "de-peg", "depeg", "insolvency", "bankrupt",
-    "emergency", "flash crash",
+    "emergency", "flash crash", "sec charges", "doj charges",
+    "exchange halt", "withdrawal halt", "forced liquidation",
 ]
 MEDIUM_IMPACT_KEYWORDS = [
     "partnership", "upgrade", "listing", "regulation", "fork",
     "airdrop", "mainnet", "testnet", "acquisition", "integration",
+    "treasury", "spot etf", "options etf", "unlock", "token unlock",
 ]
 
 # ── Rate limiting ──────────────────────────────────────────────────────
@@ -119,6 +126,7 @@ _RATE_LIMIT = {
     "coindesk":      {"last": 0.0, "min_gap": 120},
     "cointelegraph": {"last": 0.0, "min_gap": 120},
     "decrypt":       {"last": 0.0, "min_gap": 120},
+    "twitter":       {"last": 0.0, "min_gap": 180},
     "coingecko":     {"last": 0.0, "min_gap": 60},
     "feargreed":     {"last": 0.0, "min_gap": 60},
 }
@@ -269,6 +277,12 @@ def _extract_coin_symbols(title: str, categories: str = "", tags: list = None) -
         "arbitrum": "ARB", "optimism": "OP", "sui": "SUI",
         "aptos": "APT", "injective": "INJ", "celestia": "TIA",
         "binance coin": "BNB", "bnb": "BNB",
+        "filecoin": "FIL", "render": "RENDER", "fetch.ai": "FET",
+        "artificial superintelligence": "FET", "hedera": "HBAR",
+        "stellar": "XLM", "tron": "TRX", "toncoin": "TON", "ton": "TON",
+        "worldcoin": "WLD", "pepe": "PEPE", "bonk": "BONK",
+        "jupiter": "JUP", "sei": "SEI", "stacks": "STX",
+        "maker": "MKR", "aave": "AAVE", "hyperliquid": "HYPE",
     }
     symbols = set()
     title_lower = title.lower()
@@ -298,6 +312,45 @@ class NewsScanner:
         self._prev_headlines: set   = set()   # for breaking news detection
         self._sentiment_hist: dict  = {}      # loaded from disk
         self._load_sentiment_history()
+        self._hydrate_from_disk()
+
+    def _hydrate_from_disk(self) -> None:
+        """Load last successful scan so consumers work before the first network fetch.
+
+        Seeds ``_prev_headlines`` so a restart does not re-flag every HIGH item
+        as BREAKING. Fail-open on missing/invalid cache.
+        """
+        try:
+            if not NEWS_CACHE.exists():
+                return
+            raw = json.loads(NEWS_CACHE.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or not raw.get("news"):
+                return
+            self._cache = raw
+            fetched = raw.get("fetched_at")
+            if fetched:
+                try:
+                    dt = datetime.fromisoformat(str(fetched).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        self._last_run = dt.timestamp()
+                    else:
+                        self._last_run = dt.timestamp()
+                except (TypeError, ValueError):
+                    self._last_run = time.time() - CACHE_TTL
+            else:
+                self._last_run = time.time() - CACHE_TTL
+            self._prev_headlines = {
+                str(a.get("title") or "")
+                for a in raw.get("news", [])
+                if a.get("title")
+            }
+            age_min = max(0.0, (time.time() - self._last_run) / 60.0)
+            logger.info(
+                f"[News] Hydrated cache from disk "
+                f"({len(raw.get('news', []))} headlines, age={age_min:.0f}m)"
+            )
+        except Exception as exc:
+            logger.debug(f"[News] Cache hydrate skipped: {exc}")
 
     # ── Public API (preserved from original) ───────────────────────────
 
@@ -556,12 +609,28 @@ class NewsScanner:
     # ── News fetchers (all sources) ────────────────────────────────────
 
     def _fetch_all_news(self) -> list:
-        """Fetch from all RSS news sources and merge into a single list."""
+        """Fetch from all RSS news sources (+ optional X/Twitter) and merge."""
         all_articles = []
         for rate_key, source_name, url in RSS_SOURCES:
             all_articles.extend(
                 self._fetch_news_rss(rate_key, source_name, url)
             )
+        all_articles.extend(self._fetch_twitter_news())
+
+        if not all_articles:
+            cached = list(self._cache.get("news") or [])
+            if cached:
+                logger.warning(
+                    "[News] All RSS sources returned 0 items — "
+                    f"serving {len(cached)} cached headlines "
+                    f"(health: {_health_summary() or 'n/a'})"
+                )
+                return cached
+            logger.warning(
+                "[News] All RSS sources returned 0 items and no cache "
+                f"(health: {_health_summary() or 'n/a'})"
+            )
+            return []
 
         # Sort by published date descending (newest first)
         all_articles.sort(
@@ -569,6 +638,38 @@ class NewsScanner:
             reverse=True,
         )
         return all_articles
+
+    def _fetch_twitter_news(self) -> list:
+        """Curated X/Twitter headlines (fail-open). See data_feeds/twitter_feed."""
+        if not NEWS_CFG.get("twitter_enabled", True):
+            return []
+        if not _rate_ok("twitter"):
+            logger.debug("[News] Twitter rate-limited, skipping")
+            return [
+                a for a in self._cache.get("news", [])
+                if str(a.get("source") or "").startswith("X/@")
+            ]
+        _rate_mark("twitter")
+        try:
+            from core.data_feeds.twitter_feed import fetch_twitter_headlines
+
+            items = fetch_twitter_headlines(
+                {
+                    "enabled": True,
+                    "accounts": NEWS_CFG.get("twitter_accounts") or None,
+                    "max_results": NEWS_CFG.get("twitter_max_results", 20),
+                    "rss_fallback": NEWS_CFG.get("twitter_rss_fallback", True),
+                    "rsshub_base": NEWS_CFG.get(
+                        "twitter_rsshub_base", "https://rsshub.app"
+                    ),
+                }
+            )
+            _health_mark("twitter", ok=bool(items))
+            return items or []
+        except Exception as exc:
+            _health_mark("twitter", ok=False)
+            logger.warning(f"[News] Twitter feed failed (fail-open): {exc}")
+            return []
 
     def _fetch_news_rss(self, rate_key: str, source_name: str, url: str) -> list:
         """Fetch and parse one RSS news source (keyless), with health tracking."""

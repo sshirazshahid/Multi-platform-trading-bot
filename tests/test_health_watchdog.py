@@ -179,15 +179,26 @@ def test_loss_streak_broken_by_winner_no_alert(tmp_path):
     assert not any("loss_streak" in c["title"] for c in n.calls)
 
 
-def test_model_starving_alerts_when_no_opens(tmp_path):
+def test_model_starving_alerts_when_no_opens(tmp_path, monkeypatch):
+    # 2026-07-28: this test used to write {"ts": ..., "type": "OPEN"} at the
+    # TOP level of mcp_decisions.jsonl — a shape the bot never emits (real
+    # top-level types are portfolio/rejection/position_monitor). The test and
+    # the check agreed with each other and both disagreed with production, so
+    # the permanent false alarm went unseen. The source of truth is now
+    # positions.json/open_time; see tests/test_watchdog_model_starving.py.
+    monkeypatch.setattr(
+        hw.HealthWatchdog, "_expected_idle_under_strict_econ_gate",
+        staticmethod(lambda: False),
+    )
     n = _FakeNotifier()
     risk = SimpleNamespace(daily_pnl=0.0)
     wd = hw.HealthWatchdog(_make_engine(), notifier=n, risk_manager=risk,
                            warehouse_path=tmp_path / "wh.sqlite")
-    (tmp_path / "mcp_decisions.jsonl").write_text(
-        json.dumps({"ts": time.time() - hw.MODEL_STARVE_HOURS * 3600 - 10,
-                    "type": "OPEN"}) + "\n"
-    )
+    pos = tmp_path / "positions.json"
+    pos.write_text(json.dumps({"open": [], "closed": [
+        {"symbol": "ETH/USDT:USDT",
+         "open_time": time.time() - hw.MODEL_STARVE_HOURS * 3600 - 10}]}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
     wd.tick()
     assert any("model_gate_starving" in c["title"] for c in n.calls)
 
@@ -311,6 +322,73 @@ def test_carry_recovery_fires_once_then_rearms_on_clear(tmp_path):
     assert len(_recovery_alerts(n)) == 2
 
 
+class _DriftEngine:
+    def __init__(self, drift_map):
+        self._clock_drift_ms = drift_map
+
+
+class _DriftWD:
+    """Minimal stub exercising HealthWatchdog._check_clock_drift unbound."""
+
+    def __init__(self, drift_map):
+        self._engine = _DriftEngine(drift_map)
+        self.calls = []
+
+    def _edge_alert(self, key, is_bad, level, message,
+                    context=None, *, grace_sec=0.0):
+        self.calls.append((key, is_bad, message))
+
+
+def _drift_thr():
+    try:
+        from config import CLOCK_DRIFT_ALERT_MS
+        return float(CLOCK_DRIFT_ALERT_MS)
+    except ImportError:
+        return 500.0
+
+
+def test_clock_drift_hysteresis_band_holds_episode_state():
+    """A venue inside [0.8*thr, thr] neither alerts nor clears — the
+    2026-08-02 flap re-fired 3 WARNs because hovering at ~thr cleared and
+    re-armed the episode on alternate ticks."""
+    from core.health_watchdog import HealthWatchdog
+    thr = _drift_thr()
+    wd = _DriftWD({"binance": thr * 1.2, "bybit": thr * 0.9})
+    HealthWatchdog._check_clock_drift(wd)
+    keys = [k for k, _b, _m in wd.calls]
+    assert "clock_drift_binance" in keys
+    assert "clock_drift_bybit" not in keys  # held, not cleared
+
+
+def test_clock_drift_missing_sample_holds_episode_state():
+    """None samples (slow-RTT discard) must not clear an episode latch."""
+    from core.health_watchdog import HealthWatchdog
+    wd = _DriftWD({"binance": None})
+    HealthWatchdog._check_clock_drift(wd)
+    assert wd.calls == []
+
+
+def test_clock_drift_clear_below_band_rearms():
+    from core.health_watchdog import HealthWatchdog
+    thr = _drift_thr()
+    wd = _DriftWD({"binance": thr * 0.5})
+    HealthWatchdog._check_clock_drift(wd)
+    assert wd.calls and wd.calls[0][0] == "clock_drift_binance"
+    assert wd.calls[0][1] is False  # explicit clear re-arms the episode
+
+
+def test_clock_drift_near_band_attribution_blames_local_clock():
+    """Decaying local-clock episode: one venue above thr, the other at 0.92x
+    thr. Old logic said 'suspect this venue, not the local clock' — actively
+    wrong operator guidance during the measured 2026-08-02 episode."""
+    from core.health_watchdog import HealthWatchdog
+    thr = _drift_thr()
+    wd = _DriftWD({"binance": thr * 1.04, "bybit": thr * 0.92})
+    HealthWatchdog._check_clock_drift(wd)
+    bad_msgs = [m for _k, b, m in wd.calls if b]
+    assert bad_msgs and "drifted together" in bad_msgs[0]
+
+
 def test_cooldown_suppresses_repeat(tmp_path):
     flag = tmp_path / "review_required.json"
     flag.write_text("{}")
@@ -371,33 +449,52 @@ def test_carry_milestone_silent_without_file_or_cycles(tmp_path, monkeypatch):
 # float(rec["ts"]) raised on every line and the swallow-all except returned
 # early, so the 6h zero-OPENs starvation alert could NEVER fire.
 
-def test_model_starving_alert_fires_with_iso_timestamps(tmp_path):
+def test_model_starving_ignores_the_decisions_log(tmp_path, monkeypatch):
+    """Replaces the F6 ISO-timestamp test (2026-07-20), which is now moot: this
+    check no longer parses mcp_decisions.jsonl at all, because its record shapes
+    cannot answer 'did a position open'. Nested OPEN actions are PROPOSALS, and
+    the sibling 'rejection' records include successful maker fills.
+
+    This pins the replacement contract: a decisions log stuffed with OPEN-shaped
+    records must NOT suppress a genuine starvation alert. Anyone reintroducing
+    the old source has to fail this test first."""
     from datetime import datetime, timezone
+    monkeypatch.setattr(
+        hw.HealthWatchdog, "_expected_idle_under_strict_econ_gate",
+        staticmethod(lambda: False),
+    )
     n = _FakeNotifier()
     risk = SimpleNamespace(daily_pnl=0.0)
     wd = hw.HealthWatchdog(_make_engine(), notifier=n, risk_manager=risk,
                            warehouse_path=tmp_path / "wh.sqlite")
-    old_iso = datetime.fromtimestamp(
-        time.time() - hw.MODEL_STARVE_HOURS * 3600 - 10, tz=timezone.utc
-    ).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     (tmp_path / "mcp_decisions.jsonl").write_text(
-        json.dumps({"ts": old_iso, "type": "OPEN"}) + "\n"
-        + json.dumps({"ts": "not-a-timestamp", "type": "OPEN"}) + "\n"  # tolerated
+        json.dumps({"ts": now_iso, "type": "OPEN"}) + "\n"
+        + json.dumps({"ts": now_iso, "type": "portfolio", "decisions": {
+            "actions": [{"type": "OPEN", "symbol": "ETH/USDT:USDT"}]}}) + "\n"
     )
+    pos = tmp_path / "positions.json"          # no recent opens: genuinely starving
+    pos.write_text(json.dumps({"open": [], "closed": []}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
     wd.tick()
     assert any("model_gate_starving" in c["title"] for c in n.calls), (
-        "6h-starvation alert must fire on an ISO-timestamped log")
+        "the decisions log must not be consulted — positions.json is the source")
 
 
-def test_model_starving_suppressed_by_recent_iso_open(tmp_path):
-    """A RECENT ISO-format OPEN must be recognized (parsed, not skipped)."""
-    from datetime import datetime, timezone
+def test_model_starving_suppressed_by_recent_open(tmp_path, monkeypatch):
+    """A RECENT position open must suppress the alert.
+
+    This is THE test that should have caught the false alarm and did not: it
+    previously wrote a recent top-level {"type": "OPEN"} record — a shape the
+    bot never emits — so it passed against a check that could never see it.
+    Now it uses positions.json, the shape the bot actually writes."""
     n = _FakeNotifier()
     risk = SimpleNamespace(daily_pnl=0.0)
     wd = hw.HealthWatchdog(_make_engine(), notifier=n, risk_manager=risk,
                            warehouse_path=tmp_path / "wh.sqlite")
-    recent_iso = datetime.now(timezone.utc).isoformat()
-    (tmp_path / "mcp_decisions.jsonl").write_text(
-        json.dumps({"ts": recent_iso, "type": "OPEN"}) + "\n")
+    pos = tmp_path / "positions.json"
+    pos.write_text(json.dumps({"open": [], "closed": [
+        {"symbol": "AAVE/USDT:USDT", "open_time": time.time() - 1200}]}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
     wd.tick()
     assert not any("model_gate_starving" in c["title"] for c in n.calls)

@@ -11,8 +11,9 @@ import config
 from core.pair_discovery import UniverseFilter
 
 
-def test_chop_threshold_overrides_from_config():
+def test_chop_threshold_overrides_from_config(monkeypatch):
     # The instance threshold must reflect centralized config, not the class default.
+    monkeypatch.setattr(config, "UNIVERSE_FLOW_LOOSEN", {"enabled": False})
     uf = UniverseFilter()
     assert uf.MIN_TREND_EFFICIENCY == config.MIN_TREND_EFFICIENCY
 

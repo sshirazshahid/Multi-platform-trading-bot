@@ -441,3 +441,51 @@ def test_shell_imports_and_exposes_the_documented_modes():
     parser = mod.build_parser()
     for flag in ("--symbol", "--refresh"):
         assert any(flag in a.option_strings for a in parser._actions), flag
+
+
+# ── 8. funding annualization must follow the OBSERVED settlement interval ────
+# The perp funding interval is time-varying per symbol (bybit TAO/ENA/ONDO
+# switched 8h -> 4h mid-history; BTC is still 8h). A hardcoded settlements/year
+# constant understates any 4h base by exactly 2x. Derive it from the median
+# consecutive-settlement delta of the very rows being averaged.
+def _funding_labels(settlements):
+    a = rb.build_asset_brief(
+        _asset_inputs("BTC", funding_settlements=settlements), now=NOW
+    )
+    return {f["label"]: f for f in a["sections"]["funding"]["findings"]}
+
+
+def test_funding_annualized_uses_8h_interval_when_history_is_8h():
+    rows = [(1784900000.0 + i * 28800.0, 0.0001) for i in range(21)]
+    ann = _funding_labels(rows)["funding_rate_annualized_pct"]
+    assert ann["numeric"] == pytest.approx(0.0001 * 1095.0 * 100.0, rel=1e-9)
+
+
+def test_funding_annualized_uses_4h_interval_when_history_is_4h():
+    """The defect: this base settles 4h, so the 8h constant halved its carry."""
+    rows = [(1784900000.0 + i * 14400.0, 0.0001) for i in range(21)]
+    ann = _funding_labels(rows)["funding_rate_annualized_pct"]
+    assert ann["numeric"] == pytest.approx(0.0001 * 2190.0 * 100.0, rel=1e-9)
+
+
+def test_funding_annualized_takes_the_median_across_a_regime_switch():
+    """TAO-like: an 8h prefix then a 4h tail. Median tracks the live regime."""
+    ts = [1784900000.0 + i * 28800.0 for i in range(5)]
+    for i in range(16):
+        ts.append(ts[-1] + 14400.0)
+    rows = [(t, 0.0001) for t in ts]
+    ann = _funding_labels(rows)["funding_rate_annualized_pct"]
+    assert ann["numeric"] == pytest.approx(0.0001 * 2190.0 * 100.0, rel=1e-9)
+
+
+def test_funding_annualized_is_omitted_when_no_interval_is_observable():
+    """One settlement = zero deltas. Emit nothing rather than assume a constant."""
+    labels = _funding_labels([(1784900000.0, 0.0001)])
+    assert "funding_rate_mean_recent" in labels
+    assert "funding_rate_annualized_pct" not in labels
+
+
+def test_funding_annualized_is_omitted_when_timestamps_are_degenerate():
+    rows = [(1784900000.0, 0.0001)] * 4
+    labels = _funding_labels(rows)
+    assert "funding_rate_annualized_pct" not in labels

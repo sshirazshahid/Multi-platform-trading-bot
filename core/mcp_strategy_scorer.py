@@ -25,6 +25,7 @@ from core.mcp_brain import ENTRY_COOLDOWN, MCPBrain
 # F5 (2026-07-20 deep audit): loud empty-universe warning fires once per
 # process, not once per construction, so restart loops cannot spam the log.
 _EMPTY_UNIVERSE_WARNED = False
+_EXECUTION_SPEC_IDS = frozenset({"MCP_DIRECTIONAL_PAPER"})
 
 
 class MCPStrategyScorer:
@@ -74,7 +75,10 @@ class MCPStrategyScorer:
         try:
             from core.strategy_spec import approved_paper_futures_routes
 
-            routes = approved_paper_futures_routes(self.specs)
+            routes = approved_paper_futures_routes(
+                self.specs,
+                strategy_ids=_EXECUTION_SPEC_IDS,
+            )
         except Exception as exc:
             logger.warning(f"[MCPScorer] invalid executable strategy spec: {exc}")
             return {}, "strategy_spec_invalid"

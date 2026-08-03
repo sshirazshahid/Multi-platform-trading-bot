@@ -1053,6 +1053,9 @@ class MCPBrain:
         # frequent enough to avoid blocking new models for hours; long enough
         # that a permanently-misconfigured bot doesn't spam the loader.
         self._model_load_failed_at: dict[str, float] = {}
+        # Warn-once state: last pointer-rejection reason warned per market so
+        # the (expected) no-promoted-model state logs once, not 200x/day.
+        self._model_gate_last_warned_reason: dict[str, str] = {}
 
         # Exchange clients for direct OHLCV fetching (set by bot_engine)
         self._exchanges = {}
@@ -1150,9 +1153,15 @@ class MCPBrain:
             ptr_ok, ptr_reason, _ptr_diag = validate_model_pointer(
                 ptr, market_type=market_type)
             if not ptr_ok:
-                logger.warning(
-                    f"[ModelGate] latest pointer rejected for market={market_type}: "
-                    f"{ptr_reason}")
+                if self._model_gate_last_warned_reason.get(market_type) != ptr_reason:
+                    logger.warning(
+                        f"[ModelGate] latest pointer rejected for market={market_type}: "
+                        f"{ptr_reason}")
+                    self._model_gate_last_warned_reason[market_type] = ptr_reason
+                else:
+                    logger.debug(
+                        f"[ModelGate] latest pointer still rejected for "
+                        f"market={market_type}: {ptr_reason}")
                 self._model_load_failed_at[market_type] = time.time()
                 return {}
             art_path = Path(ptr["artifact_path"])
@@ -1180,6 +1189,7 @@ class MCPBrain:
             # happened — defensive in case the same market_type ever rolls
             # from "missing" to "promoted" inside one process lifetime.
             self._model_load_failed_at.pop(market_type, None)
+            self._model_gate_last_warned_reason.pop(market_type, None)
             logger.info(
                 f"[ModelGate] loaded {market_type} ensemble "
                 f"(version={bundle['version']}, weights={bundle['weights']})")

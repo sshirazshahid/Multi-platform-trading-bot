@@ -50,6 +50,12 @@ def _reset_health():
     ns._SOURCE_HEALTH.clear()
 
 
+@pytest.fixture(autouse=True)
+def _disable_twitter_network(monkeypatch):
+    """Keep legacy RSS tests offline — Twitter has its own suite."""
+    monkeypatch.setitem(ns.NEWS_CFG, "twitter_enabled", False)
+
+
 @pytest.fixture
 def scanner(monkeypatch):
     sc = ns.NewsScanner()
@@ -238,3 +244,141 @@ def test_news_signals_consumed_by_prompt_builder():
         "prompt builder must consume news_context['news_signals']"
     )
     assert "NEWS SIGNALS:" in src
+
+
+# ── 2026-07-27: cold-start hydrate + mcp_brain cache-first fetch ──────────────
+class TestHydrateFromDisk:
+    def test_hydrate_seeds_cache_and_prev_headlines(self, tmp_path, monkeypatch):
+        cache = tmp_path / "news_cache.json"
+        payload = {
+            "fetched_at": datetime.fromtimestamp(time.time() - 120).isoformat(),
+            "news": [
+                {
+                    "title": "Bitcoin ETF inflows hit record",
+                    "sentiment": 2,
+                    "impact": "HIGH",
+                    "source": "CoinDesk",
+                    "tags": ["BTC"],
+                }
+            ],
+            "sentiment": {"BTC": 2},
+        }
+        cache.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(ns, "NEWS_CACHE", cache)
+        monkeypatch.setattr(
+            ns.NewsScanner, "_load_sentiment_history", lambda self: None
+        )
+        sc = ns.NewsScanner()
+        assert len(sc._cache.get("news", [])) == 1
+        assert "Bitcoin ETF inflows hit record" in sc._prev_headlines
+        assert sc.latest_headlines(1)[0].startswith("Bitcoin ETF")
+
+    def test_hydrate_missing_cache_fail_open(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ns, "NEWS_CACHE", tmp_path / "missing.json")
+        monkeypatch.setattr(
+            ns.NewsScanner, "_load_sentiment_history", lambda self: None
+        )
+        sc = ns.NewsScanner()
+        assert sc._cache == {}
+        assert sc._prev_headlines == set()
+
+    def test_empty_rss_serves_hydrated_cache(self, tmp_path, monkeypatch):
+        cache = tmp_path / "news_cache.json"
+        payload = {
+            "fetched_at": datetime.fromtimestamp(time.time() - 60).isoformat(),
+            "news": [
+                {
+                    "title": "Solana partnership upgrade lands",
+                    "sentiment": 1,
+                    "impact": "MEDIUM",
+                    "source": "Decrypt",
+                    "tags": ["SOL"],
+                    "published": "2026-07-27 12:00",
+                }
+            ],
+        }
+        cache.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(ns, "NEWS_CACHE", cache)
+        monkeypatch.setattr(
+            ns.NewsScanner, "_load_sentiment_history", lambda self: None
+        )
+        monkeypatch.setattr(ns, "_rate_ok", lambda source: True)
+        monkeypatch.setattr(ns, "_fetch_xml", lambda url, timeout=8: None)
+        sc = ns.NewsScanner()
+        articles = sc._fetch_all_news()
+        assert len(articles) == 1
+        assert articles[0]["title"].startswith("Solana")
+
+
+class TestMcpBrainFetchNewsCacheFirst:
+    def _write_cache(self, tmp_path, *, age_sec: int, news: list):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        payload = {
+            "fetched_at": datetime.fromtimestamp(time.time() - age_sec).isoformat(),
+            "news": news,
+        }
+        (data_dir / "news_cache.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+        return data_dir
+
+    def test_fresh_cache_preferred_over_network(self, tmp_path, monkeypatch):
+        from core import mcp_brain as brain
+
+        self._write_cache(
+            tmp_path,
+            age_sec=90,
+            news=[
+                {
+                    "title": "Exchange delisting panic after probe",
+                    "sentiment": -2,
+                    "impact": "HIGH",
+                    "source": "CoinTelegraph",
+                    "breaking": True,
+                    "categories": "BTC",
+                }
+            ],
+        )
+        monkeypatch.chdir(tmp_path)
+
+        def boom(*_a, **_k):
+            raise AssertionError("network must not be called when cache is fresh")
+
+        monkeypatch.setattr(brain, "_http_get", boom)
+        results = brain.fetch_news()
+        assert len(results) == 1
+        assert results[0]["sentiment"] == "negative"
+        assert results[0]["source"] == "CoinTelegraph"
+        assert results[0]["breaking"] is True
+        assert results[0]["impact"] == "HIGH"
+
+    def test_stale_cache_falls_through(self, tmp_path, monkeypatch):
+        from core import mcp_brain as brain
+
+        self._write_cache(
+            tmp_path,
+            age_sec=3 * 3600,
+            news=[{"title": "Stale headline only", "sentiment": 1, "source": "X"}],
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            brain,
+            "_http_get",
+            lambda *a, **k: {
+                "coins": [
+                    {
+                        "item": {
+                            "name": "Bitcoin",
+                            "symbol": "BTC",
+                            "score": 0,
+                            "data": {"price_change_percentage_24h": {"usd": 5.0}},
+                        }
+                    }
+                ]
+            },
+        )
+        results = brain.fetch_news()
+        assert results
+        assert results[0]["source"] == "CoinGecko"
+        assert "Bitcoin" in results[0]["title"]

@@ -25,8 +25,14 @@ from typing import Optional
 
 from loguru import logger
 
+from core.funding_history import load_realized_settlements
+
 # ── Shared frozen constants (single source; agents re-export their own) ─────
-FUNDING_SETTLE_S = 8 * 3600  # perp funding settles every 8h
+FUNDING_SETTLE_S = 8 * 3600  # legacy 8h bucket width (listing/unlock probes only)
+# Below this, a persisted last_funding_bucket is a pre-2026-07-28 8h bucket
+# INDEX (~6.2e4), not a settlement timestamp (~1.78e9): ~28,800x apart.
+_LEGACY_BUCKET_CEILING = 1e9
+_FUNDING_HISTORY_WARNED: set = set()  # warn once per (venue, coin)
 ATR_LEN = 14  # ta.atr(14) — Wilder RMA
 RISK_PCT = 0.01  # Codex risk model: 1% equity risk (NOTATIONAL)
 MAX_NOTIONAL_MULTIPLE = 2.0  # Codex cap: notional <= 2x equity (NOTATIONAL)
@@ -398,24 +404,69 @@ def set_hint(warehouse, table: str, pid: str, bar_ts: int, reason: str) -> None:
 
 
 def accrue_funding(warehouse, *, table: str, market_data, venue: str,
-                   row: dict, now: int) -> None:
-    """Book the current funding print once per 8h settlement bucket while
-    the position is open. Missing funding is never guessed."""
+                   row: dict, now: int, history_dir=None) -> None:
+    """Book each REALIZED venue settlement for an open probe row exactly once.
+
+    Settlements are replayed from the venue's realized history
+    (``core.funding_history``), bounded below by the row's entry bar and above
+    by ``now``. Nothing is inferred: the live funding print is not a settlement,
+    and no settlement interval is assumed — the perp funding interval is
+    time-varying per symbol (bases have switched 8h -> 4h mid-history), so no
+    constant is correct. When the realized history is unavailable or has not yet
+    caught up, nothing is booked and the cursor is left untouched, so the
+    settlement is picked up on a later pass.
+
+    ``last_funding_bucket`` now holds the last booked settlement TIMESTAMP.
+    Rows written before this change hold an 8h bucket INDEX (~6.2e4 vs ~1.78e9);
+    those are treated as unset, so accrual resumes bounded by the row's entry
+    instead of re-booking or skipping history. ``market_data`` is retained for
+    call-site compatibility and deliberately unused.
+    """
+    del market_data  # the live print is not an authority on settled funding
+    symbol = str(row.get("symbol") or "")
+    coin = symbol.split("/", 1)[0].strip().upper()
+    if not coin:
+        return
     try:
-        md = market_data(venue, row["symbol"]) or {}
-    except Exception:
+        since = float(row["signal_bar_ts"])
+        end = float(now)
+    except (KeyError, TypeError, ValueError):
         return
-    fr = md.get("funding_rate")
-    if fr is None:
+
+    cursor = row.get("last_funding_bucket")
+    if cursor is not None:
+        try:
+            cursor_f = float(cursor)
+        except (TypeError, ValueError):
+            cursor_f = 0.0
+        if cursor_f >= _LEGACY_BUCKET_CEILING:  # a real settlement timestamp
+            since = max(since, cursor_f)
+
+    settlements = load_realized_settlements(
+        venue, coin, start_ts=since, end_ts=end,
+        **({"base_dir": history_dir} if history_dir is not None else {}),
+    )
+    if settlements is None:
+        key = (venue, coin)
+        if key not in _FUNDING_HISTORY_WARNED:
+            _FUNDING_HISTORY_WARNED.add(key)
+            logger.warning(
+                f"[probe] {venue} {coin}: no usable realized funding history — "
+                "probe funding accrual DEFERRED (run "
+                "scripts/backfill_funding_history.py). Nothing was guessed."
+            )
         return
-    bucket = now // FUNDING_SETTLE_S
-    if row["last_funding_bucket"] is not None and int(row["last_funding_bucket"]) == bucket:
-        return  # this settlement already booked
-    new_sum = float(row["realized_funding_rate_sum"] or 0.0) + float(fr)
+    new = [s for s in settlements if s.settlement_ts > since]
+    if not new:
+        return
+
+    new_sum = float(row["realized_funding_rate_sum"] or 0.0) + sum(
+        float(s.rate) for s in new
+    )
     conn = warehouse._conn()
     conn.execute(
         f"UPDATE {table} SET realized_funding_rate_sum=?, "
         "last_funding_bucket=? WHERE proposal_id=?",
-        (new_sum, int(bucket), row["proposal_id"]),
+        (new_sum, int(new[-1].settlement_ts), row["proposal_id"]),
     )
     conn.commit()

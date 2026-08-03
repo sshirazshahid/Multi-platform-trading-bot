@@ -157,3 +157,32 @@ def test_recent_realized_window_requires_all_21_authoritative_rows(tmp_path):
         before_ts=NOW + 30 * 3600,
         base_dir=tmp_path,
     ) is None
+
+
+# ── record() must never fabricate the funding interval ──────────────────────
+# The interval is time-varying per symbol (bases have switched 8h -> 4h
+# mid-history), so a missing value must be recorded as absent, exactly like
+# next_funding_ts. Writing a literal 8.0 puts an unobserved number into the
+# permanent historical record.
+def test_record_leaves_interval_blank_when_the_venue_did_not_report_one(tmp_path):
+    frame = {"rate": 0.0001, "next_funding_ts": NOW + 3600.0, "interval_hours": None}
+    assert record("binance", "SOL", frame, base_dir=tmp_path, now_fn=lambda: NOW)
+    rows = list(csv.DictReader(open(tmp_path / "binance_SOL.csv", encoding="utf-8")))
+    assert rows[0]["interval_hours"] == "", "absent interval must not be fabricated as 8.0"
+
+
+def test_record_preserves_a_legitimate_short_interval(tmp_path):
+    """`or` fires on a real 0-ish value; 4h venues must survive verbatim."""
+    assert record("bybit", "TAO", _frame(interval=4.0), base_dir=tmp_path,
+                  now_fn=lambda: NOW)
+    rows = list(csv.DictReader(open(tmp_path / "bybit_TAO.csv", encoding="utf-8")))
+    assert float(rows[0]["interval_hours"]) == 4.0
+
+
+def test_record_rejects_a_nonpositive_or_unparsable_interval_as_absent(tmp_path):
+    for coin, bad in (("AAA", 0.0), ("BBB", -8.0), ("CCC", "n/a")):
+        frame = {"rate": 0.0001, "next_funding_ts": NOW, "interval_hours": bad}
+        assert record("binance", coin, frame, base_dir=tmp_path, now_fn=lambda: NOW)
+        rows = list(csv.DictReader(
+            open(tmp_path / f"binance_{coin}.csv", encoding="utf-8")))
+        assert rows[0]["interval_hours"] == "", f"{bad!r} must record as absent"

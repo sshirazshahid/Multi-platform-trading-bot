@@ -286,6 +286,36 @@ class Position:
         self.partial_exit_value += float(qty) * float(price)
         self.realized_partial_pnl += float(net_pnl)
 
+    def whole_realized_pnl(self) -> float:
+        """Return the completed trade's net PnL across partials and runner.
+
+        ``self.pnl`` intentionally remains the final runner leg because the
+        partial leg is booked to the wallet and daily risk total when it fills.
+        Outcome labels, learning, and operator reporting must use this sum so
+        a profitable trade is not taught as a loss merely because its reduced
+        runner later stopped out.
+        """
+        return float(self.pnl or 0.0) + float(self.realized_partial_pnl or 0.0)
+
+    def whole_realized_pnl_pct(self) -> Optional[float]:
+        """Return whole-trade net return on the original entry margin.
+
+        The runner's ``pnl_pct`` uses the reduced runner size as denominator.
+        Once a partial has filled that percentage is not a trade-level return.
+        Reconstruct the original quantity from runner plus exited quantity,
+        while preserving ``None`` for reconciled rows lacking entry context.
+        """
+        partial_qty = float(self.partial_exit_qty or 0.0)
+        if partial_qty <= 0.0:
+            return self.pnl_pct
+        entry = float(self.entry_price or 0.0)
+        original_qty = float(self.size or 0.0) + partial_qty
+        leverage = max(float(self.leverage or 1.0), 1.0)
+        margin = entry * original_qty / leverage
+        if entry <= 0.0 or original_qty <= 0.0 or margin <= 0.0:
+            return self.pnl_pct
+        return self.whole_realized_pnl() / margin * 100.0
+
     def effective_exit_price(self, final_px: float) -> float:
         """Size-weighted average exit over partial fills + the final (runner)
         fill. Reduces to final_px when no partial was taken. `self.size` is

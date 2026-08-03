@@ -4,7 +4,13 @@ from __future__ import annotations
 import json
 
 from core.decision.promotion_loop import init_evidence_registry, load_registry
-from core.strategy_spec import SPEC_DIR, StrategySpec, load_spec, save_spec
+from core.strategy_spec import (
+    SPEC_DIR,
+    StrategySpec,
+    approved_paper_futures_routes,
+    load_spec,
+    save_spec,
+)
 
 
 def _sample_spec() -> StrategySpec:
@@ -55,3 +61,30 @@ def test_strategy_spec_registers_in_evidence_registry(tmp_path):
 
 def test_default_spec_dir_constant():
     assert str(SPEC_DIR).replace("\\", "/").endswith("data/strategy_specs")
+
+
+def test_approved_routes_can_be_scoped_to_one_strategy_identity():
+    directional = StrategySpec(
+        id="MCP_DIRECTIONAL_PAPER",
+        strategy_version="directional-v1",
+        market_type="futures",
+        venues=["binance"],
+        symbols=["BTC/USDT"],
+        promotion_status="active-paper",
+    )
+    carry = StrategySpec(
+        id="F1",
+        strategy_version="carry-v1",
+        market_type="futures",
+        venues=["bybit"],
+        symbols=["ETH/USDT"],
+        promotion_status="active-paper",
+    )
+
+    assert approved_paper_futures_routes(
+        [directional, carry], strategy_ids={"MCP_DIRECTIONAL_PAPER"}
+    ) == {"BTC": frozenset({"binance"})}
+    assert approved_paper_futures_routes([directional, carry]) == {
+        "BTC": frozenset({"binance"}),
+        "ETH": frozenset({"bybit"}),
+    }

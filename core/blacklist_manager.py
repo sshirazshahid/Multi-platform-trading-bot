@@ -6,6 +6,12 @@ FIX: Supports per-profile blacklist files (data/profiles/{name}/blacklist.json)
 FIX: SL counts reset when a symbol's blacklist entry expires.
 FIX: Blacklist only tracks direction-relevant SLs — 3 LONG SLs blacklists LONGs
      but shouldn't block a SHORT on the same symbol.
+FIX (2026-07-29): consecutive-SL counts persist to a sidecar file
+     (<blacklist stem>_sl_counts.json) so quarantine progress survives
+     restarts — on 2026-07-28 AAVE's 2/3 count was reset by a restart and
+     the pair took a third stop that should have quarantined it. Counts
+     older than auto_expiry_hours expire on load rather than resurrect.
+     The blacklist.json format contract is untouched.
 """
 
 import json
@@ -44,9 +50,14 @@ class BlacklistManager:
             self._file = DEFAULT_BLACKLIST_FILE
 
         self._list:      dict = {}   # symbol -> {reason, expires, added_at}
-        self._sl_counts: dict = {}   # symbol -> consecutive SL count (in-memory only)
+        self._sl_counts: dict = {}   # symbol:direction -> consecutive SL count
+        self._sl_updated: dict = {}  # symbol:direction -> last count-change ts
+        # Sidecar keeps blacklist.json's format contract untouched
+        # (BlacklistManager is that file's only reader).
+        self._sl_file = self._file.with_name(self._file.stem + "_sl_counts.json")
 
         self._load()
+        self._load_sl_counts()
 
         for sym in self.cfg.get("manual_list", []):
             self.add(sym, "manual", permanent=True)
@@ -74,19 +85,23 @@ class BlacklistManager:
         if symbol in self._list:
             del self._list[symbol]
             self._sl_counts.pop(symbol, None)
+            self._sl_updated.pop(symbol, None)
             self._save()
+            self._save_sl_counts()
             logger.info(f"[Blacklist] {symbol} removed.")
 
     def record_stop_loss(self, symbol: str, direction: str = ""):
         """Record a stop-loss hit. Direction-aware: 3 LONG SLs only blacklists LONGs."""
         key = f"{symbol}:{direction}" if direction else symbol
         self._sl_counts[key] = self._sl_counts.get(key, 0) + 1
+        self._sl_updated[key] = time.time()
         count = self._sl_counts[key]
         limit = self.cfg["consecutive_sl_limit"]
         logger.debug(f"[Blacklist] {key} SL count: {count}/{limit}")
         if count >= limit:
             self.add(key, "{} consecutive stop losses ({})".format(count, direction or "all"))
             self._sl_counts[key] = 0   # reset counter after blacklisting
+        self._save_sl_counts()
 
     def record_win(self, symbol: str, direction: str = ""):
         """A win resets the consecutive SL counter for this symbol/direction."""
@@ -95,6 +110,8 @@ class BlacklistManager:
             logger.debug(
                 f"[Blacklist] {key} WIN — resetting SL counter (was {self._sl_counts[key]})")
         self._sl_counts[key] = 0
+        self._sl_updated[key] = time.time()
+        self._save_sl_counts()
 
     def check_volatility(self, symbol: str, candle: list):
         if not candle:
@@ -120,7 +137,9 @@ class BlacklistManager:
         for s in non_perm:
             del self._list[s]
         self._sl_counts.clear()
+        self._sl_updated.clear()
         self._save()
+        self._save_sl_counts()
         if non_perm:
             logger.info(f"[Blacklist] Cleared {len(non_perm)} entries.")
 
@@ -136,8 +155,10 @@ class BlacklistManager:
             logger.info(f"[Blacklist] {s} expired — removed.")
             del self._list[s]
             self._sl_counts.pop(s, None)   # FIX: reset SL count when expiry clears
+            self._sl_updated.pop(s, None)
         if expired:
             self._save()
+            self._save_sl_counts()
 
     def _save(self):
         try:
@@ -159,3 +180,41 @@ class BlacklistManager:
         except Exception as e:
             logger.debug(f"[Blacklist] Load error: {e}")
             self._list = {}
+
+    def _save_sl_counts(self):
+        try:
+            self._sl_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                k: {"count": c, "updated_at": self._sl_updated.get(k, 0.0)}
+                for k, c in self._sl_counts.items() if c > 0
+            }
+            self._sl_file.write_text(
+                json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Blacklist] SL-count save error: {e}")
+
+    def _load_sl_counts(self):
+        """Restore persisted consecutive-SL counts (2026-07-29 fix). Entries
+        older than auto_expiry_hours EXPIRE on load rather than resurrect — a
+        stale 2/3 count must not blacklist a pair on its first stop after a
+        long-downtime restart. Corrupt/missing sidecar fails open to empty."""
+        try:
+            if not self._sl_file.exists():
+                return
+            raw = json.loads(self._sl_file.read_text(encoding="utf-8"))
+            max_age_s = self.cfg["auto_expiry_hours"] * 3600
+            now = time.time()
+            for key, rec in raw.items():
+                count = int(rec.get("count", 0))
+                updated = float(rec.get("updated_at", 0.0))
+                if count > 0 and 0 <= now - updated <= max_age_s:
+                    self._sl_counts[key] = count
+                    self._sl_updated[key] = updated
+            if self._sl_counts:
+                logger.info(
+                    f"[Blacklist] Restored SL counts for "
+                    f"{len(self._sl_counts)} symbol-direction keys")
+        except Exception as e:
+            logger.warning(f"[Blacklist] SL-count load error (starting empty): {e}")
+            self._sl_counts = {}
+            self._sl_updated = {}

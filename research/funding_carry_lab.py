@@ -36,7 +36,14 @@ try:
 except ImportError:  # run as a script (python research/funding_carry_lab.py)
     from _stats import _percentiles, resample_blocks
 
-# Binance/Bybit/Bitget settle perpetual funding every 8h -> 3/day -> 1095/yr.
+# DEFAULT ONLY — an 8h settlement regime (3/day -> 1095/yr). This is NOT a venue
+# constant: the perp funding interval is time-varying PER SYMBOL and per venue
+# (bybit TAO/ENA/ONDO settle 4h = 2190/yr and switched mid-history, while BTC is
+# still 8h). Every consumer here takes `settlements_per_year` as an argument;
+# callers screening a 4h base MUST pass the interval observed in that base's own
+# settlement history, or the annualized figures are understated by 2x. Only the
+# annualization/summary helpers use it — the F1 net-edge gate
+# (`f1_net_expected_edge_bps`) is interval-agnostic by construction.
 SETTLEMENTS_PER_YEAR = 1095
 # Per-side taker cost defaults; the carry crosses 2 legs (spot + perp), entry+exit.
 DEFAULT_FEE_PCT_PER_SIDE = 0.0006  # ~0.06% blended taker (spot+perp)

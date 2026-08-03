@@ -132,6 +132,55 @@ def test_explicit_active_versioned_universe_allows_only_declared_routes():
     assert len(scorer._last_research_actions) == 4
 
 
+def test_unrelated_active_spec_cannot_expand_directional_execution_routes():
+    """Each runtime scorer is scoped to its own StrategySpec identity.
+
+    An independently active PAPER strategy may share the same process/catalog,
+    but its symbol/venue routes must never authorize MCP directional actions.
+    """
+    directional = _active_spec(symbols=["BTC/USDT"], venues=["binance"])
+    unrelated = StrategySpec(
+        id="OTHER_ACTIVE_FUTURES_STRATEGY",
+        strategy_version="other-v1",
+        family="other_family",
+        market_type="futures",
+        venues=["binance"],
+        symbols=["ETH/USDT"],
+        promotion_status="active-paper",
+    )
+
+    result, scorer, _ = _run(
+        [directional, unrelated],
+        actions=[
+            _open("BTC/USDT:USDT", exchange="binance"),
+            _open("ETH/USDT:USDT", exchange="binance"),
+        ],
+    )
+
+    assert [action["symbol"] for action in result] == ["BTC/USDT:USDT"]
+    assert scorer._last_blocked_open_routes == ["ETH@binance"]
+
+
+def test_unrelated_active_spec_alone_does_not_authorize_directional_scorer():
+    unrelated = StrategySpec(
+        id="OTHER_ACTIVE_FUTURES_STRATEGY",
+        strategy_version="other-v1",
+        family="other_family",
+        market_type="futures",
+        venues=["binance"],
+        symbols=["BTC/USDT"],
+        promotion_status="active-paper",
+    )
+
+    result, scorer, brain = _run(
+        [unrelated], actions=[_open("BTC/USDT:USDT", exchange="binance")]
+    )
+
+    assert result == []
+    assert scorer._last_blocked_open_routes == ["BTC@binance"]
+    assert brain.scored_coins == ["BTC", "ETH", "SOL"]
+
+
 def test_active_futures_spec_without_version_fails_closed():
     result, scorer, brain = _run([_active_spec(version="")])
 

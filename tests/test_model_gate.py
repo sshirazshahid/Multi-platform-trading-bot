@@ -459,6 +459,69 @@ def test_load_model_bundle_rejects_overfit_latest_pointer(tmp_path: Path, monkey
     assert "futures" in b._model_load_failed_at
 
 
+def test_load_model_bundle_pointer_rejection_warns_once(
+    tmp_path: Path, monkeypatch
+):
+    """The (expected) no-promoted-model state logged the identical pointer
+    rejection every retry window — 204 WARNINGs on 2026-08-03. Same reason
+    warns once, then drops to debug; a changed reason warns again."""
+    from core.mcp_brain import MCPBrain
+
+    monkeypatch.chdir(tmp_path)
+    md = tmp_path / "data" / "models"
+    md.mkdir(parents=True)
+    art = md / "ensemble_futures_overfit.json"
+    art.write_text(json.dumps({
+        "model_version": "overfit",
+        "metrics": {"n_oos_ensemble": 4670, "auc_ensemble": 0.76},
+    }))
+    (md / "ensemble_futures_latest.json").write_text(json.dumps({
+        "model_version": "overfit",
+        "artifact_path": str(art),
+        "promoted_at": int(__import__("time").time()),
+        "diag": {
+            "model_version": "overfit",
+            "oos_wr": 0.71,
+            "deflated_sharpe": 0.0008,
+            "pbo": 1.0,
+        },
+    }))
+
+    class _RecLogger:
+        """loguru stand-in — caplog cannot capture loguru records."""
+
+        def __init__(self):
+            self.warnings: list[str] = []
+            self.debugs: list[str] = []
+
+        def warning(self, msg, *a, **k):
+            self.warnings.append(str(msg))
+
+        def debug(self, msg, *a, **k):
+            self.debugs.append(str(msg))
+
+        def __getattr__(self, name):
+            def _noop(*a, **k):
+                return None
+            return _noop
+
+    rec = _RecLogger()
+    monkeypatch.setattr("core.mcp_brain.logger", rec)
+
+    b = MCPBrain()
+    assert b._load_model_bundle("futures") == {}
+    # Expire the retry stamp so the pointer is genuinely re-validated.
+    b._model_load_failed_at["futures"] = 0.0
+    assert b._load_model_bundle("futures") == {}
+
+    rejects = [m for m in rec.warnings if "latest pointer rejected" in m]
+    stills = [m for m in rec.debugs if "still rejected" in m]
+    assert len(rejects) == 1, (
+        f"identical rejection reason must warn exactly once; warnings={rec.warnings}"
+    )
+    assert stills, "subsequent identical rejection must drop to debug"
+
+
 def test_score_via_model_rule_fallback(tmp_path: Path, monkeypatch):
     """No latest pointer => rule-only sigmoid fallback."""
     from core.mcp_brain import MCPBrain

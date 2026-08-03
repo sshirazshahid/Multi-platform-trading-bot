@@ -61,7 +61,13 @@ def _decision_ts_epoch(raw) -> Optional[float]:
     Accepts legacy float/int epochs AND the current ISO-8601 strings
     (e.g. ``2026-07-20T01:13:35.644077+00:00``); returns None when
     unparseable so one bad record cannot silently kill a whole check
-    (F6, 2026-07-20 audit)."""
+    (F6, 2026-07-20 audit).
+
+    NOTE (2026-07-28): its only consumer, _check_model_gate_starving, no
+    longer reads that file — it reads positions.json, whose timestamps are
+    plain epoch floats. Kept (not deleted) because it is the correct parser
+    for that log and the Brain view's live-reasoning feed reads the same
+    file; deleting it would only make the next consumer re-derive it."""
     if raw is None:
         return None
     try:
@@ -85,6 +91,10 @@ CARRY_SAMPLE_MILESTONES = (1, 10, 30, 60)
 REVIEW_FLAG_PATH      = Path("data/review_required.json")
 POST_MORTEM_PATH      = Path("data/post_mortem.json")
 DECISIONS_PATH        = Path("data/mcp_decisions.jsonl")
+# Authoritative record of "a position actually opened" — every entry carries
+# open_time. Used by the starvation check instead of mcp_decisions.jsonl, whose
+# record shapes cannot answer the question (see _check_model_gate_starving).
+POSITIONS_PATH        = Path("data/positions.json")
 # Anchored to the repo root (parents[1] == repo root from core/) so a standalone
 # entrypoint that constructs HealthWatchdog from another cwd reads the canonical
 # warehouse — cwd-relative broke ShadowResolver from System32 on 2026-07-05. (The
@@ -226,7 +236,11 @@ class HealthWatchdog:
     def _alert(self, key: str, level: str, message: str,
                context: Optional[dict] = None) -> None:
         now = time.time()
-        cooldown = COOLDOWN_SEC.get(key, 30 * 60)
+        cooldown = COOLDOWN_SEC.get(key)
+        if cooldown is None:
+            # Per-venue keys (e.g. clock_drift_binance) inherit their family
+            # base (clock_drift) instead of silently using the generic default.
+            cooldown = COOLDOWN_SEC.get(key.rsplit("_", 1)[0], 30 * 60)
         if (now - self._state.last_alert.get(key, 0)) < cooldown:
             return
         title = f"[Watchdog/{level.upper()}] {key}"
@@ -304,13 +318,27 @@ class HealthWatchdog:
         _bad = [d for d in _sampled if abs(d) > _thr]
         if len(_sampled) < 2:
             _hint = "check venue status and local NTP/w32tm sync"
-        elif len(_bad) == len(_sampled):
+        elif _bad and all(abs(d) > 0.8 * _thr for d in _sampled):
+            # Near-band attribution (2026-08-03): at the decaying tail of a
+            # local-clock episode venues re-cross the threshold at slightly
+            # different instants; a venue at 0.9x the line is still "drifting
+            # together", not evidence against the local clock.
             _hint = "every sampled venue drifted together — check local NTP/w32tm sync"
         else:
             _hint = ("other venues are in sync — suspect this venue or its "
                      "network path, not the local clock")
         for ex_name, drift in drift_map.items():
-            is_bad = isinstance(drift, (int, float)) and abs(drift) > _thr
+            if not isinstance(drift, (int, float)):
+                # Missing sample (slow-RTT discard / failed health check):
+                # neither clears nor extends an episode — a sample gap must
+                # not re-arm the edge alert mid-episode (2026-08-02 flap).
+                continue
+            if abs(drift) > _thr:
+                is_bad = True
+            elif abs(drift) < 0.8 * _thr:
+                is_bad = False
+            else:
+                continue  # hysteresis band [0.8*thr, thr]: hold episode state
             self._edge_alert(
                 f"clock_drift_{ex_name}", is_bad, "WARN",
                 (f"{ex_name} clock drift {drift:+.0f}ms exceeds {_thr}ms — "
@@ -530,6 +558,22 @@ class HealthWatchdog:
                  "recent_pnls": [round(float(p or 0), 4) for p in pnls[:consec_losses]]},
             )
 
+    @staticmethod
+    def _expected_idle_under_strict_econ_gate() -> bool:
+        """True when zero directional OPENs is the intended honesty state.
+
+        Under EconGate=strict with no promoted model, AccBand/MCP directional
+        flow is supposed to stay idle — alerting that as 'starvation' contradicts
+        the owner premise (refuse −EV opens = success).
+        """
+        try:
+            from config import MCP_DIRECTIONAL_ECONOMIC_GATE
+            return str(
+                MCP_DIRECTIONAL_ECONOMIC_GATE.get("mode", "")
+            ).strip().lower() == "strict"
+        except Exception:
+            return False
+
     def _check_model_gate_starving(self) -> None:
         # Only nag when the bot isn't already in real drawdown — drawdown
         # makes the gate's caution rational and we don't want to encourage
@@ -540,30 +584,53 @@ class HealthWatchdog:
                     return
             except Exception:
                 pass
-        if not DECISIONS_PATH.exists():
+        if self._expected_idle_under_strict_econ_gate():
+            # Re-arm so a later flip to paper_fallback can alert again.
+            self._edge_alert("model_gate_starving", False, "INFO", "")
             return
+        # 2026-07-28: this counted mcp_decisions.jsonl records whose TOP-LEVEL
+        # "type"/"action" == "OPEN". Measured against the live file, top-level
+        # type is only ever portfolio / rejection / position_monitor — the real
+        # OPEN actions sit two levels down at decisions.actions[].type. So the
+        # count was structurally always 0 and this INFO alert emailed hourly
+        # forever while the bot traded normally (16 entries that day). The F6
+        # ISO-timestamp fix (2026-07-20) is what made the broken check start
+        # firing; the shape mismatch predated it.
+        #
+        # Walking the nested actions is ALSO wrong: those are PROPOSED opens,
+        # each of which additionally emits a "rejection" record — and that type
+        # is a misnomer, its reasons include maker_first_maker_fill (a fill).
+        # A decision_id join of proposals-minus-rejections measured 0 executed
+        # opens on a day with 16 real entries.
+        #
+        # positions.json is the authoritative answer: every entry carries
+        # open_time. Its closed list is a rolling 500 cap that keeps the NEWEST
+        # entries, so recent opens are never truncated away; truncation could
+        # only lower an old count, and this check alerts solely on zero.
         cutoff = time.time() - MODEL_STARVE_HOURS * 3600
-        opens_recent = 0
         try:
-            with DECISIONS_PATH.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
-                        continue
-                    # F6 (2026-07-20 audit): mcp_decisions.jsonl carries ISO
-                    # "ts" strings now; float() raised on every line and the
-                    # outer except swallowed it, so this alert NEVER fired.
-                    ts = _decision_ts_epoch(rec.get("ts"))
-                    if ts is None or ts < cutoff:
-                        continue
-                    if (rec.get("type") or rec.get("action") or "").upper() == "OPEN":
-                        opens_recent += 1
+            doc = json.loads(POSITIONS_PATH.read_text(encoding="utf-8"))
         except Exception:
+            # Absent or unreadable state is NOT evidence of starvation.
             return
+        entries = []
+        if isinstance(doc, dict):
+            for key in ("open", "closed"):
+                val = doc.get(key)
+                if isinstance(val, list):
+                    entries.extend(val)
+        elif isinstance(doc, list):
+            entries = doc
+        opens_recent = 0
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            try:
+                opened = float(e.get("open_time"))
+            except (TypeError, ValueError):
+                continue          # no usable open_time -> cannot count as recent
+            if opened >= cutoff:
+                opens_recent += 1
         if opens_recent == 0:
             self._alert(
                 "model_gate_starving", "INFO",
