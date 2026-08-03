@@ -41,17 +41,60 @@ def exposure_breached(open_positions, new_notional: float, equity: float,
     hard risk rail must never open the gate on a glitch. A bad/disabled cap
     (max_pct None or <= 0) still fails OPEN (the cap is intentionally off).
     """
-    if max_pct is None or max_pct <= 0:
+    if max_pct is None:
         return False
-    if equity is None or equity <= 0:
+    try:
+        cap = float(max_pct)
+    except (TypeError, ValueError):
         return True
-    gross = float(new_notional or 0.0)
+    if cap <= 0:
+        return False
+    try:
+        equity = float(equity)
+        gross = abs(float(new_notional or 0.0))
+    except (TypeError, ValueError):
+        return True
+    if not math.isfinite(equity) or equity <= 0 or not math.isfinite(gross):
+        return True
     for p in open_positions or []:
+        getter = p.get if isinstance(p, dict) else None
+
+        def field(name, default=None):
+            return getter(name, default) if getter else getattr(p, name, default)
+
+        is_reservation = bool(field("is_pending_maker_reservation", False))
+        if is_reservation:
+            if (
+                not str(field("reservation_key", "") or "").strip()
+                or str(field("market_type", "") or "").lower() != "futures"
+                or str(field("side", "") or "").lower() not in ("buy", "sell")
+                or not str(field("exchange", "") or "").strip()
+                or not str(field("symbol", "") or "").strip()
+            ):
+                return True
         try:
-            gross += abs(float(getattr(p, "size", 0) or 0) * float(getattr(p, "entry_price", 0) or 0))
+            size = abs(float(field("size", 0) or 0))
+            entry = float(field("entry_price", 0) or 0)
+            stop = float(field("stop_loss", 0) or 0) if is_reservation else 1.0
         except (TypeError, ValueError):
+            if is_reservation:
+                return True
             continue
-    return (gross / equity * 100.0) > float(max_pct)
+        if not math.isfinite(size) or not math.isfinite(entry):
+            if is_reservation:
+                return True
+            continue
+        if is_reservation and (
+            size <= 0
+            or entry <= 0
+            or not math.isfinite(stop)
+            or stop <= 0
+        ):
+            return True
+        gross += abs(size * entry)
+        if not math.isfinite(gross):
+            return True
+    return (gross / equity * 100.0) > cap
 
 
 def aggregate_open_risk_breached(
@@ -76,9 +119,18 @@ def aggregate_open_risk_breached(
         exit_cost = max(0.0, float(stressed_exit_cost_frac or 0.0))
     except (TypeError, ValueError):
         return True
+    if not math.isfinite(cap):
+        return True
     if cap <= 0:
         return False
-    if equity <= 0 or (new_notional > 0 and new_stop_frac <= 0):
+    if (
+        not math.isfinite(equity)
+        or not math.isfinite(new_notional)
+        or not math.isfinite(new_stop_frac)
+        or not math.isfinite(exit_cost)
+        or equity <= 0
+        or (new_notional > 0 and new_stop_frac <= 0)
+    ):
         return True
 
     total_risk = new_notional * (new_stop_frac + exit_cost)
@@ -96,7 +148,12 @@ def aggregate_open_risk_breached(
             size = abs(float(field("size", 0.0) or 0.0))
         except (TypeError, ValueError):
             return True
-        if entry <= 0 or size <= 0:
+        if (
+            not math.isfinite(entry)
+            or not math.isfinite(size)
+            or entry <= 0
+            or size <= 0
+        ):
             return True
         stop = None
         stop_fn = field("entry_risk_stop")
@@ -111,9 +168,11 @@ def aggregate_open_risk_breached(
             stop = float(stop or 0.0)
         except (TypeError, ValueError):
             return True
-        if stop <= 0:
+        if not math.isfinite(stop) or stop <= 0:
             return True
         total_risk += (size * entry) * (abs(stop - entry) / entry + exit_cost)
+        if not math.isfinite(total_risk):
+            return True
     return total_risk > equity * cap
 
 # ------------------------------------------------------------------
@@ -224,6 +283,10 @@ class RiskManager:
         self._daily_pnl:     float = 0.0
         self._start_balance: float = 0.0
         self._peak_balance:  float = 0.0
+        # Invalid UTC carry-forward arithmetic must block new entries until
+        # the persisted ledger is reconciled. A wallet snapshot is not a safe
+        # fallback because it may exclude reserved margin.
+        self._daily_anchor_valid: bool = True
         # Phase 25 (2026-05-05): set to True after _load_state restores
         # peak from disk; first note_balance_update checks if the loaded
         # peak is stale (>10% above current effective) and resets if so.
@@ -309,6 +372,8 @@ class RiskManager:
         incident = self._incident_reason()
         if incident:
             return incident
+        if not self._daily_anchor_valid:
+            return "daily_equity_anchor_invalid"
         if include_kill_switch:
             try:
                 from core.kill_switch import entries_halted
@@ -387,6 +452,7 @@ class RiskManager:
                     / self._peak_balance), 4) if self._peak_balance > 0 else 0.0,
             "start_balance": round(self._start_balance, 2),
             "peak_balance": round(self._peak_balance, 2),
+            "daily_anchor_valid": self._daily_anchor_valid,
             "trading_day": self._trading_day.isoformat(),
             "trades_today": self._opens_today,
             "recent_results": self._recent_results[-20:],
@@ -457,6 +523,11 @@ class RiskManager:
         except (TypeError, ValueError):
             self._recent_sl_by_pair_side = {}
 
+        # An invalid anchor is an operator-reconciled condition, not a
+        # process-lifetime condition. Preserve it even if a restart crosses
+        # another UTC boundary.
+        self._daily_anchor_valid = state.get("daily_anchor_valid", True) is True
+
         if saved_day == _utc_today():
             # Same-day restart: restore daily PnL, peak
             self._loaded_same_day_state = True
@@ -478,11 +549,18 @@ class RiskManager:
                 f"[Risk] Resumed same-day state: daily_pnl={self._daily_pnl:+.4f}, "
                 f"trades={len(self._trade_history)}")
         else:
-            # New day: reset daily counters but keep trade history
-            self._loaded_same_day_state = False
-            self._daily_pnl = 0.0
-            self._trading_day = _utc_today()
-            self._opens_today = 0
+            # A restart spanning UTC midnight must use the same realized-ledger
+            # carry as a long-running process. Restore the saved day's anchor,
+            # then roll it forward under the common locked implementation.
+            self._start_balance = state.get("start_balance", 0.0)
+            self._peak_balance = state.get("peak_balance", 0.0)
+            self._daily_pnl = state.get("daily_pnl", 0.0)
+            self._opens_today = int(state.get("trades_today", 0) or 0)
+            self._trading_day = saved_day
+            self.roll_day_if_needed()
+            # Rollover persisted a current-day ledger. Startup initialization
+            # must preserve that carried anchor.
+            self._loaded_same_day_state = True
             logger.info(
                 f"[Risk] New day — daily counters reset. "
                 f"Carried over {len(self._trade_history)} trade history entries")
@@ -602,7 +680,7 @@ class RiskManager:
     # ── Trading gate with SMART RECOVERY ─────────────────────────────
 
     def roll_day_if_needed(self) -> bool:
-        """Reset daily counters (daily_pnl, opens_today) on a UTC-day crossing.
+        """Carry realized equity and reset daily counters on a UTC crossing.
 
         Idempotent and side-effect-free within a day, so it is safe to call
         every portfolio cycle. 2026-06-13: previously the rollover lived only
@@ -615,14 +693,54 @@ class RiskManager:
         PnL. Calling this once per cycle decouples the rollover from entries.
         Returns True if a rollover occurred.
         """
-        today = _utc_today()
-        if today != self._trading_day:
+        with self._lock:
+            today = _utc_today()
+            if today == self._trading_day:
+                return False
+
+            try:
+                old_start = float(self._start_balance)
+                old_pnl = float(self._daily_pnl)
+                carried_equity = old_start + old_pnl
+                anchor_valid = (
+                    self._daily_anchor_valid
+                    and math.isfinite(old_start)
+                    and old_start > 0
+                    and math.isfinite(old_pnl)
+                    and math.isfinite(carried_equity)
+                    and carried_equity > 0
+                )
+            except (TypeError, ValueError, OverflowError):
+                old_start = old_pnl = float("nan")
+                anchor_valid = False
+
+            if anchor_valid:
+                # Carry prior realized equity. Do not substitute current wallet
+                # free balance, which can be reduced by open-position margin.
+                self._start_balance = carried_equity
+                self._peak_balance = carried_equity
+                self._daily_anchor_valid = True
+                logger.info(
+                    f"[Risk] UTC day rollover: carried realized equity "
+                    f"${carried_equity:.4f} into {today.isoformat()}")
+            else:
+                # Explicit unusable sentinels plus a persisted breaker prevent
+                # restart-time reconstruction from silently resuming entries.
+                self._start_balance = 0.0
+                self._peak_balance = 0.0
+                self._daily_anchor_valid = False
+                logger.error(
+                    "[Risk] UTC day rollover could not establish a finite, "
+                    "positive realized-equity anchor "
+                    f"(start={old_start!r}, daily_pnl={old_pnl!r}); "
+                    "NEW entries remain blocked pending reconciliation.")
+
             self._daily_pnl = 0.0
             self._trading_day = today
             self._opens_today = 0
+            self._peak_stale_flag = False
             self._save_state()
             return True
-        return False
 
     def can_trade(self, open_position_count: int) -> bool:
         # New-day rollover: in long-running processes the load-state path
@@ -963,12 +1081,9 @@ class RiskManager:
         # daily_pnl stay correct. Only Kelly-history storage cares about the
         # percentage; store None there and let Kelly ignore unknowns.
         with self._lock:
-            today = _utc_today()
-            if today != self._trading_day:
-                self._daily_pnl   = 0.0
-                self._opens_today = 0  # A2: reset open-count too, else a post-
-                self._trading_day = today  # midnight close carries yesterday's count
-                logger.info("[Risk] Daily PnL reset (new day)")
+            # RLock permits the nested call. One rollover path keeps close
+            # workers and portfolio cycles on identical UTC accounting.
+            self.roll_day_if_needed()
 
             self._daily_pnl += pnl
 
@@ -986,14 +1101,14 @@ class RiskManager:
 
             # Effective balance = start balance + cumulative daily PnL
             # (The `balance` param is often just position notional — unreliable for DD calc)
-            effective_balance = (self._start_balance or balance) + self._daily_pnl
+            effective_balance = self._start_balance + self._daily_pnl
 
             # Phase 25 (2026-05-05): stale-peak reset on first update post-restart.
             # If the peak loaded from disk is >10% above current effective, the
             # peak is from a richer prior session and should not gate today's
             # drawdown calc. Reset to current × 1.05 to give a small buffer for
             # normal volatility without losing all guard.
-            if self._peak_stale_flag:
+            if self._daily_anchor_valid and self._peak_stale_flag:
                 self._peak_stale_flag = False
                 if (effective_balance > 0
                         and self._peak_balance > effective_balance * 1.10):
@@ -1004,7 +1119,7 @@ class RiskManager:
                         f"${effective_balance:.2f} × 1.10 — reset to "
                         f"${self._peak_balance:.2f} (current × 1.05).")
 
-            if effective_balance > self._peak_balance:
+            if self._daily_anchor_valid and effective_balance > self._peak_balance:
                 self._peak_balance = effective_balance
 
             self._save_state()
@@ -1024,33 +1139,20 @@ class RiskManager:
             and math.isfinite(restored_peak) and restored_peak > 0
             and math.isfinite(restored_pnl)
         )
-        if self._loaded_same_day_state and not restored_valid:
-            # A torn or test-polluted ledger must not leave start_balance=0:
-            # the percentage daily-loss breaker is undefined and disabled
-            # without a positive denominator. Reconstruct start-of-day equity
-            # from current equity and the retained daily realized PnL.
-            if math.isfinite(current_balance) and current_balance > 0:
-                daily_pnl = restored_pnl if math.isfinite(restored_pnl) else 0.0
-                reconstructed_start = current_balance - daily_pnl
-                if not math.isfinite(reconstructed_start) or reconstructed_start <= 0:
-                    logger.error(
-                        "[Risk] Invalid persisted PnL prevents start-balance reconstruction; "
-                        "resetting the corrupt daily PnL to zero.")
-                    daily_pnl = 0.0
-                    reconstructed_start = current_balance
-                self._daily_pnl = daily_pnl
-                self._start_balance = reconstructed_start
-                self._peak_balance = max(reconstructed_start, current_balance)
-                self._peak_stale_flag = False
-                self._save_state()
-                logger.warning(
-                    "[Risk] Recovered invalid same-day risk ledger: "
-                    f"start=${self._start_balance:.4f}, daily_pnl={self._daily_pnl:+.4f}, "
-                    f"peak=${self._peak_balance:.4f}.")
-            else:
-                logger.error(
-                    "[Risk] Invalid same-day risk ledger and no positive startup balance; "
-                    "percentage daily-loss breaker remains unavailable.")
+        if not self._daily_anchor_valid or (
+                self._loaded_same_day_state and not restored_valid):
+            # Never infer start-of-day realized equity from a current wallet
+            # snapshot. It may exclude reserved margin or be a partial read.
+            self._daily_anchor_valid = False
+            if not restored_valid:
+                self._start_balance = 0.0
+                self._peak_balance = 0.0
+            self._peak_stale_flag = False
+            self._save_state()
+            logger.error(
+                "[Risk] Invalid persisted daily-equity anchor; refusing to "
+                "reconstruct it from current balance. NEW entries remain "
+                "blocked pending reconciliation.")
             return
 
         if self._loaded_same_day_state and self._peak_balance > 0:
@@ -1065,10 +1167,21 @@ class RiskManager:
                 f"(daily_pnl={self._daily_pnl:+.4f}, peak=${self._peak_balance:.2f})")
         else:
             # New day or first run: fresh slate
-            self._start_balance = balance
-            self._peak_balance = balance
-            self._daily_pnl = 0.0
-            logger.info(f"[Risk] Starting balance: {balance:.4f} USDT (peak reset)")
+            if math.isfinite(current_balance) and current_balance > 0:
+                self._start_balance = current_balance
+                self._peak_balance = current_balance
+                self._daily_pnl = 0.0
+                self._daily_anchor_valid = True
+                logger.info(
+                    f"[Risk] Starting balance: {current_balance:.4f} USDT (peak reset)")
+            else:
+                self._start_balance = 0.0
+                self._peak_balance = 0.0
+                self._daily_anchor_valid = False
+                self._save_state()
+                logger.error(
+                    "[Risk] Refusing invalid starting balance; NEW entries "
+                    "remain blocked pending reconciliation.")
 
     def update_current_balance(self, balance: float):
         """Update peak balance without resetting peak or clearing halts.

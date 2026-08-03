@@ -15,6 +15,8 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
+import pytest
+
 from config import SCALP_MODE
 from core.order_manager import OrderManager, _position_age_minutes
 from core.position_tracker import Position
@@ -73,6 +75,21 @@ def _closed_reason(close_mock):
 # stale window: stale_close_min <= age < time_wall_min
 _STALE_AGE = (SCALP_MODE["stale_close_min"] + SCALP_MODE["time_wall_min"]) / 2
 _FLOOR = SCALP_MODE["stale_min_profit"]
+
+
+@pytest.fixture(autouse=True)
+def _scalp_mode_enabled(monkeypatch):
+    """Pin SCALP_MODE.enabled so these tests exercise the scalp block.
+
+    check_sl_tp gates the entire scalp time-wall/stale section on
+    ``SCALP_MODE["enabled"]`` (order_manager.py). That flag is operator
+    config and is currently OFF on the live box, which silently skipped the
+    block: the two IS_stale_closed tests failed, and the three "spared"
+    tests passed VACUOUSLY (asserting a close reason that is trivially
+    absent when nothing closes at all). Pinning it makes every case in this
+    module test the logic rather than the operator's .env.
+    """
+    monkeypatch.setitem(SCALP_MODE, "enabled", True)
 
 
 def test_position_age_minutes_accepts_production_epoch_float():

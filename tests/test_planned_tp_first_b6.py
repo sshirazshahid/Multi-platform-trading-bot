@@ -31,10 +31,18 @@ def _om(monkeypatch):
     om._early_breakeven_move = lambda pos, price, eff: eff
     monkeypatch.setattr("core.order_manager._should_fire_partial_tp",
                         lambda *a, **k: (False, 0.0, 0.0))
+    # Isolate from live AccBand + .env NEAR_TARGET so B6 order tests stay pure.
+    monkeypatch.setattr(
+        config, "ACCURACY_TARGET_MODE",
+        {"enabled": False, "tp_frac_of_sl": 0.5, "min_tp_pct": 0.5},
+        raising=False,
+    )
     return om
 
 
-def _pos(*, entry=100.0, sl=92.0, tp=105.0, side="buy", strategy="claude_portfolio"):
+def _pos(*, entry=100.0, sl=92.0, tp=116.0, side="buy", strategy="claude_portfolio"):
+    # Default TP > SL distance so AccBand geometry fallback cannot reclassify
+    # the fixture as a band position and skip trailing under test.
     return Position(
         id="p1", exchange="Binance", symbol="ETH/USDT", side=side,
         market_type="futures", strategy=strategy,
@@ -76,8 +84,8 @@ def test_flag_on_planned_tp_beats_trailing_sell(monkeypatch):
     om = _om(monkeypatch)
     _set_flag(monkeypatch, True)
     om.trailing.update.return_value = (True, "trailing_stop", 96.0)
-    close = _run(om, _pos(entry=100.0, sl=108.0, tp=95.0, side="sell"),
-                 price=94.0, net_pct=+6.0)
+    close = _run(om, _pos(entry=100.0, sl=108.0, tp=84.0, side="sell"),
+                 price=83.0, net_pct=+6.0)
     assert _reason(close) == "take_profit"
 
 
@@ -86,7 +94,7 @@ def test_flag_off_preserves_trailing_before_tp(monkeypatch):
     _set_flag(monkeypatch, False)
     om.trailing.update.return_value = (True, "trailing_stop", 104.0)
     close = _run(om, _pos(tp=105.0, side="buy"), price=106.0, net_pct=+6.0)
-    # Today's order: trailing (2446) is checked before the late TP (2527).
+    # Today's order: trailing is checked before the late TP.
     assert _reason(close) == "trailing_stop"
 
 
@@ -170,16 +178,15 @@ def test_flag_off_preserves_trailing_before_tp_sell(monkeypatch):
     om = _om(monkeypatch)
     _set_flag(monkeypatch, False)
     om.trailing.update.return_value = (True, "trailing_stop", 96.0)
-    close = _run(om, _pos(entry=100.0, sl=108.0, tp=95.0, side="sell"),
-                 price=94.0, net_pct=+6.0)
+    close = _run(om, _pos(entry=100.0, sl=108.0, tp=84.0, side="sell"),
+                 price=83.0, net_pct=+6.0)
     assert _reason(close) == "trailing_stop"  # today's order, sell side
 
 
-def test_flag_defaults_off_when_env_unset():
-    # The whole safety story is "default OFF => byte-identical". Pin the default
-    # so an env-default typo can't ship the EV-shape change to PAPER green.
-    # (All flag toggles in this file use auto-reverting monkeypatch.setitem, so
-    # the imported value here is the import-time env default — no reload needed,
-    # which would divorce config.RISK from the modules' bound reference.)
-    assert config.RISK["near_target_exit_enabled"] is False
+def test_flag_code_default_is_false_when_env_unset():
+    # Safety story: missing env must default OFF. Live .env may enable the
+    # A/B; pin the source default so a typo can't silently ship EV-shape.
+    from pathlib import Path
+    src = Path("config.py").read_text(encoding="utf-8")
+    assert 'os.getenv("NEAR_TARGET_EXIT_ENABLED", "false")' in src
     assert config.RISK["near_target_frac"] == 0.8

@@ -138,6 +138,23 @@ def _safe_ticker_px(ticker: dict, key: str) -> float:
         return 0.0
 
 
+def _mcp_confidence_size_multiplier(confidence, layers_aligned) -> float:
+    """Return a final-order multiplier that can never increase approved risk.
+
+    Confidence and layer count already affect scorer admission and upstream
+    sizing. Increasing quantity again inside OrderManager happened after the
+    portfolio gross- and aggregate-risk checks and double-used an uncalibrated
+    score. High confidence therefore stays at 1.0; a marginal non-zero score
+    may still reduce exposure.
+    """
+    try:
+        confidence = float(confidence or 0.0)
+        float(layers_aligned or 0.0)  # validate malformed scorer state
+    except (TypeError, ValueError):
+        return 1.0
+    return 0.80 if 0.0 < confidence < 0.60 else 1.0
+
+
 def _mid_from_ticker(ticker: dict) -> float:
     """Extract mid price (bid+ask)/2 from a ccxt ticker dict.
 
@@ -323,6 +340,9 @@ class OrderManager:
         self.enforce_entry_policy = False
         self.enforce_event_provenance = False
         self.enforce_mark_price_triggers = False
+        # BotEngine composes this with its PAPER deployable-equity snapshot.
+        # Maker resolution fails closed when the provider is absent or invalid.
+        self.portfolio_equity_provider = None
         self._mark_data_incidents: set[str] = set()
         # Provenance (2026-06-12): last open_position rejection reason —
         # read by bot_engine when open_position returns None so the
@@ -1494,54 +1514,22 @@ class OrderManager:
         # MCP Brain SL/TP override REMOVED — spec §2 forbids AI from
         # widening stop losses. Deterministic ATR-based SL/TP is authoritative.
 
-        # ── MCP Brain confidence → position size scaling ──
-        # High-conviction signals get more capital, marginal ones get less.
+        # ── MCP Brain confidence → conservative position-size scaling ──
+        # This final layer can reduce exposure, never increase it after risk checks.
         # Skipped on a maker-first finalize (_maker_first_ctx): the intent's
-        # size was already boosted at register time — never boost twice.
-        _pre_boost_size = size
+        # size was already adjusted at register time — never adjust twice.
         if self.mcp_brain and _maker_first_ctx is None:
             try:
                 base = symbol.split("/")[0].split(":")[0]
                 mcp_dec = self.mcp_brain.last_decisions().get(base, {})
                 mcp_conf = mcp_dec.get("confidence", 0)
                 layers = mcp_dec.get("layers_aligned", 0)
-                if mcp_conf >= 0.85 and layers >= 4:
-                    size *= 1.20  # 20% boost for high-conviction (4+ layers agree)
-                    logger.info(
-                        f"[MCP-SIZE] {symbol}: +20% size (conf={mcp_conf:.0%}, "
-                        f"{layers}/5 layers)")
-                elif mcp_conf < 0.60 and mcp_conf > 0:
-                    size *= 0.80  # 20% reduction for marginal signals
+                _mcp_mult = _mcp_confidence_size_multiplier(mcp_conf, layers)
+                if _mcp_mult < 1.0:
+                    size *= _mcp_mult
                     logger.info(
                         f"[MCP-SIZE] {symbol}: -20% size (conf={mcp_conf:.0%})")
             except Exception:
-                pass
-
-        # ── Post-boost loss clamp — prevent MCP boost from exceeding $MAX_LOSS ──
-        # bot_engine._within_loss_clamp() ran BEFORE this function was called,
-        # so the +20% boost above can push expected loss from $2.00 to $2.40.
-        # Re-check and clamp size back down if needed.
-        if size > _pre_boost_size and sl > 0:
-            try:
-                from config import MAX_LOSS_PER_TRADE_USD
-                _est_px = price
-                if not _est_px:
-                    try:
-                        _t = exchange.fetch_ticker(symbol, market_type)
-                        _est_px = float(_t.get("last") or _t.get("close") or 0)
-                    except Exception:
-                        _est_px = 0
-                if _est_px > 0:
-                    _sl_frac = abs(_est_px - sl) / _est_px
-                    _exp_loss = size * _est_px * _sl_frac
-                    if _exp_loss > MAX_LOSS_PER_TRADE_USD:
-                        _max_sz = MAX_LOSS_PER_TRADE_USD / (_est_px * _sl_frac) if _sl_frac > 0 else size
-                        logger.warning(
-                            f"[MCP-SIZE] Re-clamped after boost: "
-                            f"size {size:.8f} → {_max_sz:.8f} "
-                            f"(loss ${_exp_loss:.2f} > ${MAX_LOSS_PER_TRADE_USD})")
-                        size = _max_sz
-            except (ImportError, Exception):
                 pass
 
         # Get fill price + mid snapshot for attribution.
@@ -1711,6 +1699,20 @@ class OrderManager:
         except Exception:
             pass
 
+        # A pending maker may have rested while other portfolio exposure
+        # changed. Re-run both hard portfolio rails at the realized fill and
+        # rounded quantity, excluding only this intent's own reservation.
+        if self.dry_run and _maker_first_ctx is not None:
+            _maker_risk_reject = self._maker_fill_risk_rejection(
+                reservation_key=_maker_first_ctx.get("reservation_key"),
+                size=size,
+                fill_price=fill_price,
+                stop_loss=sl,
+            )
+            if _maker_risk_reject:
+                self.last_open_reject = _maker_risk_reject
+                return None
+
         # Build Position first so __post_init__ calculates entry_fee
         order_id = f"DRY-{uuid.uuid4().hex[:8]}" if self.dry_run else None
         # Phase 18 (2026-05-04): persist mcp_score / 100 as `confidence`
@@ -1730,6 +1732,23 @@ class OrderManager:
             entry_mid=entry_mid,
             confidence=_conf_in,
         )
+        # AccBand stamp at construction (2026-07-29): maker-first finalize
+        # never returns through bot_engine's post-open stamp, so inverted
+        # geometry must be marked here BEFORE tracker.add persists the row.
+        try:
+            from config import ACCURACY_TARGET_MODE as _acc_stamp
+            if (
+                _acc_stamp.get("enabled")
+                and fill_price > 0
+                and float(tp or 0) > 0
+                and float(sl or 0) > 0
+            ):
+                _sl_f = abs(float(fill_price) - float(sl)) / float(fill_price)
+                _tp_f = abs(float(tp) - float(fill_price)) / float(fill_price)
+                if 0.0 < _tp_f < _sl_f <= 0.20:
+                    pos._accuracy_band = True
+        except Exception:
+            pass
 
         # Execution fill type ('maker'|'taker'|'maker_partial'); None in dry-run
         # (no real fill) and tagged by the executor on the live path below.
@@ -3387,24 +3406,34 @@ class OrderManager:
                 self.risk.note_sl_hit(pos.symbol, pos.side)
             except Exception as _e:
                 logger.debug(f"[Risk29] note_sl_hit failed: {_e}")
+        # The partial leg was already booked when it filled, but every
+        # completed-trade label and report must use partial + runner economics.
+        try:
+            whole_pnl = float(pos.whole_realized_pnl())
+            pnl_pct = pos.whole_realized_pnl_pct()
+        except (AttributeError, TypeError, ValueError):
+            whole_pnl = float(pos.pnl or 0.0) + float(
+                getattr(pos, "realized_partial_pnl", 0.0) or 0.0
+            )
+            pnl_pct = pos.pnl_pct
+        is_win = whole_pnl > 0.0
+
         # CLAUDE.md §4: structured markdown journal of the exit (best-effort, every
         # close path funnels through here, so one wire captures SL/TP/trailing/flip).
         try:
             from core import journal as _journal
             _journal.log_action(
                 "CLOSE", pos.symbol, getattr(pos, "side", ""),
-                f"reason={reason} pnl=${(pos.pnl or 0.0):+.2f} "
+                f"reason={reason} pnl=${whole_pnl:+.2f} "
                 f"strat={getattr(pos, 'strategy', '')}")
         except Exception:
             pass
-        is_win  = (pos.pnl or 0) > 0
         # 2026-05-24 — Was `pos.pnl_pct or 0.0` which converts None → 0.0
         # and trips the _SPEC12_SCRATCH_PCT (0.5%) gate in
         # record_trade_result, silently neutralizing real losses on rows
         # without a computed pnl_pct (e.g. ghost-reclassified SL fills
         # with missing entry context). record_trade_result accepts None
         # and treats it correctly.
-        pnl_pct = pos.pnl_pct
         close_side = "sell" if pos.side == "buy" else "buy"
         _is_paper = pos.paper_trade if hasattr(pos, "paper_trade") else self.dry_run
 
@@ -3421,6 +3450,9 @@ class OrderManager:
 
         try:
             self.risk.record_trade_pnl(
+                # The partial dollars entered daily PnL at partial fill. Book
+                # only runner dollars here, but label the one completed trade
+                # from its whole economic outcome.
                 pos.pnl, self.risk._start_balance or 0,
                 is_win=is_win, pnl_pct=pnl_pct,
             )
@@ -3435,7 +3467,7 @@ class OrderManager:
                 symbol=pos.symbol,
                 family=pos.strategy or "unknown",
                 is_win=is_win,
-                pnl_usd=float(pos.pnl or 0.0),
+                pnl_usd=whole_pnl,
                 pnl_pct=pnl_pct,
                 reason=reason,
             )
@@ -3445,7 +3477,7 @@ class OrderManager:
             self.compliance.log_trade(
                 pos.exchange, pos.symbol, close_side,
                 pos.size, price, pos.strategy,
-                pnl=pos.pnl, reason=reason, order_id=pos.id,
+                pnl=whole_pnl, reason=reason, order_id=pos.id,
             )
         except Exception as ce:
             logger.debug(f"[Compliance] log_trade skipped: {ce}")
@@ -3636,7 +3668,7 @@ class OrderManager:
                 "side": pos.side, "market_type": pos.market_type,
                 "strategy": pos.strategy,
                 "entry_price": pos.entry_price, "close_price": price,
-                "pnl": pos.pnl, "pnl_pct": pnl_pct,
+                "pnl": whole_pnl, "pnl_pct": pnl_pct,
                 "close_reason": reason, "leverage": pos.leverage,
                 "open_time": getattr(pos, "open_time", 0),
                 "close_time": getattr(pos, "close_time", 0),
@@ -3684,11 +3716,19 @@ class OrderManager:
                 if (float(getattr(p, "close_time", 0) or 0) >= day_start
                     and (getattr(p, "close_reason", "") or "") not in _IMPORT_REASONS)
             ]
+            def _closed_whole_pnl(closed_pos):
+                try:
+                    return float(closed_pos.whole_realized_pnl())
+                except (AttributeError, TypeError, ValueError):
+                    return float(closed_pos.pnl or 0.0) + float(
+                        getattr(closed_pos, "realized_partial_pnl", 0.0) or 0.0
+                    )
+
             _daily_trades = len(todays)
-            _daily_pnl = sum(float(p.pnl or 0) for p in todays)
+            _daily_pnl = sum(_closed_whole_pnl(p) for p in todays)
             if _daily_trades:
                 _daily_wr = 100.0 * sum(
-                    1 for p in todays if (p.pnl or 0) > 0
+                    1 for p in todays if _closed_whole_pnl(p) > 0.0
                 ) / _daily_trades
         except Exception:
             pass
@@ -3696,7 +3736,7 @@ class OrderManager:
             self.notifier.trade_closed(
                 pos.exchange, pos.symbol, pos.side,
                 pos.entry_price, price,
-                pos.pnl, pnl_pct, reason,
+                whole_pnl, pnl_pct, reason,
                 strategy=getattr(pos, "strategy", None),
                 size=getattr(pos, "size", None),
                 leverage=getattr(pos, "leverage", None),
@@ -3797,6 +3837,61 @@ class OrderManager:
         except (AttributeError, IndexError, TypeError, ValueError):
             return 0.0
 
+    def _paper_funding_live_settlements(
+        self, exchange: BaseExchange, pos, start_ts: float, end_ts: float
+    ):
+        """Venue-realized funding rows fetched live when the local CSV store
+        lacks coverage (missing file or stale tail — measured 2026-08-03:
+        binance ETC/FET had no store file and accrual was silently inert).
+        Attempts are throttled per (venue, base) so the ~12s monitor tick
+        cannot hammer the API; a failed or empty fetch returns None and the
+        caller defers the charge, exactly like a missing store."""
+        from core.funding_history import FundingSettlement
+
+        base = str(pos.symbol).split("/", 1)[0].upper()
+        key = (str(exchange.name).lower(), base)
+        attempts = getattr(self, "_simfund_live_attempt_at", None)
+        if attempts is None:
+            attempts = self._simfund_live_attempt_at = {}
+        now = time.time()
+        last = attempts.get(key)
+        if last is not None and now - last < 900.0:
+            return None
+        attempts[key] = now
+        client = getattr(exchange, "exchange", None)
+        if client is None or not hasattr(client, "fetch_funding_rate_history"):
+            return None
+        try:
+            raw = client.fetch_funding_rate_history(
+                pos.symbol, since=int(start_ts * 1000), limit=50
+            )
+        except Exception as e:
+            logger.debug(
+                f"[SimFund] live funding history fetch failed for "
+                f"{pos.symbol}: {e}"
+            )
+            return None
+        # Only a real sequence of mappings is usable. A venue client that
+        # returns None, an error object, or anything non-iterable must defer
+        # the charge — never raise, because this runs inside the SL/TP monitor
+        # loop and an exception here would stop protecting the position.
+        if not isinstance(raw, (list, tuple)):
+            return None
+        out = []
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            try:
+                ts = float(row.get("timestamp") or 0.0) / 1000.0
+                rate = float(row.get("fundingRate"))
+            except (TypeError, ValueError):
+                continue
+            if start_ts <= ts <= end_ts:
+                out.append(FundingSettlement(settlement_ts=ts, rate=rate))
+        if not out:
+            return None
+        return tuple(sorted(out, key=lambda s: s.settlement_ts))
+
     def accrue_paper_funding(self, exchange: BaseExchange):
         """Accrue authoritative realized funding settlements exactly once.
 
@@ -3825,11 +3920,29 @@ class OrderManager:
                 start_ts=start_ts,
                 end_ts=now_ts,
             )
-            if settlements is None:
-                logger.warning(
-                    f"[SimFund] {exchange.name} {pos.symbol}: realized funding "
-                    "history unavailable; no rate fabricated"
+            overdue = (now_ts - start_ts) > 9 * 3600
+            if settlements is None or (not settlements and overdue):
+                # Local store has no file for this (venue, base) OR its tail is
+                # stale (zero rows in an overdue window — funding_history.py:73
+                # says callers must treat either as unavailable; the empty case
+                # was previously silent and left accrual inert for weeks).
+                # Fall back to the venue's own realized history — the same
+                # endpoint the backfill script uses, so no rate is fabricated.
+                settlements = self._paper_funding_live_settlements(
+                    exchange, pos, start_ts, now_ts
                 )
+            if settlements is None:
+                wkey = (str(exchange.name).lower(), base)
+                warned = getattr(self, "_simfund_warned_at", None)
+                if warned is None:
+                    warned = self._simfund_warned_at = {}
+                if now_ts - warned.get(wkey, 0.0) >= 3600.0:
+                    warned[wkey] = now_ts
+                    logger.warning(
+                        f"[SimFund] {exchange.name} {pos.symbol}: realized "
+                        "funding history unavailable (local store and live "
+                        "fetch); no rate fabricated"
+                    )
                 continue
             for settlement in settlements:
                 mark = self._paper_funding_mark_at(
@@ -3877,7 +3990,9 @@ class OrderManager:
                 if not exclude_key or key != exclude_key
             )
 
-    def pending_maker_reservations(self) -> list:
+    def pending_maker_reservations(
+        self, *, exclude_key: str | None = None
+    ) -> list:
         """Return Position-shaped immutable views of pending PAPER exposure.
 
         A maker intent has no Position yet, but it has consumed the same scarce
@@ -3891,6 +4006,8 @@ class OrderManager:
         with self._pending_maker_lock:
             rows = list(self._pending_maker.items())
         for key, intent in rows:
+            if exclude_key and key == exclude_key:
+                continue
             try:
                 limit_px = float(intent.get("limit_px") or 0.0)
                 signal_px = float(intent.get("signal_px") or limit_px)
@@ -3938,6 +4055,69 @@ class OrderManager:
                     is_pending_maker_reservation=True,
                 ))
         return reservations
+
+    def _maker_fill_risk_rejection(
+        self,
+        *,
+        reservation_key: str | None,
+        size: float,
+        fill_price: float,
+        stop_loss: float,
+    ) -> str | None:
+        """Return a fail-closed PAPER maker fill-time portfolio rejection."""
+        try:
+            from config import MAX_AGGREGATE_OPEN_RISK_PCT
+            from config import MAX_PORTFOLIO_EXPOSURE_PCT
+            from config import STRESSED_EXIT_COST_FRAC
+            from core.risk_manager import (
+                aggregate_open_risk_breached,
+                exposure_breached,
+            )
+
+            key = str(reservation_key or "").strip()
+            if not key:
+                raise ValueError("maker reservation_key is missing")
+            with self._pending_maker_lock:
+                if key not in self._pending_maker:
+                    raise ValueError("maker reservation_key is not pending")
+
+            provider = self.portfolio_equity_provider
+            if not callable(provider):
+                raise ValueError("paper portfolio equity provider is unavailable")
+            equity = provider()
+            current = list(self.tracker.get_open() or [])
+            current.extend(self.pending_maker_reservations(exclude_key=key))
+            notional = abs(float(size) * float(fill_price))
+            stop_frac = abs(float(stop_loss) - float(fill_price)) / float(fill_price)
+
+            if exposure_breached(
+                current,
+                notional,
+                equity,
+                MAX_PORTFOLIO_EXPOSURE_PCT,
+            ):
+                logger.warning(
+                    "[MakerFirst] fill blocked by portfolio exposure cap"
+                )
+                return "maker_fill_portfolio_exposure_cap"
+            if aggregate_open_risk_breached(
+                current,
+                notional,
+                stop_frac,
+                equity,
+                MAX_AGGREGATE_OPEN_RISK_PCT,
+                STRESSED_EXIT_COST_FRAC,
+            ):
+                logger.warning(
+                    "[MakerFirst] fill blocked by aggregate open-risk cap"
+                )
+                return "maker_fill_aggregate_open_risk_cap"
+            return None
+        except Exception as exc:
+            logger.warning(
+                f"[MakerFirst] fill-time portfolio risk check failed closed: {exc}"
+            )
+            return "maker_fill_risk_error"
 
     @staticmethod
     def _stable_maker_resolution_id(intent: dict) -> str:
@@ -4324,6 +4504,7 @@ class OrderManager:
         # 2026-07-23: also carry provenance_intent + authorization strategy_id
         # so entry policy and append-only intent lineage stay consistent.
         ctx = {
+            "reservation_key": key,
             "fill_type": fill_type,
             "fill_px": limit_px,
             "sl_pct": sl_pct,
@@ -4371,6 +4552,15 @@ class OrderManager:
                 )
                 self._persist_pending_maker()
                 return
+        # The pending decision is the immutable DEFERRED parent.  A maker
+        # resolution creates its own terminal child; the trade must link to
+        # that FILLED child while retaining the original decision as lineage.
+        parent_decision_id = str(
+            intent.get("parent_decision_id")
+            or intent.get("decision_id")
+            or ""
+        ).strip()
+        resolution_decision_id = self._stable_maker_resolution_id(intent)
         pos = self.open_position(
             exchange, intent["symbol"], side, intent["market_type"],
             intent["strategy"], float(intent["size"]), prov_sl, prov_tp,
@@ -4378,11 +4568,11 @@ class OrderManager:
             candidate_id=intent.get("candidate_id"),
             mcp_score=intent.get("mcp_score"),
             model_version=intent.get("model_version"),
-            decision_id=intent.get("decision_id"),
+            decision_id=resolution_decision_id,
             execution_snapshot=resolved_snapshot,
             authorization_strategy_id=intent.get("strategy_id"),
             decision_confidence=intent.get("decision_confidence"),
-            decision_parent_id=intent.get("parent_decision_id"),
+            decision_parent_id=parent_decision_id or None,
             _maker_first_ctx=ctx)
         if pos is None:
             reject = self.last_open_reject or "maker_finalize_open_rejected"
@@ -4664,7 +4854,14 @@ class OrderManager:
             # position so trailing/early-BE can still advance it first.
             if RISK.get("near_target_exit_enabled", False):
                 _tp_ptf = pos.take_profit
-                if _tp_ptf and float(_tp_ptf) > 0 and not _exchange_handles_sltp:
+                _sl_ptf = pos.stop_loss
+                if (
+                    _sl_ptf
+                    and float(_sl_ptf) > 0
+                    and _tp_ptf
+                    and float(_tp_ptf) > 0
+                    and not _exchange_handles_sltp
+                ):
                     _hit = self._target_traded_through(pos, price)
                     if _hit:
                         _, _ntp_ptf, _ = self._net_pnl_at_price(pos, price)
@@ -4742,6 +4939,10 @@ class OrderManager:
 
             # ── TRAILING STOP ─────────────────────────────────────────
             # Skip trailing for scalp trades (v4: trailing clips winners at 0.67R)
+            # Skip trailing for ACCURACY band (2026-07-28): audited geometry is
+            # pure first-touch SL/TP; trailing activation (1.2%) can still clip
+            # a gapped winner past TP before the late TP check, or convert a
+            # near-TP into trailing_stop instead of take_profit.
             try:
                 from config import SCALP_MODE as _SM_trail
             except ImportError:
@@ -4753,6 +4954,8 @@ class OrderManager:
                 )
                 if _is_scalp_trail:
                     _skip_trail_for_scalp = True
+            if _is_accuracy_band_position(pos):
+                _skip_trail_for_scalp = True
 
             if _skip_trail_for_scalp:
                 updated_sl = pos.stop_loss
@@ -4777,7 +4980,13 @@ class OrderManager:
             )
 
             # ── Early breakeven move: lock SL to breakeven once in profit ──
-            effective_sl = self._early_breakeven_move(pos, price, effective_sl)
+            # AccBand first-touch (2026-07-29): BE ratchets stop into the TP
+            # path and turns near-TP pullbacks into scratch SL exits — same
+            # leak class as trailing. Skip for band positions.
+            if not _is_accuracy_band_position(pos):
+                effective_sl = self._early_breakeven_move(
+                    pos, price, effective_sl
+                )
 
             # Persist trailing advance so it survives restarts
             # 2026-04-19 (Fix A2): when the exchange holds SL, also re-place
@@ -4825,20 +5034,29 @@ class OrderManager:
             # any positive price >= 0. Skip the SL/TP trigger *only* when
             # invalid, but let age-limit + hard-max-loss enforcement continue
             # below so an unprotected position isn't immortal.
+            # 2026-07-27: the two triggers are gated INDEPENDENTLY. A literal
+            # take_profit=0.0 is a "no TP" SENTINEL (bot_engine.py:4385 tsmom
+            # entries; position_tracker.py:748 manual/reconcile imports), not
+            # corruption — conjoining the gates let that sentinel disable the
+            # position's real stop, leaving it on the 3% hard-max-loss gate
+            # alone. TP stays gated on _tp_ok, so the cascade guard is intact.
             _tp_ok = pos.take_profit is not None and float(pos.take_profit) > 0
             _sl_ok = effective_sl is not None and float(effective_sl) > 0
-            _sltp_valid = _tp_ok and _sl_ok
-            if not _sltp_valid:
+            if not _sl_ok:
                 logger.warning(
-                    f"[Orders] Invalid SL/TP for {pos.symbol} "
+                    f"[Orders] Invalid SL for {pos.symbol} "
                     f"(SL={effective_sl}, TP={pos.take_profit}) — "
                     f"skipping SL/TP trigger this cycle (age/hard-loss still active)")
+            elif not _tp_ok:
+                logger.debug(
+                    f"[Orders] No take-profit for {pos.symbol} "
+                    f"(TP={pos.take_profit}) — TP trigger inert, stop-loss active")
 
             # Skip direct SL/TP price-trigger checks when the exchange
             # holds both conditionals — the exchange fires them on its own.
             # All OTHER monitoring (trailing, age limit, hard max loss,
             # entry invalidation) still runs above and below this block.
-            if _sltp_valid and not _exchange_handles_sltp and pos.side == "buy":
+            if _sl_ok and not _exchange_handles_sltp and pos.side == "buy":
                 if price <= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED. SL hit = close.
                     # No widening, no MCP hold consultation. Discipline > hope.
@@ -4848,7 +5066,7 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif self._target_traded_through(pos, price):
+                elif _tp_ok and self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED — always close at TP.
                     # The old "MCP says RIDE" gate collapsed R:R from 2.5:1 to 1.12:1
                     # by letting winning positions ride past TP, only to retrace and
@@ -4869,7 +5087,7 @@ class OrderManager:
                 # retrace case, and MCP advice now only applies to exits below
                 # the planned TP line (loss-cut / breakeven).
 
-            elif _sltp_valid and not _exchange_handles_sltp and pos.side == "sell":
+            elif _sl_ok and not _exchange_handles_sltp and pos.side == "sell":
                 if price >= effective_sl:
                     # 2026-04-12: ANTI-LOSS gate REMOVED for shorts too.
                     logger.warning(
@@ -4878,7 +5096,7 @@ class OrderManager:
                     )
                     self.close_position(exchange, pos, "stop_loss", price)
                     continue
-                elif self._target_traded_through(pos, price):
+                elif _tp_ok and self._target_traded_through(pos, price):
                     # 2026-04-16: MCP TP override REMOVED for shorts too.
                     _, net_pct, _ = self._net_pnl_at_price(pos, price)
                     logger.info(
@@ -4912,7 +5130,13 @@ class OrderManager:
             except ImportError:
                 _ES = {"enabled": False}
             age_minutes_for_staleness = (pos.duration_minutes or 0)
+            # AccBand first-touch: do not invalidate on 4h EMA flip inside the
+            # band hold horizon — audited geometry is pure SL/TP.
+            _band_hold_es = _accuracy_band_hold_active(
+                pos, float(age_minutes_for_staleness) / 60.0
+            )
             if (_ES.get("enabled", True)
+                    and not _band_hold_es
                     and age_minutes_for_staleness >= int(_ES.get("min_hold_minutes", 30))
                     and pos.market_type == "futures"
                     and self.mcp_brain is not None):
@@ -5011,13 +5235,20 @@ class OrderManager:
             # 60-65% WR band was audited on. False when the flag is off
             # (byte-identical) or past the horizon (zombie protection).
             _band_hold = _accuracy_band_hold_active(pos, age_hours)
-            if _band_hold and age_hours >= min(max_age_h, max_stale_h):
+            # 2026-08-03 owner-directed STALE fix: tier-geometry positions
+            # (planned R:R >= 1) get the same time-exit deferral the band
+            # earned on 2026-07-10 — first-touch SL/TP governs inside the
+            # hold horizon. Measured trigger: 4/10 post-fix closes were
+            # STALE with 0 full TPs; the wide targets never had time.
+            _tier_hold = _tier_geometry_hold_active(pos, age_hours)
+            _hold = _band_hold or _tier_hold
+            if _hold and age_hours >= min(max_age_h, max_stale_h):
                 logger.debug(
-                    f"[Orders] ACCURACY band hold: {pos.symbol} "
-                    f"age={age_hours:.1f}h — STALE/AGE time exits deferred "
-                    f"until SL/TP or horizon")
+                    f"[Orders] {'ACCURACY band' if _band_hold else 'tier-geometry'} "
+                    f"hold: {pos.symbol} age={age_hours:.1f}h — STALE/AGE time "
+                    f"exits deferred until SL/TP or horizon")
 
-            if (not _band_hold
+            if (not _hold
                     and age_hours >= max_age_h and net_pnl < 0
                     and abs(net_pct) >= AGE_LIMIT_MIN_LOSS_PCT):
                 logger.warning(
@@ -5026,7 +5257,7 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — force-closing losing position")
                 _try_soft_close(self, pos, "AGE_LIMIT", proceed_fn=_close)
                 continue
-            elif (AGE_LOSS_ENABLED and not _band_hold
+            elif (AGE_LOSS_ENABLED and not _hold
                     and age_hours >= max_loss_age_h
                     and net_pct <= -max_loss_age_pct):
                 logger.warning(
@@ -5035,7 +5266,7 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — cutting before mid-hold bleed worsens")
                 _try_soft_close(self, pos, "AGE_LOSS", proceed_fn=_close)
                 continue
-            elif (not _band_hold
+            elif (not _hold
                     and age_hours >= max_stale_h and -0.3 <= net_pct <= 0.0):
                 # 2026-05-28: only STALE-close flat/losing positions.
                 # Profitable trades (net_pct > 0) should run to TP, not get
@@ -5047,6 +5278,46 @@ class OrderManager:
                     f"net={net_pct:+.2f}% — flat/slight loss, freeing capital")
                 _try_soft_close(self, pos, "STALE", proceed_fn=_close)
                 continue
+
+
+def _tier_geometry_hold_active(pos, age_hours: float) -> bool:
+    """True while a position's planned tier geometry defers time exits.
+
+    2026-08-03 owner-directed STALE fix, mirroring the 2026-07-10 ACCURACY
+    band hold below: post-AccBand tier geometry (TP 2.0-3.75% vs SL
+    0.9-1.5%) needs time to reach either barrier — the first 10 post-fix
+    resolved trades show 4 STALE exits and 0 full take-profits. While the
+    planned R:R (from the position's own stored entry/SL/TP prices) is
+    >= min_planned_rr and age < max_hold_hours, first-touch SL/TP governs.
+    Past the horizon (zombie protection), with the flag off, or with
+    missing/degenerate barrier prices the hold never applies.
+    """
+    try:
+        from config import TIER_GEOMETRY_TIME_EXIT_HOLD as _cfg
+    except ImportError:
+        return False
+    if not _cfg.get("enabled"):
+        return False
+    if age_hours >= float(_cfg.get("max_hold_hours", 72.0)):
+        return False
+    # Scalp lane keeps its own stale economics (2026-05-28 verdict: $1-2
+    # scalps have no edge after costs; their aged-flat closes free capital
+    # by design and must never be deferred by tier geometry).
+    if getattr(pos, "_scalp", False) or (
+            "scalp" in str(getattr(pos, "strategy", "")).lower()):
+        return False
+    entry = float(getattr(pos, "entry_price", 0.0) or 0.0)
+    sl = float(getattr(pos, "stop_loss", 0.0) or 0.0)
+    tp = float(getattr(pos, "take_profit", 0.0) or 0.0)
+    if entry <= 0 or sl <= 0 or tp <= 0:
+        return False
+    if str(getattr(pos, "side", "")).lower() in ("buy", "long"):
+        risk, reward = entry - sl, tp - entry
+    else:
+        risk, reward = sl - entry, entry - tp
+    if risk <= 0 or reward <= 0:
+        return False
+    return (reward / risk) >= float(_cfg.get("min_planned_rr", 1.0))
 
 
 # ─────────────────────────────────────────────────────────────────────

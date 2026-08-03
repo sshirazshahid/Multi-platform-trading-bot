@@ -64,8 +64,53 @@ def test_flag_on_inverts_geometry(acc_on):
 
 
 def test_flag_on_respects_cost_floor(acc_on):
-    # TP never compresses below min_tp_pct (must clear round-trip costs).
-    assert mb._apply_accuracy_target(0.8, 1.6) == pytest.approx(0.5)
+    # cost_clearance default 0.35: SL 0.8% x 0.5 = 0.4 → keep 0.4 (clears RT).
+    assert mb._apply_accuracy_target(0.8, 1.6) == pytest.approx(0.4)
+    assert mb._apply_accuracy_target(2.0, 4.0) == pytest.approx(1.0)
+
+
+def test_geometry_preferred_over_min_tp_inflate(acc_on, monkeypatch):
+    """TP clears stressed RT without legacy 0.5% inflate when raw is enough."""
+    import config
+    monkeypatch.setattr(
+        config, "ACCURACY_TARGET_MODE",
+        {"enabled": True, "tp_frac_of_sl": 0.45, "min_tp_pct": 0.5,
+         "min_tp_cost_pct": 0.35},
+        raising=False,
+    )
+    # SL 0.8% x 0.45 = 0.36 >= 0.35 clearance → keep 0.36 (not 0.5)
+    assert mb._apply_accuracy_target(0.8, 1.6, side="buy") == pytest.approx(0.36)
+
+
+def test_sub_clearance_tp_lifted_for_economic_gate(acc_on, monkeypatch):
+    """Sell frac 0.35 x 0.8% SL = 0.28 < 0.35 clearance → lift to 0.35.
+
+    Without this lift, paper_fallback economic_gate_stressed_breakeven
+    systematically starves AccBand shorts (RT ~31.5bps).
+    """
+    import config
+    monkeypatch.setattr(
+        config, "ACCURACY_TARGET_MODE",
+        {"enabled": True, "tp_frac_of_sl": 0.5, "min_tp_pct": 0.5,
+         "tp_frac_buy": 0.45, "tp_frac_sell": 0.35,
+         "min_tp_cost_pct": 0.35},
+        raising=False,
+    )
+    assert mb._apply_accuracy_target(0.8, 1.6, side="sell") == pytest.approx(0.35)
+
+
+def test_hard_cost_clearance_still_floors_micro_targets(acc_on, monkeypatch):
+    import config
+    monkeypatch.setattr(
+        config, "ACCURACY_TARGET_MODE",
+        {"enabled": True, "tp_frac_of_sl": 0.5, "min_tp_pct": 0.5,
+         "min_tp_cost_pct": 0.40},
+        raising=False,
+    )
+    # raw 0.8*0.5=0.40 == clearance → 0.40
+    assert mb._apply_accuracy_target(0.8, 1.6) == pytest.approx(0.40)
+    # raw 0.6*0.5=0.30 < 0.40 → lift to clearance 0.40 (< SL 0.6)
+    assert mb._apply_accuracy_target(0.6, 1.2) == pytest.approx(0.40)
 
 
 def test_flag_off_is_byte_identical(acc_off):
@@ -98,21 +143,18 @@ def test_per_side_override_applied_by_side(acc_on_per_side):
 
 
 def test_per_side_override_respects_cost_floor(acc_on_per_side):
-    # SL 1.0% x sell-frac 0.35 = 0.35 -> floored at min_tp_pct 0.5 (still < SL)
-    assert mb._apply_accuracy_target(1.0, 2.0, side="sell") == pytest.approx(0.5)
+    # SL 1.0% x sell-frac 0.35 = 0.35 == default clearance → keep 0.35
+    assert mb._apply_accuracy_target(1.0, 2.0, side="sell") == pytest.approx(0.35)
 
 
 def test_cost_floor_must_not_invert_band_geometry(acc_on_per_side):
-    """Warehouse 2026-07-24: SL≈0.48% + min_tp=0.5% floored TP≥SL → WR≈37%.
-
-    When the cost floor would put TP >= SL, prefer frac-compressed TP so
-    theoretical hit-rate SL/(SL+TP) stays in the AccBand regime.
-    """
-    # SL 0.48% x sell 0.35 = 0.168; floor 0.5 would invert — use raw 0.168
-    assert mb._apply_accuracy_target(0.48, 1.2, side="sell") == pytest.approx(0.168)
-    # SL 0.48% x buy 0.45 = 0.216; same conflict
-    assert mb._apply_accuracy_target(0.48, 1.2, side="buy") == pytest.approx(0.216)
-    # Floor still applies when it does NOT invert (SL 2.0% x 0.35 = 0.7 >= 0.5)
+    """When clearance would put TP >= SL, prefer frac-compressed raw TP."""
+    # SL 0.30% x sell 0.35 = 0.105; clearance 0.35 would invert — use raw
+    import config
+    # Force a tight SL via monkeypatch on the shared fixture values
+    assert mb._apply_accuracy_target(0.30, 1.2, side="sell") == pytest.approx(0.105)
+    assert mb._apply_accuracy_target(0.30, 1.2, side="buy") == pytest.approx(0.135)
+    # Clearance applies when it does NOT invert (SL 2.0% x 0.35 = 0.7)
     assert mb._apply_accuracy_target(2.0, 4.0, side="sell") == pytest.approx(0.7)
 
 

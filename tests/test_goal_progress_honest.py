@@ -7,11 +7,20 @@ from datetime import datetime, timezone
 import pytest
 
 from scripts.report_goal_progress import (
+    GOAL_LINE,
     RESOLVED_FLOOR,
+    TARGET_WR_HIGH,
+    TARGET_WR_LOW,
     _runtime_context,
     excursion_telemetry_summary,
     performance_summary,
 )
+
+
+def test_goal_band_is_exact_owner_target():
+    assert TARGET_WR_LOW == pytest.approx(0.63)
+    assert TARGET_WR_HIGH == pytest.approx(0.67)
+    assert "63-67%" in GOAL_LINE
 
 
 def _conn() -> sqlite3.Connection:

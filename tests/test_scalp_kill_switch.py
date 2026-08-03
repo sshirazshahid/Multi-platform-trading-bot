@@ -27,9 +27,16 @@ if str(ROOT) not in sys.path:
 
 
 def _reload_config():
-    """Drop cached config, re-import — re-runs the import-time gate."""
-    sys.modules.pop("config", None)
-    return importlib.import_module("config")
+    """Reload config in place so collected tests retain one module identity.
+
+    Popping ``sys.modules`` left earlier-collected tests holding a stale
+    ``config`` object while runtime code imported a replacement, making later
+    assertions order-dependent.
+    """
+    module = sys.modules.get("config")
+    if module is None:
+        module = importlib.import_module("config")
+    return importlib.reload(module)
 
 
 @pytest.fixture(autouse=True)

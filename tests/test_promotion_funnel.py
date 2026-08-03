@@ -93,7 +93,8 @@ def test_probe_lane_gate_ready_at_floor(tmp_path):
 def test_probe_lane_error_isolated():
     ro = sqlite3.connect(":memory:")  # empty db: tables missing -> per-lane ERROR
     lanes = pf.probe_lane_states(ro, time.time())
-    assert all(l.state == "ERROR" for l in lanes) and len(lanes) == len(pf.PROBE_LANES)
+    expected = len(pf.PROBE_LANES) + len(pf.UNLOCK_ARM_LANES)
+    assert all(l.state == "ERROR" for l in lanes) and len(lanes) == expected
 
 
 def test_bundle_mr_lanes_registered():
@@ -101,8 +102,9 @@ def test_bundle_mr_lanes_registered():
     both arms are 4h, so each lane keys on its own DISTINCT agent_id."""
     assert pf.PROBE_LANES["zfade_4h_cfg365"] == ("ZfadeProbeAgent", "4h")
     assert pf.PROBE_LANES["rsi2_4h_cfg226"] == ("Rsi2TrackerProbeAgent", "4h")
-    # 4 pre-existing lanes + 2 bundle arms + pullback_ma20_4h (2026-07-23)
-    assert len(pf.PROBE_LANES) == 7
+    # tsmom×2 + breakout + bundle×2 + pullback; unlock arms live in UNLOCK_ARM_LANES
+    assert len(pf.PROBE_LANES) == 6
+    assert len(pf.UNLOCK_ARM_LANES) == 2
 
 
 def test_bundle_mr_lanes_carry_universe_widened_stamp(tmp_path):
@@ -123,11 +125,49 @@ def test_bundle_mr_lanes_carry_universe_widened_stamp(tmp_path):
         assert parsed.tzinfo is not None
         assert parsed.utcoffset().total_seconds() == 0  # explicit UTC
     # lanes whose accrual universe never changed are NOT stamped
-    for lane in ("tsmom_20d_1h", "tsmom_20d_4h", "breakout_60d", "unlock_short"):
+    for lane in ("tsmom_20d_1h", "tsmom_20d_4h", "breakout_60d",
+                 "unlock_short_w1", "unlock_short_w2"):
         assert "universe_widened_utc" not in lanes[lane].detail
 
 
-def test_classifier_tokenized_vs_crypto():
+def test_unlock_arms_are_separate_funnel_lanes():
+    assert "unlock_short" not in pf.PROBE_LANES
+    assert pf.UNLOCK_ARM_LANES["unlock_short_w1"][1] == "unlock_short_w1_v1"
+    assert pf.UNLOCK_ARM_LANES["unlock_short_w2"][1] == "unlock_short_w2_v1"
+
+
+def test_unlock_arm_lanes_count_by_model_version(tmp_path):
+    import sqlite3
+    import time
+
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute(
+        "CREATE TABLE shadow_decisions (id INTEGER PRIMARY KEY, ts REAL, agent_id TEXT,"
+        " timeframe TEXT, proposal_id TEXT, label_status TEXT, p_win REAL, model_version TEXT)"
+    )
+    c.execute(
+        "CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)"
+    )
+    now = time.time()
+    # 2 proposals on W1, 0 on W2
+    for i in range(2):
+        pid = f"u1-{i}"
+        c.execute(
+            "INSERT INTO shadow_decisions "
+            "(ts, agent_id, timeframe, proposal_id, label_status, p_win, model_version) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (now, "UnlockShortProbeAgent", "1d", pid, "PENDING", 0.6,
+             "unlock_short_w1_v1"),
+        )
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    lanes = {l.lane: l for l in pf.probe_lane_states(ro, now)}
+    assert lanes["unlock_short_w1"].detail["proposals"] == 2
+    assert lanes["unlock_short_w1"].state == "ACCRUING"
+    assert lanes["unlock_short_w2"].detail["proposals"] == 0
+    assert lanes["unlock_short_w2"].state == "IDLE"
+
     assert pf.classify_base("TZA") == "tokenized"     # leveraged-ETF explicit list
     assert pf.classify_base("SOXS") == "tokenized"
     assert pf.classify_base("NVDA") == "tokenized"    # static stock set
@@ -151,6 +191,68 @@ def test_listing_lane_starved_when_all_recent_tokenized(tmp_path):
     assert ls.state == "STARVED"
     assert ls.detail["known_tokenized_listings_30d"] == 3
     assert ls.detail["unclassified_listings_30d"] == 0
+    assert ls.detail["starvation_reason"] == "no_actionable_shortable_listing"
+
+
+def test_listing_lane_idle_when_all_skip_not_crypto(tmp_path):
+    """Unanimous TradFi scope skips are idle-by-market, not probe starvation."""
+    import sqlite3
+    import time
+
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute(
+        "CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, decision TEXT,"
+        " shortable INTEGER, created_ts REAL)"
+    )
+    c.execute(
+        "CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)"
+    )
+    now = time.time()
+    for i, b in enumerate(["GS", "SNOW", "HK0700", "PYPL"]):
+        c.execute(
+            "INSERT INTO shadow_listing_probe VALUES (?,?,?,?,?)",
+            (f"ls{i}", b, "SKIP_NOT_CRYPTO", 0, now - i * 3600),
+        )
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    ls = pf.listing_lane_state(ro, now)
+    assert ls.state == "IDLE"
+    assert ls.detail["actionable_proposals_30d"] == 0
+    assert ls.detail["skip_not_crypto_30d"] == 4
+    assert ls.detail.get("scope_only") is True
+    assert ls.detail["starvation_reason"] == "all_listings_out_of_crypto_universe"
+
+
+def test_listing_lane_still_starved_on_mixed_skips_without_enter(tmp_path):
+    import sqlite3
+    import time
+
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute(
+        "CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, decision TEXT,"
+        " shortable INTEGER, created_ts REAL)"
+    )
+    c.execute(
+        "CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)"
+    )
+    now = time.time()
+    rows = [
+        ("a", "PEPE", "SKIP_NOT_CRYPTO"),
+        ("b", "WIF", "SKIP_UNSHORTABLE"),
+        ("c", "BONK", "SKIP_NO_FUNDING"),
+    ]
+    for i, (pid, base, dec) in enumerate(rows):
+        c.execute(
+            "INSERT INTO shadow_listing_probe VALUES (?,?,?,?,?)",
+            (pid, base, dec, 0, now - i * 3600),
+        )
+    c.commit()
+    ro = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    ls = pf.listing_lane_state(ro, now)
+    assert ls.state == "STARVED"
+    assert ls.detail.get("scope_only") is not True
     assert ls.detail["starvation_reason"] == "no_actionable_shortable_listing"
 
 
@@ -258,7 +360,65 @@ def test_dossier_written_complete_and_idempotent(tmp_path):
     assert pf.build_dossier(lane, gate, outcomes, tmp_path, "20260718") is None  # idempotent
 
 
+def test_listing_short_gate_ready_can_stage_dossier(tmp_path, monkeypatch):
+    """listing_short is outside PROBE_LANES but must still run gate+dossier."""
+    import sqlite3
+    import time
+    from datetime import datetime, timezone
+
+    db = tmp_path / "wh.sqlite"
+    c = sqlite3.connect(db)
+    c.execute(
+        "CREATE TABLE shadow_listing_probe (proposal_id TEXT, base TEXT, "
+        "decision TEXT, shortable INTEGER, created_ts REAL)"
+    )
+    c.execute(
+        "CREATE TABLE shadow_outcomes (proposal_id TEXT, net_pnl REAL, resolved_ts REAL)"
+    )
+    c.execute(
+        "CREATE TABLE shadow_decisions (id INTEGER PRIMARY KEY, ts REAL, agent_id TEXT,"
+        " timeframe TEXT, proposal_id TEXT, label_status TEXT, p_win REAL)"
+    )
+    now = time.time()
+    for i in range(30):
+        pid = f"L{i}"
+        c.execute(
+            "INSERT INTO shadow_listing_probe VALUES (?,?,?,?,?)",
+            (pid, "NEWCOIN", "SHORT", 1, now - 86400),
+        )
+        c.execute(
+            "INSERT INTO shadow_outcomes VALUES (?,?,?)",
+            (pid, 1.0, now - 1000),
+        )
+    c.commit()
+    c.close()
+    (tmp_path / "carry_gate_log.jsonl").write_text("")
+    (tmp_path / "goal_progress.json").write_text(json.dumps({"lanes": []}))
+    (tmp_path / "unlock_calendar").mkdir()
+    paths = {
+        "warehouse": db,
+        "gate_log": tmp_path / "carry_gate_log.jsonl",
+        "goal_json": tmp_path / "goal_progress.json",
+        "cal_dir": tmp_path / "unlock_calendar",
+        "funnel_json": tmp_path / "promotion_funnel.json",
+        "dossier_dir": tmp_path / "dossiers",
+        "journal_dir": tmp_path / "journal",
+    }
+
+    def _pass_gate(outcomes):
+        return {"passed": True, "gates": {}}
+
+    monkeypatch.setattr(pf, "run_gate", _pass_gate)
+    doc = pf.compute_all(paths, now)
+    listing = next(l for l in doc["lanes"] if l["lane"] == "listing_short")
+    assert listing["state"] == "STAGED"
+    assert list((tmp_path / "dossiers").glob("listing_short_*"))
+
+
 def test_compute_all_and_journal_on_state_change(tmp_path):
+    import sqlite3
+    import time
+
     db = tmp_path / "wh.sqlite"
     c = sqlite3.connect(db)
     c.execute("CREATE TABLE shadow_decisions (id INTEGER PRIMARY KEY, ts REAL, agent_id TEXT,"
@@ -279,7 +439,7 @@ def test_compute_all_and_journal_on_state_change(tmp_path):
     doc1 = pf.compute_all(paths, now)
     assert {l["lane"] for l in doc1["lanes"]} >= {
         "tsmom_20d_1h", "listing_short", "f1_carry",
-        "directional_paper_cohort", "unlock_short",
+        "directional_paper_cohort", "unlock_short_w1", "unlock_short_w2",
     }
     pf.persist(doc1, paths)            # first run: journal written (all states new)
     files = list((tmp_path / "journal").glob("*.md"))

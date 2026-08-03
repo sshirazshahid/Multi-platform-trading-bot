@@ -66,8 +66,9 @@ def test_geometry_compresses_with_spec_fracs(monkeypatch):
     )
     assert mb._apply_accuracy_target(2.0, 4.0, side="buy") == pytest.approx(0.70)
     assert mb._apply_accuracy_target(2.0, 4.0, side="sell") == pytest.approx(0.60)
-    # min_tp_pct floor still clears round-trip costs
-    assert mb._apply_accuracy_target(1.0, 2.0, side="sell") == pytest.approx(0.5)
+    # Soft cost clearance: SL 1.0% x sell 0.30 = 0.30; default clearance
+    # in fixture is unset → module default 0.35 lifts to 0.35.
+    assert mb._apply_accuracy_target(1.0, 2.0, side="sell") == pytest.approx(0.35)
 
 
 def test_geometry_off_is_unchanged(monkeypatch):

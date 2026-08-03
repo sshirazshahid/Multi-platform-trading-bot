@@ -88,8 +88,8 @@ def test_same_day_restart_keeps_start_balance_no_double_count(rm):
     assert abs((fresh._start_balance + fresh._daily_pnl) - 380.0) < 1e-6  # effective = 380, not 360
 
 
-def test_same_day_restart_repairs_zero_start_balance():
-    """A polluted/torn ledger must not silently disable the daily-loss breaker."""
+def test_same_day_restart_with_zero_start_balance_fails_closed():
+    """A polluted ledger must not be reconstructed from a wallet snapshot."""
     Path("data/risk_state.json").write_text(json.dumps({
         "daily_pnl": -1.0,
         "start_balance": 0.0,
@@ -101,11 +101,15 @@ def test_same_day_restart_repairs_zero_start_balance():
     fresh = RiskManager()
     fresh.set_start_balance(15_595.18)
 
-    assert fresh._start_balance == pytest.approx(15_596.18)
-    assert fresh._peak_balance == pytest.approx(15_596.18)
+    assert fresh._start_balance == 0.0
+    assert fresh._peak_balance == 0.0
     assert fresh._daily_pnl == pytest.approx(-1.0)
+    assert fresh._daily_anchor_valid is False
+    assert fresh.can_trade(open_position_count=0) is False
+    assert fresh.halt_reason == "daily_equity_anchor_invalid"
     persisted = json.loads(Path("data/risk_state.json").read_text(encoding="utf-8"))
-    assert persisted["start_balance"] == pytest.approx(15_596.18)
+    assert persisted["start_balance"] == 0.0
+    assert persisted["daily_anchor_valid"] is False
 
 
 def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):
@@ -114,6 +118,7 @@ def test_opens_today_resets_on_new_utc_day(rm, monkeypatch):
 
     import core.risk_manager as rmod
     monkeypatch.setitem(rmod.RISK, "max_trades_per_day", 2)
+    rm.set_start_balance(1_000.0)
 
     rm.note_trade_opened()
     rm.note_trade_opened()

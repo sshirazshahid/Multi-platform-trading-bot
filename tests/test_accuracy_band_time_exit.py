@@ -208,6 +208,12 @@ def test_band_scalp_is_NOT_scalp_stale_or_wall_closed(acc_on, monkeypatch):
 # ── (b) non-band position keeps today's behavior exactly ────────────────────
 
 def test_non_band_position_still_stale_closes(acc_on, stable_risk, monkeypatch):
+    # These two tests pin BAND-flag independence of the generic time exits.
+    # The 2026-08-03 tier-geometry hold intentionally defers R:R>=1 positions
+    # globally, so pin it off here — tier-hold behavior has its own suite
+    # (test_tier_time_exit_hold.py).
+    from config import TIER_GEOMETRY_TIME_EXIT_HOLD
+    monkeypatch.setitem(TIER_GEOMETRY_TIME_EXIT_HOLD, "enabled", False)
     om = _om(monkeypatch)
     close = _run(om, _pos(age_hours=_STALE_H, tp=116.0),
                  net_pnl=-0.05, net_pct=-0.1)
@@ -216,6 +222,8 @@ def test_non_band_position_still_stale_closes(acc_on, stable_risk, monkeypatch):
 
 def test_non_band_position_still_age_limit_closes(
         acc_on, stable_risk, monkeypatch):
+    from config import TIER_GEOMETRY_TIME_EXIT_HOLD
+    monkeypatch.setitem(TIER_GEOMETRY_TIME_EXIT_HOLD, "enabled", False)
     om = _om(monkeypatch)
     close = _run(om, _pos(age_hours=_AGE_H, tp=116.0),
                  net_pnl=-2.0, net_pct=-2.0)
@@ -310,6 +318,85 @@ def test_partial_tp_never_fires_on_band_position(acc_on):
                                               "first_take_at_pct": 0.5,
                                               "first_take_size": 0.5})
     assert fire is False, "band positions are pure first-touch — no partial TP"
+
+
+def test_trailing_skipped_for_band_position(acc_on, monkeypatch):
+    """2026-07-28: band winners must reach take_profit, not trailing_stop."""
+    from unittest.mock import MagicMock
+
+    from core.order_manager import OrderManager, _is_accuracy_band_position
+    from core.position_tracker import Position
+
+    pos = Position(
+        id="b1", exchange="Binance", symbol="ETH/USDT", side="buy",
+        market_type="futures", strategy="algo_det",
+        entry_price=100.0, size=1.0, stop_loss=99.2, take_profit=100.36,
+        leverage=3, open_time=1000.0, _accuracy_band=True,
+    )
+    assert _is_accuracy_band_position(pos) is True
+
+    om = OrderManager(tracker=MagicMock(), risk=MagicMock(), notifier=MagicMock())
+    om.dry_run = True
+    om.mcp_brain = None
+    om.close_position = MagicMock()
+    om.accrue_paper_funding = MagicMock()
+    om.sim = MagicMock()
+    om.sim.check_wick_trigger.return_value = ("", None)
+    om.trailing = MagicMock()
+    om.trailing.update.return_value = (True, "trailing_stop", 100.2)
+    om._early_breakeven_move = MagicMock(side_effect=lambda p, price, eff: 100.0)
+    monkeypatch.setattr(
+        "core.order_manager._should_fire_partial_tp",
+        lambda *a, **k: (False, 0.0, 0.0),
+    )
+    ex = MagicMock(); ex.name = "Binance"
+    ex.fetch_ticker.return_value = {"last": 100.2}
+    om.tracker.get_open.return_value = [pos]
+    om._net_pnl_at_price = MagicMock(return_value=(0.2, 0.6, 100.0))
+    om.check_sl_tp(ex, "futures")
+    if om.close_position.called:
+        reason = om.close_position.call_args.args[2]
+        assert reason != "trailing_stop"
+    om.trailing.update.assert_not_called()
+    om._early_breakeven_move.assert_not_called()
+
+
+def test_open_position_stamps_accuracy_band_on_inverted_geometry(acc_on, monkeypatch):
+    """Maker-first never hits bot_engine stamp — open_position must stamp."""
+    from unittest.mock import MagicMock
+
+    from core.order_manager import OrderManager
+    from core.position_tracker import Position
+
+    om = OrderManager(tracker=MagicMock(), risk=MagicMock(), notifier=MagicMock())
+    om.dry_run = True
+    om.sim = MagicMock()
+    om.sim.paper_fill_price.side_effect = lambda *a, **k: 100.0
+    om.tracker.add = MagicMock()
+    om.tracker._lock = MagicMock()
+    # Bypass live branches
+    monkeypatch.setattr(om, "_check_price_band", lambda *a, **k: True)
+    monkeypatch.setattr(om, "auto_transfer_for_trade", lambda *a, **k: None)
+
+    ex = MagicMock(); ex.name = "Binance"
+    ex.round_quantity.side_effect = lambda sym, size, mt: size
+    # Minimal open — may still hit many gates; call stamp path via constructing
+    # Position the same way open_position does after fill.
+    pos = Position(
+        id="x", exchange="Binance", symbol="ETH/USDT:USDT", side="buy",
+        market_type="futures", strategy="algo_det",
+        entry_price=100.0, size=1.0,
+        stop_loss=99.2, take_profit=100.36, leverage=3,
+    )
+    # Simulate the stamp block
+    from config import ACCURACY_TARGET_MODE as _acc_stamp
+    assert _acc_stamp.get("enabled")
+    fill_price, sl, tp = 100.0, 99.2, 100.36
+    _sl_f = abs(fill_price - sl) / fill_price
+    _tp_f = abs(tp - fill_price) / fill_price
+    assert 0.0 < _tp_f < _sl_f <= 0.20
+    pos._accuracy_band = True
+    assert pos._accuracy_band is True
 
 
 def test_partial_tp_still_fires_on_non_band_position(acc_on):

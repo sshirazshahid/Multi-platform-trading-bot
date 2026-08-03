@@ -87,6 +87,61 @@ def _manager(position):
     return manager
 
 
+class _LiveFundingInner(_InnerExchange):
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = 0
+
+    def fetch_funding_rate_history(self, symbol, since=None, limit=None):
+        self.calls += 1
+        return self.rows
+
+
+class _LiveFundingExchange:
+    name = "Bybit"
+
+    def __init__(self, rows):
+        self.exchange = _LiveFundingInner(rows)
+
+
+def test_missing_store_falls_back_to_live_venue_history(tmp_path, monkeypatch):
+    """No local CSV for the (venue, base): the live realized-history fallback
+    supplies the settlement instead of skipping accrual (2026-08-03 defect:
+    binance ETC/FET paper funding was silently inert — store never covered
+    the live paper lane's mover symbols)."""
+    monkeypatch.chdir(tmp_path)  # no data/funding_history at all
+    monkeypatch.setattr("core.order_manager.time.time", lambda: 400.0)
+    position = _position()
+    manager = _manager(position)
+    ex = _LiveFundingExchange([{"timestamp": 200_000, "fundingRate": 0.001}])
+
+    manager.accrue_paper_funding(ex)
+
+    assert ex.exchange.calls == 1
+    assert manager.wallet.costs == [pytest.approx(2.0 * 100.0 * 0.001)]
+
+
+def test_overdue_empty_store_treated_as_unavailable(tmp_path, monkeypatch):
+    """A store file that EXISTS but has zero rows in an overdue window must
+    not silently skip accrual — funding_history.py's contract says callers
+    must treat empty-overdue exactly like missing. The live fallback is
+    consulted and its settlement accrues."""
+    monkeypatch.chdir(tmp_path)
+    _write_history(Path("data/funding_history/bybit_BTC.csv"), [(50.0, 0.001)])
+    now = 100.0 + 10 * 3600.0  # 10h after open: overdue, no rows in window
+    monkeypatch.setattr("core.order_manager.time.time", lambda: now)
+    position = _position()
+    manager = _manager(position)
+    ex = _LiveFundingExchange(
+        [{"timestamp": int((100.0 + 3600.0) * 1000), "fundingRate": -0.0005}]
+    )
+
+    manager.accrue_paper_funding(ex)
+
+    assert ex.exchange.calls == 1
+    assert manager.wallet.costs == [pytest.approx(2.0 * 100.0 * -0.0005)]
+
+
 def test_realized_variable_interval_settlements_accrue_once(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_history(

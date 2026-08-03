@@ -27,6 +27,7 @@ def test_exposure_breached_normal_paths_unchanged():
 def test_record_trade_pnl_resets_opens_today_on_new_day():
     from core.risk_manager import RiskManager
     rm = RiskManager()
+    rm.set_start_balance(100.0)
     rm._opens_today = 5
     from datetime import date
     rm._trading_day = date(2000, 1, 1)  # force stale day

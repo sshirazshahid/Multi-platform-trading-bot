@@ -96,6 +96,7 @@ def _om(tmp_path):
     om.tracker.get_open.return_value = []
     om.accrue_paper_funding = MagicMock()
     om._check_price_band = lambda *a, **k: True
+    om.portfolio_equity_provider = lambda: 10_000.0
     om._pending_maker_path = tmp_path / "pending_maker_entries.json"
     return om
 

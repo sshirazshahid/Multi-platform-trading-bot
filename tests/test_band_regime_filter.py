@@ -227,7 +227,9 @@ def test_veto_lives_only_inside_the_accuracy_band_carveout():
     the candidates funnel stays auditable. Exactly one call site."""
     src = Path("core/bot_engine.py").read_text(encoding="utf-8")
     assert src.count("self._band_regime_veto(action)") == 1
-    i = src.index("_acc_mode_on = tp_pct != _tp_before_acc")
+    # Band lane is now inverted-geometry after apply (not merely TP-changed).
+    i = src.index("_acc_mode_on = (")
+    assert "tp_pct < sl_pct" in src[i:i + 280]
     j = src.index("actual_rr = tp_pct / sl_pct", i)
     window = src[i:j]
     assert "self._band_regime_veto(action)" in window, (

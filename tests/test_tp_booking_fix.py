@@ -15,9 +15,10 @@ substrate):
        wallet). Fix: accumulate the partial fill on the Position and book the
        WHOLE trade (partial + runner) with a size-weighted blended exit for R.
 
-These are BOOKING-accuracy fixes only. They do not change PnL economics, the
-edge (settled: flat alpha), or the risk rails (which intentionally stay on the
-conservative runner-leg accounting).
+These are BOOKING-accuracy fixes only. They do not change PnL economics or the
+edge (settled: flat alpha).  A completed trade's outcome label must nevertheless
+use partial + runner PnL; otherwise a banked winner whose runner stops out is
+fed back to the calibrator and streak logic as a loss.
 """
 from __future__ import annotations
 
@@ -137,6 +138,95 @@ def test_total_realized_pnl_includes_partial():
     runner_pnl = -0.4  # runner stopped at small loss
     total = runner_pnl + p.realized_partial_pnl
     assert total == pytest.approx(0.8)  # net-positive despite runner loss
+
+
+def test_position_whole_realized_pnl_and_pct_use_original_margin():
+    """Whole-trade return uses the original quantity, not the reduced runner."""
+    p = _mk(size=1.0)
+    p.book_partial_exit(0.6, 104.0, 2.0)
+    p.size = 0.4
+    p.close(98.0, "stop_loss")
+
+    expected = float(p.pnl) + 2.0
+    assert p.pnl < 0 < expected
+    assert p.whole_realized_pnl() == pytest.approx(expected)
+    assert p.whole_realized_pnl_pct() == pytest.approx(expected)
+
+
+def test_finalize_close_labels_partial_plus_runner_as_one_outcome(
+        tmp_path, monkeypatch):
+    """Risk, calibration and operator telemetry learn the WHOLE trade label.
+
+    The runner dollar PnL is still the amount booked to daily PnL at final
+    close because the partial leg was booked when it filled.  Only the outcome
+    label/percentage and whole-trade consumers change here.
+    """
+    from unittest.mock import MagicMock
+
+    import core.journal as journal
+    import core.warehouse as whmod
+    from core.order_manager import OrderManager
+
+    risk = MagicMock()
+    risk._start_balance = 1_000.0
+    tracker = MagicMock()
+    notifier = MagicMock()
+    om = OrderManager(tracker=tracker, risk=risk, notifier=notifier)
+    om.dry_run = False
+    om.compliance = MagicMock()
+    om.blacklist = MagicMock()
+    om.trailing = MagicMock()
+    om.post_mortem = MagicMock()
+    om._calibrator_instance = MagicMock()
+
+    wh = MagicMock()
+    wh.trade_id_by_key.return_value = 42
+    monkeypatch.setattr(whmod, "get_warehouse", lambda: wh)
+    journal_spy = MagicMock()
+    monkeypatch.setattr(journal, "log_action", journal_spy)
+
+    pos = _mk(size=1.0)
+    pos.paper_trade = False
+    pos.confidence = 0.7
+    pos.book_partial_exit(0.6, 104.0, 2.0)
+    pos.size = 0.4
+    pos.close(98.0, "stop_loss")
+    tracker._closed = [pos]
+    tracker.count_open.return_value = 0
+
+    whole_pnl = float(pos.pnl) + float(pos.realized_partial_pnl)
+    assert pos.pnl < 0 < whole_pnl
+
+    om._finalize_close(pos, 98.0, "stop_loss")
+
+    pnl_call = risk.record_trade_pnl.call_args
+    assert pnl_call.args[0] == pytest.approx(pos.pnl)  # partial already booked
+    assert pnl_call.kwargs["is_win"] is True
+    assert pnl_call.kwargs["pnl_pct"] == pytest.approx(
+        pos.whole_realized_pnl_pct()
+    )
+
+    result_call = risk.record_trade_result.call_args.kwargs
+    assert result_call["is_win"] is True
+    assert result_call["pnl_usd"] == pytest.approx(whole_pnl)
+    assert result_call["pnl_pct"] == pytest.approx(
+        pos.whole_realized_pnl_pct()
+    )
+    risk.note_sl_hit.assert_called_once_with(pos.symbol, pos.side)
+
+    om._calibrator_instance.record.assert_called_once()
+    assert om._calibrator_instance.record.call_args.kwargs["actual_win"] is True
+    assert om.post_mortem.analyze_trade.call_args.args[0]["pnl"] \
+        == pytest.approx(whole_pnl)
+    assert om.compliance.log_trade.call_args.kwargs["pnl"] \
+        == pytest.approx(whole_pnl)
+    om.blacklist.record_win.assert_called_once_with(pos.symbol, pos.side)
+
+    assert f"pnl=${whole_pnl:+.2f}" in journal_spy.call_args.args[3]
+    notify = notifier.trade_closed.call_args
+    assert notify.args[5] == pytest.approx(whole_pnl)
+    assert notify.kwargs["daily_pnl"] == pytest.approx(whole_pnl)
+    assert notify.kwargs["daily_wr"] == pytest.approx(100.0)
 
 
 # ── B1/B3: warehouse persistence of entry_stop_px ────────────────────────

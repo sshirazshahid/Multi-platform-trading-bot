@@ -290,6 +290,17 @@ def _boot_profile_log_lines() -> list:
         ),
         f"  EconGate  : mode={_egate.get('mode', 'strict')}",
     ]
+    try:
+        from config import UNIVERSE_FLOW_LOOSEN as _ufl
+
+        if bool((_ufl or {}).get("enabled")):
+            lines.append(
+                "  UniverseLoosen: ON (V1 mild spread/depth/chop — 7d review)"
+            )
+        else:
+            lines.append("  UniverseLoosen: OFF")
+    except Exception:  # pragma: no cover
+        lines.append("  UniverseLoosen: UNAVAILABLE")
     # Statistical contract (2026-07-24 harden): AccBand shapes WR by geometry;
     # dual-goal (band WR + profit) is CONFIRMED_NO_GO on the measured no-edge path.
     if acc_on:
@@ -415,6 +426,39 @@ class BotEngine:
         try:
             from core.pair_discovery import UniverseFilter
             self.universe_filter = UniverseFilter()
+            try:
+                from config import UNIVERSE_FLOW_LOOSEN as _ufl
+
+                if bool((_ufl or {}).get("enabled")):
+                    from pathlib import Path as _P
+                    from datetime import datetime as _dt, timezone as _tz
+                    import json as _json
+
+                    _cpath = _P(
+                        _ufl.get("cohort_path") or "data/universe_flow_loosen_cohort.json"
+                    )
+                    if not _cpath.is_absolute():
+                        _cpath = _P(__file__).resolve().parents[1] / _cpath
+                    if not _cpath.exists():
+                        _cpath.parent.mkdir(parents=True, exist_ok=True)
+                        _cpath.write_text(
+                            _json.dumps(
+                                {
+                                    "schema_version": 1,
+                                    "enabled": True,
+                                    "started_at_utc": _dt.now(_tz.utc).isoformat(),
+                                    "review_after_days": float(
+                                        _ufl.get("review_after_days") or 7
+                                    ),
+                                },
+                                indent=2,
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                        logger.info(f"[UniverseLoosen] cohort started → {_cpath}")
+            except Exception as _ufl_exc:  # pragma: no cover — non-fatal
+                logger.warning(f"[UniverseLoosen] cohort mark skipped: {_ufl_exc}")
         except ImportError:
             self.universe_filter = None
 
@@ -505,6 +549,9 @@ class BotEngine:
         self._last_heartbeat    = 0  # Time-based heartbeat writer (60s interval)
         # Per-exchange, per-market-type USDT balances (populated by _log_balances)
         self._balances: dict[str, dict[str, float]] = {}
+        self.order_mgr.portfolio_equity_provider = (
+            lambda: _deployable_total(self._balances)
+        )
         # Transfer cooldown: prevent repeated transfer attempts (5 min per route)
         self._last_transfer: dict[tuple, float] = {}  # (ex, from, to) → timestamp
         # Exchange position cache — for universal position monitor (60s TTL)
@@ -1002,10 +1049,31 @@ class BotEngine:
         return (self.active_exchanges or {}).get(venue)
 
     def _listing_markets(self) -> list:
-        """Current tradeable Binance USDT-M perp unified symbols. Read-only."""
+        """Current tradeable Binance USDT-M perp unified symbols. Read-only.
+
+        Reloads ccxt markets at most once per hour so brand-new crypto perps
+        appear in the listing-short universe. A frozen boot-time ``markets``
+        snapshot would make the lane look permanently STARVED after seed
+        (only symbols that slip in via incidental reloads would ever detect).
+        """
         try:
             ex = self._listing_venue_client()
             client = getattr(ex, "exchange", None)
+            if client is None:
+                return []
+            import time as _time
+            ttl = 3600.0
+            last = float(getattr(self, "_listing_markets_loaded_at", 0.0) or 0.0)
+            now = _time.time()
+            if (now - last) >= ttl or not getattr(client, "markets", None):
+                try:
+                    client.load_markets(reload=True)
+                    self._listing_markets_loaded_at = now
+                except Exception as e:
+                    logger.debug(f"[ListingProbe] load_markets reload failed: {e}")
+                    # keep whatever snapshot we have; still better than []
+                    if not getattr(client, "markets", None):
+                        return []
             markets = getattr(client, "markets", None) or {}
             out = []
             for sym, m in markets.items():
@@ -1150,6 +1218,26 @@ class BotEngine:
                                         "max_contracts_per_venue", 5000
                                     )
                                 ),
+                                abs_move_usdt_min=float(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "abs_move_usdt_min", 0.0
+                                    )
+                                ),
+                                abs_move_usdt_max=float(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "abs_move_usdt_max", float("inf")
+                                    )
+                                ),
+                                prefer_abs_usdt_rank=bool(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "prefer_abs_usdt_rank", False
+                                    )
+                                ),
+                                prefer_crypto_shortlist=bool(
+                                    BROAD_UNIVERSE_MONITOR.get(
+                                        "prefer_crypto_shortlist", True
+                                    )
+                                ),
                             ),
                         )
                         self._broad_universe_monitor = monitor
@@ -1161,6 +1249,54 @@ class BotEngine:
                     self._shadow_symbol_venues = {
                         row.symbol: row.venue for row in scan.shortlist
                     }
+                    # Persist latest shortlist for MCP / research (log-only).
+                    try:
+                        from pathlib import Path as _Path
+
+                        snap = {
+                            "schema_version": 1,
+                            "scan_status": "ok",
+                            "ts": now,
+                            "completed_at": now,
+                            "accepted_tickers": scan.accepted_tickers,
+                            "raw_tickers": scan.raw_tickers,
+                            "abs_band_usdt": [
+                                float(BROAD_UNIVERSE_MONITOR.get(
+                                    "abs_move_usdt_min", 0
+                                )),
+                                float(BROAD_UNIVERSE_MONITOR.get(
+                                    "abs_move_usdt_max", 0
+                                )),
+                            ],
+                            "shortlist": [
+                                {
+                                    "venue": r.venue,
+                                    "symbol": r.symbol,
+                                    "base": r.base,
+                                    "price": r.price,
+                                    "horizon": r.selected_horizon,
+                                    "direction": r.direction,
+                                    "return_pct": r.selected_return_pct,
+                                    "abs_usdt": abs(r.selected_return_pct)
+                                    / 100.0
+                                    * float(r.price),
+                                    "quote_volume_usdt": r.quote_volume_usdt,
+                                    "asset_class": getattr(
+                                        r, "asset_class", "crypto"
+                                    ),
+                                }
+                                for r in scan.shortlist
+                            ],
+                        }
+                        atomic_write_json(
+                            _Path("data/mover_shortlist_latest.json"),
+                            snap,
+                            indent=2,
+                        )
+                    except Exception as _snap_err:
+                        logger.warning(
+                            f"[Shadow] shortlist snapshot failed: {_snap_err}"
+                        )
                     if out:
                         logger.info(
                             f"[Shadow] broad universe accepted "
@@ -2451,7 +2587,8 @@ class BotEngine:
     def _min_notional_floor(self, symbol: str, step: float, price: float,
                             leverage: int, market_type: str,
                             notional: float, base_notional: float,
-                            mtype_bal: float, sl_pct: float) -> float:
+                            mtype_bal: float, sl_pct: float,
+                            risk_positions=None) -> float:
         """MIN-NOTIONAL FLOOR (2026-07-10, owner UNBLOCK directive).
 
         When the EV-opinion size-multiplier stack (Phase 17 rolling-50,
@@ -2463,8 +2600,9 @@ class BotEngine:
               (undo opinion-downsizing only; never override balance/
               margin reality),
           (b) the hard loss clamp passes at the floored size,
-          (c) the §2 portfolio-exposure cap passes at the floored size
-              (fail-CLOSED on error, same as the main rail).
+          (c) both portfolio-exposure and aggregate stop-risk caps pass at
+              the floored size, including pending maker reservations
+              (fail-CLOSED on error, same as the main rails).
         Returns 0.0 when the floor must NOT apply (caller keeps the
         original skip + 30min cooldown). Default OFF via
         config.MIN_NOTIONAL_FLOOR — flag off is byte-identical.
@@ -2484,13 +2622,34 @@ class BotEngine:
         if not self._within_loss_clamp(
                 mtype_bal, floor_notional, max(lev, 1), sl_pct / 100.0):
             return 0.0
-        # (c) §2 exposure cap at the floored gross notional — fail-CLOSED
+        # (c) Both portfolio caps at the floored gross notional — fail-CLOSED.
         try:
-            from config import MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP
-            from core.risk_manager import exposure_breached as _exp_breached
+            from config import (
+                MAX_AGGREGATE_OPEN_RISK_PCT as _MAX_OPEN_RISK,
+                MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP,
+                STRESSED_EXIT_COST_FRAC as _EXIT_STRESS,
+            )
+            from core.risk_manager import (
+                aggregate_open_risk_breached as _aggregate_breached,
+                exposure_breached as _exp_breached,
+            )
             _equity = _deployable_total(self._balances)
-            if _exp_breached(self.tracker.get_open(), step * price,
-                             _equity, _MAX_EXP):
+            _positions = (
+                list(risk_positions)
+                if risk_positions is not None
+                else list(self.tracker.get_open() or [])
+            )
+            _floor_gross = step * price
+            if _exp_breached(_positions, _floor_gross, _equity, _MAX_EXP):
+                return 0.0
+            if _aggregate_breached(
+                _positions,
+                _floor_gross,
+                sl_pct / 100.0,
+                _equity,
+                _MAX_OPEN_RISK,
+                _EXIT_STRESS,
+            ):
                 return 0.0
         except Exception as _fe:
             logger.warning(
@@ -2631,6 +2790,26 @@ class BotEngine:
             logger.info(f"[{_sig_tag}] No actions this cycle")
             self._cycle += 1
             return
+
+        # Prefer dual-model FIT_BAND_PAPER bases among OPENs (2026-07-29).
+        # Soft ranking only — does not invent edge; CLOSES stay first.
+        try:
+            from config import FIT_BAND_PAPER_BASES as _FIT_BASES
+        except ImportError:
+            _FIT_BASES = frozenset()
+        if _FIT_BASES:
+            def _base_of(_a: dict) -> str:
+                return str(_a.get("symbol") or "").split("/")[0].split(":")[0].upper()
+
+            _closes = [a for a in actions if a.get("type") == "CLOSE"]
+            _opens = [a for a in actions if a.get("type") == "OPEN"]
+            _other = [
+                a for a in actions if a.get("type") not in ("OPEN", "CLOSE")
+            ]
+            _fit = [a for a in _opens if _base_of(a) in _FIT_BASES]
+            _rest = [a for a in _opens if _base_of(a) not in _FIT_BASES]
+            if _fit:
+                actions = _closes + _fit + _rest + _other
 
         # Cap actions per cycle — provenance: the dropped tail is logged as
         # rejection rows so capped decisions never silently vanish (E-4).
@@ -3941,14 +4120,23 @@ class BotEngine:
         # tsmom (tp_pct=0, exit = momentum flip) is excluded. Flag-off = no-op.
         _acc_mode_on = False
         if tp_pct > 0 and not _tsmom_bypass_rr:
+            from config import ACCURACY_TARGET_MODE as _acc_cfg
             from core.mcp_brain import _apply_accuracy_target
             _tp_before_acc = tp_pct
             tp_pct = _apply_accuracy_target(sl_pct, tp_pct, side=side)
-            _acc_mode_on = tp_pct != _tp_before_acc
-            if _acc_mode_on:
+            # Band lane = inverted geometry after apply (tp < sl), NOT merely
+            # "TP value changed". Entries that already carried a compressed TP
+            # used to skip the stamp + regime filter (open ETH 2026-07-28 had
+            # tp%0.50/sl%0.80 with _accuracy_band=False).
+            _acc_mode_on = (
+                bool(_acc_cfg.get("enabled"))
+                and sl_pct > 0 and tp_pct > 0 and tp_pct < sl_pct
+            )
+            if _acc_mode_on and tp_pct != _tp_before_acc:
                 logger.info(
                     f"[Claude] {symbol} ACCURACY band: TP {_tp_before_acc:.2f}%"
                     f"→{tp_pct:.2f}% (SL={sl_pct:.2f}%, target WR 60-65%)")
+            if _acc_mode_on:
                 # ── BAND REGIME FILTER (2026-07-12) — band-lane-ONLY veto ────
                 # Inside the _acc_mode_on carve-out by design: the evidence
                 # (screen 13_band_conditional) was measured on band outcomes,
@@ -4022,10 +4210,12 @@ class BotEngine:
         if self.universe_filter:
             uf_result = self.universe_filter.check(exchange, symbol, market_type)
             if not uf_result["ok"]:
+                detail = ", ".join(uf_result["reasons"]) or "unspecified"
                 logger.info(
-                    f"[Claude] BLOCKED by universe filter: {symbol} — "
-                    f"{', '.join(uf_result['reasons'])}")
-                action["reject_reason"] = "universe_filter_blocked"
+                    f"[Claude] BLOCKED by universe filter: {symbol} — {detail}")
+                # Keep stable family prefix for funnel grouping; append detail
+                # so Mission Control / drought diagnosis can see chop vs spread.
+                action["reject_reason"] = f"universe_filter_blocked:{detail}"
                 return False
 
         # Risk manager circuit breakers
@@ -4412,7 +4602,12 @@ class BotEngine:
             from config import MAX_PORTFOLIO_EXPOSURE_PCT as _MAX_EXP
             from core.risk_manager import exposure_breached as _exp_breached
             _equity = _deployable_total(self._balances)
-            if _exp_breached(self.tracker.get_open(), size * price, _equity, _MAX_EXP):
+            _risk_positions = list(self.tracker.get_open() or [])
+            if DRY_RUN:
+                _risk_positions.extend(
+                    self.order_mgr.pending_maker_reservations()
+                )
+            if _exp_breached(_risk_positions, size * price, _equity, _MAX_EXP):
                 logger.warning(
                     f"[Risk] §2 EXPOSURE CAP: {symbol} would exceed {_MAX_EXP:g}% of "
                     f"${_equity:.0f} open exposure — blocked")
@@ -4438,7 +4633,7 @@ class BotEngine:
             from core.risk_manager import aggregate_open_risk_breached
 
             if aggregate_open_risk_breached(
-                self.tracker.get_open(),
+                _risk_positions,
                 size * price,
                 sl_pct / 100.0,
                 _equity,
@@ -4471,7 +4666,8 @@ class BotEngine:
                 # sizing could afford it. Flag off -> 0.0 -> skip unchanged.
                 _floor_notional = self._min_notional_floor(
                     symbol, step, price, leverage, market_type,
-                    notional, _pre_ev_notional, mtype_bal, sl_pct)
+                    notional, _pre_ev_notional, mtype_bal, sl_pct,
+                    risk_positions=_risk_positions)
                 if _floor_notional > 0:
                     notional = _floor_notional
                     size = step
@@ -4623,14 +4819,19 @@ class BotEngine:
                 action["reject_reason"] = f"order_manager:{_omr or 'unspecified'}"
                 return False
             # ACCURACY band marker (2026-07-10 time-exit leak fix): stamp
-            # entries whose TP the band rewrote so the position monitor
-            # suppresses STALE/AGE_LIMIT/scalp time exits inside
+            # inverted-geometry entries so the position monitor suppresses
+            # STALE/AGE_LIMIT/scalp time exits + partial-TP inside
             # ACCURACY_TARGET_MODE["max_hold_hours"] and first-touch SL/TP
-            # governs (order_manager._accuracy_band_hold_active; the tp-dist
-            # < sl-dist geometry fallback there covers restarts, since this
-            # dynamic attr does not persist to positions.json).
+            # governs. Declared Position field (2026-07-25) persists via
+            # asdict; geometry fallback in _is_accuracy_band_position covers
+            # legacy rows that predate the stamp.
             if _acc_mode_on:
                 pos._accuracy_band = True
+                try:
+                    with self.tracker._lock:
+                        self.tracker._save()
+                except Exception:
+                    pass
             action["exchange_symbol"] = trade_symbol
             action["filled_quantity"] = float(pos.size)
             action["filled_price"] = float(pos.entry_price)
@@ -4903,6 +5104,12 @@ class BotEngine:
                 ENTRY_POLICY as _ENTRY_POLICY,
             )
             from config import (
+                MCP_DIRECTIONAL_ECONOMIC_GATE as _ECON_GATE,
+            )
+            from config import (
+                MCP_ENTRY_MIN_SCORE as _ENTRY_FLOOR,
+            )
+            from config import (
                 MODE_PROFILE as _MODE_PROFILE,
             )
             from config import (
@@ -4919,6 +5126,8 @@ class BotEngine:
             )
         except Exception:
             _ENTRY_POLICY = "UNKNOWN"
+            _ECON_GATE = {}
+            _ENTRY_FLOOR = None
             _MODE_PROFILE = None
             _OPERATING_MODE = "UNKNOWN"
             _PAPER_PROFILE_STARTED_AT = ""
@@ -4939,6 +5148,13 @@ class BotEngine:
             "signal_source": _SIGNAL_SOURCE,
             "paper_trading_profile": _PAPER_TRADING_PROFILE,
             "paper_profile_started_at": _PAPER_PROFILE_STARTED_AT or None,
+            "effective_config": {
+                "econ_gate_mode": (
+                    _ECON_GATE.get("mode") if isinstance(_ECON_GATE, dict) else None
+                ),
+                "mcp_entry_min_score": _ENTRY_FLOOR,
+                "paper_trading_profile": _PAPER_TRADING_PROFILE,
+            },
             "risk_profile": (
                 {
                     "max_open_positions": _MODE_PROFILE.max_open_positions,
@@ -5005,11 +5221,36 @@ class BotEngine:
         except Exception as e:
             logger.debug(f"[Health] {ex_name} reconnect attempt failed: {e}")
 
+    def _retry_inactive_exchanges(self) -> None:
+        """Throttled reconnect for venues that never authenticated at startup.
+
+        _check_exchange_health iterates only active_exchanges, so a venue whose
+        very first _init_exchange failed (e.g. bitget 40018 while this IP was
+        off the API-key allowlist) was unreachable by _try_reconnect until a
+        full restart — measured 2026-08-03: engine-side bitget stayed inert
+        for the whole outage and would never have self-healed. Sweep the
+        inactive set at most once per venue per 15 minutes; _try_reconnect
+        already re-adds a recovered venue to active_exchanges.
+        """
+        if not hasattr(self, "_inactive_reconnect_at"):
+            self._inactive_reconnect_at: dict[str, float] = {}
+        now = time.time()
+        for ex_name, exchange in list(self.exchanges.items()):
+            if ex_name in self.active_exchanges:
+                continue
+            if ex_name in self._exchange_halted:
+                continue  # halted venues already have their own retry path
+            if now - self._inactive_reconnect_at.get(ex_name, 0.0) < 900.0:
+                continue
+            self._inactive_reconnect_at[ex_name] = now
+            self._try_reconnect(ex_name, exchange)
+
     def _check_exchange_health(self):
         """Verify exchanges are reachable + measure latency.
         Auto-halt trading on exchange after 3 consecutive failures.
         Auto-resume when exchange recovers."""
         self._last_health_check = time.time()
+        self._retry_inactive_exchanges()
         for ex_name, exchange in list(self.active_exchanges.items()):
             try:
                 t0 = time.time()

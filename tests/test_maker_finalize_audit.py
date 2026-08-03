@@ -74,6 +74,53 @@ def test_finalize_carries_provenance_intent_in_ctx(mf_on, tmp_path, monkeypatch)
     assert seen.get("provenance_intent") == {"id": "prov-abc"}
 
 
+def test_finalize_persists_filled_child_decision_and_preserves_parent_lineage(
+    mf_on, tmp_path, monkeypatch
+):
+    import core.warehouse as wh
+
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker=_ticker())
+    _open(om, ex)
+    key = f"{ex.name}:{SYM}"
+    intent = om._pending_maker[key]
+    parent_id = "decision-deferred-parent-1"
+    child_id = "maker-resolution-filled-child-1"
+    intent["decision_id"] = parent_id
+    intent["parent_decision_id"] = parent_id
+    intent["resolution_decision_id"] = child_id
+
+    warehouse = MagicMock()
+    monkeypatch.setattr(wh, "get_warehouse", lambda: warehouse)
+    seen = {}
+    resolutions = []
+    real_open = om.open_position
+
+    def spy_open(*args, **kwargs):
+        seen["decision_id"] = kwargs.get("decision_id")
+        seen["decision_parent_id"] = kwargs.get("decision_parent_id")
+        return real_open(*args, **kwargs)
+
+    def spy_resolution(resolved_intent, **kwargs):
+        resolutions.append((om._stable_maker_resolution_id(resolved_intent), kwargs))
+        return True
+
+    monkeypatch.setattr(om, "open_position", spy_open)
+    monkeypatch.setattr(om, "_record_maker_resolution_decision", spy_resolution)
+    ex.ticker = {"last": 99.85, "bid": 99.8, "ask": 99.9}
+    om._resolve_pending_maker_entries(ex)
+
+    assert om.tracker.add.called, "maker fill did not open a position"
+    assert seen == {
+        "decision_id": child_id,
+        "decision_parent_id": parent_id,
+    }
+    assert intent["decision_id"] == parent_id, "parent decision must stay immutable"
+    assert resolutions[-1][0] == child_id
+    assert resolutions[-1][1]["outcome"] == "filled"
+    assert warehouse.record_trade_open.call_args.kwargs["decision_id"] == child_id
+
+
 def test_finalize_records_nonfill_when_open_rejects(mf_on, tmp_path, monkeypatch):
     om = _om(tmp_path)
     recorded = []

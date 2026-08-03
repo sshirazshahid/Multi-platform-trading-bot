@@ -38,7 +38,9 @@ SL_PCT = 1.5
 
 
 def _stub_engine(monkeypatch, *, enabled=True, clamp_ok=True,
-                 exposure_hit=False, exposure_raises=False, equity=100.0):
+                 exposure_hit=False, exposure_raises=False,
+                 aggregate_hit=False, aggregate_raises=False,
+                 equity=100.0):
     """Minimal BotEngine stub (repo idiom: __new__ skips __init__)."""
     import config
     from core.bot_engine import BotEngine
@@ -56,7 +58,12 @@ def _stub_engine(monkeypatch, *, enabled=True, clamp_ok=True,
     else:
         _exp = MagicMock(return_value=exposure_hit)
     monkeypatch.setattr("core.risk_manager.exposure_breached", _exp)
-    return eng, _exp
+    if aggregate_raises:
+        _agg = MagicMock(side_effect=RuntimeError("aggregate boom"))
+    else:
+        _agg = MagicMock(return_value=aggregate_hit)
+    monkeypatch.setattr("core.risk_manager.aggregate_open_risk_breached", _agg)
+    return eng, _exp, _agg
 
 
 def _call(eng, **overrides):
@@ -71,7 +78,7 @@ def _call(eng, **overrides):
 
 
 def test_flag_off_returns_zero_skip_preserved(monkeypatch):
-    eng, _ = _stub_engine(monkeypatch, enabled=False)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=False)
     assert _call(eng) == 0.0
 
 
@@ -88,12 +95,12 @@ def test_config_default_is_off():
 
 
 def test_flag_on_floors_when_base_affords(monkeypatch):
-    eng, _ = _stub_engine(monkeypatch, enabled=True)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=True)
     assert _call(eng) == pytest.approx(FLOOR)
 
 
 def test_flag_on_spot_floor_uses_lev_1(monkeypatch):
-    eng, _ = _stub_engine(monkeypatch, enabled=True)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=True)
     # Spot: no leverage — floor is the full lot notional ($64).
     got = _call(eng, market_type="spot", notional=50.0, base_notional=70.0)
     assert got == pytest.approx(STEP * PRICE)
@@ -105,7 +112,7 @@ def test_flag_on_spot_floor_uses_lev_1(monkeypatch):
 def test_flag_on_skips_when_base_cannot_afford(monkeypatch):
     """Pre-multiplier base < floor: this is balance/margin reality, not
     opinion-downsizing — the floor must NOT fire."""
-    eng, _ = _stub_engine(monkeypatch, enabled=True)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=True)
     assert _call(eng, base_notional=20.0) == 0.0
 
 
@@ -113,7 +120,7 @@ def test_flag_on_skips_when_base_cannot_afford(monkeypatch):
 
 
 def test_loss_clamp_rejection_at_floored_size_skips(monkeypatch):
-    eng, _ = _stub_engine(monkeypatch, enabled=True, clamp_ok=False)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=True, clamp_ok=False)
     assert _call(eng) == 0.0
     # The clamp must have been consulted with the FLOORED notional.
     eng._within_loss_clamp.assert_called_once_with(
@@ -121,7 +128,7 @@ def test_loss_clamp_rejection_at_floored_size_skips(monkeypatch):
 
 
 def test_exposure_cap_breach_at_floored_size_skips(monkeypatch):
-    eng, exp = _stub_engine(monkeypatch, enabled=True, exposure_hit=True)
+    eng, exp, _ = _stub_engine(monkeypatch, enabled=True, exposure_hit=True)
     assert _call(eng) == 0.0
     # Exposure checked against the FLOORED gross notional (step * price).
     args = exp.call_args[0]
@@ -131,7 +138,27 @@ def test_exposure_cap_breach_at_floored_size_skips(monkeypatch):
 def test_exposure_cap_error_fails_closed(monkeypatch):
     """A broken exposure check must SKIP (fail-closed), mirroring the
     §2 main rail — never open the gate on a glitch."""
-    eng, _ = _stub_engine(monkeypatch, enabled=True, exposure_raises=True)
+    eng, _, _ = _stub_engine(monkeypatch, enabled=True, exposure_raises=True)
+    assert _call(eng) == 0.0
+
+
+def test_aggregate_risk_breach_at_floored_size_skips(monkeypatch):
+    eng, _, aggregate = _stub_engine(
+        monkeypatch, enabled=True, aggregate_hit=True
+    )
+    reservation = object()
+
+    assert _call(eng, risk_positions=[reservation]) == 0.0
+    args = aggregate.call_args[0]
+    assert args[0] == [reservation]
+    assert args[1] == pytest.approx(STEP * PRICE)
+    assert args[2] == pytest.approx(SL_PCT / 100.0)
+
+
+def test_aggregate_risk_error_fails_closed(monkeypatch):
+    eng, _, _ = _stub_engine(
+        monkeypatch, enabled=True, aggregate_raises=True
+    )
     assert _call(eng) == 0.0
 
 
@@ -165,6 +192,7 @@ def test_floor_respects_clamp_and_exposure_before_applying():
     ret_idx = body.rindex("return floor_notional")
     assert body.index("_within_loss_clamp") < ret_idx
     assert body.index("exposure_breached") < ret_idx
+    assert body.index("aggregate_open_risk_breached") < ret_idx
 
 
 def test_original_skip_path_unchanged():
