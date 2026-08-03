@@ -17,6 +17,9 @@ def test_read_only_mcp_server_imports_and_exposes_expected_tools():
         "trading_bot_recent_candidates",
         "trading_bot_shadow_vs_live",
         "trading_bot_query",
+        "trading_bot_recent_movers",
+        "trading_bot_f1_edge_status",
+        "trading_bot_open_funnel",
     }
     for tool in by_name.values():
         annotations = tool.annotations

@@ -155,5 +155,67 @@ async def trading_bot_query(params: QueryInput) -> str:
     return _guard(lambda: wr.run_select(params.sql, limit=params.limit))
 
 
+class MoversInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    # Reserved for future filters; currently returns the full latest snapshot.
+
+
+class F1StatusInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    lookback_hours: float = Field(
+        default=24.0, ge=1.0, le=168.0, description="Hours of carry_gate_log to summarize"
+    )
+
+
+class OpenFunnelInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    lookback_hours: float = Field(
+        default=24.0,
+        ge=1.0,
+        le=168.0,
+        description="Hours of decision_events OPEN attempts to summarize",
+    )
+
+
+@mcp.tool(
+    name="trading_bot_recent_movers",
+    annotations={"title": "Recent absolute-USDT movers (shadow)", **_RO},
+)
+async def trading_bot_recent_movers(params: MoversInput) -> str:
+    """Return the latest 1h/24h/7d absolute-USDT-band mover shortlist.
+
+    Shadow research only — these symbols are NOT an executable universe.
+    Band defaults to [$5, $200] absolute price move (owner 2026-07-30).
+    """
+    return _guard(wr.recent_movers)
+
+
+@mcp.tool(
+    name="trading_bot_f1_edge_status",
+    annotations={"title": "F1 carry edge status", **_RO},
+)
+async def trading_bot_f1_edge_status(params: F1StatusInput) -> str:
+    """Summarize F1 funding/basis carry gate checks over a lookback window.
+
+    status=idle_no_edge with negative best net_edge_bps means the validated
+    family is correctly idle (compressed funding). status=stale_runner means
+    the gate log is older than lookback — that is the alertable case.
+    """
+    return _guard(lambda: wr.f1_edge_status(lookback_hours=params.lookback_hours))
+
+
+@mcp.tool(
+    name="trading_bot_open_funnel",
+    annotations={"title": "Directional OPEN funnel (econ gate)", **_RO},
+)
+async def trading_bot_open_funnel(params: OpenFunnelInput) -> str:
+    """Denominator-aware OPEN-attempt funnel from decision_events.
+
+    Separates econ_gate blocks from other execute_open rejects, and from
+    cycles that never produced an OPEN attempt (score floor / no candidate).
+    """
+    return _guard(lambda: wr.open_funnel_status(lookback_hours=params.lookback_hours))
+
+
 if __name__ == "__main__":
     mcp.run()

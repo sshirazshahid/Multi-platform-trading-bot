@@ -148,3 +148,249 @@ def test_run_select_returns_rows_and_caps(db):
     rows = wr.run_select("SELECT symbol, realized_pnl FROM trades", limit=2, db_path=db)
     assert len(rows) == 2
     assert "symbol" in rows[0]
+
+
+# ── T4: movers + F1 measurement surfaces (autoplan 2026-07-30) ──────────────
+
+
+def test_recent_movers_missing_file(tmp_path):
+    with pytest.raises(wr.WarehouseError, match="mover shortlist not found"):
+        wr.recent_movers(path=tmp_path / "missing.json")
+
+
+def test_recent_movers_corrupt_json(tmp_path):
+    p = tmp_path / "mover_shortlist_latest.json"
+    p.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(wr.WarehouseError, match="unreadable"):
+        wr.recent_movers(path=p)
+
+
+def test_recent_movers_non_object_json(tmp_path):
+    p = tmp_path / "mover_shortlist_latest.json"
+    p.write_text("[1,2,3]", encoding="utf-8")
+    with pytest.raises(wr.WarehouseError, match="corrupt"):
+        wr.recent_movers(path=p)
+
+
+def test_recent_movers_ok(tmp_path):
+    p = tmp_path / "mover_shortlist_latest.json"
+    p.write_text(
+        '{"schema_version":1,"abs_band_usdt":[5,200],"movers":[]}',
+        encoding="utf-8",
+    )
+    doc = wr.recent_movers(path=p)
+    assert doc["abs_band_usdt"] == [5, 200]
+
+
+def test_f1_edge_status_missing_log(tmp_path):
+    with pytest.raises(wr.WarehouseError, match="carry_gate_log not found"):
+        wr.f1_edge_status(path=tmp_path / "missing.jsonl")
+
+
+def test_f1_edge_status_idle_no_edge(tmp_path):
+    import json
+    import time
+
+    p = tmp_path / "carry_gate_log.jsonl"
+    now = time.time()
+    rows = [
+        {"ts": now - 60, "symbol": "BTC", "venue": "bybit",
+         "net_edge_bps": -12.0, "ok": False, "reason": "funding_rate -0.0001 <= 0",
+         "feeds_fresh": False},
+        {"ts": now - 30, "symbol": "ETH", "venue": "bybit",
+         "net_edge_bps": -8.0, "ok": False, "reason": "edge 1.0bps < 5.0bps",
+         "feeds_fresh": True},
+    ]
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    st = wr.f1_edge_status(path=p, lookback_hours=1.0)
+    assert st["checks"] == 2 and st["ok"] == 0
+    assert st["status"] == "idle_no_edge"
+    assert st["best"]["net_edge_bps"] == -8.0
+    assert st["feeds_fresh_rate"] == 0.5
+    families = {row["family"]: row["count"] for row in st["top_reject_families"]}
+    assert families["funding_rate_le_0"] == 1
+    assert families["edge_below_cost"] == 1
+
+
+def test_f1_edge_status_stale_runner(tmp_path):
+    import json
+    import time
+
+    p = tmp_path / "carry_gate_log.jsonl"
+    old = time.time() - 48 * 3600
+    p.write_text(
+        json.dumps({"ts": old, "symbol": "BTC", "net_edge_bps": -1.0, "ok": False})
+        + "\n",
+        encoding="utf-8",
+    )
+    st = wr.f1_edge_status(path=p, lookback_hours=24.0)
+    assert st["checks"] == 0
+    assert st["status"] == "stale_runner"
+
+
+def test_f1_edge_status_partial_corrupt_lines_skipped(tmp_path):
+    import json
+    import time
+
+    p = tmp_path / "carry_gate_log.jsonl"
+    now = time.time()
+    p.write_text(
+        "not-json\n"
+        + json.dumps({"ts": now, "symbol": "SOL", "net_edge_bps": 3.0,
+                      "ok": True, "f1_gate_ok": True, "reason": "ok"})
+        + "\n",
+        encoding="utf-8",
+    )
+    st = wr.f1_edge_status(path=p, lookback_hours=1.0)
+    assert st["checks"] == 1 and st["ok"] == 1
+    assert st["status"] == "passing"
+
+
+# ── T5: denominator-aware OPEN / econ-gate funnel ────────────────────────────
+
+
+def _mk_decision_db(tmp_path, rows: list[dict]):
+    import hashlib
+    import json
+
+    db = tmp_path / "warehouse.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE decision_events (
+            event_id TEXT PRIMARY KEY, decision_id TEXT NOT NULL UNIQUE,
+            occurred_at TEXT NOT NULL, venue TEXT, market TEXT,
+            canonical_symbol TEXT, exchange_symbol TEXT, strategy_id TEXT,
+            action TEXT, side TEXT, snapshot_id TEXT, model_manifest_id TEXT,
+            schema_version INTEGER, payload_json TEXT NOT NULL,
+            payload_sha256 TEXT NOT NULL
+        )"""
+    )
+    for i, payload in enumerate(rows):
+        raw = json.dumps(payload)
+        sha = hashlib.sha256(raw.encode()).hexdigest()
+        conn.execute(
+            "INSERT INTO decision_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"e{i}", f"d{i}", payload.get("occurred_at") or "2026-07-30T00:00:00Z",
+                "bybit", "perpetual", "BTC/USDT:USDT", "BTC/USDT:USDT",
+                "mcp_registry", payload.get("action") or "enter_long", "buy",
+                f"s{i}", None, 1, raw, sha,
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_open_funnel_econ_vs_other_denominator(tmp_path):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db = _mk_decision_db(
+        tmp_path,
+        [
+            {
+                "occurred_at": now,
+                "action": "enter_long",
+                "outcome": "rejected",
+                "context": {
+                    "reason": "economic_gate_model_missing",
+                    "terminal_stage": "execute_open",
+                    "terminal_outcome": "rejected",
+                },
+                "reason_codes": ["economic_gate_model_missing", "execute_open"],
+            },
+            {
+                "occurred_at": now,
+                "action": "enter_long",
+                "outcome": "rejected",
+                "context": {
+                    "reason": "universe_filter_blocked",
+                    "terminal_stage": "execute_open",
+                    "terminal_outcome": "rejected",
+                },
+                "reason_codes": ["universe_filter_blocked", "execute_open"],
+            },
+            {
+                "occurred_at": now,
+                "action": "enter_long",
+                "outcome": "filled",
+                "context": {
+                    "reason": "maker_first_maker_fill",
+                    "terminal_stage": "maker_resolution",
+                    "terminal_outcome": "filled",
+                },
+                "reason_codes": ["maker_first_maker_fill", "maker_resolution"],
+            },
+        ],
+    )
+    st = wr.open_funnel_status(db_path=db, lookback_hours=24.0)
+    assert st["open_attempts"] == 3
+    assert st["econ_blocked"] == 1
+    assert st["other_rejected"] == 1
+    assert st["filled"] == 1
+    assert st["econ_block_rate"] == pytest.approx(1 / 3)
+    assert st["fill_rate"] == pytest.approx(1 / 3)
+    assert st["status"] in ("mixed", "econ_gate_dominant", "passing_or_other_blocks")
+    assert "drought_status" in st
+
+
+def test_open_funnel_drought_band_regime_idle(tmp_path):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    db = _mk_decision_db(
+        tmp_path,
+        [
+            {
+                "occurred_at": now,
+                "action": "enter_long",
+                "outcome": "rejected",
+                "context": {
+                    "reason": "band_regime_filter:adx_4h>30",
+                    "terminal_stage": "execute_open",
+                    "terminal_outcome": "rejected",
+                },
+                "reason_codes": ["band_regime_filter:adx_4h>30", "execute_open"],
+            },
+            {
+                "occurred_at": now,
+                "action": "enter_short",
+                "outcome": "rejected",
+                "context": {
+                    "reason": "band_regime_filter:adx_4h>30",
+                    "terminal_stage": "execute_open",
+                    "terminal_outcome": "rejected",
+                },
+                "reason_codes": ["band_regime_filter:adx_4h>30", "execute_open"],
+            },
+            {
+                "occurred_at": now,
+                "action": "enter_long",
+                "outcome": "rejected",
+                "context": {
+                    "reason": "universe_filter_blocked:chop:ER=0.09<0.12",
+                    "terminal_stage": "execute_open",
+                    "terminal_outcome": "rejected",
+                },
+                "reason_codes": [
+                    "universe_filter_blocked:chop:ER=0.09<0.12",
+                    "execute_open",
+                ],
+            },
+        ],
+    )
+    st = wr.open_funnel_status(db_path=db, lookback_hours=24.0)
+    assert st["drought_status"] == "band_regime_idle"
+    families = {f["family"]: f["count"] for f in st["top_reject_families"]}
+    assert families["band_regime_filter"] == 2
+    assert families["universe_filter_blocked"] == 1
+
+
+def test_open_funnel_no_attempts(tmp_path):
+    db = _mk_decision_db(tmp_path, [])
+    st = wr.open_funnel_status(db_path=db, lookback_hours=24.0)
+    assert st["open_attempts"] == 0
+    assert st["status"] == "no_open_attempts"
+    assert st["econ_block_rate"] == 0.0
+    assert st["drought_status"] == "no_open_attempts"
