@@ -357,9 +357,6 @@ python -m pytest --cov=skills --cov-report=term-missing
 # V3 backtest (current scoring engine)
 python backtest_v3.py
 
-# Multi-strategy backtest
-python backtest_all.py
-
 # Auto-backtest (parameter sweep)
 python auto_backtest.py
 ```

@@ -69,7 +69,8 @@ def test_launchers_do_not_recursively_delete_python_caches():
         "TradingBot.bat",
         "auto_restart.bat",
         "start_all.bat",
-        "run_confluence_paper.bat",
+        # run_confluence_paper.bat deleted 2026-08-04 (Phase 2a): its runner
+        # script was already absent, so the batch only printed "disabled".
         "scripts/start_all.ps1",
     )
 

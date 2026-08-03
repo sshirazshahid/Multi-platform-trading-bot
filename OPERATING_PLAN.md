@@ -21,9 +21,11 @@ before risking a cent.
   places real orders or blocks your trades.
 
 ## Do this (2–3 weeks)
-1. `cd D:\Downloads\Trading_Bot`  then  `.\run_confluence_paper.bat`  — leave it running.
-   It simulates the confluence strategy and logs every trade to
-   `reports\confluence_paper_trades.csv`.
+1. `cd D:\Downloads\Trading_Bot`  then  `venv\Scripts\python.exe main.py`  — leave
+   it running (the supervisor respawns it; `TradingBot.bat` is the menu front end).
+   It trades paper-only and logs to `logs\bot_<date>.log` and the warehouse.
+   (The old `run_confluence_paper.bat` step was removed: its runner script had
+   already been deleted, so the batch file only printed "disabled".)
 2. Each morning, glance at the daily scan briefing (the scheduled task), or run
    `python -m quant_suite.daily_scan`.
 3. Don't touch the strategy parameters. Let it gather an honest, untampered sample.
