@@ -77,7 +77,6 @@ BASELINE = {
     "exchanges/bybit_client.py::cancel_all_orders": 1,
     "exchanges/bybit_client.py::create_order": 3,
     "exchanges/bybit_client.py::set_leverage": 2,
-    "exchanges/mexc_client.py::create_order": 1,
 }
 
 

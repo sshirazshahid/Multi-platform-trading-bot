@@ -187,11 +187,14 @@ def test_bitget_client_wires_validator():
     assert "validate_ohlcv(" in block
 
 
-def test_binance_bybit_mexc_route_through_base():
-    """Binance/Bybit/MEXC fetch_ohlcv delegate to super().fetch_ohlcv, which
+def test_binance_bybit_route_through_base():
+    """Binance/Bybit fetch_ohlcv delegate to super().fetch_ohlcv, which
     carries the validator — pin the delegation so a refactor to a direct ccxt
     call can't silently drop validation."""
-    for fname in ("binance_client.py", "bybit_client.py", "mexc_client.py"):
+    # mexc_client.py deleted 2026-08-04 (Phase 2b): it imported
+    # MEXC_API_KEY from config, which does not exist, so the module
+    # could not even be imported.
+    for fname in ("binance_client.py", "bybit_client.py"):
         src = (ROOT / "exchanges" / fname).read_text(encoding="utf-8")
         idx = src.index("def fetch_ohlcv")
         block = src[idx : idx + 1600]
