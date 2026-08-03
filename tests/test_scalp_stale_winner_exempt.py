@@ -88,8 +88,16 @@ def _scalp_mode_enabled(monkeypatch):
     tests passed VACUOUSLY (asserting a close reason that is trivially
     absent when nothing closes at all). Pinning it makes every case in this
     module test the logic rather than the operator's .env.
+
+    Resolved through the ``config`` MODULE, not the module-level import
+    above: tests/test_scalp_kill_switch.py calls importlib.reload(config),
+    which rebinds every config dict to a new object. Patching the
+    import-time dict would then silently miss the one production code reads
+    (order_manager re-imports inside the function), which is exactly how
+    this test passed alone and failed in full-suite order.
     """
-    monkeypatch.setitem(SCALP_MODE, "enabled", True)
+    import config as _cfg
+    monkeypatch.setitem(_cfg.SCALP_MODE, "enabled", True)
 
 
 def test_position_age_minutes_accepts_production_epoch_float():
