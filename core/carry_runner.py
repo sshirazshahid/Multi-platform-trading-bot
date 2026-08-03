@@ -109,6 +109,27 @@ LIVE_ACTIVATION_PRECONDITIONS = (
 )
 
 
+def _observed_settlement_schedule(funding: dict):
+    """``(interval_hours, next_settlement_ts)`` exactly as the venue reported
+    them, or ``None`` when either is missing or unusable.
+
+    Never substitutes a default. The perp funding interval is time-varying per
+    symbol (bases have switched 8h -> 4h mid-history), so a fabricated value
+    would be indistinguishable from an observation in the position record and
+    would silently shift every downstream settlement cursor.
+    """
+    try:
+        hours = float(funding.get("interval_hours"))
+        next_ts = float(funding.get("next_funding_ts"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(hours) or hours <= 0.0:
+        return None
+    if not math.isfinite(next_ts) or next_ts <= 0.0:
+        return None
+    return hours, next_ts
+
+
 class CarryRunner:
     """Single-shot F1 carry paper runner (see module docstring)."""
 
@@ -357,8 +378,19 @@ class CarryRunner:
         perp_spread_bps = (float(snap["perp_ask"]) - float(snap["perp_bid"])) / perp_mid * 1e4
         next_ts = f.get("next_funding_ts")
         ttf_min = (float(next_ts) - now) / 60.0 if next_ts is not None else None
-        snap_age = self._observed_age_sec(snap, now)
-        funding_age = self._observed_age_sec(f, now)
+        # Snapshot provider stamps received_at AFTER network I/O. Cycle ``now``
+        # is captured once at run_once start, so funding/book observed_at can
+        # land slightly AFTER ``now`` and look "future" (age=inf) → permanent
+        # feeds_stale. Age against max(now, received_at).
+        asof = now
+        try:
+            recv = float(snap.get("received_at"))
+            if math.isfinite(recv):
+                asof = max(asof, recv)
+        except (TypeError, ValueError, OverflowError):
+            pass
+        snap_age = self._observed_age_sec(snap, asof)
+        funding_age = self._observed_age_sec(f, asof)
         feeds_fresh = (
             not bool(snap.get("stale", False))
             and snap_age <= DEFAULT_MAX_HEDGE_STALENESS_SEC
@@ -449,9 +481,20 @@ class CarryRunner:
             rec["reason"] = policy_reason
             self._log_gate(rec)
             return
+
+        # The settlement schedule must be OBSERVED before a carry position is
+        # stamped with it: the funding interval is time-varying per symbol, so
+        # an assumed 8h / "now + 8h" would enter the position record — and every
+        # later reconciliation cursor — indistinguishable from an observation.
+        schedule = _observed_settlement_schedule(snap.get("funding") or {})
+        if schedule is None:
+            rec["ok"] = False
+            rec["reason"] = "settlement_schedule_unobserved"
+            self._log_gate(rec)
+            return
+        interval_hours, next_settlement_ts = schedule
         self._log_gate(rec)
 
-        f = snap["funding"]
         slip = self.slip_frac
         spot_px = float(snap["spot_ask"]) * (1.0 + slip)   # buy spot: pay up
         perp_px = float(snap["perp_bid"]) * (1.0 - slip)   # sell perp: hit bid
@@ -510,8 +553,8 @@ class CarryRunner:
             "entry_basis_bps": (perp_px - spot_px) / spot_px * 1e4,
             "opened_ts": now, "entry_fees": entry_fees,
             "round_trip_cost_frac": gi["round_trip_cost_frac"],
-            "interval_hours": float(f.get("interval_hours") or 8.0),
-            "next_settlement_ts": float(f.get("next_funding_ts") or (now + 8 * 3600)),
+            "interval_hours": interval_hours,          # venue-reported, verbatim
+            "next_settlement_ts": next_settlement_ts,  # venue-reported, verbatim
             "funding_accrued": 0.0, "settlements_held": 0,
             "consec_negative_settlements": 0, "runs_seen": 0,
             "perp_leverage": 1.0, "mmr": F1_MMR_FRAC,

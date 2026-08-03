@@ -210,7 +210,6 @@ def build_live_snapshot_provider(venue: str):
 
     def provider(symbol: str) -> dict | None:
         coin = symbol.split("/")[0]
-        received_at = time.time()
         try:
             spot = _bbo_depth(
                 client.fetch_order_book(symbol, limit=5, market_type="spot"),
@@ -231,6 +230,11 @@ def build_live_snapshot_provider(venue: str):
             perp_exchange_symbol = client.exchange.market_id(f"{symbol}:USDT")
         except Exception:  # noqa: BLE001 - identity must be venue-derived
             return None
+
+        # Stamp receipt AFTER all network work. Funding meta harvesters set
+        # ``ts=time.time()`` at fetch completion; an early received_at made
+        # funding look "future" (age=inf) → feeds_fresh permanently false.
+        received_at = time.time()
 
         funding_observed_at = _record_observed_at(funding)
         funding_age = _observed_age_sec(funding_observed_at, received_at)
@@ -253,12 +257,17 @@ def build_live_snapshot_provider(venue: str):
             perp_mark = (perp[0] + perp[1]) / 2.0
             mark_observed_at = perp[3]
 
-        market_observations = (spot[3], perp[3], mark_observed_at)
-        observed_at = (
-            min(market_observations)
-            if all(value is not None for value in market_observations)
-            else None
-        )
+        # Binance (and some ccxt spot paths) return timestamp=None on books.
+        # For a just-completed REST poll, receipt time is the honest observation
+        # clock — not a cache backdate. Missing exchange ts must not fail-closed
+        # the entire F1 lane forever.
+        spot_observed_at = spot[3] if spot[3] is not None else received_at
+        perp_observed_at = perp[3] if perp[3] is not None else received_at
+        if mark_observed_at is None:
+            mark_observed_at = received_at
+
+        market_observations = (spot_observed_at, perp_observed_at, mark_observed_at)
+        observed_at = min(market_observations)
         market_stale = any(
             _observed_age_sec(value, received_at)
             > DEFAULT_MAX_HEDGE_STALENESS_SEC
@@ -296,8 +305,8 @@ def build_live_snapshot_provider(venue: str):
             ),
             "round_trip_cost_frac": rt_cost,
             "funding": funding,
-            "spot_observed_at": spot[3],
-            "perp_observed_at": perp[3],
+            "spot_observed_at": spot_observed_at,
+            "perp_observed_at": perp_observed_at,
             "mark_observed_at": mark_observed_at,
             "observed_at": observed_at,
             "received_at": received_at,

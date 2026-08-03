@@ -9,6 +9,7 @@ grep-proof that no order-path symbol is imported by the runner.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -192,6 +193,29 @@ def test_entry_age_uses_observed_time_not_local_receipt(
     if stale_source == "funding":
         assert gate_inputs["funding_age_sec"] == pytest.approx(301.0)
     assert summary["opened"] == 0
+
+
+def test_gate_inputs_asof_received_at_when_cycle_now_is_early(tmp_path):
+    """Regression: run_once stamps ``now`` before multi-symbol network I/O.
+    Funding observed_at / snap received_at land after that instant and must
+    not be treated as future (age=inf → permanent feeds_stale).
+    """
+    clock = FakeClock()
+    cycle_now = clock()
+    later = cycle_now + 2.5
+    snap = make_snap(later, funding_age_sec=0.0, snapshot_age_sec=0.0)
+    snap["received_at"] = later
+    snap["funding"]["received_at"] = later
+    snap["funding"]["observed_at"] = later
+    snap["funding"]["ts"] = later
+    snap["stale"] = False
+    snap["funding"]["stale"] = False
+    runner = build(tmp_path, clock, lambda symbol: snap)
+
+    # Without asof=max(now, received_at), funding_age would be inf.
+    gi = runner._gate_inputs(snap, cycle_now)
+    assert gi["feeds_fresh"] is True
+    assert gi["funding_age_sec"] == pytest.approx(0.0)
 
 
 def test_entry_recomputes_fillability_from_actual_leg_side_depth(tmp_path):
@@ -1416,6 +1440,86 @@ def test_live_snapshot_provider_wires_source_time_and_side_depth(
     assert snapshot["funding"]["received_at"] == now
 
 
+def test_live_snapshot_provider_rest_poll_without_spot_ts_stays_fresh(
+    monkeypatch,
+):
+    """Regression: Binance spot books often have timestamp=None; funding meta
+    stamps ts after the provider's former early received_at. Both made
+    feeds_fresh permanently false even when books/rates were live.
+    """
+    import core.market_data_ledger as ledger_module
+    import exchanges.binance_client as binance_module
+    import scripts.run_f1_carry_paper as carry_script
+
+    clock = {"t": 1_700_000_100.0}
+
+    def advance(dt: float = 0.05) -> float:
+        clock["t"] += dt
+        return clock["t"]
+
+    spot_book = {
+        "timestamp": None,  # live Binance spot quirk
+        "bids": [[100.0, 100.0]],
+        "asks": [[101.0, 5.0]],
+    }
+    perp_book = {
+        "timestamp": (clock["t"] - 1.0) * 1000.0,
+        "bids": [[100.0, 50.0]],
+        "asks": [[101.0, 50.0]],
+    }
+
+    class FakeClient:
+        exchange = SimpleNamespace(
+            market_id=lambda symbol: symbol.replace("/", "").replace(":USDT", "")
+        )
+
+        def fetch_order_book(self, symbol, limit, market_type):
+            advance(0.02)
+            return spot_book if market_type == "spot" else perp_book
+
+    class FakeLedger:
+        def __init__(self, clients):
+            pass
+
+        def mark_index(self, symbol):
+            advance(0.02)
+            return {"binance": {"mark": 100.5, "ts": clock["t"] - 2.0}}
+
+        def funding(self, coins):
+            # Harvester stamps ts at fetch completion — after provider start.
+            ts = advance(0.05)
+            return {
+                "BTC": {
+                    "binance": {
+                        "rate": 0.0004,
+                        "interval_hours": 8.0,
+                        "next_funding_ts": clock["t"] + HOUR,
+                        "ts": ts,
+                        "stale": False,
+                    }
+                }
+            }
+
+    monkeypatch.setattr(binance_module, "BinanceClient", FakeClient)
+    monkeypatch.setattr(ledger_module, "MarketDataLedger", FakeLedger)
+    monkeypatch.setattr(carry_script.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(carry_script, "avg_7d", lambda *args, **kwargs: 0.0003)
+    monkeypatch.setattr(
+        carry_script,
+        "load_recent_realized_settlements",
+        lambda *args, **kwargs: tuple(SimpleNamespace(rate=0.0004) for _ in range(21)),
+    )
+
+    snapshot = carry_script.build_live_snapshot_provider("binance")("BTC/USDT")
+    assert snapshot is not None
+    assert snapshot["stale"] is False
+    assert snapshot["spot_observed_at"] == pytest.approx(snapshot["received_at"])
+    assert snapshot["funding"]["stale"] is False
+    assert snapshot["funding"]["age_sec"] == pytest.approx(0.0, abs=1e-9)
+    assert math.isfinite(snapshot["funding"]["age_sec"])
+    assert snapshot["observed_at"] is not None
+
+
 # ── FIX 3: per-symbol crash-safe state persistence (no double-book) ─────
 class _CycleRecorder:
     def __init__(self):
@@ -1490,3 +1594,48 @@ def test_no_order_path_symbols_in_runner_sources():
         src = (root / rel).read_text(encoding="utf-8")
         assert "create_order" not in src, rel
         assert "OrderManager" not in src, rel
+
+
+# ── the settlement schedule must be OBSERVED, never fabricated ─────────────
+# The funding interval is time-varying per symbol (bases have switched 8h -> 4h
+# mid-history). An open stamped with an assumed 8h interval / "now + 8h" next
+# settlement poisons every later reconciliation cursor with an unobserved number.
+def test_open_refuses_when_the_venue_reports_no_funding_interval(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, interval_hours=None, next_in_sec=1 * HOUR)
+    r = build(tmp_path, clock, provider)
+    summary = r.run_once()
+    assert summary["opened"] == 0
+    assert r.load_state()["positions"] == {}
+    rec = json.loads(
+        (tmp_path / "carry_gate_log.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["ok"] is False
+    assert rec["reason"] == "settlement_schedule_unobserved"
+
+
+def test_open_refuses_when_the_venue_reports_no_next_settlement(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, interval_hours=8.0, next_in_sec=1 * HOUR)
+    r = build(tmp_path, clock, provider)
+    original = provider.__call__
+
+    def strip_next(symbol):
+        snap = original(symbol)
+        f = dict(snap["funding"])
+        f["next_funding_ts"] = None
+        snap["funding"] = f
+        return snap
+
+    r.snapshot_provider = strip_next
+    assert r.run_once()["opened"] == 0
+    assert r.load_state()["positions"] == {}
+
+
+def test_open_records_a_four_hour_interval_verbatim(tmp_path):
+    clock = FakeClock()
+    provider = Provider(clock, interval_hours=4.0, next_in_sec=1 * HOUR)
+    r = build(tmp_path, clock, provider)
+    assert r.run_once()["opened"] == 1
+    pos = list(r.load_state()["positions"].values())[0]
+    assert pos["interval_hours"] == 4.0
+    assert pos["next_settlement_ts"] == pytest.approx(clock() + 1 * HOUR)
