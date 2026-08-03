@@ -435,6 +435,23 @@ BROAD_UNIVERSE_MONITOR = {
     ).lower() == "true",
 }
 
+# ── Tier-geometry time-exit hold (2026-08-03, owner-directed STALE fix) ──────
+# Post-AccBand tier geometry (TP 2.0-3.75% vs SL 0.9-1.5%) needs TIME to reach
+# either barrier: the first 10 post-fix resolved trades show 4/10 STALE exits
+# and 0 full take-profits — the Phase-14-era stale/age cutoffs (tuned when
+# edge half-life was ~60min) harvest wide-target positions while still flat,
+# exactly the failure measured and fixed for the ACCURACY band on 2026-07-10
+# (72h hold precedent). While a position's planned R:R >= min_planned_rr and
+# age < max_hold_hours, STALE / AGE_LIMIT / AGE_LOSS defer so first-touch
+# SL/TP governs. Zombie protection: past the horizon, time exits fire again.
+# NOTE (measurement honesty): activating this resets the post-fix verdict
+# cohort epoch — geometry-v1 trades (pre-hold) must never be pooled with v2.
+TIER_GEOMETRY_TIME_EXIT_HOLD = {
+    "enabled": os.getenv("TIER_TIME_EXIT_HOLD", "true").lower() == "true",
+    "max_hold_hours": float(os.getenv("TIER_TIME_EXIT_MAX_HOLD_H", "72")),
+    "min_planned_rr": float(os.getenv("TIER_TIME_EXIT_MIN_RR", "1.0")),
+}
+
 # ── Listing-short shadow probe (pipeline rev3 CONFIRMED_GO, 2026-07-09) ──────
 # LOG-ONLY forward soak of the capital-scaled post-listing perp short. Detects
 # new Binance USDT-M perp listings, proposes 3%-notional shorts (7d + 30d,
