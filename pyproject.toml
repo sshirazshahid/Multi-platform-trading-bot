@@ -7,9 +7,9 @@ build-backend = "setuptools.build_meta"
 packages = []
 
 [project]
-name = "claude-trading-skills"
+name = "multi-platform-trading-bot"
 version = "0.1.0"
-description = "Claude Skills for equity investors and traders"
+description = "Deterministic multi-venue crypto paper-trading bot (Binance/Bybit/Bitget) with a pre-registered strategy-evidence pipeline"
 requires-python = ">=3.9"
 dependencies = [
     "jsonschema>=4.25.1",
@@ -84,7 +84,9 @@ skip = ".venv,*.json,*.csv,*.baseline,skill-packages,*.pyc,__pycache__"
 ignore-words-list = "trough,ore,cna,acn,blok,hims,pont,claus,theses,ot,fo,interm,nd,ser,strat,unparseable"
 
 [tool.coverage.run]
-source = ["skills", "core", "exchanges", "mcp_server", "research", "scripts", "strategies", "quant_suite", "ntrader"]
+# quant_suite/ and ntrader/ removed 2026-08-04: neither directory exists —
+# coverage silently reported nothing for them.
+source = ["skills", "core", "exchanges", "mcp_server", "research", "scripts", "strategies", "utils"]
 
 [tool.coverage.report]
 fail_under = 40

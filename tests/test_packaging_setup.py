@@ -19,6 +19,8 @@ def test_setup_metadata_command_does_not_run_first_time_wizard():
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == "claude-trading-skills"
+    # Renamed 2026-08-04 (Phase 2d): the tree is a crypto trading bot, not the
+    # equity "claude-trading-skills" pack it was forked alongside.
+    assert completed.stdout.strip() == "multi-platform-trading-bot"
     assert "FIRST TIME SETUP" not in completed.stdout
 
