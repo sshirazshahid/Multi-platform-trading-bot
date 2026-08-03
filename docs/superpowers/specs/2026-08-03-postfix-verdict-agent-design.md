@@ -23,6 +23,14 @@ It reports to the owner; it never acts. Humans decide.
   caught in design review; pinned by a test.
 - `FIX_EPOCH` is a named constant documenting its provenance (supervisor
   respawn logged 2026-08-02 17:25:14 local). A test pins its value.
+- **EPOCH UPDATE (2026-08-03, owner-directed):** the tier-geometry time-exit
+  hold (`TIER_GEOMETRY_TIME_EXIT_HOLD`, config.py) activated at the
+  2026-08-03 22:42:57 +05:00 respawn (~unix 1785778977) changed exit policy
+  mid-stream. `FIX_EPOCH` MUST be that second respawn: geometry-v1 trades
+  (2026-08-02 17:25 → 2026-08-03 22:42, resolved n=10: 3W/7L, −$1.12, 4
+  STALE, 0 full TP) are a CLOSED mini-cohort and must never be pooled with
+  v2. The `TIMEOUT_INTERFERENCE` flag stays: v2's prediction is that STALE
+  share collapses; if it does not, the hold's R:R/scalp exemptions leak.
 - **Self-validating cohort:** the script independently recomputes planned R:R
   for every cohort trade from entry/stop/target. If any trade shows R:R < 1.0
   (compressed geometry), verdict becomes `COHORT_CONTAMINATED` with the
