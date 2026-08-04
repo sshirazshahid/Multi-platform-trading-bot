@@ -29,7 +29,7 @@ HARD SCOPE — read this:
 Usage:
     python scripts/run_intel_synthesis.py
     python scripts/run_intel_synthesis.py --no-llm      # assemble facts, skip Claude
-    python scripts/run_intel_synthesis.py --email       # also email the note (Gmail env)
+    python scripts/run_intel_synthesis.py --email       # OPT-IN email (schtask must NOT pass this)
     python scripts/run_intel_synthesis.py --symbols BTC ETH SOL
 """
 

@@ -40,6 +40,11 @@ Triggers (see WatchdogConfig for thresholds):
      MODEL_STARVE_HOURS hours while RiskManager.daily_pnl > -2%.
      INFO — the model gate has been blocking everything; not an
      emergency, but operator should know.
+
+  7. stuck_open_positions
+     Warehouse trades stuck at status='OPEN' older than STUCK_OPEN_HOURS
+     that are NOT still open in positions.json (true orphans after a
+     trade_id close miss). Live holds past 24h (tier-geometry) are silent.
 """
 
 from __future__ import annotations
@@ -157,6 +162,83 @@ STALE_MAKER_INTENT_SEC = 10 * 60
 # startup warmup window (status files from a previous run look stale until the
 # just-launched harvester writes a fresh one) and brief poll flaps.
 FEED_GRACE_SEC = 10 * 60
+
+
+def live_open_position_keys(
+    positions_path: Path = POSITIONS_PATH,
+) -> Optional[set[tuple[str, str, str]]]:
+    """Return {(exchange_lower, symbol, side_lower)} for tracked opens.
+
+    ``None`` means positions state was unreadable — callers must skip the
+    stuck/orphan check rather than treat every old warehouse OPEN as an orphan.
+    """
+    if not positions_path.exists():
+        return set()
+    try:
+        doc = json.loads(positions_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    opens = []
+    if isinstance(doc, dict):
+        val = doc.get("open")
+        if isinstance(val, list):
+            opens = val
+    elif isinstance(doc, list):
+        opens = [e for e in doc if isinstance(e, dict) and not e.get("close_time")]
+    keys: set[tuple[str, str, str]] = set()
+    for e in opens:
+        if not isinstance(e, dict):
+            continue
+        ex = str(e.get("exchange") or "").strip().lower()
+        sym = str(e.get("symbol") or "").strip()
+        side = str(e.get("side") or "").strip().lower()
+        if ex and sym and side:
+            keys.add((ex, sym, side))
+    return keys
+
+
+def orphan_open_trade_rows(
+    warehouse_path: Path,
+    *,
+    older_than_hours: float = STUCK_OPEN_HOURS,
+    positions_path: Path = POSITIONS_PATH,
+    limit: int = 50,
+) -> Optional[list]:
+    """Warehouse OPEN rows older than threshold with no matching tracker open.
+
+    Returns ``[]`` when none, or ``None`` when the check cannot run safely
+    (missing warehouse / unreadable positions.json / query error).
+    """
+    if not warehouse_path.exists():
+        return []
+    live = live_open_position_keys(positions_path)
+    if live is None:
+        return None
+    cutoff = time.time() - float(older_than_hours) * 3600
+    try:
+        conn = sqlite3.connect(str(warehouse_path))
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, exchange, symbol, side, ts_entry FROM trades
+                WHERE status='OPEN' AND ts_entry < ?
+                ORDER BY ts_entry LIMIT ?
+                """,
+                (cutoff, int(limit)),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    orphans = []
+    for r in rows:
+        ex = str(r[1] or "").strip().lower()
+        sym = str(r[2] or "").strip()
+        side = str(r[3] or "").strip().lower()
+        if (ex, sym, side) in live:
+            continue
+        orphans.append(r)
+    return orphans
 
 
 @dataclass
@@ -699,42 +781,52 @@ class HealthWatchdog:
                 {"cycle_count": cycle_count},
             )
 
+    @staticmethod
+    def _live_open_keys(positions_path: Path = POSITIONS_PATH) -> Optional[set[tuple[str, str, str]]]:
+        return live_open_position_keys(positions_path)
+
     def _check_stuck_open_positions(self) -> None:
-        if not self._warehouse_path.exists():
+        """Alert only on orphan warehouse OPEN rows (not live tracker opens).
+
+        Tier-geometry holds can keep real PAPER positions open past
+        ``STUCK_OPEN_HOURS`` (up to ~72h). Those are intentional, not stuck.
+        The leak this check exists for is a warehouse row left OPEN after the
+        position closed in ``positions.json`` (trade_id lookup miss).
+        """
+        orphans = orphan_open_trade_rows(
+            self._warehouse_path,
+            older_than_hours=STUCK_OPEN_HOURS,
+            positions_path=POSITIONS_PATH,
+            limit=50,
+        )
+        if orphans is None:
+            # Unreadable positions.json — skip rather than false-positive.
             return
-        cutoff = time.time() - STUCK_OPEN_HOURS * 3600
-        try:
-            conn = sqlite3.connect(str(self._warehouse_path))
-            try:
-                rows = conn.execute(
-                    """
-                    SELECT id, symbol, side, ts_entry FROM trades
-                    WHERE status='OPEN' AND ts_entry < ?
-                    ORDER BY ts_entry LIMIT 10
-                    """,
-                    (cutoff,),
-                ).fetchall()
-            finally:
-                conn.close()
-        except Exception:
-            return
-        if rows:
-            self._alert(
-                "stuck_open_positions", "WARN",
-                f"{len(rows)} sampled OPEN warehouse rows are older than "
-                f"{STUCK_OPEN_HOURS}h",
-                {
-                    "sample": [
-                        {
-                            "id": int(r[0]),
-                            "symbol": str(r[1]),
-                            "side": str(r[2]),
-                            "age_h": round((time.time() - float(r[3])) / 3600, 2),
-                        }
-                        for r in rows
-                    ]
-                },
-            )
+        sample = orphans[:10]
+        self._edge_alert(
+            "stuck_open_positions",
+            bool(orphans),
+            "WARN",
+            (
+                f"{len(orphans)} orphan OPEN warehouse row(s) older than "
+                f"{STUCK_OPEN_HOURS}h (not in positions.json) — learning "
+                f"analytics under-count; run "
+                f"`python scripts/backfill_warehouse_closes.py --commit`"
+            ) if orphans else "",
+            {
+                "orphan_count": len(orphans),
+                "sample": [
+                    {
+                        "id": int(r[0]),
+                        "exchange": str(r[1]),
+                        "symbol": str(r[2]),
+                        "side": str(r[3]),
+                        "age_h": round((time.time() - float(r[4])) / 3600, 2),
+                    }
+                    for r in sample
+                ],
+            } if orphans else None,
+        )
 
     def _check_forward_feeds(self) -> None:
         try:

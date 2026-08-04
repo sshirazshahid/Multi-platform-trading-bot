@@ -498,3 +498,75 @@ def test_model_starving_suppressed_by_recent_open(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
     wd.tick()
     assert not any("model_gate_starving" in c["title"] for c in n.calls)
+
+
+def _make_open_trade_wh(path: Path, rows: list[tuple]) -> None:
+    """rows: (id, exchange, symbol, side, ts_entry)."""
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE trades (id INTEGER PRIMARY KEY, exchange TEXT, "
+        "symbol TEXT, side TEXT, status TEXT, ts_entry REAL)"
+    )
+    for r in rows:
+        conn.execute(
+            "INSERT INTO trades (id, exchange, symbol, side, status, ts_entry) "
+            "VALUES (?,?,?,?,?,?)",
+            (r[0], r[1], r[2], r[3], "OPEN", r[4]),
+        )
+    conn.commit()
+    conn.close()
+
+
+def test_stuck_open_silent_when_still_in_tracker(tmp_path, monkeypatch):
+    """Live tracker opens older than STUCK_OPEN_HOURS are holds, not orphans."""
+    wh = tmp_path / "wh.sqlite"
+    age = time.time() - (hw.STUCK_OPEN_HOURS + 2) * 3600
+    _make_open_trade_wh(wh, [
+        (1, "binance", "BNB/USDT:USDT", "buy", age),
+    ])
+    pos = tmp_path / "positions.json"
+    pos.write_text(json.dumps({"open": [{
+        "exchange": "Binance",
+        "symbol": "BNB/USDT:USDT",
+        "side": "buy",
+        "open_time": age,
+    }], "closed": []}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n, warehouse_path=wh)
+    wd.tick()
+    assert not any("stuck_open_positions" in c["title"] for c in n.calls)
+
+
+def test_stuck_open_alerts_orphan_warehouse_row(tmp_path, monkeypatch):
+    """Warehouse OPEN with no matching tracker open is a true bookkeeping leak."""
+    wh = tmp_path / "wh.sqlite"
+    age = time.time() - (hw.STUCK_OPEN_HOURS + 2) * 3600
+    _make_open_trade_wh(wh, [
+        (99, "binance", "ETH/USDT:USDT", "buy", age),
+    ])
+    pos = tmp_path / "positions.json"
+    pos.write_text(json.dumps({"open": [], "closed": []}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n, warehouse_path=wh)
+    wd.tick()
+    assert any("stuck_open_positions" in c["title"] for c in n.calls)
+    assert any("orphan" in c["message"].lower() for c in n.calls)
+
+
+def test_stuck_open_edge_silent_while_orphan_persists(tmp_path, monkeypatch):
+    """Orphan alert is edge-triggered — no hourly re-email for the same leak."""
+    wh = tmp_path / "wh.sqlite"
+    age = time.time() - (hw.STUCK_OPEN_HOURS + 2) * 3600
+    _make_open_trade_wh(wh, [
+        (99, "binance", "ETH/USDT:USDT", "buy", age),
+    ])
+    pos = tmp_path / "positions.json"
+    pos.write_text(json.dumps({"open": [], "closed": []}))
+    monkeypatch.setattr(hw, "POSITIONS_PATH", pos)
+    n = _FakeNotifier()
+    wd = hw.HealthWatchdog(_make_engine(), notifier=n, warehouse_path=wh)
+    wd.tick()
+    wd.tick()
+    assert sum(1 for c in n.calls if "stuck_open_positions" in c["title"]) == 1
