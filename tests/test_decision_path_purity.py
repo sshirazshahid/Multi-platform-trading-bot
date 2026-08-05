@@ -26,6 +26,7 @@ FORBIDDEN_IMPORT_ROOTS = (
     "core.news_scanner",
     "core.data_feeds.news_sentiment_feed",
     "core.data_feeds.twitter_feed",
+    "core.regime_short_bias",  # prereg-61 log-only; never on entry path
 )
 
 FORBIDDEN_SUBSTRINGS = (
