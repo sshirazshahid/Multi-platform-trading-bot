@@ -19,11 +19,11 @@ Fail-open: degenerate inputs return inf so min() keeps the chain value.
 """
 from __future__ import annotations
 
-from pathlib import Path
+from tests.bot_engine_source import bot_engine_source_for_grep
 
 import pytest
 
-SRC = Path("core/bot_engine.py")
+SRC = bot_engine_source_for_grep
 
 
 def test_risk_budget_margin_math():
@@ -79,7 +79,7 @@ def test_config_knob_present_and_on():
 def test_layer_inserted_after_pinned_notional_line():
     """House pin: the layer sits AFTER the multiplier-chain notional line
     (which other phase tests pin) and BEFORE the $5 min-notional rail."""
-    src = SRC.read_text(encoding="utf-8")
+    src = SRC()
     i_notional = src.index("notional = mtype_bal * size_fraction")
     i_layer = src.index("VOL_TARGET_SIZING")
     i_floor = src.index("min_notional = 5.0")
@@ -88,7 +88,7 @@ def test_layer_inserted_after_pinned_notional_line():
 
 def test_ceiling_only_semantics():
     """Shrink-only: assignment happens only under `if _budget < notional`."""
-    src = SRC.read_text(encoding="utf-8")
+    src = SRC()
     i = src.index("VOL_TARGET_SIZING")
     block = src[i:i + 1800]
     assert "if _budget < notional" in block
@@ -96,7 +96,7 @@ def test_ceiling_only_semantics():
 
 
 def test_spot_uses_lev_1():
-    src = SRC.read_text(encoding="utf-8")
+    src = SRC()
     i = src.index("VOL_TARGET_SIZING")
     block = src[i:i + 1800]
     assert 'leverage if market_type == "futures" else 1' in block
@@ -105,5 +105,5 @@ def test_spot_uses_lev_1():
 def test_post_phase28_sl_used():
     """The budget keys off the POST-Phase-28-asymmetry SL actually placed
     (sell-side sl_pct*0.60 happens before the layer)."""
-    src = SRC.read_text(encoding="utf-8")
+    src = SRC()
     assert src.index("size_pct = size_pct * 0.75") < src.index("VOL_TARGET_SIZING")

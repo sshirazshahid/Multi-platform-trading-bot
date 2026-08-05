@@ -16,6 +16,9 @@ from unittest.mock import MagicMock
 import pytest
 
 
+from tests.order_manager_source import order_manager_impl_source
+
+
 @pytest.fixture(autouse=True)
 def _tmp_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -52,8 +55,7 @@ def test_non_dict_payload_ignored():
 
 
 def test_accrue_persists_per_position_settlement_cursor():
-    src = Path(__file__).resolve().parents[1].joinpath(
-        "core", "order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     body = src[src.index("def accrue_paper_funding"):]
     i_mark = body.find("pos.last_funding_ts = settlement.settlement_ts")
     i_save = body.find('getattr(self.tracker, "_save", None)')

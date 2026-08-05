@@ -89,6 +89,9 @@ class GateInputs:
 @dataclass
 class PromotionGate:
     """Stateless gate. Construct with thresholds, call `evaluate`."""
+    # Dual WR floors (intentional, do not "reconcile" by loosening either):
+    # this shadow-vs-live PromotionGate uses wr_floor=0.65; the model-artifact
+    # gate below uses MIN_OOS_WR=0.55. Both stay frozen.
     wr_floor: float = 0.65
     pbo_threshold: float = 0.5
     dsr_p_threshold: float = 0.05
@@ -305,6 +308,8 @@ def _kurt(x: np.ndarray) -> float:
 # the trainer's PBO is fixed (see TODO in scripts/train_models.py).
 # The shadow-vs-live PromotionGate above keeps its strict 0.5 floors.
 MIN_OOS = {"futures": 200, "spot": 100}
+# Model-artifact OOS WR floor (0.55). Distinct from PromotionGate.wr_floor
+# (0.65) above — dual floors are documented intentionally; never lower either.
 MIN_OOS_WR = 0.55
 MIN_AUC = 0.60
 MIN_WR_UPLIFT = 1.5

@@ -19,6 +19,8 @@ This file is retained as a historical pin for the supersession.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 
 def test_phase20_disabled_was_superseded_by_phase27():
     """EXPECTANCY_FILTER is now enabled (Phase 27) — but as a graduated
@@ -38,7 +40,7 @@ def test_phase16_18_still_engage_after_supersession():
     """Sanity: Phase 16 ev_mult and Phase 18 cal_mult must still apply,
     they compose with the Phase 27 graduated multiplier."""
     from pathlib import Path
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "self.risk._adaptive_size_multiplier()" in src
     assert "size_fraction *= _ev_mult" in src
     assert "self.order_mgr.calibrator.calibrate(" in src

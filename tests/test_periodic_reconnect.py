@@ -11,6 +11,8 @@ the ccxt client.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
@@ -21,7 +23,7 @@ def test_try_reconnect_method_exists():
 
 def test_periodic_retry_branch_in_health_check():
     """Source contains the periodic-retry branch."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "stale-halt retry" in src
     assert "fails % 5 == 0" in src
 
@@ -29,7 +31,7 @@ def test_periodic_retry_branch_in_health_check():
 def test_first_halt_transition_still_calls_reconnect():
     """The original 'first transition to halted' path also routes through
     _try_reconnect (unified) — not duplicated inline."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # The first-transition block calls _try_reconnect
     first_transition_idx = src.index(
         "EXCHANGE HALTED: {ex_name.upper()} unreachable for"
@@ -43,7 +45,7 @@ def test_first_halt_transition_still_calls_reconnect():
 def test_reconnect_clears_fails_and_halted_set():
     """When reconnect succeeds, clear both the consecutive_fails counter
     and the _exchange_halted set."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Find the _try_reconnect body
     method_idx = src.index("def _try_reconnect(self")
     body = src[method_idx:method_idx + 1200]
@@ -53,7 +55,7 @@ def test_reconnect_clears_fails_and_halted_set():
 
 def test_reconnect_handles_exception():
     """Exception in reconnect attempt does not crash the health-check loop."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     method_idx = src.index("def _try_reconnect(self")
     body = src[method_idx:method_idx + 1200]
     assert "except Exception" in body

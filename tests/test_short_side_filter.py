@@ -55,14 +55,16 @@ def test_short_allowed_when_btc_trends_unavailable():
     assert d.block is False
 
 
-def test_news_bearish_catalyst_overrides_block():
+def test_news_sentiment_no_longer_overrides_btc_block():
+    """De-Emotion: bearish news sentiment is ignored; BTC uptrend still blocks."""
     d = evaluate(
         side="sell", symbol="XRP/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
         symbol_news_sentiment=-3,
+        mcp_score=80, confidence=0.80,
     )
-    assert d.block is False
-    assert "news_bearish_catalyst" in d.reason
+    assert d.block is True
+    assert "btc_aligned_up" in d.reason
 
 
 def test_news_neutral_does_not_override():
@@ -70,6 +72,7 @@ def test_news_neutral_does_not_override():
         side="sell", symbol="XRP/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
         symbol_news_sentiment=0,
+        mcp_score=80, confidence=0.80,
     )
     assert d.block is True
 

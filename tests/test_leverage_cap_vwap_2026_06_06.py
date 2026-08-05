@@ -8,8 +8,9 @@ book. Reversible via config.CONFIDENCE_LEVERAGE_ESCALATION.
 """
 from __future__ import annotations
 
+from tests.mcp_brain_source import mcp_brain_source_for_grep
+
 import re
-from pathlib import Path
 
 from config import CONFIDENCE_LEVERAGE_ESCALATION
 from core.bot_engine import _tier_blocked_by_cap
@@ -39,7 +40,7 @@ def test_consec_loss_throttle_still_caps_with_escalation_on():
 
 
 def test_vwap_bonus_reverted_to_5():
-    src = (Path(__file__).resolve().parents[1] / "core" / "mcp_brain.py").read_text(encoding="utf-8")
+    src = mcp_brain_source_for_grep()
     m = re.search(r"B7: VWAP[\s\S]+?SMART MONEY", src)
     assert m, "B7 VWAP block not found"
     block = m.group(0)

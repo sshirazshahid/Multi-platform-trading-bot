@@ -22,6 +22,8 @@ New pieces:
 
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -215,7 +217,7 @@ def test_check_registered_in_tick():
 
 # ── engine wiring pinned by source scan ──────────────────────────────────────
 def test_heartbeat_carries_clock_drift_field():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _write_heartbeat")
     j = src.index("def _try_reconnect", i)
     assert '"clock_drift_ms"' in src[i:j], (
@@ -224,7 +226,7 @@ def test_heartbeat_carries_clock_drift_field():
 
 
 def test_health_cycle_samples_drift():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _check_exchange_health")
     assert "sample_clock_drift_ms" in src[i : i + 5000], (
         "_check_exchange_health must sample venue clock drift each cycle"
@@ -250,7 +252,7 @@ def test_controlled_live_entry_drift_gate_fails_closed():
 
 
 def test_execute_open_calls_live_clock_drift_gate_before_entry_policy():
-    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    source = bot_engine_source_for_grep()
     block = source[source.index("def _execute_open"):source.index("def _execute_close")]
 
     assert block.index("_live_entry_clock_drift_rejection(") < block.index(
@@ -259,7 +261,7 @@ def test_execute_open_calls_live_clock_drift_gate_before_entry_policy():
 
 
 def test_fund_ops_buy_and_transfer_share_live_clock_drift_gate():
-    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    source = bot_engine_source_for_grep()
     block = source[
         source.index("def _execute_fund_ops"):
         source.index("def _fetch_all_exchange_positions")
@@ -271,7 +273,7 @@ def test_fund_ops_buy_and_transfer_share_live_clock_drift_gate():
 
 
 def test_failed_health_sample_invalidates_prior_clock_drift():
-    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    source = bot_engine_source_for_grep()
     block = source[
         source.index("def _check_exchange_health"):
         source.index("def is_exchange_halted")

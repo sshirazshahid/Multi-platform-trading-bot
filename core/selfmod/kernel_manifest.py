@@ -15,7 +15,8 @@ from __future__ import annotations
 # Files the self-modifier may NEVER edit. Repo-relative POSIX paths; a trailing
 # "/" denotes a directory subtree (every file under it is protected).
 PROTECTED_PATHS: frozenset = frozenset({
-    "config.py",                          # OPERATING_MODE/DRY_RUN derivation, leverage caps, breakers, latch
+    "config/",                            # OPERATING_MODE/DRY_RUN derivation, leverage caps, breakers, latch (package since De-Emotion D1)
+    "config.py",                          # legacy single-file path (kept so stale diffs still deny)
     "main.py",                            # crash-restart supervisor / _classify_exit
     "core/live_gate.py",                  # CONTROLLED_LIVE double-latch
     "core/risk_manager.py",               # SL / leverage / daily-loss enforcement

@@ -9,7 +9,7 @@ New gates added to evaluate():
   mcp_score  >= 75   (default; vs 65 open-threshold for longs)
   confidence >= 0.70 (default; vs 0.60 floor for longs)
 
-The news_bearish_catalyst escape hatch overrides BOTH gates.
+News sentiment no longer bypasses gates (De-Emotion 2026-08-04).
 Missing score/confidence default to 0 → fail-closed (block).
 """
 from __future__ import annotations
@@ -130,30 +130,30 @@ def test_short_allowed_when_confidence_exactly_at_threshold():
     assert d.block is False
 
 
-# ── News catalyst overrides both gates ────────────────────────────────────
+# ── News sentiment no longer bypasses gates (De-Emotion) ──────────────────
 
-def test_news_catalyst_bypasses_score_gate():
-    """Bearish catalyst overrides the score gate — short is allowed."""
+def test_news_sentiment_no_longer_bypasses_score_gate():
+    """Bearish news no longer overrides the score gate — short stays blocked."""
     d = evaluate(
         side="sell", symbol="XRP/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
         symbol_news_sentiment=-5,
         mcp_score=50.0, confidence=0.40,  # both below threshold
     )
-    assert d.block is False
-    assert "news_bearish_catalyst" in d.reason
+    assert d.block is True
+    assert "short_score_too_low" in d.reason
 
 
-def test_news_catalyst_bypasses_confidence_gate():
-    """Bearish catalyst overrides the confidence gate — short is allowed."""
+def test_news_sentiment_no_longer_bypasses_confidence_gate():
+    """Bearish news no longer overrides the confidence gate — short stays blocked."""
     d = evaluate(
         side="sell", symbol="BNB/USDT",
         btc_4h_uptrend=True, btc_1h_uptrend=True,
         symbol_news_sentiment=-1,
         mcp_score=80.0, confidence=0.30,  # confidence below threshold
     )
-    assert d.block is False
-    assert "news_bearish_catalyst" in d.reason
+    assert d.block is True
+    assert "short_conf_too_low" in d.reason
 
 
 # ── Custom threshold override ─────────────────────────────────────────────

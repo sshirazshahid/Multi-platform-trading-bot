@@ -167,8 +167,30 @@ body::after {
 .rbtn.primary { color: #04121a; background: var(--cyan); border-color: var(--cyan); font-weight: 600; }
 :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
 
-/* ══════════ verdict ══════════ */
-.verdict-wrap { position: relative; z-index: 1; padding: 18px 20px 4px; }
+/* ══════════ health / verdict / next action ══════════ */
+.verdict-wrap { position: relative; z-index: 1; padding: 18px 20px 8px; }
+.verdict-wrap[data-health="bad"] {
+  background: linear-gradient(180deg, rgba(255, 107, 125, 0.10), transparent 70%);
+  border-bottom: 1px solid rgba(255, 107, 125, 0.25);
+}
+.verdict-wrap[data-health="warn"] {
+  background: linear-gradient(180deg, rgba(255, 200, 97, 0.08), transparent 70%);
+}
+.sec-label {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.sec-label.span12 { grid-column: 1 / -1; margin: 8px 0 0; }
+.health-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
 .verdict {
   margin: 0;
   font-size: 17px;
@@ -182,10 +204,13 @@ body::after {
 
 .alarms { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .alarm {
-  font-size: 12px;
-  padding: 5px 11px;
-  border-radius: 8px;
-  border: 1px solid;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -193,6 +218,28 @@ body::after {
 .alarm[data-sev="bad"]  { color: var(--red);   border-color: rgba(255, 107, 125, 0.42); background: rgba(255, 107, 125, 0.09); }
 .alarm[data-sev="warn"] { color: var(--amber); border-color: rgba(255, 200, 97, 0.42);  background: rgba(255, 200, 97, 0.08); }
 .alarm[data-sev="ok"]   { color: var(--green); border-color: rgba(53, 224, 161, 0.38);  background: rgba(53, 224, 161, 0.07); }
+
+.next-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.action-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.action-card[data-sev="bad"]  { border-color: rgba(255, 107, 125, 0.45); box-shadow: var(--bad-glow); }
+.action-card[data-sev="warn"] { border-color: rgba(255, 200, 97, 0.4); }
+.action-card strong { display: block; margin-bottom: 2px; }
+.action-card p { margin: 0; color: var(--ink-dim); font-size: 13px; max-width: 70ch; }
+.action-card .rbtn.primary { flex: none; text-decoration: none; }
 
 /* ══════════ grid ══════════ */
 .deck {
@@ -653,8 +700,10 @@ table.data .r, table.data th.r { text-align: right; }
   .span4, .span6, .span8, .span12 { grid-column: span 12; }
   .deck { padding: 12px 12px 24px; gap: 12px; }
   .rail { padding: 9px 12px; }
-  .verdict-wrap { padding: 14px 12px 2px; }
+  .verdict-wrap { padding: 14px 12px 8px; }
   .verdict { font-size: 15px; }
+  .health-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .action-card { flex-direction: column; align-items: stretch; }
   .cond, .mrow { grid-template-columns: 118px 1fr 74px; }
   .fstage { grid-template-columns: 96px 1fr; }
   .reason { grid-template-columns: 1fr 76px 52px; }

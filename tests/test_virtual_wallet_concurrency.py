@@ -23,6 +23,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from tests.order_manager_source import order_manager_impl_source
+
 from core.virtual_wallet import VirtualWallet
 
 
@@ -98,7 +100,7 @@ def test_wiring_source_pins():
         assert "with self._lock:" in body, f"{meth} must hold self._lock"
     assert "os.replace(" in wsrc, "_save must be atomic (tmp + os.replace)"
 
-    osrc = Path("core/order_manager.py").read_text(encoding="utf-8")
+    osrc = order_manager_impl_source()
     assert "self.wallet.apply_funding(" in osrc, (
         "accrue_paper_funding must use the locked wallet.apply_funding")
     assert "self.wallet._balances[name] = prev - cost" not in osrc, (

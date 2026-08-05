@@ -22,7 +22,7 @@ from core.mcp_brain import AccuracyTracker
 def _make_tracker(tmp_path: Path) -> AccuracyTracker:
     """Return a fresh AccuracyTracker whose _save writes to tmp_path."""
     acc_file = tmp_path / "mcp_accuracy.json"
-    with patch("core.mcp_brain.ACCURACY_FILE", acc_file):
+    with patch("core.scoring.accuracy_tracker.ACCURACY_FILE", acc_file):
         tracker = AccuracyTracker()
     tracker._acc_file = acc_file          # store for inspection
     # Monkey-patch _save/_load to use tmp file

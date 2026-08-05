@@ -57,7 +57,6 @@ class MarketContext:
     funding: dict = field(default_factory=dict)
     open_interest: dict = field(default_factory=dict)
     orderbook: dict = field(default_factory=dict)
-    news: dict = field(default_factory=dict)
     smart_money: dict = field(default_factory=dict)
     any_stale: bool = True
 
@@ -81,27 +80,23 @@ class DataCoordinator:
         self._funding_feed = None
         self._oi_feed = None
         self._orderbook_feed = None
-        self._news_feed = None
         self._smart_money_feed = None
 
         # Feed data caches
         self._funding_data: dict = {}
         self._oi_data: dict = {}
         self._orderbook_data: dict = {}
-        self._news_data: dict = {}
         self._smart_money_data: dict = {}
 
         # Timestamps
         self._funding_time: float = 0.0
         self._oi_time: float = 0.0
         self._orderbook_time: float = 0.0
-        self._news_time: float = 0.0
         self._smart_money_time: float = 0.0
         self._feed_times: dict[str, dict[str, float]] = {
             "funding": {},
             "oi": {},
             "orderbook": {},
-            "news": {},
             "smart_money": {},
         }
 
@@ -110,12 +105,10 @@ class DataCoordinator:
             "funding_enabled": True,
             "oi_enabled": True,
             "orderbook_enabled": True,
-            "news_enabled": True,
             "smart_money_enabled": True,
             "funding_ttl": 300,
             "oi_ttl": 180,
             "orderbook_ttl": 60,
-            "news_ttl": 600,
             "smart_money_ttl": 900,
             "staleness_multiplier": 2.0,  # >2x TTL = stale
             "max_workers": 5,
@@ -257,13 +250,6 @@ class DataCoordinator:
             logger.warning(f"[DataCoord] OrderBookDepthFeed init failed: {e}")
 
         try:
-            from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
-            self._news_feed = NewsSentimentFeed(
-                cache_ttl=self._config["news_ttl"])
-        except Exception as e:
-            logger.warning(f"[DataCoord] NewsSentimentFeed init failed: {e}")
-
-        try:
             from core.data_feeds.smart_money_feed import SmartMoneyFeed
             self._smart_money_feed = SmartMoneyFeed(
                 cache_ttl=self._config["smart_money_ttl"])
@@ -293,8 +279,6 @@ class DataCoordinator:
              self._config["oi_ttl"], self._config["oi_enabled"]),
             ("orderbook", self._orderbook_feed,
              self._config["orderbook_ttl"], self._config["orderbook_enabled"]),
-            ("news", self._news_feed,
-             self._config["news_ttl"], self._config["news_enabled"]),
             ("smart_money", self._smart_money_feed,
              self._config["smart_money_ttl"], self._config["smart_money_enabled"]),
         ]
@@ -388,7 +372,7 @@ class DataCoordinator:
             any_stale = False
             snapshots = {}
             for feed_name in (
-                "funding", "oi", "orderbook", "news", "smart_money"
+                "funding", "oi", "orderbook", "smart_money"
             ):
                 data = getattr(self, f"_{feed_name}_data")
                 entry = data.get(cu, {})
@@ -408,7 +392,6 @@ class DataCoordinator:
             funding=snapshots["funding"],
             open_interest=snapshots["oi"],
             orderbook=snapshots["orderbook"],
-            news=snapshots["news"],
             smart_money=snapshots["smart_money"],
             any_stale=any_stale,
         )
@@ -449,7 +432,7 @@ class DataCoordinator:
                 "feeds": {
                     name: self._feed_status(name, now)
                     for name in (
-                        "funding", "oi", "orderbook", "news", "smart_money"
+                        "funding", "oi", "orderbook", "smart_money"
                     )
                 },
             }

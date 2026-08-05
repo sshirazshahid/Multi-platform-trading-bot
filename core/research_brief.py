@@ -79,9 +79,6 @@ BANNED_CALLABLES = frozenset({
     "core.market_regime.detect",
     "core.market_regime.detect_detailed",
     "core.market_regime.allowed_strategies",
-    "core.news_scanner.NewsScanner.get_news_signals",
-    "core.news_scanner.NewsScanner.is_bearish_environment",
-    "core.news_scanner.NewsScanner.is_bullish_environment",
 })
 
 BANNED_FEED_KEYS = frozenset({
@@ -105,8 +102,6 @@ FEED_ALLOWLIST = MappingProxyType({
     "funding_oi": frozenset({"oi_usd", "oi_chg_24h_pct"}),
     # warehouse candidates features_json (carries several banned keys)
     "warehouse_features": frozenset({"atr_pct_1h"}),
-    # NewsScanner.get_market_context() / DataCoordinator news feed
-    "sentiment": frozenset({"coin_sentiments", "fear_greed_value", "fetched_at"}),
     # data/unlock_calendar/{BASE}.json
     "unlock": frozenset({"max_supply", "circ_calibration", "events", "circ_series"}),
     # one unlock event
@@ -120,11 +115,46 @@ CEILING_BY_VERDICT = MappingProxyType({
 
 SECTION_NAMES = (
     "price_action", "volume", "volatility", "funding", "open_interest",
-    "supply_unlocks", "news", "sentiment", "liquidity", "macro_context",
+    "supply_unlocks", "news", "liquidity", "macro_context",
 )
 
 MIN_CLOSED_4H = 210  # mirrors core.pair_dossier.MIN_CLOSED_4H
 MIN_FUNDING_SETTLEMENTS = 6  # mirrors core.funding_history.MIN_PERIODS_FOR_AVG
+
+_COIN_NAMES = {
+    "bitcoin": "BTC", "ethereum": "ETH", "solana": "SOL",
+    "ripple": "XRP", "cardano": "ADA", "dogecoin": "DOGE",
+    "avalanche": "AVAX", "polkadot": "DOT", "chainlink": "LINK",
+    "litecoin": "LTC", "polygon": "MATIC", "uniswap": "UNI",
+    "cosmos": "ATOM", "near protocol": "NEAR", "near": "NEAR",
+    "arbitrum": "ARB", "optimism": "OP", "sui": "SUI",
+    "aptos": "APT", "injective": "INJ", "celestia": "TIA",
+    "binance coin": "BNB", "bnb": "BNB",
+    "filecoin": "FIL", "render": "RENDER", "fetch.ai": "FET",
+    "artificial superintelligence": "FET", "hedera": "HBAR",
+    "stellar": "XLM", "tron": "TRX", "toncoin": "TON", "ton": "TON",
+    "worldcoin": "WLD", "pepe": "PEPE", "bonk": "BONK",
+    "jupiter": "JUP", "sei": "SEI", "stacks": "STX",
+    "maker": "MKR", "aave": "AAVE", "hyperliquid": "HYPE",
+}
+
+
+def _extract_coin_symbols(title: str, categories: str = "", tags: list | None = None) -> set[str]:
+    """Extract probable coin symbols from headline text, categories, and tags."""
+    symbols: set[str] = set()
+    title_lower = title.lower()
+    for name, sym in _COIN_NAMES.items():
+        if name in title_lower:
+            symbols.add(sym)
+    cats = categories.upper() if categories else ""
+    tag_list = [t.upper() for t in (tags or [])]
+    candidates = set(cats.replace(",", " ").split() + tag_list)
+    for coin in candidates:
+        coin = coin.strip()
+        if len(coin) >= 2 and coin.isalpha():
+            symbols.add(coin)
+    return symbols
+
 
 DISCLAIMER = (
     "Descriptive record of what this repository already stores about each asset, and of "
@@ -351,8 +381,6 @@ class AssetInputs:
     unlock: dict | None = None               # data/unlock_calendar/{BASE}.json
     news_mentions: int | None = None
     news_as_of: str | None = None
-    sentiment_map: dict | None = None        # coin -> score; MEMBERSHIP decides
-    sentiment_as_of: str | None = None
     l2_as_of: str | None = None
     aggtrades_as_of: str | None = None
 
@@ -810,34 +838,8 @@ def _news(em: Emitter, a: AssetInputs) -> dict:
     return _section([em.fact(
         sec, "headline_mentions", value=int(a.news_mentions), numeric=int(a.news_mentions),
         unit="count", as_of_utc=a.news_as_of, source=src, source_kind="local_json",
-        source_fn="core.news_scanner._extract_coin_symbols",
+        source_fn="core.research_brief._extract_coin_symbols",
         n=int(a.news_mentions), min_n=3,
-    )])
-
-
-def _sentiment(em: Emitter, a: AssetInputs) -> dict:
-    """MEMBERSHIP decides. A coin the scanner never saw is ABSENT, never a 0."""
-    sec = "sentiment"
-    src = "data/news_cache.json (per-coin sentiment map)"
-    remediation = ("run the bot's news scan cycle so the coin enters the sentiment map; "
-                   "per-coin coverage is limited to the scanner's name/tag table")
-    if a.sentiment_map is None or a.sentiment_as_of is None:
-        return _section([em.absent(
-            sec, "coin_sentiment_score", expected_source=src, remediation=remediation,
-            value="no per-coin sentiment map was supplied to the builder",
-        )])
-    if a.base not in a.sentiment_map:
-        return _section([em.absent(
-            sec, "coin_sentiment_score", expected_source=src, remediation=remediation,
-            value=("this base is absent from the sentiment map: the scanner never saw it, "
-                   "which is NOT the same as a measured score of zero"),
-        )])
-    score = a.sentiment_map[a.base]
-    return _section([em.fact(
-        sec, "coin_sentiment_score", value=score, numeric=float(score), unit="index_-1_1",
-        as_of_utc=a.sentiment_as_of, source=src, source_kind="local_json",
-        source_fn="core.news_scanner.NewsScanner.get_market_context",
-        n=1, min_n=1,
     )])
 
 
@@ -960,7 +962,6 @@ def build_asset_brief(a: AssetInputs, *, now: datetime) -> dict:
         "open_interest": _open_interest(em, a),
         "supply_unlocks": _supply_unlocks(em, a, now),
         "news": _news(em, a),
-        "sentiment": _sentiment(em, a),
         "liquidity": _liquidity(em, a),
         "macro_context": _macro_context(em, a),
     }

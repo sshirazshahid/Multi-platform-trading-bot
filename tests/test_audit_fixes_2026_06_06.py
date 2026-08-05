@@ -10,7 +10,9 @@ from pathlib import Path
 
 from core.risk_manager import RiskManager
 
-_OM_SRC = (Path(__file__).resolve().parents[1] / "core" / "order_manager.py").read_text(encoding="utf-8")
+from tests.order_manager_source import order_manager_impl_source
+
+_OM_SRC = order_manager_impl_source()
 _RM_SRC = (Path(__file__).resolve().parents[1] / "core" / "risk_manager.py").read_text(encoding="utf-8")
 
 

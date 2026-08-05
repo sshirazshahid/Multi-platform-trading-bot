@@ -24,6 +24,8 @@ Phase 22 (regime). Pure-data, self-correcting, no biases.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -146,20 +148,20 @@ def test_hour_multiplier_handles_warehouse_exception(monkeypatch):
 
 
 def test_phase31_block_in_size_chain():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "_btc_cross_regime_multiplier" in src
     assert "Phase 31 BTC" in src
 
 
 def test_phase32_block_in_size_chain():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "_hour_of_day_multiplier" in src
     assert "Phase 32 hour-EV" in src
 
 
 def test_phase31_32_run_after_phase27_in_chain():
     """Order: 27 EV → 31 BTC → 32 hour → 22 regime. Pin via source idx."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     p27 = src.index("size_fraction *= _ev_symbol_mult")
     p31 = src.index("size_fraction *= _btc_mult")
     p32 = src.index("size_fraction *= _hr_mult")

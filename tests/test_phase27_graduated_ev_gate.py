@@ -27,6 +27,8 @@ with Phase 17 (rolling-50 EV), Phase 18 (calibrator), Phase 22
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -171,14 +173,14 @@ def test_ev_mult_disabled_returns_full_size(monkeypatch):
 
 
 def test_ev_check_runs_in_execute_open():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "_ev_per_symbol_multiplier" in src
     assert "_ev_symbol_mult" in src
 
 
 def test_ev_block_path_short_circuits():
     """Catastrophic (mult==0) path must short-circuit with return False."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "if _ev_symbol_mult <= 0.0:" in src
     # Within close proximity, return False must follow (1500 chars covers
     # the warning log + warehouse SKIP record + return)
@@ -189,13 +191,13 @@ def test_ev_block_path_short_circuits():
 
 def test_ev_multiplier_applied_in_size_chain():
     """The graduated tier (0.5, 0.75) must multiply size_fraction."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "size_fraction *= _ev_symbol_mult" in src
 
 
 def test_ev_multiplier_runs_before_regime_in_chain():
     """Order: ev → cal → ev_symbol → regime → notional"""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     cal_idx = src.index("size_fraction *= _cal_mult")
     ev_idx = src.index("size_fraction *= _ev_symbol_mult")
     regime_idx = src.index("size_fraction *= _regime_size_mult")
@@ -206,5 +208,5 @@ def test_ev_multiplier_runs_before_regime_in_chain():
 
 def test_phase27_log_marker_present():
     """A 'Phase 27' marker in source helps log readers identify the path."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "Phase 27" in src

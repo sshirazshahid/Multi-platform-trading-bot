@@ -17,6 +17,8 @@ This pins:
 
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 # ── 1. The safety predicate (pure) ────────────────────────────────────
@@ -83,7 +85,7 @@ def test_is_analysis_only_does_not_block_crypto(monkeypatch):
 
 
 def test_execute_open_hard_blocks_analysis_only():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     idx = src.index("def _execute_open")
     block = src[idx : idx + 3000]
     assert "is_analysis_only" in block, "_execute_open must consult is_analysis_only"
@@ -95,7 +97,7 @@ def test_execute_open_hard_blocks_analysis_only():
 
 
 def test_collect_all_coins_includes_analysis_only():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     idx = src.index("def _collect_all_coins")
     block = src[idx : idx + 2000]
     assert "ANALYSIS_ONLY_BASES" in block, (
@@ -107,7 +109,7 @@ def test_collect_all_coins_includes_analysis_only():
 
 
 def test_mcp_brain_has_perp_fallback():
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = Path("core/scoring/brain.py").read_text(encoding="utf-8")
     assert 'f"{coin}/USDT:USDT"' in src, (
         "mcp_brain OHLCV fetch must fall back to the linear perp when spot 404s"
     )

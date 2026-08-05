@@ -10,7 +10,7 @@ double-count.
 """
 from __future__ import annotations
 
-from pathlib import Path
+from tests.order_manager_source import order_manager_impl_source
 
 
 def test_partial_plus_final_close_returns_full_margin_and_total_pnl(tmp_path, monkeypatch):
@@ -52,7 +52,7 @@ def test_partial_plus_final_close_returns_full_margin_and_total_pnl(tmp_path, mo
 
 def test_partial_close_books_the_paper_wallet():
     """partial_close_position() must call wallet.on_close for the taken fraction."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     i = src.index("def partial_close_position")
     # Window covers the whole function; widened 4500->6000 when the C2
     # lot-step quantization preamble (2026-07-08) grew the function head.
@@ -70,7 +70,7 @@ def test_partial_close_records_daily_pnl_for_breaker():
     pos.pnl, which excludes realized_partial_pnl). is_win=None is mandatory:
     a partial is not a completed trade — Spec §12 streaks, recent-results
     and Kelly history update once, at _finalize_close, on the whole trade."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     i = src.index("def partial_close_position")
     block = src[i:i + 7000]
     assert "self.risk.record_trade_pnl(" in block, (

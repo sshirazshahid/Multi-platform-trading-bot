@@ -19,6 +19,8 @@ Semantics:
 
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -112,7 +114,7 @@ def test_flatten_all_never_raises():
 def test_no_automatic_trigger_wired_in_bot_engine():
     """Owner directive: no auto-halts. flatten_all is operator/breaker-
     CALLABLE only — nothing in the engine invokes it automatically."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "flatten_all" not in src, (
         "flatten_all must not be auto-wired into bot_engine — the owner's "
         "no-auto-halt directive stands; it is a callable primitive only"

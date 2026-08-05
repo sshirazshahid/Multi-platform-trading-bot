@@ -22,7 +22,7 @@ Root causes found and fixed (4-agent audit, adversarially verified):
    "All Time (since X)" was actually a 500-row ring buffer.
 
 These tests pin the fixes. Dashboard pins are source-level (house style —
-dashboard.py is not imported by tests); wallet fixes are behavioral.
+dashboard package is not imported by tests); wallet fixes are behavioral.
 """
 from __future__ import annotations
 
@@ -30,7 +30,10 @@ import json
 import threading
 from pathlib import Path
 
-DASH = Path("dashboard.py")
+def _dashboard_src() -> str:
+    from conftest import dashboard_package_source
+
+    return dashboard_package_source()
 
 
 # ─── VirtualWallet: production-file protection ────────────────────────
@@ -147,14 +150,14 @@ def test_reset_without_open_positions_is_clean(tmp_path, monkeypatch):
 def test_breakdown_bal_column_is_mode_scoped():
     """PAPER dashboards must show the paper wallet balance, never the
     user's real exchange balance (the 220.73/0.01/78.25 leak)."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert "wallet_bal.get(ex_name) if dry_run else live_bals.get(ex_name)" in src
 
 
 def test_warehouse_queries_are_mode_filtered():
     """All four load_warehouse_stats queries must scope to the current
     operating mode — the trades table mixes PAPER and CONTROLLED_LIVE."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     i = src.index("def load_warehouse_stats")
     # 4500->6000 (2026-07-10): the current-boot cohort block grew the function
     # head; it adds a 5th mode-filtered query, so the floor rises to 5.
@@ -169,7 +172,7 @@ def test_whole_trade_pnl_helper_used_everywhere():
     """Partial-TP legs (realized_partial_pnl) must be included in every PnL
     sum — the runner-only `pnl` field under-reported profit by +22.49 over
     the 500-row window at audit time."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert "def _whole_pnl(" in src
     assert "realized_partial_pnl" in src
     # the aggregators all route through the helper
@@ -184,7 +187,7 @@ def test_day_buckets_are_utc():
     """calc_stats and calc_daily_pnl must bucket by UTC date — the engine
     (risk manager, hour gates, heatmap) lives on UTC days; local-date
     bucketing made panels disagree (117 local closes vs 191 UTC opens)."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     for fn in ("def calc_stats", "def calc_daily_pnl"):
         i = src.index(fn)
         block = src[i:i + 2500]
@@ -197,19 +200,19 @@ def test_day_buckets_are_utc():
 def test_ring_buffer_label_is_honest():
     """positions.json closed history is capped at 500 rows — the panel must
     say 'Last 500 trades', not 'All Time', once the cap is hit."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert '"Last 500 trades" if s["total_n"] >= 500 else "All Time"' in src
 
 
 def test_risk_panel_counter_labeled_as_opens():
     """risk_state's trades_today counts OPENS since UTC midnight — label it
     so it isn't compared 1:1 against the closed-trade count."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert "Opens Today (UTC):" in src
 
 
 def test_equity_curve_filters_and_whole_pnl():
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert "sorted(_filter_real_trades(closed)" in src
     assert "pnl_series = [_whole_pnl(t) for t in sorted_closed[-50:]]" in src
 
@@ -217,14 +220,14 @@ def test_equity_curve_filters_and_whole_pnl():
 def test_regime_panel_title_names_its_timeframe():
     """'BTC 4h: BEAR' (gates) vs 'TREND UP' (regime) read as a contradiction
     until the regime panel admits it is a 1h classifier."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert 'box_top("MARKET REGIME  (1h' in src
 
 
 def test_balances_panel_shows_trade_history_truth():
     """PAPER balances panel must surface warehouse whole-trade net alongside
     the sim-wallet ROI (the wallet measures 'since last seed', not results)."""
-    src = DASH.read_text(encoding="utf-8")
+    src = _dashboard_src()
     assert "sim wallet vs seed" in src
     assert "Trade PnL ({}, all history" in src
 

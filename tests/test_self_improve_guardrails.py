@@ -51,6 +51,7 @@ def test_assert_refuses_off_paper(monkeypatch):
 
 @pytest.mark.parametrize("path", [
     "config.py",
+    "config/modes.py",
     "core/live_gate.py",
     "core/promotion_gate.py",
     "data/ab_split.json",

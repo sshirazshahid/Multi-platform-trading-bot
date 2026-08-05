@@ -16,8 +16,8 @@ Try to REFUTE every screen result before anyone trusts it. Default position: the
 - Run incrementally: audit each verdict as it lands, not the whole batch at the end.
 
 ## Input/Output Protocol
-- Input: `_workspace/strategy_pipeline/02_screener_verdicts.md` + the screen scripts/tests/data paths it cites.
-- Output: `_workspace/strategy_pipeline/03_audit_findings.md` — per candidate: findings (severity-ranked), verdict CONFIRMED | REFUTED | NEEDS_WORK.
+- Input: `_workspace/strategy_pipeline/<N>_screen_*.md` / `<N>_verdict_*.md` + the screen scripts/tests/data paths they cite.
+- Output: `_workspace/strategy_pipeline/<N>_audit_*.md` — per candidate: findings (severity-ranked), verdict CONFIRMED | REFUTED | NEEDS_WORK.
 
 ## Error Handling
 - A claim that cannot be verified → NEEDS_WORK naming the exact missing evidence; never pass on trust.

@@ -117,7 +117,6 @@ def test_no_directional_language_with_every_optional_feed_populated():
                 oi={"oi_usd": 1.2e9, "oi_chg_24h_pct": -3.4, "oi_conviction": 2},
                 oi_as_of="2026-07-25T10:00Z",
                 news_mentions=4, news_as_of="2026-07-25T11:00Z",
-                sentiment_map={"BTC": -0.2}, sentiment_as_of="2026-07-25T11:00Z",
                 l2_as_of="2026-07-25T09:00Z", aggtrades_as_of="2026-07-25T09:00Z",
                 atr_4h=0.42,
                 indicator_pctls={"n": 120, "rsi14_pctl": 0.81, "kdj_k_pctl": 0.77,
@@ -349,32 +348,14 @@ def test_absent_is_a_record_never_a_missing_key():
     doc = _doc(["TAO"], )
     asset = doc["assets"][0]
     for name in ("funding", "open_interest", "supply_unlocks", "news",
-                 "sentiment", "liquidity", "macro_context"):
+                 "liquidity", "macro_context"):
         sec = asset["sections"][name]
         assert sec["findings"], f"{name} emitted nothing at all"
         assert sec["status"] == "ABSENT", (name, sec["status"])
         assert all(f["kind"] == "ABSENT" for f in sec["findings"])
 
 
-# ── 6. absence != neutral ────────────────────────────────────────────────────
-def test_missing_coin_sentiment_is_absent_not_a_zero_fact():
-    """news_scanner.symbol_sentiment() returns 0 for coins it never saw."""
-    sent = {"BTC": 0.0}  # BTC seen with a genuine 0.0; ADA never seen at all
-    stamp = "2026-07-25T11:00Z"
-    btc = rb.build_asset_brief(
-        _asset_inputs("BTC", sentiment_map=sent, sentiment_as_of=stamp), now=NOW
-    )
-    ada = rb.build_asset_brief(
-        _asset_inputs("ADA", sentiment_map=sent, sentiment_as_of=stamp), now=NOW
-    )
-    btc_f = btc["sections"]["sentiment"]["findings"]
-    assert any(f["kind"] == "FACT" and f["numeric"] == 0.0 for f in btc_f), btc_f
-    ada_f = ada["sections"]["sentiment"]["findings"]
-    assert all(f["kind"] == "ABSENT" for f in ada_f), ada_f
-    assert all(f["numeric"] is None for f in ada_f)
-
-
-# ── 7. scope separation + determinism ────────────────────────────────────────
+# ── 6. scope separation + determinism ────────────────────────────────────────
 def test_market_scope_findings_are_never_nested_in_an_asset():
     doc = _doc(["ADA", "BTC"], market_intel={
         "ts_utc": "2026-07-25 08:00 UTC", "fng_value": 55, "fng_class": "Greed",
@@ -403,7 +384,7 @@ def test_generated_utc_comes_from_the_injected_now():
     assert doc["schema_version"] == "research_brief/1"
 
 
-# ── 8. quarantine: no order-path imports, no LLM imports ─────────────────────
+# ── 7. quarantine: no order-path imports, no LLM imports ─────────────────────
 def test_no_order_path_or_llm_imports():
     forbidden = (
         "order_manager", "risk_manager", "live_gate", "bot_engine",
@@ -443,7 +424,7 @@ def test_shell_imports_and_exposes_the_documented_modes():
         assert any(flag in a.option_strings for a in parser._actions), flag
 
 
-# ── 8. funding annualization must follow the OBSERVED settlement interval ────
+# ── 8. funding annualization must follow the OBSERVED settlement interval ───
 # The perp funding interval is time-varying per symbol (bybit TAO/ENA/ONDO
 # switched 8h -> 4h mid-history; BTC is still 8h). A hardcoded settlements/year
 # constant understates any 4h base by exactly 2x. Derive it from the median

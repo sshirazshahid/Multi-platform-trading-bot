@@ -5,9 +5,10 @@ Test specs 9-13 from shiraz-main-test-plan-20260612-082500.md:
       equality with what the parser consumed.
   10. Concurrent-append integrity through the _audit_log lock.
   11. Audit-write failure counter increments on injected OSError.
-  12. repaired=true via _repair_json; truncation meta (orig_len, cut_len,
-      tail_80) recorded + prompt actually capped.
-  13. meta_out contract: existing call sites unaffected (signature compat).
+  12. meta_out contract: existing call sites unaffected (signature compat).
+
+MCPBrain._call_claude / _repair_json tests removed (De-Emotion: Claude
+decision path deleted). Research-side capture via utils.claude_client kept.
 
 NEVER touches data/ — AUDIT_DIR / AUDIT_FAILURES_FILE / DECISION_LOG are
 monkeypatched to tmp_path.
@@ -21,9 +22,7 @@ import json
 import subprocess
 import threading
 
-import core.mcp_brain as mb
 import utils.claude_client as cc
-from core.mcp_brain import MCPBrain
 
 
 def _fake_cli_success(monkeypatch, response_text: str):
@@ -129,93 +128,6 @@ def test_audit_write_failure_counter_increments(monkeypatch, tmp_path):
 
     cc._audit_log({"status": "x"})
     assert json.loads(fails.read_text(encoding="utf-8"))["count"] == 2
-
-
-# ── Spec 12: repaired flag + truncation meta ──
-
-
-def _make_capture_brain():
-    brain = object.__new__(MCPBrain)
-    brain._check_rate_limit = lambda: True
-    brain._claude_backoff_until = 0.0
-    brain._claude_consecutive_fails = 0
-    brain._api_calls_this_hour = 0
-    return brain
-
-
-def test_repaired_true_when_repair_json_used(monkeypatch):
-    brain = _make_capture_brain()
-    truncated_json = '{"actions": [{"type": "OPEN"}, {"type": "CLO'
-
-    def fake_cli(prompt, system_prompt, model, timeout, effort, meta_out=None):
-        if meta_out is not None:
-            meta_out["attempt"] = 1
-            meta_out["raw"] = truncated_json
-        return truncated_json
-
-    monkeypatch.setattr(mb, "call_claude_cli", fake_cli)
-    meta: dict = {}
-    result = brain._call_claude("p", "s", "portfolio", meta_out=meta)
-
-    assert result == {"actions": [{"type": "OPEN"}]}  # repair succeeded
-    assert meta.get("repaired") is True
-
-
-def test_clean_json_not_marked_repaired(monkeypatch):
-    brain = _make_capture_brain()
-
-    def fake_cli(prompt, system_prompt, model, timeout, effort, meta_out=None):
-        if meta_out is not None:
-            meta_out["attempt"] = 1
-            meta_out["raw"] = '{"actions": []}'
-        return '{"actions": []}'
-
-    monkeypatch.setattr(mb, "call_claude_cli", fake_cli)
-    meta: dict = {}
-    result = brain._call_claude("p", "s", "portfolio", meta_out=meta)
-
-    assert result == {"actions": []}
-    assert "repaired" not in meta or meta["repaired"] is False
-
-
-def test_truncation_meta_orig_cut_tail80(monkeypatch):
-    brain = _make_capture_brain()
-    captured: dict = {}
-
-    def fake_cli(prompt, system_prompt, model, timeout, effort, meta_out=None):
-        captured["prompt"] = prompt
-        if meta_out is not None:
-            meta_out["attempt"] = 1
-            meta_out["raw"] = '{"ok": true}'
-        return '{"ok": true}'
-
-    monkeypatch.setattr(mb, "call_claude_cli", fake_cli)
-    # varied content so tail_80 is meaningful
-    long_prompt = "".join(chr(65 + (i % 26)) for i in range(9000))
-    meta: dict = {}
-    brain._call_claude(long_prompt, "s", "portfolio", meta_out=meta)  # cap 8000
-
-    t = meta["truncated"]
-    assert t["orig_len"] == 9000
-    assert t["cut_len"] == 1000
-    assert t["tail_80"] == long_prompt[8000 - 80 : 8000]
-    assert captured["prompt"].startswith(long_prompt[:8000])
-    assert captured["prompt"].endswith("[TRUNCATED]")
-
-
-def test_short_prompt_not_marked_truncated(monkeypatch):
-    brain = _make_capture_brain()
-
-    def fake_cli(prompt, system_prompt, model, timeout, effort, meta_out=None):
-        if meta_out is not None:
-            meta_out["attempt"] = 1
-            meta_out["raw"] = "{}"
-        return "{}"
-
-    monkeypatch.setattr(mb, "call_claude_cli", fake_cli)
-    meta: dict = {}
-    brain._call_claude("short", "s", "portfolio", meta_out=meta)
-    assert "truncated" not in meta
 
 
 # ── Spec 13: meta_out signature compatibility ──

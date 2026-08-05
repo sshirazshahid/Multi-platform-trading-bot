@@ -15,6 +15,10 @@ analysis of the futures stack:
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.mcp_brain_source import mcp_brain_source_for_grep
+from tests.order_manager_source import order_manager_impl_source
+
 from pathlib import Path
 
 import pytest
@@ -346,7 +350,7 @@ def test_production_has_expectancy_filter():
     `_ev_per_symbol_multiplier` which calls `recent_expectancy` and
     emits a `[EV] BLOCKED` log on the catastrophic short-circuit.
     """
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "EXPECTANCY_FILTER" in src
     assert "[EV] BLOCKED" in src
     assert "recent_expectancy" in src
@@ -355,7 +359,7 @@ def test_production_has_expectancy_filter():
 
 def test_production_has_entry_staleness():
     """Pin that order_manager monitor calls is_entry_invalidated."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     assert "ENTRY_STALENESS_EXIT" in src
     assert "is_entry_invalidated" in src
     assert "entry_invalidated" in src   # close reason
@@ -366,7 +370,7 @@ def test_production_has_entry_staleness():
 
 def test_production_has_is_entry_invalidated_method():
     """Pin that mcp_brain.py has the method."""
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = mcp_brain_source_for_grep()
     assert "def is_entry_invalidated" in src
     assert "ema20" in src
     assert "long invalidated" in src

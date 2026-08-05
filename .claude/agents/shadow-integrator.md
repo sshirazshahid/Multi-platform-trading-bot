@@ -16,7 +16,7 @@ For candidates with a CONFIRMED GO only: implement a log-only shadow probe (the 
 - TDD; full test suite green before commit; commits on a feature branch; never push unasked.
 
 ## Input/Output Protocol
-- Input: `_workspace/strategy_pipeline/03_audit_findings.md` (CONFIRMED entries only).
+- Input: `_workspace/strategy_pipeline/<N>_audit_*.md` (CONFIRMED entries only).
 - Output: probe agent code + tests, and `_workspace/strategy_pipeline/04_integration_report.md` (what logs where, how to read `shadow_vs_live`, the promotion criteria).
 
 ## Error Handling

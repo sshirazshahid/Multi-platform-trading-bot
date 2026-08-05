@@ -27,4 +27,7 @@ Write into the verdict file FIRST: hypothesis, universe, sample period, cost mod
 - Report DSR/PBO against the TRUE number of variants tried, including abandoned ones.
 
 ## Output convention
-`reports/<screen>_<date>.md` + JSON verdict `{candidate, hypothesis, n, after_cost_metrics, gates, verdict: GO|NO_GO|INSUFFICIENT_DATA}`; workspace copy at `_workspace/strategy_pipeline/02_screener_verdicts.md`. TDD any new script (tests in `tests/`, script in `research/` or `scripts/`). One screen = one commit on a research branch; never push unasked. NO_GO verdicts get a new row in `refuted-families-ledger`.
+`reports/<screen>_<date>.md` (generated at runtime; `reports/` is gitignored) + JSON verdict `{candidate, hypothesis, n, after_cost_metrics, gates, verdict: GO|NO_GO|INSUFFICIENT_DATA}`; workspace copy at `_workspace/strategy_pipeline/<N>_screen_<slug>.md` / `<N>_verdict_*.md` (per-candidate pattern — not a single shared `02_screener_verdicts.md`). TDD any new script (tests in `tests/`, script in `research/` or `scripts/`). One screen = one commit on a research branch; never push unasked. NO_GO verdicts get a new row in `refuted-families-ledger`.
+
+## Artifact commit rule
+Screen artifacts (`_workspace/strategy_pipeline/<N>_prereg_*`, `<N>_screen_*`, `<N>_audit_*`, `<N>_verdict_*`) **must be committed the same UTC day** as any ledger row that cites them. Untracked citations become evidence-loss.

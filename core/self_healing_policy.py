@@ -65,7 +65,9 @@ _CACHE_DATA_SUFFIXES = frozenset(
 MANUAL_CONTROL_PATHS = frozenset(
     {
         Path(".env"),
-        Path("config.py"),
+        Path("config.py"),  # legacy monolith path
+        Path("config"),  # package root (De-Emotion D1)
+        Path("config/__init__.py"),
         Path("data/KILL_SWITCH"),
         Path("data/ab_split.json"),
         Path("data/active_strategies.json"),

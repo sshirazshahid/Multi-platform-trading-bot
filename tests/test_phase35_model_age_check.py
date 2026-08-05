@@ -19,13 +19,15 @@ is exactly the kind of drift the operator should see.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import time
 from pathlib import Path
 
 
 def test_model_age_check_present_in_gate_health():
     repo = Path(__file__).resolve().parents[1]
-    src = (repo / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "Phase 35" in src
     assert "ML ensemble model" in src
     assert "ensemble_futures_latest.json" in src
@@ -34,7 +36,7 @@ def test_model_age_check_present_in_gate_health():
 def test_model_age_thresholds_in_source():
     """Two-tier threshold: >2 days warns, >7 days strong-warns."""
     repo = Path(__file__).resolve().parents[1]
-    src = (repo / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "age_h > 168" in src   # 7 days
     assert "age_h > 48" in src    # 2 days
 
@@ -42,7 +44,7 @@ def test_model_age_thresholds_in_source():
 def test_missing_model_file_flagged():
     """If ensemble json doesn't exist, surface that to the operator."""
     repo = Path(__file__).resolve().parents[1]
-    src = (repo / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "ML ensemble model file not found" in src
 
 
@@ -50,7 +52,7 @@ def test_model_age_check_does_not_raise(tmp_path, monkeypatch):
     """Defensive: any exception in the freshness path must not break
     the rest of _gate_health_check."""
     repo = Path(__file__).resolve().parents[1]
-    src = (repo / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # The block is wrapped in try/except per the implementation
     idx = src.index("Phase 35")
     block = src[idx:idx + 2000]

@@ -163,14 +163,6 @@ def _mutable_runtime_state_isolation_guard(tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "ACCURACY_FILE", data_dir / "mcp_accuracy.json")
     monkeypatch.setattr(mb, "STATE_FILE", data_dir / "mcp_state.json")
 
-    import core.prediction_agent as pa
-    import core.prediction_tracker as ptr
-
-    monkeypatch.setattr(pa, "PREDICTION_LOG_PATH", data_dir / "prediction_agent_log.jsonl")
-    monkeypatch.setattr(pa, "PREDICTION_FAILURE_LOG_PATH", data_dir / "prediction_agent_failures.jsonl")
-    monkeypatch.setattr(ptr, "PREDICTION_LOG", data_dir / "prediction_agent_log.jsonl")
-    monkeypatch.setattr(ptr, "ACCURACY_CACHE", data_dir / "prediction_accuracy.json")
-
     import core.virtual_wallet as vw
     import core.blacklist_manager as bm
     import core.compliance_logger as cl
@@ -180,7 +172,6 @@ def _mutable_runtime_state_isolation_guard(tmp_path, monkeypatch):
     import core.knowledge_model as km
     import core.learning_engine as le
     import core.machine_signal as ms
-    import core.news_scanner as ns
 
     monkeypatch.setattr(vw, "WALLET_FILE", data_dir / "virtual_wallet.json")
     monkeypatch.setattr(bm, "DEFAULT_BLACKLIST_FILE", data_dir / "blacklist.json")
@@ -197,9 +188,6 @@ def _mutable_runtime_state_isolation_guard(tmp_path, monkeypatch):
     monkeypatch.setattr(le, "LEARNING_FILE", data_dir / "learning_report.json")
     monkeypatch.setattr(le, "REPORT_HTML_FILE", data_dir / "learning_report.html")
     monkeypatch.setattr(ms, "MACHINE_DECISION_LOG", data_dir / "machine_decisions.jsonl")
-    monkeypatch.setattr(ns, "NEWS_CACHE", data_dir / "news_cache.json")
-    monkeypatch.setattr(ns, "NEWS_TEXT", data_dir / "news_latest.txt")
-    monkeypatch.setattr(ns, "SENTIMENT_HISTORY", data_dir / "sentiment_history.json")
     yield
 
 

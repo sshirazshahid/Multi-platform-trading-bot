@@ -357,7 +357,9 @@
       "WebFetch(domain:ideas.repec.org)",
       "WebFetch(domain:kar.kent.ac.uk)",
       "PowerShell($hb = Get-Content \"D:\\\\Downloads\\\\Trading_Bot\\\\data\\\\heartbeat.json\" -Raw | ConvertFrom-Json; \"S0: pid=$\\($hb.pid\\) profile=$\\($hb.paper_trading_profile\\) halted=$\\($hb.is_halted\\) open=$\\($hb.open_positions\\) ts=$\\($hb.timestamp\\) latch=$\\(Test-Path 'D:\\\\Downloads\\\\Trading_Bot\\\\data\\\\risk_incident_latch.json'\\)\"; $f = Get-Content \"D:\\\\Downloads\\\\Trading_Bot\\\\data\\\\promotion_funnel.json\" -Raw | ConvertFrom-Json; \"S1: \" + \\(\\($f.lanes | Where-Object { $_.resolved -ge 30 } | ForEach-Object { \"$\\($_.lane\\)=$\\($_.resolved\\)[$\\($_.state\\)]\" }\\) -join \" \"\\) + \" | tsmom_1h=\" + \\(\\($f.lanes | Where-Object {$_.lane -eq 'tsmom_20d_1h'}\\).resolved\\) + \"/30\")",
-      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"D:\\\\Downloads\\\\AN AI HEDGE FUND WITH CLAUDE FABLE.docx\"\\); $e = $zip.Entries | Where-Object { $_.FullName -eq 'word/document.xml' }; $r = New-Object System.IO.StreamReader\\($e.Open\\(\\)\\); $xml = $r.ReadToEnd\\(\\); $r.Close\\(\\); $zip.Dispose\\(\\); $txt = $xml -replace '</w:p>', \"`n\" -replace '<[^>]+>',''; $txt = $txt -replace '&amp;','&' -replace '&lt;','<' -replace '&gt;','>' -replace '&quot;','\"' -replace '&apos;',\"'\"; \"CHARS=\" + $txt.Length; $txt)"
+      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"D:\\\\Downloads\\\\AN AI HEDGE FUND WITH CLAUDE FABLE.docx\"\\); $e = $zip.Entries | Where-Object { $_.FullName -eq 'word/document.xml' }; $r = New-Object System.IO.StreamReader\\($e.Open\\(\\)\\); $xml = $r.ReadToEnd\\(\\); $r.Close\\(\\); $zip.Dispose\\(\\); $txt = $xml -replace '</w:p>', \"`n\" -replace '<[^>]+>',''; $txt = $txt -replace '&amp;','&' -replace '&lt;','<' -replace '&gt;','>' -replace '&quot;','\"' -replace '&apos;',\"'\"; \"CHARS=\" + $txt.Length; $txt)",
+      "Bash(./venv/Scripts/python.exe *)",
+      "Bash(powershell -NoProfile -Command 'Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; '\\\\''{0} PID={1} {2}'\\\\'' -f $_.LocalAddress,$_.OwningProcess,$p.ProcessName }')"
     ]
   },
   "enableAllProjectMcpServers": true,
@@ -366,5 +368,8 @@
   ],
   "enabledPlugins": {
     "ecc@ecc": true
-  }
+  },
+  "disabledMcpjsonServers": [
+    "claude-flow"
+  ]
 }

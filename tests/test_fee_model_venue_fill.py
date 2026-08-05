@@ -40,7 +40,9 @@ def test_unknown_venue_falls_back_to_generic():
 
 
 def test_order_manager_books_fill_aware_entry_fee():
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     i = src.index("Recalculate entry_fee based on actual fill price")
     block = src[i:i + 600]
     assert "pos.market_type, pos.exchange" in block

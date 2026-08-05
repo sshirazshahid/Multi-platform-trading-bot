@@ -1,0 +1,3 @@
+A — Keep BAND_REGIME_FILTER_ENABLED=true. Drought is correct idle (ADX>30 veto), not a hang.
+Owner chose plan-tune D1 option A on 2026-07-31: refuse -EV AccBand; do not disable band filter;
+attended restart only to load F1 feeds_fresh fix + pullback retire + honesty scorer labels.

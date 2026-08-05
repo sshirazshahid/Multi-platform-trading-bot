@@ -17,6 +17,10 @@ the algorithmic SL/TP block and the Claude-proposal ingestion clamp.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
+from tests.mcp_brain_source import mcp_brain_source_for_grep
+
 from pathlib import Path
 
 import pytest
@@ -206,21 +210,16 @@ def test_config_default_is_off():
 
 # ── wire-in pins (source-scan, matching repo scan-test style) ────────────────
 def test_applied_at_both_tp_authorities():
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
-    assert src.count("_apply_accuracy_target(") >= 3, (
-        "helper def + BOTH call sites: the algorithmic SL/TP block and the "
-        "Claude-proposal ingestion clamp must route TP through the accuracy band"
+    """AccBand geometry must still wrap algorithmic SL/TP (Claude path removed)."""
+    src = mcp_brain_source_for_grep()
+    assert src.count("_apply_accuracy_target(") >= 2, (
+        "helper def + algorithmic SL/TP call site must route TP through the accuracy band"
     )
-    i = src.index("_claude_tp_clamped = _apply_accuracy_target")
-    assert i > 0, "Claude ingestion clamp must apply the accuracy geometry"
-    # Per-side band (2026-07-10): both authorities must pass their side so
-    # tp_frac_buy/tp_frac_sell can split the geometry.
     assert '_apply_accuracy_target(sl_pct, tp_pct, side=side)' in src, (
         "algorithmic SL/TP block must pass its side variable"
     )
-    assert 'side=a.get("side")' in src[i : i + 300], (
-        "Claude ingestion clamp must pass the action side"
-    )
+    # Claude ingestion clamp removed in De-Emotion — must NOT remain.
+    assert "_claude_tp_clamped = _apply_accuracy_target" not in src
 
 
 def test_execute_open_chokepoint_covers_all_builders():
@@ -229,7 +228,7 @@ def test_execute_open_chokepoint_covers_all_builders():
     authority: every executed futures entry with a real TP must route through
     the band, tsmom (tp=0) excluded, and the min-R:R gate must not reject the
     intentional inverted shape when the mode produced it."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _execute_open")
     block = src[i:]
     j = block.index("actual_rr = tp_pct / sl_pct")

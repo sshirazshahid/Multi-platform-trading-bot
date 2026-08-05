@@ -233,10 +233,10 @@ Active exchanges: `BinanceClient`, `BybitClient`, `BitgetClient` (three-exchange
 
 ### Strategies (`strategies/`)
 
-All extend `BaseStrategy`. **None of these classes are in the live Claude Portfolio decision
-path** — `mcp_brain` makes every live entry/exit decision (Claude-primary, algorithmic-fallback).
-These are for backtest/research only. (Corrected 2026-06-07 wiring audit; the prior "Active" list
-was misleading.)
+All extend `BaseStrategy`. **None of these classes are in the live portfolio decision
+path** — `mcp_brain` makes every live entry/exit decision via the deterministic
+scorer (De-Emotion 2026-08-04: LLM/sentiment removed from the trade path).
+These strategy classes are for backtest/research only.
 
 - `strategies/` root: `DCAStrategy` (live DCA is hard-OFF: `ENABLE_DCA=False`, config.py),
   `RebalancingStrategy`, `rule_engine`, `base_strategy`.

@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import config
 import core.bot_engine as be
 from core.bot_engine import BotEngine
 
@@ -68,7 +69,7 @@ def _futures_pos():
 
 # ── (a) reduceOnly-reject + position now FLAT -> NO second order placed ───────
 def test_reduceonly_reject_when_flat_skips_naked_reverse_retry(monkeypatch, caplog):
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     ex = MagicMock()
     # First close attempt rejected because the position is already gone on-venue.
     ex.create_order.side_effect = Exception("ReduceOnly Order is rejected")
@@ -86,7 +87,7 @@ def test_reduceonly_reject_when_flat_skips_naked_reverse_retry(monkeypatch, capl
 
 # ── (b) reduceOnly-reject + position STILL open -> retry proceeds (no regress) ─
 def test_reduceonly_reject_when_still_open_retries(monkeypatch):
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     ex = MagicMock()
     ex.create_order.side_effect = [Exception("ReduceOnly Order is rejected"), {"id": "2"}]
     ex.fetch_positions.return_value = [{"contracts": 0.01}]  # re-fetch confirms STILL OPEN
@@ -102,7 +103,7 @@ def test_reduceonly_reject_when_still_open_retries(monkeypatch):
 
 # ── (c) re-fetch itself raises -> fail CLOSED, NO retry order ─────────────────
 def test_refetch_raises_fails_closed(monkeypatch):
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     ex = MagicMock()
     ex.create_order.side_effect = Exception("ReduceOnly Order is rejected")
     ex.fetch_positions.side_effect = Exception("network timeout")
@@ -114,7 +115,7 @@ def test_refetch_raises_fails_closed(monkeypatch):
 
 # ── (d) position-mode ("bybit") branch is guarded too ────────────────────────
 def test_position_mode_branch_flat_skips_naked_reverse_retry(monkeypatch, caplog):
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     ex = MagicMock()
     ex._is_oneway = False  # stripped retry params would be {} -> naked reverse risk
     ex.create_order.side_effect = Exception("position side does not match -4061 unilateral")

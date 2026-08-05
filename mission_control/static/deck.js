@@ -26,7 +26,7 @@
   const TIERS = [
     { ms: 4000,  keys: ["brain", "risk"] },
     { ms: 9000,  keys: ["positions", "candidates"] },
-    { ms: 20000, keys: ["status", "goals", "funnel", "gates", "mtsi"] },
+    { ms: 20000, keys: ["status", "goals", "funnel", "gates"] },
   ];
 
   const S = Object.create(null);       // key -> payload
@@ -138,10 +138,9 @@
     gates:      () => "/api/gates",
     brain:      () => "/api/brain",
     candidates: () => `/api/candidates?hours=${candHours}&limit=40`,
-    mtsi:       () => "/api/mtsi",
   };
 
-  const OPTIONAL_FEEDS = new Set(["mtsi"]); // research surfaces — 404 must not flip "degraded"
+  const OPTIONAL_FEEDS = new Set(); // reserved for soft-fail research feeds
 
   /* Single-flight: a slow response can never stack a second request behind it. */
   function pull(key) {
@@ -195,7 +194,9 @@
 
   function render() {
     safe("rail", renderRail);
+    safe("health", renderHealth);
     safe("verdict", renderVerdict);
+    safe("actions", renderNextActions);
     safe("wr", renderWinRate);
     safe("pnl", renderEconomics);
     safe("wallet", renderWallet);
@@ -206,7 +207,6 @@
     safe("positions", renderPositions);
     safe("lanes", renderLanes);
     safe("risk", renderRisk);
-    safe("mtsi", renderMtsi);
     markPanels();
   }
 
@@ -255,7 +255,28 @@
       : `polling ${TIERS.map((t) => `${t.ms / 1000}s`).join(" / ")}`;
   }
 
-  /* ══════════ verdict + alarms ══════════ */
+  /* ══════════ health strip + verdict + next actions ══════════ */
+  function renderHealth() {
+    const st = S.status || {};
+    const rs = (S.risk || {}).risk_state || {};
+    const open = ((S.positions || {}).open || []).length;
+    const hbAge = num(st.heartbeat_age_seconds);
+    const halted = !!(rs.is_halted || st.is_halted || st.incident_latch_present);
+    const entriesOk = !halted && !st.kill_switch;
+    const wrap = $("verdict-wrap");
+    if (wrap) wrap.dataset.health = halted ? "bad" : (hbAge !== null && hbAge > 900 ? "warn" : "ok");
+
+    const hbTone = hbAge === null ? "mute" : hbAge < 180 ? "good" : hbAge < 900 ? "warn" : "bad";
+    $("health-strip").innerHTML = [
+      kpi("Heartbeat", age(hbAge), hbTone, hbAge === null ? "unknown" : "ago"),
+      kpi("Mode", st.mode || "—", String(st.mode || "").toUpperCase() === "CONTROLLED_LIVE" ? "bad" : "mute"),
+      kpi("Profile", st.paper_profile || "—", "mute"),
+      kpi("Open", int(open), open > 0 ? "mute" : "mute"),
+      kpi("Entries", entriesOk ? "allowed" : "blocked", entriesOk ? "good" : "bad",
+        halted ? "incident latch" : st.kill_switch ? "kill switch" : ""),
+    ].join("");
+  }
+
   function renderVerdict() {
     const lane = laneByName(wrLane);
     const scorer = (((S.brain || {}).cascade || {}).binding || {}).scorer;
@@ -281,17 +302,17 @@
     const al = [];
     const st = S.status || {};
     const rs = (S.risk || {}).risk_state || {};
-    if (rs.is_halted || st.is_halted) al.push(["bad", `HALTED — ${rs.halt_reason || "reason not recorded"}`]);
-    if (st.incident_latch_present) al.push(["bad", "Risk incident latch present"]);
+    const hbAge = num(st.heartbeat_age_seconds);
+    if (rs.is_halted || st.is_halted) al.push(["bad", `HALTED — ${rs.halt_reason || st.halt_reason || "reason not recorded"}`]);
+    if (st.incident_latch_present) al.push(["bad", "Risk incident latch present — new entries blocked"]);
     if (st.kill_switch) al.push(["bad", "Kill switch engaged"]);
-    if (st.mode_divergent) al.push(["warn", "Mode differs from .env — a restart would change behaviour"]);
-    if (st.profile_divergent) al.push(["warn", "Paper profile differs from .env"]);
+    if (hbAge !== null && hbAge > 900) al.push(["bad", `Heartbeat stale (${age(hbAge)}) — process may be hung`]);
+    else if (hbAge !== null && hbAge > 180) al.push(["warn", `Heartbeat aging (${age(hbAge)})`]);
+    if (st.mode_divergent) al.push(["warn", "Mode differs from .env — restart supervisor to apply"]);
+    if (st.profile_divergent) al.push(["warn", "Paper profile differs from .env — restart supervisor to apply"]);
     const g = S.gates || {};
     if (g.checklist_exists && !g.checklist_signed)
       al.push(["ok", `Real-money path fail-closed — checklist unsigned (${int(g.unchecked_count)} items)`]);
-    // Drawdown is reported, never gating (changing target_status would move
-    // the promotion gate -- governance, not reporting). An alarm is the
-    // "surface it, let a human act" half of that contract.
     const ddLane = laneByName(wrLane);
     if (ddLane && ddLane.drawdown_exceeds_cap)
       al.push(["warn",
@@ -305,6 +326,73 @@
       al.push(["warn", `7d status: ${String(lane7.target_status).replace(/_/g, " ").toLowerCase()}`]);
 
     $("alarms").innerHTML = al.map((a) => `<span class="alarm" data-sev="${a[0]}">${esc(a[1])}</span>`).join("");
+  }
+
+  function renderNextActions() {
+    const host = $("next-actions");
+    if (!host) return;
+    const st = S.status || {};
+    const rs = (S.risk || {}).risk_state || {};
+    const actions = [];
+
+    if (rs.is_halted || st.is_halted || st.incident_latch_present) {
+      actions.push({
+        sev: "bad",
+        title: "Clear incident latch",
+        why: "New entries stay blocked until the latch is archived and removed.",
+        href: "/classic?ops=clear-incident",
+        label: "Open Clear incident",
+      });
+      actions.push({
+        sev: "warn",
+        title: "Restart supervisor",
+        why: "After clearing, restart so the worker reloads code and drops in-memory halt state.",
+        href: "/classic?ops=restart",
+        label: "Open Restart bot",
+      });
+    } else if (st.kill_switch) {
+      actions.push({
+        sev: "bad",
+        title: "Release kill switch",
+        why: "KILL_SWITCH is pausing new entries; open positions still manage stops.",
+        href: "/classic?ops=kill",
+        label: "Open Kill switch",
+      });
+    } else if (st.mode_divergent || st.profile_divergent) {
+      actions.push({
+        sev: "warn",
+        title: "Restart to apply .env",
+        why: "Running mode/profile differs from .env — long-lived supervisors never re-read env.",
+        href: "/classic?ops=restart",
+        label: "Open Restart bot",
+      });
+    }
+
+    const hbAge = num(st.heartbeat_age_seconds);
+    if (hbAge !== null && hbAge > 900) {
+      actions.push({
+        sev: "bad",
+        title: "Investigate hung process",
+        why: `Heartbeat is ${age(hbAge)} old. Prefer restart after checking logs.`,
+        href: "/classic?ops=restart",
+        label: "Open Restart bot",
+      });
+    }
+
+    if (!actions.length) {
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    host.hidden = false;
+    host.innerHTML =
+      `<p class="sec-label">Next action</p>` +
+      actions.map((a) =>
+        `<div class="action-card" data-sev="${esc(a.sev)}">` +
+        `<div><strong>${esc(a.title)}</strong><p>${esc(a.why)}</p></div>` +
+        `<a class="rbtn primary" href="${esc(a.href)}">${esc(a.label)}</a>` +
+        `</div>`
+      ).join("");
   }
 
   /* ══════════ win-rate gauge ══════════ */
@@ -830,54 +918,6 @@
       (r.incident_latch_present ? " · INCIDENT LATCH PRESENT" : "");
   }
 
-  /* ══════════ MTSI micro inventory ══════════ */
-  function renderMtsi() {
-    const m = S.mtsi || {};
-    const pill = $("mtsi-verdict");
-    const verdict = String(m.final_verdict || "—");
-    pill.textContent = verdict;
-    pill.dataset.tone = /GO/i.test(verdict) && !/NO_GO|NOT_RUN/i.test(verdict) ? "good"
-      : /NO_GO|NOT_RUN/i.test(verdict) ? "mute" : "warn";
-
-    const util = num(m.inventory_utilization);
-    $("mtsi-kpis").innerHTML = [
-      kpi("Inventory", money(m.inventory_usd), "mute"),
-      kpi("Cap", money(m.max_gross_inventory_usd), "mute"),
-      kpi("Utilization", util === null ? "—" : `${(util * 100).toFixed(0)}%`, util !== null && util > 0.9 ? "warn" : "mute"),
-      kpi("Clips", int(m.n_clips), "mute"),
-      kpi("Mean clip", money(m.mean_clip_pnl_usd), tone(m.mean_clip_pnl_usd)),
-      kpi("Cell", m.display_cell || "—", "mute"),
-    ].join("");
-
-    const hist = Array.isArray(m.clip_pnl_histogram) ? m.clip_pnl_histogram : [];
-    const maxH = Math.max(1, ...hist.map((x) => Number(x) || 0));
-    $("mtsi-hist").innerHTML = hist.length
-      ? hist.map((v, i) => {
-          const h = Math.max(2, Math.round((Number(v) || 0) / maxH * 40));
-          return `<span class="gl-bar" style="height:${h}px" title="bucket ${i}: ${esc(String(v))}"></span>`;
-        }).join("")
-      : `<span class="src">no clip histogram yet — run research/sim_mtsi_inventory.py</span>`;
-
-    const spark = Array.isArray(m.candle_spark) ? m.candle_spark.map(Number).filter((x) => Number.isFinite(x)) : [];
-    const svg = $("mtsi-candle");
-    if (spark.length >= 2) {
-      const min = Math.min(...spark);
-      const max = Math.max(...spark);
-      const span = (max - min) || 1;
-      const pts = spark.map((y, i) => {
-        const x = (i / (spark.length - 1)) * 320;
-        const yy = 44 - ((y - min) / span) * 40;
-        return `${x.toFixed(1)},${yy.toFixed(1)}`;
-      }).join(" ");
-      svg.innerHTML = `<polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${pts}" />`;
-    } else {
-      svg.innerHTML = "";
-    }
-
-    $("mtsi-src").textContent = m.honesty
-      || "source: /api/mtsi · balanced inventory ≠ edge";
-  }
-
   /* ══════════ command palette ══════════ */
   const COMMANDS = [
     { name: "Win rate: today", hint: "day", run: () => setWrLane("paper_futures_current_utc_day") },
@@ -891,12 +931,13 @@
     { name: "Go to: positions", hint: "jump", run: () => jump("p-pos") },
     { name: "Go to: risk rails", hint: "jump", run: () => jump("p-risk") },
     { name: "Go to: evidence lanes", hint: "jump", run: () => jump("p-lanes") },
-    { name: "Go to: MTSI micro inventory", hint: "jump", run: () => jump("p-mtsi") },
+    { name: "Open operator console", hint: "/classic", run: () => { window.location.href = "/classic"; } },
+    { name: "Clear incident (operator)", hint: "ops", run: () => { window.location.href = "/classic?ops=clear-incident"; } },
+    { name: "Restart bot (operator)", hint: "ops", run: () => { window.location.href = "/classic?ops=restart"; } },
     { name: "Refresh all feeds now", hint: "R", run: () => refreshAll() },
     { name: "Pause / resume polling", hint: "P", run: () => togglePause() },
     { name: "Toggle animation", hint: "motion", run: () => toggleMotion() },
     { name: "Re-enter Mission Control token", hint: "auth", run: () => askToken() },
-    { name: "Open the classic console", hint: "/classic", run: () => { window.location.href = "/classic"; } },
   ];
 
   let palIdx = 0;

@@ -221,18 +221,14 @@ def aggtrades_last_stamps() -> dict:
     return out
 
 
-def news_snapshot() -> tuple[dict, dict, str | None]:
-    """(mentions per base, per-coin sentiment map, fetch stamp) from the cache.
+def news_snapshot() -> tuple[dict, str | None]:
+    """(mentions per base, fetch stamp) from the cache.
 
-    Read-only. The scanner is NOT run: that would hit the network and rewrite
-    files under data/, which the live PAPER bot owns. Headline TEXT is never
-    copied into the brief — only per-base counts.
+    Read-only. Headline TEXT is never copied into the brief — only per-base counts.
     """
-    from core.news_scanner import _extract_coin_symbols
-
     p = DATA / "news_cache.json"
     if not p.exists():
-        return {}, {}, None
+        return {}, None
     cache = json.loads(p.read_text(encoding="utf-8"))
     stamp = cache.get("fetched_at")
     try:
@@ -241,13 +237,12 @@ def news_snapshot() -> tuple[dict, dict, str | None]:
         stamp = None
     mentions: dict[str, int] = {}
     for art in cache.get("news") or []:
-        syms = _extract_coin_symbols(
+        syms = rb._extract_coin_symbols(
             art.get("title", ""), art.get("categories", "") or "", art.get("tags") or []
         )
         for s in syms:
             mentions[s.upper()] = mentions.get(s.upper(), 0) + 1
-    sentiment = {str(k).upper(): v for k, v in (cache.get("sentiment") or {}).items()}
-    return mentions, sentiment, stamp
+    return mentions, stamp
 
 
 def unlock_artifact(base: str) -> dict | None:
@@ -330,8 +325,6 @@ def gather_asset(symbol: str, base: str, *, now: datetime, ex=None, shared: dict
         unlock=_safe(lambda: unlock_artifact(base), None, ""),
         news_mentions=shared["news_mentions"].get(base),
         news_as_of=shared["news_stamp"] if base in shared["news_mentions"] else None,
-        sentiment_map=shared["sentiment_map"],
-        sentiment_as_of=shared["news_stamp"],
         l2_as_of=shared["l2"].get(base),
         aggtrades_as_of=shared["agg"].get(base),
     )
@@ -342,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--symbol",
         default=None,
-        help="single BASE (e.g. BTC); also reads the persisted sentiment map",
+        help="single BASE (e.g. BTC)",
     )
     ap.add_argument(
         "--refresh",
@@ -390,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         if intel_mod
         else {}
     )
-    mentions, sentiment_map, news_stamp = _safe(news_snapshot, ({}, {}, None), "news cache")
+    mentions, news_stamp = _safe(news_snapshot, ({}, None), "news cache")
     shared = {
         "l2": _safe(l2_last_hours, {}, "l2_history"),
         "agg": _safe(aggtrades_last_stamps, {}, "aggtrades_qh"),
@@ -398,8 +391,6 @@ def main(argv: list[str] | None = None) -> int:
         "oi": oi,
         "news_mentions": mentions,
         "news_stamp": news_stamp,
-        # per-coin sentiment is per the plan a --symbol-mode input only
-        "sentiment_map": sentiment_map if args.symbol else None,
     }
 
     ex = None

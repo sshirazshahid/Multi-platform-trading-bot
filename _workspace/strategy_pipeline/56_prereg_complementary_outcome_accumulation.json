@@ -1,0 +1,112 @@
+{
+  "prereg_id": "complementary_outcome_accumulation_v1_2026-08-01",
+  "sha256_md": "0323ba3aabbe49ecc5a3475858b489ef3acc7f875e44b5a9438598ccba87cf77",
+  "bytes_md": 15426,
+  "status": "FROZEN_BEFORE_PROSPECTIVE_COLLECTION",
+  "expected_verdict": "INSUFFICIENT_DATA",
+  "venue_assumption": "polymarket_standard_binary_crypto_up_down",
+  "policy": {
+    "payout_per_pair": 1.0,
+    "min_locked_edge_per_pair": 0.005,
+    "operations_reserve_per_pair": 0.001,
+    "expected_taker_fee_rate": 0.07,
+    "expected_fee_exponent": 1,
+    "expected_fee_mode": "taker_only",
+    "expected_builder_maker_fee_rate": 0.0,
+    "expected_builder_taker_fee_rate": 0.0,
+    "preflight_fee_quantum_usd": 0.00001,
+    "new_order_size_quantum_shares": 0.01,
+    "confirmed_taker_fee_required": true,
+    "authoritative_exact_fee_sources": [
+      "builder_trade_fee_usdc",
+      "settlement_balance_delta"
+    ],
+    "standard_user_event_fee_rate_alone_is_insufficient": true,
+    "preflight_fee_treatment": "estimate_only",
+    "actual_fee_treatment": "authoritative_confirmed_fill_only",
+    "clip_shares": 5,
+    "max_clip_shares": 5,
+    "max_clip_notional_usd": 3.0,
+    "max_directional_shares": 20,
+    "max_directional_cost_usd": 12.0,
+    "aggregate_portfolio_cap_status": "unset_live_blocked",
+    "min_model_edge": 0.01,
+    "model_clip_shares": 5,
+    "model_clip_policy": "fixed_after_edge_gate",
+    "balanced_lock_entry_policy": "both_exact_passive_clips_guarded_below_one_then_cheaper_first",
+    "balanced_lock_entry_tie_break": "up",
+    "lock_candidate_is_not_locked_profit": true,
+    "min_future_complement_price": 0.05,
+    "signal_stale_after_seconds": 2.0,
+    "max_live_orders_per_condition": 1,
+    "new_order_requires_zero_live_pending_uncertain": true,
+    "book_stale_after_seconds": 2.0,
+    "max_cross_book_skew_seconds": 0.5,
+    "new_lean_cutoff_seconds": 60.0,
+    "completion_cutoff_seconds": 15.0,
+    "cutoff_action": "cancel_then_reconcile_without_releasing_reservation",
+    "actual_fill_reconciliation": "always",
+    "inadmissible_confirmed_complete_set_policy": "merge_and_latch_incident",
+    "collateral_release_policy": "authoritative_merge_confirmation_only",
+    "terminal_policy": "cancel_reconcile_merge_then_hold_residual_to_resolution"
+  },
+  "identity_and_archive_contract": {
+    "condition_token_outcome_binding_required": true,
+    "required_fields": [
+      "conditionId",
+      "outcome_token_mapping",
+      "negRisk",
+      "acceptingOrders",
+      "itode",
+      "fee_details",
+      "pUSD_precision",
+      "order_precision",
+      "measurement_window"
+    ],
+    "fee_details_required": [
+      "maker_base_fee",
+      "taker_base_fee",
+      "rate",
+      "exponent",
+      "taker_only",
+      "builder_maker_fee_rate",
+      "builder_taker_fee_rate",
+      "fee_precision",
+      "effective_time",
+      "raw_response"
+    ],
+    "measurement_window_required": [
+      "settlement_oracle",
+      "start_timestamp",
+      "end_timestamp",
+      "tie_rule"
+    ]
+  },
+  "execution_state_contract": {
+    "canonical_reconciliation_index_required": true,
+    "out_of_order_new_fill_policy": "fail_and_rebuild_condition_ledger",
+    "required_zero_before_new_order": [
+      "live_order_quantity",
+      "pending_fill_quantity",
+      "uncertain_cancel_quantity"
+    ],
+    "explicit_reserved_states": [
+      "confirmed_unpaired",
+      "confirmed_paired_unmerged",
+      "merge_pending"
+    ],
+    "incident_latch_blocks_new_orders": true,
+    "immutable_admitted_order_registry_required": true,
+    "unknown_order_fill_policy": "reconcile_then_latch_incident",
+    "paired_unmerged_terminal_edge_may_be_recorded": true,
+    "merge_confirmation_required_before_realized_proceeds_or_collateral_release": true
+  },
+  "minimum_sample": {
+    "calendar_days": 30,
+    "resolved_market_windows": 1000,
+    "completed_shadow_pairs": 2000
+  },
+  "implementation": "research/complementary_outcome_inventory.py",
+  "tests": "tests/test_complementary_outcome_inventory.py",
+  "live_authorized": false
+}

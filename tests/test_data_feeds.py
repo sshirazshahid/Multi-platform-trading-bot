@@ -115,31 +115,6 @@ class TestOrderBookDepthFeed:
         assert slip < 200  # sanity: less than 2%
 
 
-class TestNewsSentimentFeed:
-    def test_neutral_structure(self):
-        from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
-        feed = NewsSentimentFeed(cache_ttl=0)
-        neutral = feed._neutral(stale=True)
-        assert neutral["sentiment_score"] == 0.0
-        assert neutral["has_veto_news"] is False
-
-    def test_classify_sentiment(self):
-        from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
-        assert NewsSentimentFeed._classify_sentiment(
-            "Bitcoin surges to new record high") == "POSITIVE"
-        assert NewsSentimentFeed._classify_sentiment(
-            "Major exchange hacked, funds stolen") == "NEGATIVE"
-        assert NewsSentimentFeed._classify_sentiment(
-            "Bitcoin trading volume steady") == "NEUTRAL"
-
-    def test_cryptocompare_wrapped_data_normalized(self):
-        from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
-        payload = {"Data": {"Data": [{"title": "A"}, {"title": "B"}]}}
-        assert NewsSentimentFeed._cryptocompare_items(payload) == [
-            {"title": "A"}, {"title": "B"}
-        ]
-
-
 class TestSmartMoneyFeed:
     def test_neutral_structure(self):
         from core.data_feeds.smart_money_feed import SmartMoneyFeed
@@ -166,7 +141,6 @@ class TestDataCoordinator:
         assert isinstance(ctx.funding, dict)
         assert isinstance(ctx.open_interest, dict)
         assert isinstance(ctx.orderbook, dict)
-        assert isinstance(ctx.news, dict)
         assert isinstance(ctx.smart_money, dict)
         # All stale since no data loaded
         assert ctx.any_stale is True
@@ -177,7 +151,6 @@ class TestDataCoordinator:
             funding={"fr_zscore": 1.5, "stale": False},
             open_interest={},
             orderbook={},
-            news={},
             smart_money={},
             any_stale=False,
         )
@@ -200,7 +173,6 @@ class TestDataCoordinator:
         assert "funding" in status["feeds"]
         assert "oi" in status["feeds"]
         assert "orderbook" in status["feeds"]
-        assert "news" in status["feeds"]
         assert "smart_money" in status["feeds"]
 
     def test_disabled_feed_not_refreshed(self):
@@ -210,13 +182,11 @@ class TestDataCoordinator:
             "funding_enabled": False,
             "oi_enabled": False,
             "orderbook_enabled": False,
-            "news_enabled": False,
             "smart_money_enabled": False,
         })
         coord.set_coins(["BTC"])
         results = coord.refresh()
-        # All feeds should report False (disabled)
-        for name in ("funding", "oi", "orderbook", "news", "smart_money"):
+        for name in ("funding", "oi", "orderbook", "smart_money"):
             assert results.get(name) is False
 
     def test_refresh_does_not_block_on_hung_feed(self):
@@ -237,7 +207,7 @@ class TestDataCoordinator:
         coord.set_config({
             "refresh_deadline_sec": 0.5,
             "funding_enabled": True, "oi_enabled": False,
-            "orderbook_enabled": False, "news_enabled": False,
+            "orderbook_enabled": False,
             "smart_money_enabled": False,
         })
 
@@ -285,12 +255,11 @@ class TestDataFeedsConfig:
         from config import DATA_FEEDS
         required_keys = [
             "funding_enabled", "oi_enabled", "orderbook_enabled",
-            "news_enabled", "smart_money_enabled",
+            "smart_money_enabled",
             "funding_ttl", "oi_ttl", "orderbook_ttl",
-            "news_ttl", "smart_money_ttl",
+            "smart_money_ttl",
             "b11_funding_enabled", "b12_oi_enabled", "b13_smart_money_enabled",
-            "v1_oi_exhaustion_veto", "v2_news_veto", "v3_slippage_veto",
-            "v4_fomo_size_reduction",
+            "v1_oi_exhaustion_veto", "v3_slippage_veto",
         ]
         for key in required_keys:
             assert key in DATA_FEEDS, f"Missing config key: {key}"
@@ -301,7 +270,6 @@ class TestDataFeedsConfig:
         assert 30 <= DATA_FEEDS["orderbook_ttl"] <= 300
         assert 60 <= DATA_FEEDS["funding_ttl"] <= 900
         assert 60 <= DATA_FEEDS["oi_ttl"] <= 600
-        assert 300 <= DATA_FEEDS["news_ttl"] <= 1800
         assert 300 <= DATA_FEEDS["smart_money_ttl"] <= 3600
 
 
@@ -321,7 +289,6 @@ class TestMCPBrainIntegration:
             "orderbook": {"imbalance": 0.0, "imbalance_momentum": 0.0,
                          "depth_ratio_log": 0.0, "slippage_buy_bps": 5.0,
                          "slippage_sell_bps": 5.0, "stale": False},
-            "news": {"has_veto_news": False, "sentiment_score": 0.0, "stale": False},
             "smart_money": {"smart_money_inflow": False, "crowd_signal": "neutral", "stale": False},
             "any_stale": False,
         }
@@ -430,23 +397,6 @@ class TestMCPBrainIntegration:
         assert result["score"] == 0, "V1 veto should zero the score"
         assert "veto" in result["reason"].lower()
 
-    def test_v2_news_veto(self):
-        """V2 should block entry when negative news detected."""
-        from core.mcp_brain import MCPBrain
-        brain = MCPBrain()
-        brain._data_coordinator = self._make_brain_with_mock_coordinator({
-            "news": {
-                "has_veto_news": True,
-                "veto_reason": "BTC exchange hacked",
-                "stale": False,
-            },
-        })
-        data = {"funding": {}, "orderbook": {}}
-        ei = self._make_minimal_ei(side="buy")
-        result = brain._score_coin("BTC", data, ei)
-        assert result["score"] == 0, "V2 veto should zero the score"
-        assert "veto" in result["reason"].lower()
-
     def test_v3_slippage_veto(self):
         """V3 should block entry when slippage exceeds threshold."""
         from core.mcp_brain import MCPBrain
@@ -467,30 +417,6 @@ class TestMCPBrainIntegration:
         assert result["score"] == 0, "V3 veto should zero the score"
         assert "slippage" in result["reason"].lower()
 
-    def test_v4_fomo_reduces_confidence(self):
-        """V4 FOMO signal should reduce confidence by multiplier."""
-        from core.mcp_brain import MCPBrain
-        brain = MCPBrain()
-        # First get baseline confidence without FOMO
-        brain._data_coordinator = self._make_brain_with_mock_coordinator()
-        data = {"funding": {}, "orderbook": {}}
-        ei = self._make_minimal_ei(side="buy")
-        baseline = brain._score_coin("BTC", data, ei)
-        baseline_conf = baseline["confidence"]
-
-        # Now with FOMO signal
-        brain._data_coordinator = self._make_brain_with_mock_coordinator({
-            "smart_money": {
-                "smart_money_inflow": False,
-                "crowd_signal": "fomo",
-                "stale": False,
-            },
-        })
-        fomo_result = brain._score_coin("BTC", data, ei)
-        # Confidence should be reduced
-        assert fomo_result["confidence"] < baseline_conf, \
-            f"FOMO conf {fomo_result['confidence']} should be < baseline {baseline_conf}"
-
     def test_stale_feeds_produce_neutral(self):
         """Stale feeds should not award bonuses or fire vetos."""
         from core.mcp_brain import MCPBrain
@@ -498,7 +424,6 @@ class TestMCPBrainIntegration:
         brain._data_coordinator = self._make_brain_with_mock_coordinator({
             "funding": {"fr_zscore": -3.0, "fr_side_signal": "bullish", "stale": True},
             "open_interest": {"oi_price_divergence": "exhaustion", "oi_conviction": 0.9, "stale": True},
-            "news": {"has_veto_news": True, "veto_reason": "hack", "stale": True},
         })
         data = {"funding": {}, "orderbook": {}}
         ei = self._make_minimal_ei(side="buy")

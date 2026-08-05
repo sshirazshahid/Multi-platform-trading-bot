@@ -24,6 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.config_source import config_source_for_grep
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -146,7 +148,7 @@ class TestScalpModeConfig:
         from pathlib import Path
 
         from config import SCALP_MODE
-        src = Path("config.py").read_text(encoding="utf-8")
+        src = config_source_for_grep()
         assert 'os.getenv("SCALP_LONGS_ONLY", "true")' in src, (
             "shipped default must remain longs-only (env absent -> true)"
         )

@@ -18,7 +18,7 @@ Turn a candidate brief into a pre-registered, after-cost screen on local data an
 
 ## Input/Output Protocol
 - Input: `_workspace/strategy_pipeline/01_scout_candidates.md`.
-- Output: `_workspace/strategy_pipeline/02_screener_verdicts.md` + per-candidate JSON verdict `{candidate, hypothesis, n, after_cost_metrics, gates, verdict}`.
+- Output: `_workspace/strategy_pipeline/<N>_screen_*.md` / `<N>_verdict_*.md` + per-candidate JSON verdict `{candidate, hypothesis, n, after_cost_metrics, gates, verdict}`.
 
 ## Error Handling
 - Missing local data → verdict INSUFFICIENT_DATA naming the exact harvest command; never substitute synthetic data.

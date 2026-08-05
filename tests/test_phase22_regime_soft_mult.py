@@ -21,6 +21,8 @@ Phase 22 fix:
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
@@ -33,7 +35,7 @@ def test_risk_config_has_regime_flags():
 def test_volatile_no_longer_hard_blocks():
     """The regime gate code at bot_engine.py must NOT unconditionally
     return False on REGIME_VOLATILE. Soft path must be reachable."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Find the regime gate
     gate_start = src.index("Phase 22): Regime-aware gate")
     gate_end = src.index("# (b) Spot", gate_start)
@@ -47,7 +49,7 @@ def test_volatile_no_longer_hard_blocks():
 def test_soft_mult_applied_to_size_fraction():
     """The soft multiplier must be applied AFTER Phase 17 ev_mult and
     Phase 18 cal_mult, BEFORE notional computation."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     ev_idx = src.index("size_fraction *= _ev_mult")
     cal_idx = src.index("size_fraction *= _cal_mult")
     regime_idx = src.index("size_fraction *= _regime_size_mult")
@@ -58,7 +60,7 @@ def test_soft_mult_applied_to_size_fraction():
 
 def test_counter_trend_still_hard_blocks():
     """Counter-trend (long/down or short/up) must remain hard block."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     gate_start = src.index("Phase 22): Regime-aware gate")
     gate_end = src.index("# (b) Spot", gate_start)
     gate_block = src[gate_start:gate_end]
@@ -70,7 +72,7 @@ def test_regime_size_mult_default_initialization():
     """`_regime_size_mult` must initialize to 1.0 BEFORE the regime gate,
     so the multiplier line never references an undefined variable when
     the regime detector errors out (e.g., exchange unavailable)."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     init_idx = src.index("_regime_size_mult = 1.0")
     gate_check_idx = src.index('if RISK.get("regime_volatile_block_enabled"')
     assert init_idx < gate_check_idx, \
@@ -79,7 +81,7 @@ def test_regime_size_mult_default_initialization():
 
 def test_regime_log_line_emitted_on_volatile_soft():
     """When volatile soft-multiplier engages, the log must say so."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Use ASCII substrings so test file encoding can't mismatch:
     assert "VOLATILE" in src
     assert "soft size" in src

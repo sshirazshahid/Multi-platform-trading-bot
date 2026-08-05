@@ -143,3 +143,11 @@ def pytest_ignore_collect(collection_path, config):  # noqa: ANN001
             return True  # skip in bulk run
 
     return None
+
+
+def dashboard_package_source() -> str:
+    """Concatenated dashboard package sources (replaces monolithic dashboard.py pins)."""
+    root = Path(__file__).resolve().parent / "dashboard"
+    return "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted(root.glob("*.py"))
+    )

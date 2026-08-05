@@ -19,6 +19,9 @@ lane, and shadow probes must be untouched. Fail-OPEN on any missing datum.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.mcp_brain_source import mcp_brain_source_for_grep
+
 from pathlib import Path
 
 import pytest
@@ -225,7 +228,7 @@ def test_veto_lives_only_inside_the_accuracy_band_carveout():
     """The veto must run inside _execute_open's _acc_mode_on block — after the
     band geometry is applied, before the R:R gate — and set reject_reason so
     the candidates funnel stays auditable. Exactly one call site."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert src.count("self._band_regime_veto(action)") == 1
     # Band lane is now inverted-geometry after apply (not merely TP-changed).
     i = src.index("_acc_mode_on = (")
@@ -255,7 +258,7 @@ def test_deep_breakout_lane_and_shadow_probes_unaffected():
 def test_algo_action_payload_threads_adx_4h():
     """mcp_brain's algo action builder must carry the already-computed 4h ADX
     (threaded, not recomputed) so the veto can read it at _execute_open."""
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = mcp_brain_source_for_grep()
     i = src.index('"type": "OPEN"')
     assert '"adx_4h"' in src[i:i + 1500], (
         "OPEN action payload must include adx_4h for the band-lane veto"

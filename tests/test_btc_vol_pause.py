@@ -7,6 +7,8 @@ fail-OPEN on missing data/warmup, NEW ENTRIES ONLY. See core/btc_vol_pause.py.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 import pytest
@@ -129,7 +131,7 @@ def test_state_persists_across_instances(tmp_path, monkeypatch):
 def test_wired_into_execute_open_new_entries_only():
     """Source pin: the gate lives in _execute_open (new-entry path), is config-gated,
     fail-OPEN, and blocks via `return False` — never touches exits/position mgmt."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "from core.btc_vol_pause import BtcVolPause" in src
     i = src.index("def _execute_open")
     j = src.find("\n    def ", i + 1)

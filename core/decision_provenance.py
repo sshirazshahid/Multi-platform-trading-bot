@@ -55,6 +55,57 @@ def _instrument(action: Mapping[str, Any]) -> InstrumentId:
     )
 
 
+def _config_source_sha256() -> str:
+    """SHA-256 of the live config module/package source on disk.
+
+    After De-Emotion D1, ``config`` is a package (``config/``). Long-running
+    processes may still have ``config.__file__`` pointing at a deleted
+    ``config.py`` — resolve via importlib and hash the package tree instead of
+    blindly reading ``__file__``.
+    """
+    import importlib.util
+
+    import config
+
+    candidates: list[Path] = []
+    raw = getattr(config, "__file__", None)
+    if raw:
+        candidates.append(Path(raw).resolve())
+    try:
+        spec = importlib.util.find_spec("config")
+    except (ImportError, AttributeError, ValueError):
+        spec = None
+    if spec is not None:
+        if spec.origin:
+            candidates.append(Path(spec.origin).resolve())
+        for loc in spec.submodule_search_locations or ():
+            candidates.append(Path(loc).resolve() / "__init__.py")
+
+    seen: set[Path] = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        if cand.is_file() and cand.name == "__init__.py" and cand.parent.name == "config":
+            root = cand.parent
+            digest = hashlib.sha256()
+            for path in sorted(root.rglob("*.py")):
+                if "__pycache__" in path.parts:
+                    continue
+                rel = path.relative_to(root).as_posix().encode("utf-8")
+                digest.update(rel)
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+                digest.update(b"\0")
+            return digest.hexdigest()
+        if cand.is_file():
+            return hashlib.sha256(cand.read_bytes()).hexdigest()
+
+    raise FileNotFoundError(
+        "config source not found on disk (expected config/ package or config.py)"
+    )
+
+
 def runtime_config_hash() -> str:
     """Hash execution-sensitive, non-secret runtime configuration."""
     import config
@@ -73,8 +124,7 @@ def runtime_config_hash() -> str:
         "SIGNAL_SOURCE",
     )
     values = {name: getattr(config, name, None) for name in names}
-    config_path = Path(config.__file__).resolve()
-    file_hash = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    file_hash = _config_source_sha256()
     encoded = json.dumps(
         {"config_file_sha256": file_hash, "runtime": values},
         sort_keys=True,

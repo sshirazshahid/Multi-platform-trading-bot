@@ -286,8 +286,6 @@ class MultiProfileRunner:
 
     def __init__(self):
         from config import DRY_RUN, TRADING_PAIRS
-        from core.claude_analyst import ClaudeAnalyst
-        from core.news_scanner import NewsScanner
         from core.report_emailer import ReportEmailer
         from core.strategy_selector import StrategySelector, build_futures_map
         from exchanges import (
@@ -326,8 +324,6 @@ class MultiProfileRunner:
         logger.info(f"[MultiProfile] Connected: {list(self.active_exchanges.keys())}")
 
         self.selector      = StrategySelector()
-        self.news          = NewsScanner()
-        self.claude        = ClaudeAnalyst()
         self.emailer       = ReportEmailer()
         self.trading_pairs = TRADING_PAIRS
         self.futures_map   = build_futures_map(TRADING_PAIRS)
@@ -366,9 +362,6 @@ class MultiProfileRunner:
             logger.info(f"[MultiProfile] Email active -- daily {hour:02d}:00 UTC + session end")
         else:
             logger.info("[MultiProfile] Email disabled (GMAIL_* not set in .env)")
-
-        if not self.claude.is_configured():
-            logger.warning("[MultiProfile] ANTHROPIC_API_KEY not set — embedded Claude active")
 
     def _handle_shutdown(self, signum, frame):
         logger.info("[MultiProfile] Shutdown signal — saving & emailing...")
@@ -469,8 +462,6 @@ class MultiProfileRunner:
 
     def run(self):
         logger.info("[MultiProfile] Starting — $100 per exchange per profile")
-        try: self.news.scan()
-        except Exception: pass
 
         self._scan_all()
         self._scan_arbitrage()
@@ -478,7 +469,6 @@ class MultiProfileRunner:
         import schedule
         schedule.every(self.SCAN_INTERVAL).seconds.do(self._scan_all)
         schedule.every(self.ARB_INTERVAL).seconds.do(self._scan_arbitrage)
-        schedule.every(30).minutes.do(self._refresh_news)
         schedule.every(60).minutes.do(self._log_comparison)
         schedule.every(15).minutes.do(self._check_email_schedule)
 
@@ -557,11 +547,7 @@ class MultiProfileRunner:
 
     def _scan_all(self):
         self._scan_count += 1
-        fg = "?"
-        try:
-            fg = self.news.fear_greed_value()
-        except Exception:
-            pass
+        fg = self._fear_greed_from_cache()
         logger.info(f"[MultiProfile] ═══ Scan #{self._scan_count} | F&G={fg} | ${int(START_BALANCE)} per profile/exchange ═══")
 
         for ex_name, exchange in self.active_exchanges.items():
@@ -580,18 +566,7 @@ class MultiProfileRunner:
 
             logger.info(f"[MultiProfile] Signals ({ex_name}):\n{self.selector.summary_table(all_opps)}")
 
-            snapshots  = self._collect_snapshots(exchange.name, all_base)
-            news_data  = self._load_news_cache()
-            prof_stats = self._collect_profile_stats()
-            open_pos   = self._collect_open_positions()
-
-            self.claude.analyze_now(snapshots, news_data, prof_stats, open_pos)
-
-            bias    = self.claude.market_bias()
-            rm      = self.claude.risk_multiplier()
-            eff_min = BASE_MIN_CONF * rm
-
-            logger.info(f"[MultiProfile] Claude: bias={bias} rm={rm:.2f}x eff_min={eff_min:.2f}")
+            eff_min = BASE_MIN_CONF
 
             flat_opps = sorted(
                 [opp for opps in all_opps.values() for opp in opps],
@@ -609,26 +584,10 @@ class MultiProfileRunner:
                     if opp.direction == "skip":
                         continue
 
-                    coin     = opp.symbol.split("/")[0]
-                    dec      = self.claude.get_decision(coin)
-                    action   = dec["action"]
-                    conf_adj = dec["confidence_adj"]
-
-                    if action == "skip" and opp.confidence < 0.80:
-                        continue
-                    if action == "short_futures" and opp.direction == "buy":
-                        conf_adj *= 0.60
-                    elif action in ("long_spot","long_futures") and opp.direction == "sell":
-                        conf_adj *= 0.60
-
-                    adj_conf = round(opp.confidence * conf_adj, 3)
-                    if adj_conf < eff_min:
+                    if opp.confidence < eff_min:
                         continue
 
-                    orig_conf      = opp.confidence
-                    opp.confidence = adj_conf
-                    traded         = inst.executor.execute(exchange, opp)
-                    opp.confidence = orig_conf
+                    traded = inst.executor.execute(exchange, opp)
 
                     if traded:
                         executed += 1
@@ -647,36 +606,18 @@ class MultiProfileRunner:
 
         self._save_comparison()
 
-    def _refresh_news(self):
-        try: self.news.scan(force=True)
-        except Exception: pass
-
     # ── Helpers ───────────────────────────────────────────────────────
 
-    def _collect_snapshots(self, ex_name, symbols):
-        """FIXED: Case-insensitive exchange name matching."""
-        result = {}
-        try:
-            for sym in symbols:
-                snaps = {
-                    tf: snap
-                    for (en, s, tf), (snap, _) in self.selector._tf_cache.items()
-                    if en.lower() == ex_name.lower() and s == sym
-                }
-                if snaps:
-                    result[sym] = snaps
-        except Exception:
-            pass
-        return result
-
-    def _load_news_cache(self):
+    @staticmethod
+    def _fear_greed_from_cache() -> str:
         try:
             p = Path("data/news_cache.json")
             if p.exists():
-                return json.loads(p.read_text(encoding="utf-8"))
+                fg = json.loads(p.read_text(encoding="utf-8")).get("fear_greed") or {}
+                return str(fg.get("value", "?"))
         except Exception:
             pass
-        return {}
+        return "?"
 
     def _collect_profile_stats(self):
         stats = {}
@@ -773,8 +714,6 @@ class MultiProfileRunner:
             "profiles":       results,
             "ranked":         [r["name"] for r in ranked],
             "recommendation": self._recommendation(results, leader),
-            "claude_bias":    self.claude.market_bias(),
-            "claude_summary": self.claude.last_summary(),
             "arbitrage":      arb_summary,
             "exchanges":      list(self.active_exchanges.keys()),
         }

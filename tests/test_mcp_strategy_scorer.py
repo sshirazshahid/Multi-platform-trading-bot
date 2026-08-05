@@ -68,21 +68,11 @@ def _strip_ids(actions):
     return out
 
 
-def test_entry_identical_claude_available_vs_unavailable(monkeypatch):
-    # If the deterministic path ever consulted Claude, this raise would surface.
-    def _boom(*a, **k):
-        raise AssertionError("Claude CLI must never be called on the entry path")
-
-    monkeypatch.setattr(mss, "_HAS_CLAUDE_GUARD", True, raising=False)
-
+def test_entry_identical_claude_available_vs_unavailable():
+    # Deterministic path must not depend on any LLM availability flag.
     brain = MCPBrain()
-    # Make any attempt to call the CLI explode.
-    import utils.claude_client as cc
-    monkeypatch.setattr(cc, "call_claude_cli", _boom, raising=False)
-
     with_claude = _run(brain, claude_available=True)
     without_claude = _run(brain, claude_available=False)
-
     assert _strip_ids(with_claude) == _strip_ids(without_claude)
 
 

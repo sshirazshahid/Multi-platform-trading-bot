@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mission Deck</title>
-<link rel="stylesheet" href="/static/deck.css?v=1" />
+<link rel="stylesheet" href="/static/deck.css?v=3" />
 </head>
 <body>
 
@@ -17,6 +17,7 @@
     <span class="badge ghost" id="profile-badge">—</span>
   </div>
   <div class="rail-right">
+    <a class="rbtn" href="/classic" title="Operator console — mutate state here">Operate</a>
     <span class="conn" id="conn-state" data-state="init">connecting</span>
     <span class="mono dim" id="clock">--:--:--</span>
     <button type="button" class="rbtn" id="btn-pause" aria-pressed="false" title="Pause polling (P)">Pause</button>
@@ -25,15 +26,19 @@
   </div>
 </header>
 
-<!-- ══════════ verdict ══════════ -->
-<div class="verdict-wrap">
+<!-- ══════════ health + verdict (operator questions 1 & 4) ══════════ -->
+<div class="verdict-wrap" id="verdict-wrap">
+  <p class="sec-label">Health</p>
+  <div class="health-strip" id="health-strip" aria-label="Bot health snapshot"></div>
   <p class="verdict" id="verdict">Reading state…</p>
   <div class="alarms" id="alarms"></div>
+  <div class="next-actions" id="next-actions" hidden></div>
 </div>
 
 <main class="deck" id="deck">
 
-  <!-- ─── row 1: three heroes ─── -->
+  <!-- ─── performance ─── -->
+  <p class="sec-label span12">Performance</p>
   <section class="panel span4" id="p-wr" data-panel="goals">
     <div class="phead">
       <h2>Win rate <span class="sub" id="wr-lane-label">7 days</span></h2>
@@ -72,7 +77,8 @@
     <p class="src" id="wallet-src"></p>
   </section>
 
-  <!-- ─── row 2: the funnel ─── -->
+  <!-- ─── bottleneck ─── -->
+  <p class="sec-label span12">Bottleneck</p>
   <section class="panel span8" id="p-funnel" data-panel="candidates">
     <div class="phead">
       <h2>Decision funnel <span class="sub" id="funnel-window">24 h</span></h2>
@@ -115,7 +121,8 @@
     <p class="src">Newest rows from the decision log. New arrivals flash.</p>
   </section>
 
-  <!-- ─── row 4: positions ─── -->
+  <!-- ─── book ─── -->
+  <p class="sec-label span12">Book</p>
   <section class="panel span12" id="p-pos" data-panel="positions">
     <div class="phead">
       <h2>Positions <span class="sub" id="pos-count">—</span></h2>
@@ -135,7 +142,8 @@
     <p class="src" id="pos-src"></p>
   </section>
 
-  <!-- ─── row 5: research lanes ─── -->
+  <!-- ─── research + risk ─── -->
+  <p class="sec-label span12">Research &amp; risk</p>
   <section class="panel span6" id="p-lanes" data-panel="funnel">
     <div class="phead"><h2>Evidence lanes</h2><span class="pill ghost" id="lanes-age">—</span></div>
     <div class="lanes" id="lane-list"></div>
@@ -150,24 +158,10 @@
     <p class="src" id="risk-src"></p>
   </section>
 
-  <!-- ─── row 6: MTSI micro inventory (research) ─── -->
-  <section class="panel span12" id="p-mtsi" data-panel="mtsi">
-    <div class="phead">
-      <h2>MTSI micro inventory <span class="sub">≤ $1 gross · many small clips</span></h2>
-      <span class="pill ghost" id="mtsi-verdict">—</span>
-    </div>
-    <div class="kpi-row" id="mtsi-kpis"></div>
-    <div class="gl-bars" id="mtsi-hist" aria-label="Clip PnL histogram"></div>
-    <div class="spark-wrap">
-      <svg id="mtsi-candle" viewBox="0 0 320 48" preserveAspectRatio="none" role="img" aria-label="Optional mid sparkline"></svg>
-    </div>
-    <p class="src" id="mtsi-src"></p>
-  </section>
-
 </main>
 
 <footer class="foot">
-  <span id="foot-note">Read-only console. Operator actions live in the <a href="/classic" id="classic-link">classic console</a>.</span>
+  <span id="foot-note">Read-only deck. Mutating actions (clear latch, restart, kill switch) live in the <a href="/classic" id="classic-link">operator console</a>.</span>
   <span class="mono dim" id="poll-note"></span>
 </footer>
 
@@ -195,6 +189,6 @@
 
 <div class="toast-stack" id="toasts" aria-live="polite"></div>
 
-<script src="/static/deck.js?v=1"></script>
+<script src="/static/deck.js?v=3"></script>
 </body>
 </html>

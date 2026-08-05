@@ -7,6 +7,8 @@ auto-restart (the 24/7-availability single point of failure).
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import builtins
 from pathlib import Path
 from types import SimpleNamespace
@@ -61,7 +63,7 @@ def test_watchdog_crash_budget_exhaustion_is_nonzero(monkeypatch):
 
 
 def test_engine_does_not_swallow_nonzero_system_exit():
-    source = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    source = bot_engine_source_for_grep()
     run_start = source.index("    def run(self):")
     shutdown_start = source.index("    def _shutdown(self):", run_start)
     run_block = source[run_start:shutdown_start]

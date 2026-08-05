@@ -126,3 +126,35 @@ def test_deck_reads_win_rate_from_the_canonical_goal_lanes():
     js = _deck_js()
     assert "paper_futures_7d" in js, "deck must name the canonical goal lane"
     assert "/api/goals" in js
+
+
+# -- operator-dashboard structure (dashboard-builder) -------------------------
+
+def test_deck_is_organized_around_operator_questions():
+    """Health → performance → bottleneck → book → research; next actions deep-link
+    into /classic?ops=… rather than calling mutating endpoints from the deck."""
+    html = DECK_HTML.read_text(encoding="utf-8")
+    js = _deck_js()
+    for marker in (
+        'id="health-strip"',
+        'id="next-actions"',
+        ">Health</p>",
+        ">Performance</p>",
+        ">Bottleneck</p>",
+        ">Book</p>",
+        "Research &amp; risk",
+        'href="/classic"',
+    ):
+        assert marker in html, f"deck.html missing operator-structure marker: {marker}"
+    assert "renderHealth" in js and "renderNextActions" in js
+    assert "/classic?ops=clear-incident" in js
+    assert "p-mtsi" not in js and "MTSI" not in js
+    assert "mtsi" not in _api_paths_referenced()
+
+
+def test_classic_console_handles_ops_deep_links():
+    """Deck CTAs land on /classic?ops=<id>; classic must open the ops rail."""
+    app_js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'get("ops")' in app_js
+    assert "$(\"ops-rail\").classList.add(\"show\")" in app_js or '$("ops-rail").classList.add("show")' in app_js
+    assert '[data-op="${opsId}"]' in app_js

@@ -8,17 +8,14 @@ The single biggest negative driver is the bot shorting alts while BTC trends up
 on both 4h and 1h. SHORTS_REQUIRE_BTC_BEAR (config.py) is False so the
 existing tier path lets these through; this filter is the explicit gate.
 
-Idiosyncratic catalyst escape hatch: when the news scanner has tagged the
-symbol with a bearish-impact headline in the last 30 min, the filter ALLOWS
-the short -- the BTC-trend signal is not predictive against a fresh negative
-catalyst on the specific asset.
+Idiosyncratic catalyst escape hatch removed (De-Emotion 2026-08-04): news
+sentiment no longer overrides the BTC-trend or score gates.
 
 2026-05-27 (454-trade hardening): shorts are 2.5x worse than longs across
 179 vs 275 trades (-$87 vs -$21). Two additional score/confidence gates are
 enforced regardless of BTC trend alignment:
   - mcp_score    >= SHORT_SIDE_FILTER["min_mcp_score"]    (default 75)
   - confidence   >= SHORT_SIDE_FILTER["min_confidence"]   (default 0.70)
-Both are bypassed by the news_bearish_catalyst escape hatch.
 Missing score/confidence values (None / 0.0) trigger the gate -- fail-closed.
 
 The filter is stateless and side-effect-free. Callers log the decision.
@@ -55,9 +52,7 @@ def evaluate(
     symbol                : 'ETH/USDT' or 'ETH/USDT:USDT' -- used in reason text
     btc_4h_uptrend        : True when BTC 4h EMA20 > EMA50
     btc_1h_uptrend        : True when BTC 1h EMA20 > EMA50
-    symbol_news_sentiment : NewsScanner.symbol_sentiment(symbol) result.
-                            < 0 means recent bearish headlines on this symbol.
-                            None means scanner unavailable.
+    symbol_news_sentiment : Deprecated (De-Emotion); ignored if passed.
     mcp_score             : Algorithmic score (0-100). None treated as 0.
     confidence            : Trade confidence (0-1). None treated as 0.
     min_mcp_score         : Minimum mcp_score for shorts (default from config).
@@ -70,14 +65,6 @@ def evaluate(
     """
     if (side or "").lower() != "sell":
         return ShortFilterDecision(False, "not_short")
-
-    # Idiosyncratic bearish catalyst on this symbol -- let the short through.
-    # This escape hatch overrides ALL gates below (BTC trend + score gates).
-    if symbol_news_sentiment is not None and symbol_news_sentiment < 0:
-        return ShortFilterDecision(
-            False,
-            f"news_bearish_catalyst({symbol_news_sentiment})",
-        )
 
     # Score gate: shorts need a stronger signal than longs.
     # Fail-closed: missing score (None/0) fails the gate.

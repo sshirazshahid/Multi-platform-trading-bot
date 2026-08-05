@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 import config
+from tests.config_source import config_source_for_grep
 from core.order_manager import build_sl_tp_order_params
 
 
@@ -149,7 +150,7 @@ def test_config_flag_exists_and_defaults_on():
     # approved plan. Inspect the declared fallback rather than the imported
     # runtime value because a developer's .env may deliberately exercise the
     # documented revert switch.
-    source = Path(config.__file__).read_text(encoding="utf-8")
+    source = config_source_for_grep()
     assert 'os.getenv("SLTP_TRIGGER_MARK_PRICE", "true")' in source
     assert isinstance(getattr(config, "SLTP_TRIGGER_MARK_PRICE", None), bool)
 

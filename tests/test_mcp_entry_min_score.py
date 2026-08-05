@@ -11,8 +11,9 @@ layers_ok gates are NOT modified by this knob.
 """
 from __future__ import annotations
 
+from tests.mcp_brain_source import mcp_brain_source_for_grep
+
 import os
-from pathlib import Path
 
 import config
 import core.mcp_brain as mb
@@ -47,7 +48,7 @@ def test_env_50_admits_score_55_that_default_rejects(monkeypatch):
 def test_gate_sites_use_the_floor_helper():
     """Source pin: both rule_gate comparisons must route through the helper
     so the env knob cannot silently miss one path (repo scan-test style)."""
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = mcp_brain_source_for_grep()
     assert 'result["score"] >= 66' not in src, "standard gate must use _entry_score_floor"
     assert '_SM_gate.get("entry_threshold", 65) and result["layers_ok"]' not in src, (
         "scalp gate must use _entry_score_floor"

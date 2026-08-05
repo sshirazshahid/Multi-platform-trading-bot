@@ -16,7 +16,9 @@ Conventions:
 
 from __future__ import annotations
 
-import hashlib
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.config_source import config_source_for_grep
+
 import importlib.util
 import inspect
 import json
@@ -34,7 +36,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 import core.mcp_brain as mb  # noqa: E402
 from core.bot_engine import BotEngine  # noqa: E402
+from core.decision_provenance import runtime_config_hash  # noqa: E402
 from core.mcp_brain import MCPBrain  # noqa: E402
+
+
+def test_runtime_config_hash_works_with_config_package():
+    """De-Emotion D1: config is a package — hashing must not require config.py."""
+    assert not (ROOT / "config.py").exists()
+    assert (ROOT / "config" / "__init__.py").exists()
+    digest = runtime_config_hash()
+    assert isinstance(digest, str) and len(digest) == 64
+    assert int(digest, 16) >= 0  # valid hex
+
+
+def test_runtime_config_hash_survives_stale_config_py_file_pointer(monkeypatch):
+    """Long-running processes may keep config.__file__ pointing at deleted config.py."""
+    import config as cfg
+    import core.decision_provenance as dp
+
+    monkeypatch.setattr(cfg, "__file__", str(ROOT / "config.py"), raising=False)
+    digest = dp.runtime_config_hash()
+    assert isinstance(digest, str) and len(digest) == 64
+
 
 
 def _load_warehouse_module():
@@ -52,24 +75,6 @@ def _load_warehouse_module():
 def _assert_uuid4(value: str):
     u = uuid_mod.UUID(value)
     assert u.version == 4
-
-
-def _make_brain_for_parse(monkeypatch, tmp_path, claude_result, meta_fill=None):
-    """MCPBrain stub good enough to run _ask_claude_portfolio's parse loop."""
-    brain = object.__new__(MCPBrain)
-    brain._accuracy = MagicMock()
-    brain._accuracy.stats.return_value = {}
-    brain._last_decisions = {}
-    brain._recent_tape_summary = lambda coins: []
-
-    def _fake_call(prompt, system_prompt, call_type="portfolio", meta_out=None):
-        if meta_out is not None and meta_fill:
-            meta_out.update(meta_fill)
-        return claude_result
-
-    brain._call_claude = _fake_call
-    monkeypatch.setattr(mb, "DECISION_LOG", tmp_path / "mcp_decisions.jsonl")
-    return brain
 
 
 def _open_action(symbol="BTC/USDT", **over):
@@ -90,42 +95,7 @@ def _open_action(symbol="BTC/USDT", **over):
     return a
 
 
-# ── Spec 1: decision_id minted per ACTION; uuid4 format; one sha per response ──
-
-
-def test_decision_id_per_action_uuid4_and_shared_response_sha(monkeypatch, tmp_path):
-    raw_text = '{"actions": [...synthetic raw...]}'
-    result = {"actions": [_open_action("BTC/USDT"), _open_action("ETH/USDT", side="sell")]}
-    brain = _make_brain_for_parse(
-        monkeypatch, tmp_path, result, meta_fill={"raw": raw_text, "attempt": 2, "repaired": False}
-    )
-
-    actions = brain._ask_claude_portfolio(["BTC", "ETH"], {}, {}, [], {}, {}, [])
-
-    assert len(actions) == 2
-    ids = {a["decision_id"] for a in actions}
-    assert len(ids) == 2  # one fresh id PER action
-    for a in actions:
-        _assert_uuid4(a["decision_id"])
-    expected_sha = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
-    assert {a["response_sha256"] for a in actions} == {expected_sha}
-
-
-# ── Spec 2: source tagging (claude + algo); fresh ids, no reuse ──
-
-
-def test_claude_actions_tagged_source_claude_with_meta(monkeypatch, tmp_path):
-    result = {"actions": [_open_action()]}
-    brain = _make_brain_for_parse(
-        monkeypatch, tmp_path, result, meta_fill={"raw": "RAW", "attempt": 2, "repaired": True}
-    )
-
-    actions = brain._ask_claude_portfolio(["BTC"], {}, {}, [], {}, {}, [])
-
-    a = actions[0]
-    assert a["source"] == "claude"
-    assert a["attempt"] == 2
-    assert a["repaired"] is True
+# ── Spec 2: source tagging (algo); fresh ids, no reuse ──
 
 
 def test_algo_monitor_advice_fresh_ids_source_algo():
@@ -151,8 +121,8 @@ def test_algo_monitor_advice_fresh_ids_source_algo():
 
 
 def test_algo_portfolio_builder_tags_provenance_source_pin():
-    """Both actions.append sites in _algorithmic_portfolio mint id + algo tag."""
-    src = inspect.getsource(MCPBrain._algorithmic_portfolio)
+    """Both actions.append sites in algorithmic_portfolio mint id + algo tag."""
+    src = (ROOT / "core" / "scoring" / "portfolio.py").read_text(encoding="utf-8")
     assert src.count('"source": "algo"') >= 2
     assert src.count('"decision_id": str(uuid.uuid4())') >= 2
 
@@ -163,60 +133,12 @@ def test_analyze_portfolio_merge_backstop_source_pin():
     assert "decision_id" in src and "uuid.uuid4()" in src
 
 
-# ── Spec 3: pre-clamp capture + clamps + symbol_unlisted LOG-ONLY ──
-
-
-def test_out_of_bounds_leverage_size_clamped_and_raw_recorded(monkeypatch, tmp_path):
-    result = {
-        "actions": [_open_action("DOGE/USDT", leverage=99, size_pct=250.0, sl_pct=9.9, tp_pct=0.4)]
-    }
-    brain = _make_brain_for_parse(
-        monkeypatch, tmp_path, result, meta_fill={"raw": "RAW", "attempt": 1}
-    )
-
-    actions = brain._ask_claude_portfolio(["BTC", "ETH"], {}, {}, [], {}, {}, [])
-
-    assert len(actions) == 1  # LOG-ONLY: unlisted symbol still flows
-    a = actions[0]
-    # pre-clamp raws
-    assert a["leverage_raw"] == 99
-    assert a["size_pct_raw"] == 250.0
-    assert a["sl_pct_raw"] == 9.9
-    assert a["tp_pct_raw"] == 0.4
-    # parse-time clamps mirror config bounds
-    import config
-
-    max_lev = max(int(t.get("leverage", 1)) for t in config.LEVERAGE_TIERS.values())
-    assert 1 <= a["leverage"] <= max_lev
-    assert 0.0 < a["size_pct"] <= 100.0
-    assert "leverage" in a["clamped"] and "size_pct" in a["clamped"]
-    assert a["clamped"]["leverage"]["from"] == 99
-    assert a["clamped"]["size_pct"]["from"] == 250.0
-    # DOGE not in the analyzed coin set → flagged, NOT rejected
-    assert a["symbol_unlisted"] is True
-
-
-def test_in_bounds_action_not_marked_clamped_or_unlisted(monkeypatch, tmp_path):
-    result = {"actions": [_open_action("BTC/USDT", leverage=2, size_pct=5.0)]}
-    brain = _make_brain_for_parse(
-        monkeypatch, tmp_path, result, meta_fill={"raw": "RAW", "attempt": 1}
-    )
-
-    actions = brain._ask_claude_portfolio(["BTC"], {}, {}, [], {}, {}, [])
-
-    a = actions[0]
-    assert a["leverage"] == 2
-    assert a["size_pct"] == 5.0
-    assert "clamped" not in a  # recorded only when changed
-    assert a["symbol_unlisted"] is False
-
-
 # ── Spec 4: rejection rows ──
 
 
 def test_log_rejection_appends_typed_row(monkeypatch, tmp_path):
     log = tmp_path / "mcp_decisions.jsonl"
-    monkeypatch.setattr(mb, "DECISION_LOG", log)
+    monkeypatch.setattr("core.scoring.brain.DECISION_LOG", log)
     brain = object.__new__(MCPBrain)
 
     brain.log_rejection("did-123", "BTC/USDT", "cycle_cap", "cycle_cap")
@@ -232,7 +154,7 @@ def test_log_rejection_appends_typed_row(monkeypatch, tmp_path):
 
 def test_engine_log_rejection_routes_to_brain(monkeypatch, tmp_path):
     log = tmp_path / "mcp_decisions.jsonl"
-    monkeypatch.setattr(mb, "DECISION_LOG", log)
+    monkeypatch.setattr("core.scoring.brain.DECISION_LOG", log)
     eng = object.__new__(BotEngine)
     eng.mcp_brain = object.__new__(MCPBrain)
 
@@ -298,14 +220,14 @@ def test_every_return_false_in_execute_open_preceded_by_reason_stash():
 
 def test_cycle_cap_drops_logged_source_pin():
     """Capped tail (actions[MAX_ACTIONS_PER_CYCLE:]) is logged as cycle_cap."""
-    src = Path(ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "actions[MAX_ACTIONS_PER_CYCLE:]" in src
     assert '"cycle_cap"' in src
 
 
 def test_execute_open_failure_logged_at_caller_source_pin():
     """_execute_open False → caller logs action.get('reject_reason','unspecified')."""
-    src = Path(ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert 'action.get("reject_reason", "unspecified")' in src
 
 
@@ -514,7 +436,7 @@ def test_insert_or_ignore_collision_first_decision_id_survives(wh):
 
 def test_decision_log_rotation_archives_instead_of_truncating(monkeypatch, tmp_path):
     log = tmp_path / "mcp_decisions.jsonl"
-    monkeypatch.setattr(mb, "DECISION_LOG", log)
+    monkeypatch.setattr("core.scoring.brain.DECISION_LOG", log)
     brain = object.__new__(MCPBrain)
 
     pad_line = json.dumps({"ts": "t", "type": "entry", "decisions": {"pad": "x" * 1000}}) + "\n"
@@ -550,10 +472,6 @@ def test_warm_restart_discards_position_advice_keeps_timing(monkeypatch, tmp_pat
                 "saved_at": time.time(),  # fresh (<10 min) — old code would restore
                 "last_entry_run": 123.0,
                 "last_position_run": 124.0,
-                "api_calls_this_hour": 7,
-                "hour_start": 125.0,
-                "claude_consecutive_fails": 1,
-                "claude_backoff_until": 0.0,
                 "decisions": {"BTC": {"action": "BUY", "confidence": 0.7, "reason": "r"}},
                 "position_advice": {
                     "pid1": {"action": "CLOSE", "confidence": 0.9, "decision_id": "stale-id"}
@@ -562,7 +480,7 @@ def test_warm_restart_discards_position_advice_keeps_timing(monkeypatch, tmp_pat
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mb, "STATE_FILE", state)
+    monkeypatch.setattr("core.scoring.brain.STATE_FILE", state)
 
     brain = object.__new__(MCPBrain)
     brain._last_decisions = {}
@@ -571,5 +489,5 @@ def test_warm_restart_discards_position_advice_keeps_timing(monkeypatch, tmp_pat
 
     assert brain._last_position_advice == {}  # stale advice never consumed
     assert brain._last_decisions["BTC"]["action"] == "BUY"  # decisions kept
-    assert brain._last_entry_run == 123.0  # timing/budget fields kept
-    assert brain._api_calls_this_hour == 7
+    assert brain._last_entry_run == 123.0  # timing fields kept
+    assert brain._last_position_run == 124.0

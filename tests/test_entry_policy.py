@@ -228,9 +228,10 @@ def test_mcp_is_only_a_deterministic_registry_compatibility_alias():
 
     from core.bot_engine import BotEngine
 
-    source = inspect.getsource(BotEngine._claude_portfolio_cycle)
+    source = inspect.getsource(BotEngine._portfolio_cycle)
     assert 'SIGNAL_SOURCE in ("mcp", "mcp_det")' in source
     assert "last_fund_ops" not in source
+    assert "self.mcp_brain" not in source.split("else:")[-1] or "raise ValueError" in source
 
 
 def test_production_order_manager_rechecks_policy_at_final_open_boundary(monkeypatch):
@@ -276,8 +277,9 @@ def test_order_manager_rechecks_the_upstream_authorized_identity(monkeypatch):
 def test_all_known_entry_lanes_reference_the_shared_policy():
     root = Path(__file__).resolve().parents[1]
     paths = (
-        "core/bot_engine.py",
-        "core/order_manager.py",
+        "core/engine/entry_exec.py",
+        "core/engine/monitors.py",
+        "core/order_mgmt/entry.py",
         "core/deep_breakout_lane.py",
         "core/arbitrage_engine.py",
         "core/direct_executor.py",

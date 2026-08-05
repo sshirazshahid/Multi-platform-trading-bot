@@ -14,9 +14,12 @@ writes. In LIVE the cancel+replace must still happen.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import config
 import core.bot_engine as be
 from core.bot_engine import BotEngine
 
@@ -47,7 +50,7 @@ def _make_exchange(last=750.0):
 
 def test_replace_exchange_sl_paper_no_live_write(monkeypatch):
     """DRY_RUN: returns True, mutates in-memory only, issues NO venue write."""
-    monkeypatch.setattr(be, "DRY_RUN", True)
+    monkeypatch.setattr(config, "DRY_RUN", True)
     eng = _make_engine()
     pos = _make_pos()
     ex = _make_exchange(last=750.0)
@@ -65,7 +68,7 @@ def test_replace_exchange_sl_paper_no_live_write(monkeypatch):
 
 def test_replace_exchange_sl_live_still_writes(monkeypatch):
     """LIVE: the gate must NOT short-circuit — cancel + replace must run."""
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     eng = _make_engine()
     pos = _make_pos()
     ex = _make_exchange(last=750.0)
@@ -84,7 +87,7 @@ def test_auto_transfer_gated_by_dry_run():
     transfer site missed by the 2026-05-31 PAPER->live leak fix; it now mirrors
     set_leverage / _execute_fund_ops (gated on DRY_RUN)."""
     from pathlib import Path
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "did_xfer = True if DRY_RUN else exchange.transfer" in src, (
         "auto-transfer must be DRY_RUN-gated: the live exchange.transfer() may only run "
         "when not DRY_RUN; PAPER simulates in-memory")

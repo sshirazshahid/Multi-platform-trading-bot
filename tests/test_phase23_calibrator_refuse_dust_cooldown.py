@@ -33,6 +33,8 @@ Phase 23 fix:
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 # ─── Cooldown attribute initialized in BotEngine.__init__ ────────────
@@ -40,7 +42,7 @@ from pathlib import Path
 
 def test_dust_skip_cooldown_attr_initialized():
     """BotEngine.__init__ must initialize the cooldown dict."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Find init region
     init_start = src.index("def __init__(self):")
     # Walk forward to next 'def ' to bound init
@@ -57,7 +59,7 @@ def test_dust_skip_cooldown_attr_initialized():
 def test_cooldown_check_runs_before_mode_gates():
     """Cooldown check must short-circuit BEFORE any expensive work
     (mode gates, universe filter, MCP scoring). Cheap early-exit."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     eo_idx = src.index("def _execute_open(self, action: dict)")
     mode_idx = src.index("OPERATING_MODE == \"OBSERVATION\"", eo_idx)
     head = src[eo_idx:mode_idx]
@@ -67,7 +69,7 @@ def test_cooldown_check_runs_before_mode_gates():
 
 def test_cooldown_check_uses_get_with_default():
     """Use .get() with default so missing key never raises."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     eo_idx = src.index("def _execute_open(self, action: dict)")
     head = src[eo_idx:eo_idx + 2000]
     assert "self._dust_skip_cooldown.get(symbol" in head
@@ -78,7 +80,7 @@ def test_cooldown_check_uses_get_with_default():
 
 def test_dust_skip_sets_cooldown():
     """size<step must record cooldown timestamp (current_time + 1800s)."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     step_idx = src.index("size {size:.8f} < step")
     block = src[max(0, step_idx - 600):step_idx + 100]
     assert "self._dust_skip_cooldown[symbol]" in block
@@ -88,7 +90,7 @@ def test_dust_skip_sets_cooldown():
 def test_dust_skip_log_mentions_cooldown():
     """Log line must say cooldown is set so operators understand
     why the same symbol stops being re-pitched."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "skip + 30min cooldown" in src
 
 
@@ -98,7 +100,7 @@ def test_dust_skip_log_mentions_cooldown():
 def test_calibrator_hard_refuse_threshold_is_30_percent_phase40():
     """When calibrator has data and predicts <40% win, refuse the
     trade outright instead of soft-discounting through the 0.7 floor."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     cal_idx = src.index("self.order_mgr.calibrator.calibrate(")
     block = src[cal_idx:cal_idx + 3000]
     assert "_calibrated < 0.30" in block, \
@@ -112,7 +114,7 @@ def test_calibrator_refuse_also_sets_cooldown():
     dead signal isn't re-pitched on every 5min cycle. (Window widened
     2026-06-11: the refuse now sits inside the opt-in
     calibrator_hard_refuse_enabled branch, which added lines.)"""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     cal_idx = src.index("self.order_mgr.calibrator.calibrate(")
     block = src[cal_idx:cal_idx + 3000]
     refuse_idx = block.index("_calibrated < 0.30")
@@ -128,7 +130,7 @@ def test_zero_calibrator_no_longer_silently_skipped():
     """The Phase 18 `if _calibrated > 0` guard would silently skip
     the catastrophic 0.0 case. Fixed by switching to divergence-based
     gating: `abs(_calibrated - _raw_conf) > 0.02`."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     cal_idx = src.index("self.order_mgr.calibrator.calibrate(")
     block = src[cal_idx:cal_idx + 3000]
     # New divergence guard must be present
@@ -142,14 +144,14 @@ def test_zero_calibrator_no_longer_silently_skipped():
 
 def test_phase18_soft_mult_clamp_preserved():
     """Phase 18 [0.7, 1.3] symmetric clamp must remain on the soft path."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "max(0.7, min(1.3," in src
 
 
 def test_phase18_multiplier_ordering_preserved():
     """ev_mult * cal_mult * regime_mult * notional ordering invariant.
     Phase 18 + 22 tests pin this; Phase 23 must not break it."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     ev_idx = src.index("size_fraction *= _ev_mult")
     cal_idx = src.index("size_fraction *= _cal_mult")
     regime_idx = src.index("size_fraction *= _regime_size_mult")
@@ -164,7 +166,7 @@ def test_phase18_multiplier_ordering_preserved():
 def test_cooldown_dict_typed_and_initialized_empty():
     """Type annotation pins the dict shape; empty {} default makes
     the .get() lookup safe for any never-cooled symbol."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     init_start = src.index("def __init__(self):")
     next_def = src.index("\n    def ", init_start + 10)
     init_block = src[init_start:next_def]

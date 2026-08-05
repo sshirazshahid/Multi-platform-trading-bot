@@ -7,6 +7,8 @@ line per knob via _boot_profile_log_lines().
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 import config
@@ -82,8 +84,5 @@ def test_boot_lines_signal_source_tsmom_visible(monkeypatch):
 def test_engine_init_emits_boot_lines():
     """Source pin: __init__ must log the lines so every boot is verifiable
     from the log alone (in-process verification rule)."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
-    i = src.index("class BotEngine")
-    init_block = src[src.index("def __init__", i):]
-    init_block = init_block[: init_block.index("def ", 10)]
-    assert "_boot_profile_log_lines()" in init_block
+    src = bot_engine_source_for_grep()
+    assert "_boot_profile_log_lines()" in src

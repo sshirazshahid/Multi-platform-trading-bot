@@ -37,6 +37,9 @@ fire independently.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.order_manager_source import order_manager_impl_source
+
 import time as _t
 from pathlib import Path
 
@@ -204,7 +207,7 @@ def test_execute_open_blocks_on_active_cooldown():
     mode ('log advisory only, don't block') let the Jun-11 revenge
     re-entry tape happen — 9-12 re-shorts per symbol into 70 stop-losses.
     The is_sl_cooldown_active hit must be followed by `return False`."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     idx = src.index("self.risk.is_sl_cooldown_active(")
     block = src[idx:idx + 600]
     assert "return False" in block, (
@@ -231,7 +234,7 @@ def test_cooldown_persists_across_restart(tmp_path, monkeypatch):
 
 def test_finalize_close_records_sl_hit():
     """On stop_loss exit, _finalize_close calls risk.note_sl_hit."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     fc_idx = src.index("def _finalize_close(self, pos: Position")
     fc_block = src[fc_idx:fc_idx + 2000]
     assert 'reason == "stop_loss"' in fc_block
@@ -241,7 +244,7 @@ def test_finalize_close_records_sl_hit():
 def test_finalize_close_only_records_on_sl_not_other_reasons():
     """Make sure note_sl_hit is gated by the stop_loss reason check —
     we don't want trailing/AGE/ghost exits to start the cooldown."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     fc_idx = src.index("def _finalize_close(self, pos: Position")
     fc_block = src[fc_idx:fc_idx + 2000]
     # The note_sl_hit call must appear AFTER the if-stop_loss guard
@@ -252,7 +255,7 @@ def test_finalize_close_only_records_on_sl_not_other_reasons():
 
 def test_execute_open_checks_cooldown_early():
     """Cooldown check must run before MCP/risk eval — cheap early exit."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     eo_idx = src.index("def _execute_open(self, action: dict)")
     # Window widened 3000→3500 (2026-06-12): provenance reject_reason stashes
     # added ~3 one-liner lines before this point; check order is unchanged.
@@ -265,7 +268,7 @@ def test_execute_open_checks_cooldown_early():
 
 def test_execute_open_logs_on_block():
     """Operators see the block in logs — Phase 29 prefix is the marker."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "[Risk29]" in src
 
 

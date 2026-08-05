@@ -147,6 +147,7 @@ def test_write_scopes_allow_only_bounded_recovery_data(policy, tmp_path):
     "scope,path,target",
     [
         (WriteScope.SELF_HEALING_STATE, "config.py", None),
+        (WriteScope.SELF_HEALING_STATE, "config/modes.py", None),
         (WriteScope.SELF_HEALING_STATE, "core/risk_manager.py", None),
         (WriteScope.SELF_HEALING_REPORT, "strategies/dca_strategy.py", None),
         (WriteScope.DERIVED_CACHE, "data/ohlcv_cache/evil.py", "ohlcv"),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
@@ -7,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _engine_source() -> str:
-    return (ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    return bot_engine_source_for_grep()
 
 
 def test_heartbeat_is_published_atomically_and_failures_are_visible():

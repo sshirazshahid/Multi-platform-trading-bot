@@ -12,6 +12,8 @@ all-exchanges scope.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,8 +81,7 @@ def test_execute_open_scopes_dedup_across_all_exchanges():
 
     Memory: project_may13_cascade_fixes_2026_05_13.md.
     """
-    src = (Path(__file__).resolve().parents[1]
-           / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Locate the per-base-asset dedup block — match the comment + check.
     m = re.search(
         r"No duplicate base asset[\s\S]{0,500}?all_open\s*=\s*self\.tracker\.get_open\s*\(([^)]*)\)",

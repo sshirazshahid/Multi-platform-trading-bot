@@ -63,7 +63,7 @@ def _om(monkeypatch):
     om.trailing.update.side_effect = lambda pos, price: (
         False, "none", float(pos.stop_loss or 0.0))
     om._early_breakeven_move = lambda pos, price, eff: eff
-    monkeypatch.setattr("core.order_manager._should_fire_partial_tp",
+    monkeypatch.setattr("core.order_mgmt.monitor._should_fire_partial_tp",
                         lambda *a, **k: (False, 0.0, 0.0))
     # Isolate from NEAR_TARGET_EXIT_ENABLED=.env — planned-TP-first would
     # otherwise fire TAKE_PROFIT before the SL/TP independence block under test.

@@ -233,7 +233,7 @@ jobs:
       - name: Bandit SAST scan (bot core, advisory)
         continue-on-error: true
         run: >
-          bandit -c pyproject.toml -r core/ exchanges/ config.py
+          bandit -c pyproject.toml -r core/ exchanges/ config/
           --exclude "*/tests/*"
 
       # Compare a fresh scan against committed baseline (results only, ignore metadata)

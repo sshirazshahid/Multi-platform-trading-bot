@@ -21,6 +21,8 @@ knowledge_model.py:284).
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
@@ -35,7 +37,7 @@ def test_risk_config_has_caution_flags_default_false():
 def test_caution_symbol_block_wrapped_in_flag():
     """The hard `return False` for caution_symbol must be wrapped by the
     config flag — or the flag is decorative."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # The flag check must precede the is_caution_symbol() call
     flag_idx = src.index('RISK.get("caution_symbol_block_enabled"')
     is_caution_idx = src.index("_km.is_caution_symbol(symbol)")
@@ -46,7 +48,7 @@ def test_caution_symbol_block_wrapped_in_flag():
 
 
 def test_caution_strategy_block_wrapped_in_flag():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Flag must guard the strategy_name try block
     assert 'and RISK.get("caution_strategy_block_enabled"' in src
 
@@ -54,7 +56,7 @@ def test_caution_strategy_block_wrapped_in_flag():
 def test_stale_log_message_corrected():
     """The stale '<50% WR' log was incorrect per knowledge_model.py:284
     (actual threshold: wr < 35). Must be updated."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # The corrected message must be present
     assert "<35% WR" in src, "log message should reflect actual threshold"
 
@@ -63,7 +65,7 @@ def test_phase16_phase18_still_engage_without_caution_block():
     """Sanity: with caution block off, Phase 16 ev_mult and Phase 18
     calibrator multipliers must still apply — they were the rationale
     for removing the binary block."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Phase 16
     assert "self.risk._adaptive_size_multiplier()" in src
     assert "size_fraction *= _ev_mult" in src

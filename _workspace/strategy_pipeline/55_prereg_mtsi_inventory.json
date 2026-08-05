@@ -1,0 +1,44 @@
+{
+  "prereg_id": "mtsi_inventory_v1_2026-08-01",
+  "frozen_before_outcomes": true,
+  "document": "55_prereg_mtsi_inventory.md",
+  "parent_research": "55_deep_research_mtsi_micro_mm_2026-08-01.md",
+  "family": "mtsi_inventory_v1",
+  "class": "sub_hft_maker_inventory_mm",
+  "expectation": "NO_GO",
+  "max_gross_inventory_usd": 1.0,
+  "max_clip_usd": 1.0,
+  "symbols": ["BTC/USDT", "ETH/USDT"],
+  "venue": "bybit",
+  "fees": {
+    "futures_maker": 0.0001,
+    "spot_maker": 0.001
+  },
+  "adverse_selection_frac_of_half_spread": 0.5,
+  "cells": [
+    {"id": "F1", "market": "futures", "gamma": 0.1, "half_spread_floor_bps": 2.0, "tilt_max_bps": 0.5},
+    {"id": "F2", "market": "futures", "gamma": 0.3, "half_spread_floor_bps": 3.0, "tilt_max_bps": 1.0},
+    {"id": "F3", "market": "futures", "gamma": 0.5, "half_spread_floor_bps": 4.0, "tilt_max_bps": 1.5},
+    {"id": "S1", "market": "spot", "gamma": 0.1, "half_spread_floor_bps": 10.0, "tilt_max_bps": 0.5},
+    {"id": "S2", "market": "spot", "gamma": 0.3, "half_spread_floor_bps": 12.0, "tilt_max_bps": 1.0},
+    {"id": "S3", "market": "spot", "gamma": 0.5, "half_spread_floor_bps": 15.0, "tilt_max_bps": 1.5}
+  ],
+  "bonferroni_m": 6,
+  "min_n_clips": 200,
+  "joint_gates": {
+    "mean_clip_pnl_usd_gt": 0.0,
+    "profit_factor_gt": 1.0,
+    "max_abs_inventory_usd_le": 1.0,
+    "max_single_clip_usd_le": 1.0
+  },
+  "forbidden": [
+    "reopen_approved_paper_strategies_from_this_prereg_alone",
+    "enable_dca_or_rebalance",
+    "mcp_accband_score_as_fv_tilt",
+    "post_hoc_cell_additions",
+    "controlled_live",
+    "cite_hyperliquid_rebate_anecdote_as_local_go"
+  ],
+  "sha256_md": "5262e07002e3713988828756f1f32deb5dc1fd5133e499f57cf91e15d19e9355",
+  "bytes_md": 3324
+}

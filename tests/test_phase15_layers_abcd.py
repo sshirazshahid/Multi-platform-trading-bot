@@ -96,7 +96,7 @@ def test_flat_schema_pairs_still_supported():
 
 def test_lookup_path_in_mcp_brain_handles_per_side():
     """Source must dispatch on side for per-side schema."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     # The new branch unwraps long/short keys from the override dict
     assert '_ov_raw["long"]' in src or "_ov_raw['long']" in src
     assert '_ov_raw["short"]' in src or "_ov_raw['short']" in src
@@ -108,7 +108,7 @@ def test_lookup_path_in_mcp_brain_handles_per_side():
 
 
 def test_vol_adaptive_layer_present_in_mcp_brain():
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     assert "Layer C" in src
     assert "low_vol" in src
     assert "high_vol" in src
@@ -117,7 +117,7 @@ def test_vol_adaptive_layer_present_in_mcp_brain():
 
 def test_vol_adaptive_preserves_rr_ratio():
     """When SL is scaled by vol_mult, TP must scale too so R:R is preserved."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     # The TP rescaling line must exist near vol_mult
     assert "tp_pct = tp_pct * (sl_pct / sl_pct_pre_vol)" in src
 
@@ -126,7 +126,7 @@ def test_vol_adaptive_preserves_rr_ratio():
 
 
 def test_conf_scaled_layer_present_in_mcp_brain():
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     assert "Layer D" in src
     assert "_conf_mult" in src
 
@@ -135,13 +135,13 @@ def test_conf_scaled_disabled_in_v4():
     """v4 (2026-05-27): confidence-scaled SL DISABLED. MCP score is
     anti-predictive (r=-0.285), so widening SL for score>=85 entries
     maximized loss. _conf_mult is now always 1.0."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     assert "_conf_mult = 1.0" in src
     assert "DISABLED (v4)" in src
 
 
 def test_conf_scaled_preserves_rr_ratio():
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     assert "tp_pct = tp_pct * (sl_pct / sl_pct_pre_conf)" in src
 
 
@@ -151,7 +151,7 @@ def test_conf_scaled_preserves_rr_ratio():
 def test_layer_ordering_in_source():
     """Order must be: PAIR_OVERRIDES → DistFitSL fallback → Layer C → Layer D
     → SMC zone tightening → STAR extender."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     pair_idx = src.index("from config import PAIR_OVERRIDES")
     layer_c_idx = src.index("Layer C: volatility-adaptive")
     layer_d_idx = src.index("Layer D: confidence-scaled")
@@ -162,7 +162,7 @@ def test_layer_ordering_in_source():
 
 def test_sl_floor_15pct_invariant_preserved():
     """Every layer that touches sl_pct must respect the 1.5% floor."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     # Each multiplier application must wrap in max(1.5, ...)
     assert src.count("max(1.5, sl_pct * _vol_mult)") == 1
     assert src.count("max(1.5, sl_pct * _conf_mult)") == 1

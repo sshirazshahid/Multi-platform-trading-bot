@@ -1,0 +1,3 @@
+### 2a. Safe-now (verified import-free)
+Root: `backtest_all.py`, `backtest_split.py`, `analyze_trades.py`, `analyze_trades2.py`, `strategy_lab.py`, `show_arb.py`, 6× `verify_*.py`, `fix_ghost_positions.py`, `clear_cache.py`, 14× `canslim_screener_2026-07-26_*`, `.obsidian/`, `run_confluence_paper.bat`, `_workspace/tmp_phase2_run/` (22 MB regenerable DefiLlama dump), `_workspace/*stderr*` dumps (~544 KB), `_workspace/pytest_*.txt` + `rebuild_test_*.txt`, `data/backtest_results/` (0/144-successful 2026-03 artifact), stale `data/research/report_2026-03-*`.
+

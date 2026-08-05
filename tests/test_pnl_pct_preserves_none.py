@@ -15,13 +15,13 @@ without entry/size context".
 from __future__ import annotations
 
 import re
-from pathlib import Path
+
+from tests.order_manager_source import order_manager_impl_source
 
 
 def test_finalize_close_does_not_coerce_pnl_pct_to_zero():
     """Structural pin: the `pos.pnl_pct or 0.0` coercion must be gone."""
-    src = (Path(__file__).resolve().parents[1]
-           / "core" / "order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     # Find _finalize_close body.
     m = re.search(
         r"def _finalize_close\(self[^)]*\)[\s\S]+?(?=\n    def |\Z)",

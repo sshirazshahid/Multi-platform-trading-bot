@@ -1,0 +1,6 @@
+## Phase 5 — Self-sufficiency consolidation (S)
+1. New `docs/SELF_UPGRADE_LOOP.md`: **harvest** (`scripts/harvest_*.py`, `backfill_*.py`) → **screen** (after-cost-screening, prereg + frozen gates) → **shadow** (probe agents) → **funnel** (`scripts/promotion_funnel.py` → `data/promotion_funnel.json`) → **promote** (frozen gate + owner sign-off + live_gate), monitored by `health_watchdog` + `self_healing_supervisor` + mission_control. LLM/committee participate only left of the screen stage.
+2. Cross-platform scheduler notes (in-process `schedule` jobs primary; Windows Task Scheduler for harvest/funnel on owner's box; equivalent cron lines documented).
+3. Add an in-process 6-hourly `promotion_funnel` refresh job if not already scheduled (log-only, PAPER-safe).
+4. Smoke test: `promotion_funnel.py` imports and fails gracefully with no warehouse.
+

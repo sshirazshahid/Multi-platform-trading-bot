@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import core.bot_engine as bot_engine
+import config
 import core.live_gate as live_gate
 import exchanges.bitget_client as bitget_client
 import main
@@ -221,7 +222,7 @@ def test_live_startup_reconciliation_is_post_preflight_and_idempotent(
     engine._protect_imported_positions = lambda positions: events.append(
         ("protect", positions)
     )
-    monkeypatch.setattr(bot_engine, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
 
     engine._complete_authorized_live_startup_reconciliation("PAPER")
     assert events == []

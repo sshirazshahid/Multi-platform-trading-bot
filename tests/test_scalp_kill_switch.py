@@ -31,11 +31,16 @@ def _reload_config():
 
     Popping ``sys.modules`` left earlier-collected tests holding a stale
     ``config`` object while runtime code imported a replacement, making later
-    assertions order-dependent.
+    assertions order-dependent. Submodules must reload so env-driven gates
+    (e.g. SCALP_TIER_ENABLED) re-execute after monkeypatch.setenv.
     """
     module = sys.modules.get("config")
     if module is None:
         module = importlib.import_module("config")
+    import config.risk as risk_mod
+    import config.signal as signal_mod
+    importlib.reload(risk_mod)
+    importlib.reload(signal_mod)
     return importlib.reload(module)
 
 

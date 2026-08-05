@@ -18,9 +18,12 @@ monkeypatch core.bot_engine.DRY_RUN.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import config
 import core.bot_engine as be
 from core.bot_engine import BotEngine
 
@@ -43,7 +46,7 @@ def _spot_pos():
 
 
 def test_dry_run_blocks_external_futures_close(monkeypatch):
-    monkeypatch.setattr(be, "DRY_RUN", True)
+    monkeypatch.setattr(config, "DRY_RUN", True)
     ex = MagicMock()
     _make_engine(ex)._close_external_position("binance", _futures_pos(), "monitor exit")
     ex.create_order.assert_not_called()
@@ -51,7 +54,7 @@ def test_dry_run_blocks_external_futures_close(monkeypatch):
 
 def test_dry_run_blocks_external_spot_sell(monkeypatch):
     """Gate must short-circuit BEFORE any venue read, so PAPER never even probes balance."""
-    monkeypatch.setattr(be, "DRY_RUN", True)
+    monkeypatch.setattr(config, "DRY_RUN", True)
     ex = MagicMock()
     ex.fetch_balance.return_value = {"free": {"BTC": 1.0}}
     ex.fetch_ticker.return_value = {"last": 60000.0}
@@ -62,7 +65,7 @@ def test_dry_run_blocks_external_spot_sell(monkeypatch):
 
 def test_live_still_places_external_futures_close(monkeypatch):
     """CONTROLLED_LIVE behavior unchanged: exactly one opposite-side market close."""
-    monkeypatch.setattr(be, "DRY_RUN", False)
+    monkeypatch.setattr(config, "DRY_RUN", False)
     ex = MagicMock()
     ex.create_order.return_value = {"id": "1"}
     _make_engine(ex)._close_external_position("binance", _futures_pos(), "monitor exit")
@@ -77,9 +80,9 @@ def test_live_still_places_external_futures_close(monkeypatch):
 
 def test_self_gate_present_in_function_source():
     """The gate lives INSIDE the function (defense-in-depth), not only at the call site."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _close_external_position")
     j = src.index("\n    def ", i + 1)  # next method = end of this one
     body = src[i:j]
-    assert "if DRY_RUN:" in body, "_close_external_position must self-gate on DRY_RUN"
+    assert "if _dry_run:" in body, "_close_external_position must self-gate on DRY_RUN"
     assert "[DRY]" in body, "the self-gate should log a [DRY] line for auditability"

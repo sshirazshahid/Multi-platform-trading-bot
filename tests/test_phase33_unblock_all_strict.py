@@ -30,6 +30,8 @@ False. The existing code paths now check these flags before firing.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 # ─── Config flags ─────────────────────────────────────────────────────
@@ -99,7 +101,7 @@ def test_shorts_require_btc_bear_off():
 
 
 def test_short_gate_block_gated_by_flag_in_bot_engine():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     sg_idx = src.index("Short gate — 2026-04-24")
     block = src[sg_idx:sg_idx + 1500]
     assert "SHORT_GATE_ENABLED" in block, (
@@ -137,7 +139,7 @@ def test_phase23_calibrator_refuse_flag_gated():
     carve-out that kept the calibrator hard-refuse: the refuse is now opt-in
     via RISK['calibrator_hard_refuse_enabled'] (default off); the Phase 18
     soft mult (0.7 floor) carries the calibrator information instead."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "_calibrated < 0.30" in src
     assert "Phase 40 hard-refuse" in src
     assert "calibrator_hard_refuse_enabled" in src
@@ -146,7 +148,7 @@ def test_phase23_calibrator_refuse_flag_gated():
 def test_unblock_2026_06_11_edge_blocks_flag_gated():
     """All remaining edge-opinion hard blocks are opt-in (default OFF):
     EV catastrophic, regime counter-trend, dynamic post-mortem blacklist."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "ev_catastrophic_block_enabled" in src
     assert "regime_countertrend_block_enabled" in src
     assert "auto_mutator_block_enabled" in src

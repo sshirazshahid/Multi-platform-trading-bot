@@ -1,6 +1,6 @@
 ---
 name: shadow-probe-integration
-description: How to wire a screen-confirmed strategy candidate into the bot as a LOG-ONLY shadow probe agent so live-market evidence accrues at zero capital risk. Use when applying a strategy, integrating a GO candidate, adding a shadow/probe agent, or updating the program with a new strategy signal. Never for candidates without a CONFIRMED GO screen verdict — check _workspace/strategy_pipeline/03_audit_findings.md first.
+description: How to wire a screen-confirmed strategy candidate into the bot as a LOG-ONLY shadow probe agent so live-market evidence accrues at zero capital risk. Use when applying a strategy, integrating a GO candidate, adding a shadow/probe agent, or updating the program with a new strategy signal. Never for candidates without a CONFIRMED GO screen verdict — check the matching _workspace/strategy_pipeline/<N>_audit_*.md first.
 ---
 
 # Shadow Probe Integration

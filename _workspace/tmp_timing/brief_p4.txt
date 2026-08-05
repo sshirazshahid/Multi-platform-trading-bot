@@ -1,0 +1,7 @@
+## Phase 4 — Audit hardening (M)
+1. Import-graph purity walk: transitively import everything reachable from `main.py` → `BotEngine`; assert deleted modules/LLM clients/sentiment hosts never appear.
+2. Gate-coherence tests: score ≥ 66 requires the intended bonus structure post-surgery; layers_ok 6/4 unchanged; `MCP_ENTRY_MIN_SCORE` honored; scalp 65/4 intact.
+3. Entry-policy invariant: all 8 call sites still enforce (add grep-based call-site-count test if absent).
+4. Strategy audit: 7 probe agents still register; carry runner unchanged; frozen-constants checksum test on `promotion_gate.py`.
+5. Full suite green: baseline − deleted tests + new purity/coherence tests, zero regressions.
+

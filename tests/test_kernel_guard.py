@@ -16,6 +16,8 @@ from core.selfmod import kernel_guard as kg
 # ── protected code paths are blocked ─────────────────────────────────────────
 @pytest.mark.parametrize("path", [
     "config.py",
+    "config/",
+    "config/modes.py",
     "main.py",
     "core/live_gate.py",
     "core/risk_manager.py",

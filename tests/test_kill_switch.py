@@ -18,6 +18,8 @@ Pins:
 
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import sys
 from pathlib import Path
 
@@ -119,7 +121,7 @@ def test_no_resume_log_when_never_halted(tmp_path, monkeypatch):
 
 # ── 3. bot_engine wiring (source pin, repo convention) ───────────────────
 def test_execute_open_consults_kill_switch():
-    src = (ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     idx = src.index("def _execute_open")
     block = src[idx : idx + 4000]
     assert "entries_halted" in block, "_execute_open must consult the kill switch"
@@ -129,7 +131,7 @@ def test_execute_open_consults_kill_switch():
 def test_kill_switch_check_precedes_order_placement():
     """The switch must fire before any sizing/order work — near the top of
     _execute_open, before the operating-mode gates."""
-    src = (ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     idx = src.index("def _execute_open")
     block = src[idx : idx + 8000]
     assert block.index("entries_halted") < block.index("OBSERVATION")

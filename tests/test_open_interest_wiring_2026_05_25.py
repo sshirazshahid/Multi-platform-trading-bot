@@ -12,6 +12,9 @@ from unittest.mock import patch
 import core.mcp_brain as mb
 
 
+import core.scoring.data_sources as ds
+
+
 def test_fetch_open_interest_computes_rising_trend():
     """Rising OI series → oi_trend='rising', positive delta."""
     fake_hist = [
@@ -19,7 +22,7 @@ def test_fetch_open_interest_computes_rising_trend():
         {"sumOpenInterest": "1010", "timestamp": 2},
         {"sumOpenInterest": "1050", "timestamp": 3},
     ]
-    with patch.object(mb, "_http_get", return_value=fake_hist):
+    with patch.object(ds, "_http_get", return_value=fake_hist):
         out = mb.fetch_open_interest(["BTC"])
     assert "BTC" in out
     assert out["BTC"]["oi_trend"] == "rising"
@@ -31,7 +34,7 @@ def test_fetch_open_interest_falling_trend():
         {"sumOpenInterest": "2000", "timestamp": 1},
         {"sumOpenInterest": "1900", "timestamp": 2},
     ]
-    with patch.object(mb, "_http_get", return_value=fake_hist):
+    with patch.object(ds, "_http_get", return_value=fake_hist):
         out = mb.fetch_open_interest(["ETH"])
     assert out["ETH"]["oi_trend"] == "falling"
     assert out["ETH"]["oi_delta_pct"] == -0.05
@@ -42,7 +45,7 @@ def test_fetch_open_interest_flat_trend():
         {"sumOpenInterest": "1000", "timestamp": 1},
         {"sumOpenInterest": "1005", "timestamp": 2},   # +0.5%, within flat band
     ]
-    with patch.object(mb, "_http_get", return_value=fake_hist):
+    with patch.object(ds, "_http_get", return_value=fake_hist):
         out = mb.fetch_open_interest(["SOL"])
     assert out["SOL"]["oi_trend"] == "flat"
 
@@ -50,7 +53,7 @@ def test_fetch_open_interest_flat_trend():
 def test_fetch_open_interest_failsafe_on_bad_data():
     """Missing / malformed responses must not raise — return empty/skip."""
     for bad in (None, [], [{"sumOpenInterest": "0"}, {"sumOpenInterest": "0"}], "err"):
-        with patch.object(mb, "_http_get", return_value=bad):
+        with patch.object(ds, "_http_get", return_value=bad):
             out = mb.fetch_open_interest(["BTC"])
         assert isinstance(out, dict)   # never raises; coin skipped if unusable
 

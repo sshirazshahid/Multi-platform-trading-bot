@@ -159,18 +159,6 @@ def test_payload_stale_flag_wins_over_recent_legacy_timestamp():
     assert context.any_stale is True
 
 
-def test_news_without_any_backing_articles_is_stale(monkeypatch):
-    from core.data_feeds.news_sentiment_feed import NewsSentimentFeed
-
-    feed = NewsSentimentFeed(cache_ttl=0)
-    monkeypatch.setattr(feed, "_fetch_articles", lambda: [])
-
-    result = feed.fetch(["BTC"])
-
-    assert result["BTC"]["stale"] is True
-    assert result["__market__"]["stale"] is True
-
-
 def test_smart_money_without_any_backing_source_is_stale(monkeypatch):
     from core.data_feeds.smart_money_feed import SmartMoneyFeed
 

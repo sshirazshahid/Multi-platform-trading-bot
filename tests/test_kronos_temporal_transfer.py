@@ -38,12 +38,12 @@ def test_thursday_is_best():
 
 
 def test_multiplier_applied_in_score_coin_return():
-    """_score_coin return dict should include _weekday_mult."""
-    src = open("core/mcp_brain.py", encoding="utf-8").read()
+    """_score_coin return dict should include _weekday_mult (FOMO mult removed)."""
+    src = open("core/scoring/entry_score.py", encoding="utf-8").read()
     assert "_weekday_mult" in src
     assert "WEEKDAY_CONFIDENCE_MULT" in src
-    # Must be multiplied into confidence
-    assert "confidence * _fomo_mult * _weekday_mult" in src
+    assert "confidence * _weekday_mult" in src
+    assert "_fomo_mult" not in src
 
 
 def test_all_multipliers_positive():

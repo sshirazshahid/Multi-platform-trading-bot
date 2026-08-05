@@ -27,6 +27,8 @@ Run: venv/Scripts/python.exe -m pytest tests/test_deep_breakout_lane.py -v
 
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import importlib.util
 import sqlite3
 import sys
@@ -529,7 +531,9 @@ def test_goal_report_excludes_deep_breakout_cohort(tmp_path):
 
 
 def test_dashboard_this_boot_excludes_deep_breakout():
-    src = (ROOT / "dashboard.py").read_text(encoding="utf-8")
+    from conftest import dashboard_package_source
+
+    src = dashboard_package_source()
     # the THIS-BOOT cohort SQL must carry the family exclusion
     i = src.index("Current-boot cohort")
     block = src[i:i + 1500]
@@ -538,7 +542,9 @@ def test_dashboard_this_boot_excludes_deep_breakout():
 
 # ── Rail 5: wiring pins (order_manager + bot_engine choke points) ────────
 def test_order_manager_wiring_pins():
-    src = (ROOT / "core" / "order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     # maker-first paper-entry interception excludes the lane (taker fidelity
     # to the researched fill model; waiting at the touch adverse-selects
     # breakout entries)
@@ -550,7 +556,7 @@ def test_order_manager_wiring_pins():
 
 
 def test_bot_engine_wiring_pins():
-    src = (ROOT / "core" / "bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # lane tick scheduled behind the flag, refused off-PAPER
     assert "_run_deep_breakout_lane" in src
     assert "PAPER-only hard gate" in src

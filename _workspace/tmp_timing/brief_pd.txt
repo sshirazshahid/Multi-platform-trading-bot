@@ -1,0 +1,31 @@
+## Phase D — Full monolith decomposition (after Phases 1–2; owner chose full decomposition)
+
+**Global method: mixin extraction, not state refactor.** `BotEngine`/`OrderManager` are God-classes whose methods close over shared mutable `self` state and locks. The only behavior-preserving mechanical move is cut/paste of method blocks into mixin classes in new modules, recomposed via `class OrderManager(_StateMixin, _ExecutionMixin, …)` — `self` semantics, lock identity, and `monkeypatch.setattr` MRO resolution stay identical. No state-ownership or signature changes ("clean up while moving" is forbidden).
+
+**Shim policy:** every old import path becomes a permanent facade re-exporting the full public surface (`core/bot_engine.py`, `core/order_manager.py`, `core/mcp_brain.py`, `dashboard.py`, `config/__init__.py`). Facades are never deleted — mass-rewriting importers across ~2,002 tests/scripts/skills is pure risk for zero behavior benefit.
+
+**#1 hazard: monkeypatch targets on module globals.** Tests patch names like `core.mcp_brain.ENTRY_COOLDOWN` (also imported by `mcp_strategy_scorer.py:24`), `core.order_manager.<helper>`, `config.<CONST>`. Rule: D0 builds a checked-in grep inventory of every patch target on the five monoliths; each symbol either stays physically in the facade (internal call sites reference the facade) or its tests are updated in the same commit as its move.
+
+### D0 — Equivalence harness (XS-S)
+New `tests/test_decomposition_equivalence.py`, `tests/fixtures/ast_golden/*.json`, `scripts/gen_ast_golden.py`:
+1. **Safety-file freeze:** `core/{entry_policy,kill_switch,live_gate,risk_manager,promotion_gate}.py` do not move; SHA-256 file-hash assertions.
+2. **AST-equivalence goldens** (normalized `ast.dump()`, stripped line/col/docstrings) for functions that WILL move: `BotEngine._execute_open/_execute_close/_apply_mcp_directional_economic_gate`, `OrderManager.open_position/close_position/_close_position_impl/check_sl_tp`, `MCPBrain._score_coin/_score_coin_scalp/_algorithmic_portfolio`. Golden regeneration legal only in a commit changing no other file.
+3. **Entry-policy call-site census test:** exactly 8 enforced sites repo-wide; count survives every D phase.
+4. **Monkeypatch-target inventory** (checked-in JSON).
+
+### D1 — `config.py` → `config/` package (M, LOW risk, lands FIRST — may precede Phase 3)
+Layout: `config/{__init__,_env,credentials,modes,costs,portfolio,execution,probes,gates,universe,risk,filters,signal,strategies,spot,feeds}.py` (line-range map in Plan-agent output; `modes.py` = the safety axis L45-112). Domain modules import ONLY stdlib + `config._env` (dotenv loaded once there) — sever any config→core edge by inlining pure helpers (`parse_allowlist`, `mode_profile_for`, `normalize_paper_profile`) into `_env.py`. `__init__.py` re-imports in the current top-to-bottom order; intra-config deps use explicit `from .modes import …`. Extraction order: credentials/costs → universe/strategies/feeds → probes/gates/filters → execution/risk → `modes` LAST.
+**Equivalence proof:** D0-captured JSON snapshot of `{name: repr(value)}` for all UPPERCASE config attributes must be byte-identical post-split. Riskiest coupling: import-time evaluation order (later constants read earlier ones) — wrong order = instant ImportError, caught by any test.
+
+### D2 — `dashboard.py` → `dashboard/` package (M, LOW risk)
+`dashboard/{__init__,__main__,health,term,cache,balances,fetcher,loaders,stats,render,app}.py`. `render()` (~1,880 L) moves **unsplit**. Module-global singletons (`_file_cache`, ANSI state) live in one module; movers import the object, never copy. Phase 1 dashboard edits must be fully landed first. Checkpoint: pytest + `python -m dashboard --help` smoke.
+
+### D3 — post-surgery `core/mcp_brain.py` (~3,200 L) → `core/scoring/` package (M, MEDIUM risk)
+`core/scoring/{__init__,data_sources,market_data,entry_score,portfolio,position_monitor,brain}.py`; `core/mcp_brain.py` stays as facade exporting `MCPBrain`, `ENTRY_COOLDOWN`, fetch helpers. `_score_coin`/`_score_coin_scalp` become module functions in `entry_score.py` (data coordinator passed as explicit arg — the ONE private signature change, covered by golden regeneration). Riskiest coupling: `mcp_strategy_scorer.py:24` imports from `core.mcp_brain` and reuses the fetch/score stack — must keep working against the facade untouched. Checkpoint: pytest + purity tests + AST goldens + 66/6 gate-coherence matrix.
+
+### D4 — `core/order_manager.py` → `core/order_mgmt/` mixin package (L, HIGH risk — own session)
+`core/order_mgmt/{__init__,helpers,state,provenance,funds,entry,protection,closing,paper_funding,maker_first,monitor,manager}.py` (line-range map in Plan-agent output; entry_policy call site ~1321 moves into `entry.py`). Extraction order: helpers → state → provenance → funds → paper_funding → maker_first → protection → closing → monitor → entry (`open_position`, 934 L, most entangled) → manager assembly. One commit per mixin; full pytest per commit.
+Riskiest coupling: the per-position **RLock re-entrancy chain** (`close_position` acquires `_position_lock(pid)` then re-enters `_replace_exchange_sl`; `check_sl_tp` races both from the monitor thread) — one `self._pos_locks` dict + guard stays in `manager.py`'s unsplit `__init__`, no mixin grows its own lock; circular wiring `self.mcp_brain = None # set by bot_engine` stays in `manager.py`. Checkpoint adds a threaded no-deadlock smoke test.
+
+### D5 — `core/bot_engine.py` → `core/engine/` mixin package (XL, HIGH risk — two sessions)
+`core/engine/{__init__,helpers,probes,gate_health,portfolio_state,sizing_gates,cycle,entry_exec,close_exec,monitors,imported_protect,jobs,lifecycle,engine}.py` (line-range map in Plan-agent output; entry_policy sites: 3392→`entry_exec.py`, 5964-region→`imported_protect.py`; 7 probe builders→`probes.py`; scheduler wiring 7076-7156→`lifecycle.py`). Extraction order: helpers → jobs → gate_health → probes → portfolio_state → sizing_gates → cycle → monitors → imported_pr

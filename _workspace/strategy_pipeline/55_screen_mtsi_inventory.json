@@ -1,0 +1,98 @@
+{
+  "prereg_id": "mtsi_inventory_v1_2026-08-01",
+  "expectation": "NO_GO",
+  "final_verdict": "NO_GO",
+  "cells": [
+    {
+      "id": "F1",
+      "market": "futures",
+      "n_clips": 1995,
+      "mean_clip_pnl_usd": -2.8299510844817566e-05,
+      "profit_factor": 0.7701900080858811,
+      "max_abs_inventory_usd": 1.0,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.056457524135411045,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-2.82995e-05<=0",
+        "profit_factor=0.77019<=1"
+      ]
+    },
+    {
+      "id": "F2",
+      "market": "futures",
+      "n_clips": 1921,
+      "mean_clip_pnl_usd": -8.003754314083696e-05,
+      "profit_factor": 0.36685921230237273,
+      "max_abs_inventory_usd": 0.75,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.1537521203735478,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-8.00375e-05<=0",
+        "profit_factor=0.366859<=1"
+      ]
+    },
+    {
+      "id": "F3",
+      "market": "futures",
+      "n_clips": 1839,
+      "mean_clip_pnl_usd": -0.00013158632227790588,
+      "profit_factor": 0.16931988601643153,
+      "max_abs_inventory_usd": 0.5,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.2419872466690689,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-0.000131586<=0",
+        "profit_factor=0.16932<=1"
+      ]
+    },
+    {
+      "id": "S1",
+      "market": "spot",
+      "n_clips": 1336,
+      "mean_clip_pnl_usd": -0.00014507286960704053,
+      "profit_factor": 0.4508594464284491,
+      "max_abs_inventory_usd": 1.0,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.19381735379500617,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-0.000145073<=0",
+        "profit_factor=0.450859<=1"
+      ]
+    },
+    {
+      "id": "S2",
+      "market": "spot",
+      "n_clips": 1108,
+      "mean_clip_pnl_usd": -0.00019618393078823552,
+      "profit_factor": 0.28615045069635536,
+      "max_abs_inventory_usd": 0.5,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.21737179531336495,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-0.000196184<=0",
+        "profit_factor=0.28615<=1"
+      ]
+    },
+    {
+      "id": "S3",
+      "market": "spot",
+      "n_clips": 840,
+      "mean_clip_pnl_usd": -0.00021262920531690217,
+      "profit_factor": 0.2528924441612485,
+      "max_abs_inventory_usd": 0.25,
+      "max_single_clip_usd": 0.25,
+      "total_pnl_usd": -0.17860853246619782,
+      "verdict": "NO_GO",
+      "reasons": [
+        "mean_clip_pnl_usd=-0.000212629<=0",
+        "profit_factor=0.252892<=1"
+      ]
+    }
+  ],
+  "honesty": "MTSI offline synthetic screen \u2014 geometry/inventory control \u2260 proven edge. CEX maker fees + adverse selection expected to yield NO_GO."
+}

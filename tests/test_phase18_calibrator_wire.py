@@ -24,6 +24,8 @@ This phase wires both ends:
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import inspect
 from pathlib import Path
 
@@ -58,7 +60,9 @@ def test_position_confidence_round_trip():
 def test_open_position_passes_mcp_score_as_confidence():
     """The Position constructor in order_manager.open_position must
     receive confidence = mcp_score / 100 when mcp_score is given."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     # The Position() constructor must have confidence= argument
     pos_block = src[src.index("# Build Position first"):
                     src.index("# Build Position first") + 1500]
@@ -78,7 +82,9 @@ def test_order_manager_has_calibrator_property():
 
 
 def test_finalize_close_calls_calibrator_record():
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     fc_start = src.index("def _finalize_close(self, pos: Position")
     fc_end = src.index("def ", fc_start + 50)  # next def
     fc_block = src[fc_start:fc_end]
@@ -91,7 +97,9 @@ def test_finalize_close_calls_calibrator_record():
 def test_finalize_close_skips_zero_confidence():
     """Trades from non-Claude-portfolio paths have confidence=0 — must
     skip calibrator.record() to avoid poisoning the bucket with junk."""
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     fc_start = src.index("def _finalize_close(self, pos: Position")
     fc_end = src.index("def ", fc_start + 50)
     fc_block = src[fc_start:fc_end]
@@ -103,7 +111,7 @@ def test_finalize_close_skips_zero_confidence():
 
 
 def test_execute_open_calls_calibrator_calibrate():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "self.order_mgr.calibrator.calibrate(" in src
     # Must apply as a multiplier in [0.7, 1.3]
     assert "max(0.7, min(1.3," in src
@@ -114,7 +122,7 @@ def test_execute_open_calls_calibrator_calibrate():
 def test_calibrator_multiplier_runs_after_adaptive_sizing():
     """Order matters: adaptive sizing applies first, then calibrator
     soft multiplier on top. Both write to size_fraction before notional."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     ev_idx = src.index("size_fraction *= _ev_mult")
     cal_idx = src.index("size_fraction *= _cal_mult")
     notional_idx = src.index("notional = mtype_bal * size_fraction")

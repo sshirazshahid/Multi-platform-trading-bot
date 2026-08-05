@@ -13,6 +13,7 @@ import types
 from unittest.mock import MagicMock
 
 import config
+from tests.config_source import config_source_for_grep
 from core.order_manager import OrderManager
 from core.position_tracker import Position
 from core.trailing_stop_manager import TrailingStopManager
@@ -187,6 +188,7 @@ def test_flag_code_default_is_false_when_env_unset():
     # Safety story: missing env must default OFF. Live .env may enable the
     # A/B; pin the source default so a typo can't silently ship EV-shape.
     from pathlib import Path
-    src = Path("config.py").read_text(encoding="utf-8")
+
+    src = config_source_for_grep()
     assert 'os.getenv("NEAR_TARGET_EXIT_ENABLED", "false")' in src
     assert config.RISK["near_target_frac"] == 0.8

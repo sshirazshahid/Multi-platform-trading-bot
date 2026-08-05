@@ -181,9 +181,8 @@ echo  -----------------------------------------------------------------------
 echo   MAINTENANCE
 echo   [J]  Fix ghost/phantom positions
 echo  -----------------------------------------------------------------------
-echo   [Z] Arbitrage opps     [Y] Arbitrage backtest
+echo   [Y] Arbitrage backtest
 echo   [X] Send email report  [W] Test email
-echo   [E] Claude AI now      [F] Set Claude key      [G] View Claude report
 echo  -----------------------------------------------------------------------
 echo   [0] Exit
 echo  -----------------------------------------------------------------------
@@ -207,13 +206,9 @@ if /i "!CHOICE!"=="R" goto :mreport
 if /i "!CHOICE!"=="L" goto :wallet_replicate
 if /i "!CHOICE!"=="K" goto :wallet_show
 if /i "!CHOICE!"=="J" goto :fix_ghosts
-if /i "!CHOICE!"=="Z" goto :arb_view
 if /i "!CHOICE!"=="Y" goto :arb_bt
 if /i "!CHOICE!"=="X" goto :email_send
 if /i "!CHOICE!"=="W" goto :email_test
-if /i "!CHOICE!"=="E" goto :ai_run
-if /i "!CHOICE!"=="F" goto :ai_key
-if /i "!CHOICE!"=="G" goto :ai_view
 goto :menu
 :run_bot
 cls
@@ -238,7 +233,7 @@ echo  Press Ctrl+C to return.
 echo.
 cd /d "%BOT_DIR%"
 if not exist "%VENV_PYTHON%" goto :err_setup
-"%VENV_PYTHON%" dashboard.py --refresh 60
+"%VENV_PYTHON%" -m dashboard --refresh 60
 pause
 goto :menu
 :wallet_replicate
@@ -288,17 +283,6 @@ if not exist "%VENV_PYTHON%" goto :err_setup
 echo.
 pause
 goto :menu
-:arb_view
-cls
-echo.
-echo  Arbitrage Opportunities (last scan)
-echo.
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-"%VENV_PYTHON%" show_arb.py
-echo.
-pause
-goto :menu
 :arb_bt
 cls
 echo.
@@ -345,55 +329,6 @@ cd /d "%BOT_DIR%"
 if not exist "%VENV_PYTHON%" goto :err_setup
 "%VENV_PYTHON%" -m core.report_emailer --test
 echo.
-pause
-goto :menu
-:ai_run
-cls
-echo.
-echo  Claude AI Analysis - Run Now
-echo.
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-set "KEY_OK=0"
-for /f "usebackq tokens=*" %%L in (".env") do (
-    set "ELINE=%%L"
-    if "!ELINE:~0,19!"=="ANTHROPIC_API_KEY=sk" set "KEY_OK=1"
-)
-if "!KEY_OK!"=="1" goto :ai_live
-echo  No active API key - using embedded Claude (free).
-echo.
-"%VENV_PYTHON%" claude_ai_runner.py
-pause
-goto :menu
-:ai_live
-echo  Live API key found. Running...
-echo.
-"%VENV_PYTHON%" claude_ai_runner.py
-echo.
-pause
-goto :menu
-:ai_key
-cls
-echo.
-echo  Set Claude AI API Key
-echo  Get one at: https://console.anthropic.com
-echo.
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-"%VENV_PYTHON%" claude_ai_runner.py --setkey
-pause
-goto :menu
-:ai_view
-cls
-echo.
-echo  Claude AI - Last Report
-echo.
-cd /d "%BOT_DIR%"
-if not exist "%VENV_PYTHON%" goto :err_setup
-"%VENV_PYTHON%" claude_ai_runner.py --report
-echo.
-set "HTML_RPT=%BOT_DIR%data\claude_analysis.html"
-if exist "!HTML_RPT!" start "" "!HTML_RPT!"
 pause
 goto :menu
 :mprofile

@@ -1,0 +1,40 @@
+{
+  "prereg_id": "cost_aware_accband_kappa_2026-07-31",
+  "frozen_before_outcomes": true,
+  "document": "52_prereg_cost_aware_accband_kappa.md",
+  "parent_research": "51_deep_research_futures_strategies_2026-07-31.md",
+  "candidate": "A_cost_aware_filter",
+  "deferred": [
+    "B_perp_pairs",
+    "C_cascade_already_41"
+  ],
+  "class": "admit_overlay_not_entry_family",
+  "expectation": "NO_GO",
+  "c_stress_frac": 0.00315,
+  "kappa_cells": [
+    1.5,
+    2.0,
+    2.5,
+    3.0
+  ],
+  "bonferroni_m": 4,
+  "min_n_per_cell": 80,
+  "joint_gates": {
+    "mean_realized_pnl_gt": 0.0,
+    "mean_r_multiple_gt": 0.0,
+    "profit_factor_gt": 1.0,
+    "win_rate_low": 0.59,
+    "win_rate_high": 0.67,
+    "delta_ev_vs_baseline_gt": 0.0
+  },
+  "forbidden": [
+    "reopen_accband_allowlist_from_this_prereg_alone",
+    "loosen_f1_funding_thresholds",
+    "change_entry_floor_or_band_mid_screen",
+    "post_hoc_cell_additions",
+    "controlled_live",
+    "cite_2606_00060_as_local_go"
+  ],
+  "sha256_md": "8d94bd24583e5a2c93017d0d0eb5ac7b4a16d6d704437bb3c5d89f3f8fe6dae6",
+  "bytes_md": 6614
+}

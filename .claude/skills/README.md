@@ -11,6 +11,7 @@ the ledger before proposing any strategy idea.
 | [after-cost-screening](./after-cost-screening/) | How a pre-registered screen is run and judged against the frozen gates. |
 | [investment-committee](./investment-committee/) | Bull/bear/debate/verdict roles for adjudicating a candidate. |
 | [shadow-probe-integration](./shadow-probe-integration/) | How a CONFIRMED-GO candidate is wired in as a **log-only** probe. |
+| [strategy-research-wiring](./strategy-research-wiring/) | Owner-directed deep-research wiring: prereg → screen → challenge → shadow only; MTSI doctrine. |
 
 `refuted-families-ledger/SKILL.md` is parsed programmatically by
 `mission_control/state.py` — its path and table structure must stay stable.

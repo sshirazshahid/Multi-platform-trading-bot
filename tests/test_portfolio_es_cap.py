@@ -9,6 +9,8 @@ on any data gap. Supersedes the static notional-bucket corr taper
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import math
 from pathlib import Path
 
@@ -141,7 +143,7 @@ def test_position_objects_supported():
 
 
 def test_es_hunk_in_sizing_chain_before_notional():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i_regime = src.index("size_fraction *= _regime_size_mult")
     i_es = src.index("PORTFOLIO ES SOFT-CAP")
     i_notional = src.index("notional = mtype_bal * size_fraction")
@@ -150,15 +152,17 @@ def test_es_hunk_in_sizing_chain_before_notional():
 
 def test_corr_bucket_taper_flag_gated():
     """Static bucket taper superseded; re-armable via RISK flag."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert 'RISK.get("corr_group_taper_enabled", False)' in src
 
 
 def test_heartbeat_and_dashboard_surface_es():
-    eng = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    eng = bot_engine_source_for_grep()
     assert '"portfolio_es"' in eng
     assert "_heartbeat_portfolio_es" in eng
-    dash = Path("dashboard.py").read_text(encoding="utf-8")
+    from conftest import dashboard_package_source
+
+    dash = dashboard_package_source()
     assert "Portfolio ES" in dash
 
 

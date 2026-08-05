@@ -1,10 +1,10 @@
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
 def test_engine_clears_global_scheduler_on_start_and_shutdown():
-    src = (
-        Path(__file__).resolve().parents[1] / "core" / "bot_engine.py"
-    ).read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     run_start = src.index("def run(self):")
     shutdown_start = src.index("def _shutdown(self):", run_start)
     run_body = src[run_start:shutdown_start]

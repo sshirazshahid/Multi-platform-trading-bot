@@ -19,6 +19,10 @@ the 2026-05-27 decision that disabled the dynamic hour gate.
 """
 from __future__ import annotations
 
+from tests.config_source import config_source_for_grep
+
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import json
 import os
 import time
@@ -107,12 +111,12 @@ def test_config_knob_default_on():
     """The shipped DEFAULT (env unset) is ON. Pin the default LITERAL in config.py,
     not the env-resolved value: an operator setting HOUR_GATE_PROFIT_ONLY=false in
     .env is a legitimate runtime override and must not turn this test red. 2026-06-14."""
-    src = Path("config.py").read_text(encoding="utf-8")
+    src = config_source_for_grep()
     assert 'os.getenv("HOUR_GATE_PROFIT_ONLY", "true")' in src
 
 
 def test_classify_hour_consumes_evidence():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _classify_hour")
     block = src[i:i + 2500]
     assert "HOUR_GATE_PROFIT_ONLY" in block
@@ -122,5 +126,7 @@ def test_classify_hour_consumes_evidence():
 def test_dashboard_mirrors_profit_gate():
     """The TRADING GATES panel must show the profit-only block so the
     operator sees WHY the bot isn't entering during most hours."""
-    src = Path("dashboard.py").read_text(encoding="utf-8")
+    from conftest import dashboard_package_source
+
+    src = dashboard_package_source()
     assert "BLOCKED (hour not profitable)" in src

@@ -13,6 +13,8 @@ sides — pin via the structural test below.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 import pytest
 
 
@@ -186,7 +188,7 @@ def test_production_gate_matches_replica_signature():
     failing CI. Reads the source verbatim and asserts the load-bearing
     strings are present."""
     from pathlib import Path
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     assert "CELL_FILTER" in src
     assert "[CellFilter] BLOCKED" in src
     assert "cell_filter:score_below_band" in src

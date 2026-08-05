@@ -15,6 +15,8 @@ HONESTY (binding): the WR band is delivered by geometry, not edge.
 """
 from __future__ import annotations
 
+from tests.config_source import config_source_for_grep
+
 from pathlib import Path
 
 import pytest
@@ -47,7 +49,7 @@ def test_config_dict_derivation_is_consistent():
 def test_no_unconditional_hardcoded_disable():
     """Source pin: 'enabled' must be derived through the profile-gated helper,
     not a hardcoded literal (in either direction)."""
-    src = Path("config.py").read_text(encoding="utf-8")
+    src = config_source_for_grep()
     block = src[src.index("ACCURACY_TARGET_MODE = {"):]
     block = block[: block.index("}")]
     assert '"enabled": _accuracy_geometry_enabled(' in block

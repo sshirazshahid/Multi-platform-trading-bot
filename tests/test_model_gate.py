@@ -506,7 +506,7 @@ def test_load_model_bundle_pointer_rejection_warns_once(
             return _noop
 
     rec = _RecLogger()
-    monkeypatch.setattr("core.mcp_brain.logger", rec)
+    monkeypatch.setattr("core.scoring.brain.logger", rec)
 
     b = MCPBrain()
     assert b._load_model_bundle("futures") == {}

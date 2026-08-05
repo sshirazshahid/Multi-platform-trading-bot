@@ -93,7 +93,7 @@ def test_doge_tp_tightened_for_asymmetric_rr():
 
 def test_mcp_brain_consults_overrides_before_dist_fit():
     """The override branch must precede the DistFitSL().compute() call."""
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = Path("core/scoring/entry_score.py").read_text(encoding="utf-8")
     # Use the actual import-and-call as the anchor, not the docstring mention
     pair_idx = src.index("from config import PAIR_OVERRIDES")
     distfit_call_idx = src.index("DistFitSL().compute")
@@ -105,7 +105,7 @@ def test_mcp_brain_consults_overrides_before_dist_fit():
 def test_star_extender_blocked_when_override_applied():
     """If PAIR_OVERRIDES specified ATOM at tp_pct=2.5, the STAR ×1.25
     must NOT then push it to 3.125 — the operator set the value explicitly."""
-    src = Path("core/mcp_brain.py").read_text(encoding="utf-8")
+    src = Path("core/scoring/entry_score.py").read_text(encoding="utf-8")
     assert "_pair_override_applied" in src
     # The flag must guard the ×1.25 multiplier
     star_block_idx = src.index("not _pair_override_applied")

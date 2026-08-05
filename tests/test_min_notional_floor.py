@@ -20,6 +20,8 @@ Default OFF (public repo) -> byte-identical dust-skip behavior.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -166,7 +168,7 @@ def test_aggregate_risk_error_fails_closed(monkeypatch):
 
 
 def _src() -> str:
-    return Path("core/bot_engine.py").read_text(encoding="utf-8")
+    return bot_engine_source_for_grep()
 
 
 def test_floor_attempt_sits_before_dust_skip():

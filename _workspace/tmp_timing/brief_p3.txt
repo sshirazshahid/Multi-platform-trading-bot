@@ -1,0 +1,13 @@
+## Phase 3 — Docs truth-pass (S-M)
+| Stale claim | Correction |
+|---|---|
+| `.env.example` `DRY_RUN=` knob | Remove/annotate — derived at config.py:84, not env-read |
+| `OPERATING_PLAN.md` `quant_suite`, "is_halted returns False" | Point at real modules; `is_halted()` is real and enforced |
+| `scripts/run_mission_control.py` refs | Replace with the real `mission_control.app` uvicorn entry |
+| 5 skill/agent defs → nonexistent `_workspace/strategy_pipeline/03_audit_findings.md`, `02_screener_verdicts.md` | Fix to per-candidate `03_audit_*.md` pattern |
+| `reports/` referenced but gitignored/absent | Annotate "generated at runtime, gitignored" in referencing skills |
+| `promotion_gate.py` dual WR floors (0.65 L92 vs 0.55 L308) | Documentation-only reconciliation + code comment; never loosen either |
+| "Claude is SOLE decision authority" (config.py:171, mcp_brain header, README, ARCHITECTURE_V2.md, OPERATOR.md) | Rewrite: deterministic scorer only; LLM = offline research/committee |
+| Jekyll equity catalogs (`docs/en`, `docs/ja`, `_config.yml`, `Gemfile`, `_includes`, `_sass`), `README.ja.md` | DELETE; keep `docs/{internal,owner,superpowers}`, `DATA_TO_PROFITS.md`, `AI_INVESTMENT_COMMITTEE.md`, `SELF_HEALING.md`, `FABLE_OPERATING_DESIGN.md`, `architecture.md`, `strategies.md`, `setup.md` (truth-edit each) |
+| Ledger MTSI (55_*) + liq-cascade (41_*) rows cite never-committed artifacts | Add evidence-loss annotation (parser-safe — test `mission_control.state.load_refuted_ledger` first); add process rule to after-cost-screening skill + CONTRIBUTING.md: screen artifacts commit same-day as ledger rows |
+

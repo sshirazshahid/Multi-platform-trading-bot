@@ -2514,5 +2514,20 @@
       el.className = "guidance danger";
       el.textContent = `Could not load bot state: ${state.errors.status || "unknown error"}`;
     }
+    // Deep-link from the read-only deck: /classic?ops=clear-incident opens the
+    // Operations rail and focuses that control (still requires confirm phrase).
+    try {
+      const opsId = new URLSearchParams(window.location.search).get("ops");
+      if (opsId && opDefs()[opsId]) {
+        $("ops-rail").classList.add("show");
+        $("btn-rail").setAttribute("aria-expanded", "true");
+        $("rail-scrim").hidden = false;
+        const btn = document.querySelector(`[data-op="${opsId}"]`);
+        if (btn) {
+          btn.scrollIntoView({ block: "center", behavior: "smooth" });
+          btn.focus();
+        }
+      }
+    } catch { /* ignore malformed URL */ }
   })();
 })();

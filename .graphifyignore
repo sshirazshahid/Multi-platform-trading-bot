@@ -1,0 +1,20 @@
+# Scope: the trading bot itself, not installed tooling.
+# 80% of semantic-extraction cost was third-party plugin/skill markdown.
+.agents/
+.claude/
+
+# Never extract: secrets and runtime state (public repo).
+.env
+.env.*
+.secrets.baseline
+data/
+logs/
+reports/
+journal/
+
+# Build/vendor noise.
+venv/
+graphify-out/
+__pycache__/
+*.pyc
+.git/

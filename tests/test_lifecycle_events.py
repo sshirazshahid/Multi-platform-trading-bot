@@ -189,8 +189,10 @@ def test_om_record_lifecycle_best_effort_never_raises(tmp_path, monkeypatch):
 
 
 # ── wire-in pins (source-scan, matching repo scan-test style) ────────────────
-def _om_src():
-    return Path("core/order_manager.py").read_text(encoding="utf-8")
+def _om_src() -> str:
+    from tests.order_manager_source import order_manager_impl_source
+
+    return order_manager_impl_source()
 
 
 def test_order_placed_wired_in_sl_tp_placement():

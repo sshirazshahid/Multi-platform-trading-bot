@@ -45,7 +45,7 @@ def test_config_accepts_none_env():
 
 def test_config_default_stays_tsmom():
     # .env can override at runtime; the CODE default (getenv fallback) must stay tsmom.
-    src = (_ROOT / "config.py").read_text(encoding="utf-8")
+    src = (_ROOT / "config" / "signal.py").read_text(encoding="utf-8")
     assert 'os.getenv("SIGNAL_SOURCE", "tsmom")' in src
 
 
@@ -64,7 +64,7 @@ def test_none_signal_returns_empty_actions():
 
 
 def test_none_branch_wired_at_seam():
-    src = inspect.getsource(be.BotEngine._claude_portfolio_cycle)
+    src = inspect.getsource(be.BotEngine._portfolio_cycle)
     assert 'SIGNAL_SOURCE == "none"' in src
     assert "_none_signal" in src
 

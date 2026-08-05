@@ -38,6 +38,19 @@ Thank you for considering contributing! This document explains how to get starte
 
 ---
 
+## Strategy evidence artifacts
+
+When adding a row to `.claude/skills/refuted-families-ledger/SKILL.md`, commit the
+cited `_workspace/strategy_pipeline/<N>_*` screen/prereg/audit/verdict files **the
+same UTC day**. Untracked citations become evidence-loss. `reports/` outputs are
+generated at runtime and gitignored — do not rely on them as the sole record.
+
+`DRY_RUN` is derived from `OPERATING_MODE` in `config.py`; prefer setting
+`OPERATING_MODE=PAPER` (or OBSERVATION) rather than treating `DRY_RUN` as an
+independent env knob.
+
+---
+
 ## Code Standards
 
 - Python 3.10+

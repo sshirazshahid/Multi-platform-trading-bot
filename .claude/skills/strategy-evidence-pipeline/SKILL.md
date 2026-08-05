@@ -19,7 +19,7 @@ Why this pipeline exists: this system refuted ~2,400+ pattern tests the hard way
 Output: `01_scout_candidates.md`. Every candidate carries a novelty-vs-ledger verdict; REFUTED candidates stop here with the ledger row cited.
 
 ## Phase 2: Screen + Audit — `edge-screener` ↔ `honesty-auditor`
-Screener pre-registers and runs after-cost screens (`after-cost-screening` skill) → `02_screener_verdicts.md`. Auditor attacks each verdict incrementally (leakage/costs/multiplicity/charter) → `03_audit_findings.md`. Debate until resolution; deadlock = NO_GO with both positions recorded. Only **CONFIRMED GO** proceeds.
+Screener pre-registers and runs after-cost screens (`after-cost-screening` skill) → `_workspace/strategy_pipeline/<N>_screen_*.md` / `<N>_verdict_*.md`. Auditor attacks each verdict incrementally (leakage/costs/multiplicity/charter) → `<N>_audit_*.md` (per-candidate; not a shared `03_audit_findings.md`). Debate until resolution; deadlock = NO_GO with both positions recorded. Only **CONFIRMED GO** proceeds.
 
 **Pre-registration integrity (binding, adopted 2026-07-17 after two debates independently demanded it; amended 2026-07-18):** the frozen pre-registration must be git-committed or content-hashed BEFORE any outcome computation runs; and any live-pulled cost input the binding cost model depends on (fees, tiers, promos) must persist its raw API response artifact — prose "verified" is not verification. The raw artifact goes to a LOCAL UNTRACKED path (e.g. under gitignored `data/`): this is a PUBLIC repo and account-derived artifacts must never be committed. The screen md records the artifact's content-hash and local path; the raw artifact itself stays local.
 

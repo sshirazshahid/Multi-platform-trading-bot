@@ -13,12 +13,12 @@ partial_close_position runs against a real exchange client.
 from __future__ import annotations
 
 import re
-from pathlib import Path
+
+from tests.order_manager_source import order_manager_impl_source
 
 
 def test_partial_close_passes_reduce_only_on_futures():
-    src = (Path(__file__).resolve().parents[1]
-           / "core" / "order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     # Find the partial_close_position function body.
     m = re.search(
         r"def partial_close_position\(self[^)]*\)[^:]*:[\s\S]+?(?=\n    def |\Z)",

@@ -22,6 +22,10 @@ scripted-ticker fake exchange; tests/conftest.py isolates the warehouse).
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.config_source import config_source_for_grep
+from tests.order_manager_source import order_manager_impl_source
+
 import json
 import time
 from pathlib import Path
@@ -344,13 +348,13 @@ def test_duplicate_intent_rejected_not_stacked(mf_on, tmp_path):
 # ── source pins ──────────────────────────────────────────────────────────────
 
 def test_config_exposes_env_knobs():
-    src = Path("config.py").read_text(encoding="utf-8")
+    src = config_source_for_grep()
     assert "MAKER_FIRST_PAPER_ENABLED" in src
     assert "MAKER_FIRST_PAPER_TIMEOUT_SEC" in src
 
 
 def test_measurement_log_present():
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    src = order_manager_impl_source()
     assert "filled as MAKER" in src
     assert "chase abandoned" in src
 
@@ -389,7 +393,7 @@ def test_no_book_at_all_falls_through_to_taker(mf_on, tmp_path):
 def test_monitor_runs_with_zero_positions_when_intents_pending():
     from pathlib import Path
 
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _check_all_sl_tp")
     block = src[i : i + 900]
     assert "_pending_maker" in block, (

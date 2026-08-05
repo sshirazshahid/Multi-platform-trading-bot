@@ -102,22 +102,3 @@ def test_orderbook_depth_uses_futures_book(monkeypatch):
     feed._fetch_binance_depth("BTC")
     assert "fapi.binance.com/fapi/v1/depth" in captured["url"]
 
-
-# ── Fix 2: CoinDesk negative headline now vetoes (local classifier) ──────
-def test_coindesk_negative_headline_classified(monkeypatch):
-    from core.data_feeds import news_sentiment_feed as nsf
-
-    def fake_call(limit=50):
-        return {"Data": [
-            {"TITLE": "Bitcoin crashes as exchange hacked in massive exploit",
-             "BODY": "", "SENTIMENT": "NEUTRAL", "PUBLISHED_ON": 0,
-             "SOURCE_DATA": {"NAME": "cd"}, "CATEGORY_DATA": []},
-        ]}
-
-    monkeypatch.setattr(
-        "core.data_feeds._coindesk_caller.call_coindesk_news",
-        fake_call, raising=False,
-    )
-    feed = nsf.NewsSentimentFeed(cache_ttl=0)
-    articles = feed._fetch_articles()
-    assert articles and articles[0]["sentiment"] == "NEGATIVE"

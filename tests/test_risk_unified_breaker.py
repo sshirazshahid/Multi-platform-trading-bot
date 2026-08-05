@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -94,9 +96,7 @@ def test_aggregate_open_risk_fails_closed_on_unknown_stop_or_equity():
 
 
 def test_aggregate_risk_gate_is_wired_before_order_placement():
-    source = (Path(__file__).resolve().parents[1] / "core" / "bot_engine.py").read_text(
-        encoding="utf-8"
-    )
+    source = bot_engine_source_for_grep()
     execute = source[source.index("def _execute_open"):source.index("def _execute_close")]
     assert "aggregate_open_risk_breached" in execute
     assert execute.index("aggregate_open_risk_breached") < execute.index("open_position(")

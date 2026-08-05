@@ -21,9 +21,12 @@ Harness mirrors tests/test_scalp_stale_winner_exempt.py.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.config_source import config_source_for_grep
+
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from tests.config_source import config_source_for_grep
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -264,7 +267,9 @@ def test_config_max_hold_hours_default_72():
 # ── (e) source-scan pins ─────────────────────────────────────────────────────
 
 def test_time_exit_authorities_are_band_guarded():
-    src = Path("core/order_manager.py").read_text(encoding="utf-8")
+    from tests.order_manager_source import order_manager_impl_source
+
+    src = order_manager_impl_source()
     assert "def _accuracy_band_hold_active" in src
     # AGE_LIMIT / AGE_LOSS / STALE block guard.
     i = src.index("POSITION AGE LIMIT ENFORCEMENT")
@@ -279,7 +284,7 @@ def test_time_exit_authorities_are_band_guarded():
 
 
 def test_execute_open_stamps_band_marker():
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     i = src.index("def _execute_open")
     block = src[i:src.index("def _execute_close")]
     assert "_accuracy_band = True" in block, (
@@ -287,7 +292,7 @@ def test_execute_open_stamps_band_marker():
 
 
 def test_config_exposes_env_knob():
-    src = Path("config.py").read_text(encoding="utf-8")
+    src = config_source_for_grep()
     assert "ACCURACY_MAX_HOLD_HOURS" in src
 
 

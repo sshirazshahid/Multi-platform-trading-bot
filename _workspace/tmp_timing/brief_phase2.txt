@@ -1,0 +1,68 @@
+## Phase 2 — Deletion manifest + skill consolidation + pyproject/CI (M-L)
+
+### 2a. Safe-now (verified import-free)
+Root: `backtest_all.py`, `backtest_split.py`, `analyze_trades.py`, `analyze_trades2.py`, `strategy_lab.py`, `show_arb.py`, 6× `verify_*.py`, `fix_ghost_positions.py`, `clear_cache.py`, 14× `canslim_screener_2026-07-26_*`, `.obsidian/`, `run_confluence_paper.bat`, `_workspace/tmp_phase2_run/` (22 MB regenerable DefiLlama dump), `_workspace/*stderr*` dumps (~544 KB), `_workspace/pytest_*.txt` + `rebuild_test_*.txt`, `data/backtest_results/` (0/144-successful 2026-03 artifact), stale `data/research/report_2026-03-*`.
+
+### 2b. Needs-test-updates
+`exchanges/mexc_client.py` + its two test references. **DEFER (have live importers — do NOT delete):** `backtest.py`, `backtest_v3.py`, `auto_backtest.py`, `strategies/legacy/*`, `core/signals/*` — mark as research-legacy in docs; deleting would orphan the TSMOM validation evidence chain.
+
+### 2c. Skill-tree consolidation
+- Delete `.agents/skills/` entirely (20 MB).
+- Delete the ~20 generic non-trading dirs from `.claude/skills/` (numbered `01-…20-*`, `canvas-design`, `docx`, `pptx`, `xlsx`, `pdf`, `mcp-builder`, `theme-factory`, `web-artifacts-builder`, `brand-guidelines`, `algorithmic-art`, etc.).
+- Keep: `.claude/skills/{after-cost-screening, investment-committee, refuted-families-ledger, shadow-probe-integration, strategy-evidence-pipeline}`, `skills/` (7 trading), `.claude/agents/` (9 committee agents).
+- Update `skills-lock.json`, `.claude/skills/README.md`.
+
+### 2d. `pyproject.toml` rewrite
+Name → the actual bot; coverage sources → `core`, `exchanges`, `scripts`, `utils` (delete phantom `quant_suite`/`ntrader`); bandit/codespell scoped to surviving tree. Remove `.gitignore`'s dead `ntrader/` section.
+
+### 2e. `.github/workflows/ci.yml` rewrite — **atomic with 2c** (CI references `.agents/skills` paths)
+- lint: ruff over `skills/ scripts/`; keep `compile_sweep.py`.
+- test: drop the per-`.agents`-skill matrix; keep `scripts/tests/`; per-skill steps for surviving `skills/*/scripts/tests`.
+- bot-tests (windows-latest, py3.12): unchanged — the real gate. bot-decision-tests, research-labs: unchanged.
+- security: bandit over `skills/`; ADD `continue-on-error: true` bandit over `core/ exchanges/ config.py` as new visibility baseline; refresh `.secrets.baseline`.
+
+**Checkpoint: full pytest + `git grep` every path referenced by ci.yml exists.**
+
+## Phase 3 — Docs truth-pass (S-M)
+| Stale claim | Correction |
+|---|---|
+| `.env.example` `DRY_RUN=` knob | Remove/annotate — derived at config.py:84, not env-read |
+| `OPERATING_PLAN.md` `quant_suite`, "is_halted returns False" | Point at real modules; `is_halted()` is real and enforced |
+| `scripts/run_mission_control.py` refs | Replace with the real `mission_control.app` uvicorn entry |
+| 5 skill/agent defs → nonexistent `_workspace/strategy_pipeline/03_audit_findings.md`, `02_screener_verdicts.md` | Fix to per-candidate `03_audit_*.md` pattern |
+| `reports/` referenced but gitignored/absent | Annotate "generated at runtime, gitignored" in referencing skills |
+| `promotion_gate.py` dual WR floors (0.65 L92 vs 0.55 L308) | Documentation-only reconciliation + code comment; never loosen either |
+| "Claude is SOLE decision authority" (config.py:171, mcp_brain header, README, ARCHITECTURE_V2.md, OPERATOR.md) | Rewrite: deterministic scorer only; LLM = offline research/committee |
+| Jekyll equity catalogs (`docs/en`, `docs/ja`, `_config.yml`, `Gemfile`, `_includes`, `_sass`), `README.ja.md` | DELETE; keep `docs/{internal,owner,superpowers}`, `DATA_TO_PROFITS.md`, `AI_INVESTMENT_COMMITTEE.md`, `SELF_HEALING.md`, `FABLE_OPERATING_DESIGN.md`, `architecture.md`, `strategies.md`, `setup.md` (truth-edit each) |
+| Ledger MTSI (55_*) + liq-cascade (41_*) rows cite never-committed artifacts | Add evidence-loss annotation (parser-safe — test `mission_control.state.load_refuted_ledger` first); add process rule to after-cost-screening skill + CONTRIBUTING.md: screen artifacts commit same-day as ledger rows |
+
+## Phase 4 — Audit hardening (M)
+1. Import-graph purity walk: transitively import everything reachable from `main.py` → `BotEngine`; assert deleted modules/LLM clients/sentiment hosts never appear.
+2. Gate-coherence tests: score ≥ 66 requires the intended bonus structure post-surgery; layers_ok 6/4 unchanged; `MCP_ENTRY_MIN_SCORE` honored; scalp 65/4 intact.
+3. Entry-policy invariant: all 8 call sites still enforce (add grep-based call-site-count test if absent).
+4. Strategy audit: 7 probe agents still register; carry runner unchanged; frozen-constants checksum test on `promotion_gate.py`.
+5. Full suite green: baseline − deleted tests + new purity/coherence tests, zero regressions.
+
+## Phase 5 — Self-sufficiency consolidation (S)
+1. New `docs/SELF_UPGRADE_LOOP.md`: **harvest** (`scripts/harvest_*.py`, `backfill_*.py`) → **screen** (after-cost-screening, prereg + frozen gates) → **shadow** (probe agents) → **funnel** (`scripts/promotion_funnel.py` → `data/promotion_funnel.json`) → **promote** (frozen gate + owner sign-off + live_gate), monitored by `health_watchdog` + `self_healing_supervisor` + mission_control. LLM/committee participate only left of the screen stage.
+2. Cross-platform scheduler notes (in-process `schedule` jobs primary; Windows Task Scheduler for harvest/funnel on owner's box; equivalent cron lines documented).
+3. Add an in-process 6-hourly `promotion_funnel` refresh job if not already scheduled (log-only, PAPER-safe).
+4. Smoke test: `promotion_funnel.py` imports and fails gracefully with no warehouse.
+
+## Phase D — Full monolith decomposition (after Phases 1–2; owner chose full decomposition)
+
+**Global method: mixin extraction, not state refactor.** `BotEngine`/`OrderManager` are God-classes whose methods close over shared mutable `self` state and locks. The only behavior-preserving mechanical move is cut/paste of method blocks into mixin classes in new modules, recomposed via `class OrderManager(_StateMixin, _ExecutionMixin, …)` — `self` semantics, lock identity, and `monkeypatch.setattr` MRO resolution stay identical. No state-ownership or signature changes ("clean up while moving" is forbidden).
+
+**Shim policy:** every old import path becomes a permanent facade re-exporting the full public surface (`core/bot_engine.py`, `core/order_manager.py`, `core/mcp_brain.py`, `dashboard.py`, `config/__init__.py`). Facades are never deleted — mass-rewriting importers across ~2,002 tests/scripts/skills is pure risk for zero behavior benefit.
+
+**#1 hazard: monkeypatch targets on module globals.** Tests patch names like `core.mcp_brain.ENTRY_COOLDOWN` (also imported by `mcp_strategy_scorer.py:24`), `core.order_manager.<helper>`, `config.<CONST>`. Rule: D0 builds a checked-in grep inventory of every patch target on the five monoliths; each symbol either stays physically in the facade (internal call sites reference the facade) or its tests are updated in the same commit as its move.
+
+### D0 — Equivalence harness (XS-S)
+New `tests/test_decomposition_equivalence.py`, `tests/fixtures/ast_golden/*.json`, `scripts/gen_ast_golden.py`:
+1. **Safety-file freeze:** `core/{entry_policy,kill_switch,live_gate,risk_manager,promotion_gate}.py` do not move; SHA-256 file-hash assertions.
+2. **AST-equivalence goldens** (normalized `ast.dump()`, stripped line/col/docstrings) for functions that WILL move: `BotEngine._execute_open/_execute_close/_apply_mcp_directional_economic_gate`, `OrderManager.open_position/close_position/_close_position_impl/check_sl_tp`, `MCPBrain._score_coin/_score_coin_scalp/_algorithmic_portfolio`. Golden regeneration legal only in a commit changing no other file.
+3. **Entry-policy call-site census test:** exactly 8 enforced sites repo-wide; count survives every D phase.
+4. **Monkeypatch-target inventory** (checked-in JSON).
+
+### D1 — `config.py` → `config/` package (M, LOW risk, lands FIRST — may precede Phase 3)
+Layout: `config/{__init__,_env,credentials,mod

@@ -7,6 +7,8 @@ Spec §12 streak halt still apply.
 """
 from __future__ import annotations
 
+from tests.bot_engine_source import bot_engine_source_for_grep
+
 from pathlib import Path
 
 
@@ -27,7 +29,7 @@ def test_whitelist_check_lives_before_floor_comparison():
     the helper returns (1.0, 'whitelisted') BEFORE calling
     `recent_expectancy`. This test pins that ordering at source level
     so the bypass cannot regress to firing post-query."""
-    src = Path("core/bot_engine.py").read_text(encoding="utf-8")
+    src = bot_engine_source_for_grep()
     # Find _ev_per_symbol_multiplier definition
     func_start = src.index("def _ev_per_symbol_multiplier")
     func_end = src.index("def _execute_open", func_start)
