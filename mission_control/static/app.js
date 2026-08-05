@@ -181,8 +181,16 @@
 
   /* ---------- token + transport ---------- */
 
-  const getToken = () => sessionStorage.getItem(TOKEN_KEY) || "";
-  const setToken = (t) => sessionStorage.setItem(TOKEN_KEY, t);
+  // Share localStorage with the read-only deck so one Continue unlocks both UIs.
+  const getToken = () => {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  };
+  const setToken = (t) => {
+    try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* private mode */ }
+  };
+  const clearToken = () => {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  };
 
   let tokenPrompt = null;
 
@@ -224,11 +232,12 @@
     return d || res.statusText || "request failed";
   }
 
-  async function api(path) {
+  async function api(path, _retried = false) {
     const res = await fetch(path, { headers: authHeaders() });
     if (res.status === 401) {
-      sessionStorage.removeItem(TOKEN_KEY);
+      clearToken();
       await ensureToken(true);
+      if (!_retried && getToken()) return api(path, true);
       throw new Error("unauthorized — token rejected");
     }
     const text = await res.text();
@@ -238,15 +247,16 @@
     return data;
   }
 
-  async function apiPost(path, body) {
+  async function apiPost(path, body, _retried = false) {
     const res = await fetch(path, {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });
     if (res.status === 401) {
-      sessionStorage.removeItem(TOKEN_KEY);
+      clearToken();
       await ensureToken(true);
+      if (!_retried && getToken()) return apiPost(path, body, true);
       throw new Error("unauthorized — token rejected");
     }
     const text = await res.text();
@@ -576,6 +586,17 @@
     </div>`;
   }
 
+  function lockedBookCard(reason) {
+    const auth = /unauthorized/i.test(String(reason || ""));
+    return `<div class="hero-card flat">
+      <span class="crosshair">+</span>
+      <div><b>${auth ? "Locked — unlock to see the book." : "Book unavailable."}</b>
+      ${auth
+        ? "APIs returned unauthorized. This is not a flat book — paste a valid MISSION_CONTROL_TOKEN to load positions.json."
+        : `Positions feed failed (${esc(reason || "unknown")}). Values below may be stale or empty — not a confirmed flat book.`}</div>
+    </div>`;
+  }
+
   /* ---------- header ---------- */
 
   function renderErrors() {
@@ -704,9 +725,14 @@
     const lanes = Array.isArray(funnel.lanes) ? funnel.lanes : [];
     const wallet = (state.positions && state.positions.wallet_summary) || {};
 
-    // hero position
+    // hero position — never claim "Flat" when the positions feed never loaded
+    const posErr = state.errors.positions;
     const open = (state.positions && Array.isArray(state.positions.open)) ? state.positions.open : [];
-    const heroHtml = open.length ? heroCard(open[0], open.length - 1) : flatCard();
+    let heroHtml;
+    if (!state.positions && posErr) heroHtml = lockedBookCard(posErr);
+    else if (open.length) heroHtml = heroCard(open[0], open.length - 1);
+    else if (state.positions) heroHtml = flatCard();
+    else heroHtml = lockedBookCard(posErr || "waiting for first successful poll");
     $("hero-position").innerHTML = heroHtml;
     const posHero = $("positions-hero");
     if (posHero) posHero.innerHTML = open.length ? heroHtml : "";

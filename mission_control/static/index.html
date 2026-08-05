@@ -389,7 +389,7 @@
         <li><strong>Live gates</strong> — real-money path status. Blocked until you sign the checklist on disk yourself.</li>
         <li><strong>Operations</strong> — Observe (reports), Operate (profile), Danger (restart, mode, kill switch, incident, CONTROLLED_LIVE).</li>
       </ol>
-      <p class="hint">Keyboard: <kbd>R</kbd> refresh · <kbd>P</kbd> pause polling · arrow keys move between tabs. Token stays in this tab only (sessionStorage). Server binds to 127.0.0.1.</p>
+      <p class="hint">Keyboard: <kbd>R</kbd> refresh · <kbd>P</kbd> pause polling · arrow keys move between tabs. Token is stored in localStorage (shared with the deck). Server binds to 127.0.0.1.</p>
     </div>
   </aside>
 
@@ -399,7 +399,7 @@
   <dialog id="token-dialog">
     <form method="dialog" id="token-form">
       <h3>Unlock Mission Control</h3>
-      <p>Paste <code>MISSION_CONTROL_TOKEN</code> from your local <code>.env</code>. Stored only in this tab.</p>
+      <p>Paste <code>MISSION_CONTROL_TOKEN</code> from your local <code>.env</code>. Stored in localStorage (shared with the deck).</p>
       <label>Token
         <input id="token-input" type="password" required autocomplete="off" />
       </label>
