@@ -434,6 +434,27 @@ def _accuracy_band_hold_active(position, age_hours) -> bool:
     return _is_accuracy_band_position(position)
 
 
+def max_hold_force_flat_hours(pos, standard_max_age_h: float) -> float:
+    """Family horizon (hours) for hard ``max_hold_force_flat`` closes.
+
+    Band → ACCURACY max_hold_hours; tier-geometry → TIER max_hold_hours;
+    else → standard_max_age_h (RISK.max_position_age_hours).
+    """
+    try:
+        from config import ACCURACY_TARGET_MODE as _acc
+        from config import TIER_GEOMETRY_TIME_EXIT_HOLD as _tg
+    except ImportError:
+        return float(standard_max_age_h)
+    try:
+        if _is_accuracy_band_position(pos):
+            return float(_acc.get("max_hold_hours", 72))
+        if _tier_geometry_hold_active(pos, 0.0):
+            return float(_tg.get("max_hold_hours", 72))
+    except Exception:
+        pass
+    return float(standard_max_age_h)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # 2026-05-19 Patch #3 — mcp_take_profit path amplification helper.
 #

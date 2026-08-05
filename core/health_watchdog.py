@@ -786,12 +786,16 @@ class HealthWatchdog:
         return live_open_position_keys(positions_path)
 
     def _check_stuck_open_positions(self) -> None:
-        """Alert only on orphan warehouse OPEN rows (not live tracker opens).
+        """Alert (+ optional auto-close) on orphan warehouse OPEN rows.
 
         Tier-geometry holds can keep real PAPER positions open past
         ``STUCK_OPEN_HOURS`` (up to ~72h). Those are intentional, not stuck.
         The leak this check exists for is a warehouse row left OPEN after the
         position closed in ``positions.json`` (trade_id lookup miss).
+
+        Blueprint Phase 1: when ``WAREHOUSE_ORPHAN_AUTO_CLOSE`` is on (default
+        under PAPER), close orphans with exit_reason=reconcile_flat (zero PnL,
+        null exit_px) — learning book only, never exchange orders.
         """
         orphans = orphan_open_trade_rows(
             self._warehouse_path,
@@ -802,19 +806,53 @@ class HealthWatchdog:
         if orphans is None:
             # Unreadable positions.json — skip rather than false-positive.
             return
+        closed_n = 0
+        try:
+            from core.warehouse_reconcile import (
+                reconcile_warehouse_orphans,
+                warehouse_orphan_auto_close_enabled,
+            )
+
+            if orphans and warehouse_orphan_auto_close_enabled():
+                result = reconcile_warehouse_orphans(
+                    self._warehouse_path,
+                    positions_path=POSITIONS_PATH,
+                    older_than_hours=STUCK_OPEN_HOURS,
+                    limit=50,
+                )
+                closed_n = len(result.get("closed") or [])
+                # Re-read remaining orphans after auto-close for the alert.
+                orphans = orphan_open_trade_rows(
+                    self._warehouse_path,
+                    older_than_hours=STUCK_OPEN_HOURS,
+                    positions_path=POSITIONS_PATH,
+                    limit=50,
+                ) or []
+        except Exception as _re:
+            logger.debug(f"[Watchdog] orphan auto-close skipped: {_re}")
         sample = orphans[:10]
-        self._edge_alert(
-            "stuck_open_positions",
-            bool(orphans),
-            "WARN",
-            (
+        msg = ""
+        if closed_n:
+            msg = (
+                f"auto-closed {closed_n} orphan OPEN warehouse row(s) "
+                f"(exit_reason=reconcile_flat)"
+            )
+        if orphans:
+            extra = (
                 f"{len(orphans)} orphan OPEN warehouse row(s) older than "
                 f"{STUCK_OPEN_HOURS}h (not in positions.json) — learning "
                 f"analytics under-count; run "
                 f"`python scripts/backfill_warehouse_closes.py --commit`"
-            ) if orphans else "",
+            )
+            msg = f"{msg}; {extra}" if msg else extra
+        self._edge_alert(
+            "stuck_open_positions",
+            bool(orphans) or closed_n > 0,
+            "WARN",
+            msg,
             {
                 "orphan_count": len(orphans),
+                "auto_closed": closed_n,
                 "sample": [
                     {
                         "id": int(r[0]),
@@ -825,7 +863,7 @@ class HealthWatchdog:
                     }
                     for r in sample
                 ],
-            } if orphans else None,
+            } if (orphans or closed_n) else None,
         )
 
     def _check_forward_feeds(self) -> None:
@@ -852,6 +890,29 @@ class HealthWatchdog:
             },
             grace_sec=FEED_GRACE_SEC,
         )
+        # Blueprint Phase 1: soft-stale latch blocks NEW entries only.
+        try:
+            from core.soft_stale_latch import (
+                SOFT_STALE_LATCH_PATH,
+                clear_soft_stale_latch,
+                set_soft_stale_latch,
+                soft_stale_entries_blocked,
+            )
+
+            if bad:
+                set_soft_stale_latch(
+                    reason="forward_feeds_stale",
+                    detail={"feeds": list(sorted(bad))},
+                )
+            elif soft_stale_entries_blocked():
+                try:
+                    doc = json.loads(SOFT_STALE_LATCH_PATH.read_text(encoding="utf-8"))
+                    if str(doc.get("reason") or "").startswith("forward_feeds"):
+                        clear_soft_stale_latch()
+                except Exception:
+                    pass
+        except Exception as _sse:
+            logger.debug(f"[Watchdog] soft-stale latch skip: {_sse}")
 
     def _check_latest_audit(self) -> None:
         if not REPORTS_DIR.exists():

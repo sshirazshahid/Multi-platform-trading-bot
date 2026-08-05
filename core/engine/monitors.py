@@ -366,19 +366,38 @@ class _MonitorsMixin:
                         f"[Health] {ex_name} stale-halt retry "
                         f"(fail #{fails}, every 5 attempts)")
                     self._try_reconnect(ex_name, exchange)
-                # 5+ fails: close losing positions to protect capital
+                # 5+ fails: optionally close losing positions (default OFF —
+                # blueprint Phase 1: soft outage blocks entries via halt /
+                # soft-stale latch; do not flatten on soft staleness).
                 if fails >= 5:
-                    try:
-                        positions = self.tracker.get_open(exchange=exchange.name)
-                        for pos in positions:
-                            if getattr(pos, "unrealized_pnl", 0) < 0:
-                                logger.warning(
-                                    f"[Health] Force-closing losing position "
-                                    f"{pos.symbol} on {ex_name} (5+ API fails)")
-                                self.order_mgr.close_position(
-                                    exchange, pos, reason="exchange_outage_5_fails")
-                    except Exception as close_err:
-                        logger.error(f"[Health] Force-close error: {close_err}")
+                    import os as _os
+
+                    if _os.getenv(
+                        "OUTAGE_FLATTEN_LOSERS_ENABLED", "false"
+                    ).lower() in ("true", "1", "yes", "on"):
+                        try:
+                            positions = self.tracker.get_open(exchange=exchange.name)
+                            for pos in positions:
+                                if getattr(pos, "unrealized_pnl", 0) < 0:
+                                    logger.warning(
+                                        f"[Health] Force-closing losing position "
+                                        f"{pos.symbol} on {ex_name} (5+ API fails)"
+                                    )
+                                    self.order_mgr.close_position(
+                                        exchange, pos, reason="exchange_outage_5_fails"
+                                    )
+                        except Exception as close_err:
+                            logger.error(f"[Health] Force-close error: {close_err}")
+                    else:
+                        try:
+                            from core.soft_stale_latch import set_soft_stale_latch
+
+                            set_soft_stale_latch(
+                                reason=f"exchange_outage:{ex_name}",
+                                detail={"fails": fails, "exchange": ex_name},
+                            )
+                        except Exception as _lse:
+                            logger.debug(f"[Health] soft-stale latch skip: {_lse}")
 
     def is_exchange_halted(self, exchange_name: str) -> bool:
         """Check if an exchange is currently halted due to health failures."""

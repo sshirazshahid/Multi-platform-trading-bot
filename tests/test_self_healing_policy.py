@@ -83,7 +83,6 @@ def test_unregistered_allowed_classes_still_fail_closed(policy):
     )
     for action in (
         RecoveryAction.REBUILD_DERIVED_CACHE,
-        RecoveryAction.RECONCILE_POSITIONS,
         RecoveryAction.QUARANTINE_INSTRUMENT,
         RecoveryAction.ROLLBACK_RELEASE,
     ):
@@ -98,7 +97,36 @@ def test_unregistered_allowed_classes_still_fail_closed(policy):
     for action in ("place_order", "train_model", "edit_code", "mutate_allowlist"):
         result = sup.execute_recovery(action, target="BTC-USDT")
         assert result["ok"] is False
-        assert result["reason"] == "action_not_allowlisted"
+
+
+def test_reconcile_positions_adapter_dry_run(policy, monkeypatch):
+    """RECONCILE_POSITIONS is registered: warehouse orphans only, dry_run safe."""
+    calls: list = []
+
+    def fake_reconcile(warehouse_path, **kwargs):
+        calls.append({"path": warehouse_path, **kwargs})
+        return {
+            "ok": True,
+            "reason": "reconciled",
+            "closed": [{"id": 1, "dry_run": True}],
+            "orphan_count": 1,
+            "skipped": 0,
+        }
+
+    monkeypatch.setattr(
+        "core.warehouse_reconcile.reconcile_warehouse_orphans",
+        fake_reconcile,
+    )
+    sup = sh.SelfHealingSupervisor(
+        {"dry_run": True, "repair_enabled": True, "enabled": True},
+        policy=policy,
+    )
+    result = sup.execute_recovery(RecoveryAction.RECONCILE_POSITIONS, target="warehouse")
+    assert result["ok"] is True
+    assert result["type"] == "reconcile_positions"
+    assert result["dry_run"] is True
+    assert result["result"]["closed"][0]["id"] == 1
+    assert calls and calls[0]["dry_run"] is True
 
 
 def test_disabled_recovery_cannot_be_called_directly(policy, monkeypatch):

@@ -29,6 +29,9 @@ WALLET_PATH = Path("data/virtual_wallet.json")
 FUNNEL_PATH = Path("data/promotion_funnel.json")
 GOAL_PATH = Path("data/goal_progress.json")
 KILL_SWITCH_PATH = Path("data/KILL_SWITCH")
+SOFT_STALE_LATCH_PATH = Path("data/soft_stale_entry_latch.json")
+REGIME_SHORT_BIAS_PATH = Path("data/regime_short_bias_latest.json")
+LIQUIDATIONS_STATUS_PATH = Path("data/liquidations_status.json")
 AUDIT_PATH = Path("data/mission_control_audit.jsonl")
 LIVE_PID_PATH = Path("data/mission_control_live_pid.json")
 CHECKLIST_PATH = Path("docs/CONTROLLED_LIVE_CHECKLIST.md")
@@ -293,6 +296,13 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
     mode = hb_mode or env_mode
     profile = hb_profile or env_profile
 
+    regime = read_json(_resolve(root, REGIME_SHORT_BIAS_PATH), {})
+    liq_status = read_json(_resolve(root, LIQUIDATIONS_STATUS_PATH), {})
+    soft_stale = _resolve(root, SOFT_STALE_LATCH_PATH).exists()
+    regime_eval = {}
+    if isinstance(regime, dict):
+        regime_eval = regime.get("evaluation") if isinstance(regime.get("evaluation"), dict) else {}
+
     return {
         "heartbeat": hb,
         "heartbeat_age_seconds": heartbeat_age_seconds(hb),
@@ -301,6 +311,7 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
         "incident_latch_present": latch_path.exists(),
         "incident_latch": latch if isinstance(latch, dict) else latch,
         "kill_switch": kill,
+        "soft_stale_entry_block": soft_stale,
         "env": env,
         # mode/paper_profile are the RUNNING values (heartbeat-sourced).
         "mode": mode,
@@ -319,6 +330,23 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
         "supervisor": supervisor_liveness(root, heartbeat_pid=hb.get("pid")),
         "live_pid": live_pid if isinstance(live_pid, dict) else {},
         "now_utc": datetime.now(timezone.utc).isoformat(),
+        # Telemetry only — never trade authority (De-Emotion / prereg 61).
+        "regime_short_bias": {
+            "present": bool(regime),
+            "ts_utc": regime.get("ts_utc") if isinstance(regime, dict) else None,
+            "narrative": regime_eval.get("narrative"),
+            "any_cell_fired": regime_eval.get("any_cell_fired"),
+            "fng_value": regime_eval.get("fng_value"),
+            "long_usd_24h": regime_eval.get("long_usd_24h"),
+            "live_short_authorized": False,
+            "log_only": True,
+            "honesty": (
+                regime.get("honesty")
+                if isinstance(regime, dict)
+                else "Log-only SHORT-bias environment flag."
+            ),
+        },
+        "liquidations_status": liq_status if isinstance(liq_status, dict) else {},
     }
 
 

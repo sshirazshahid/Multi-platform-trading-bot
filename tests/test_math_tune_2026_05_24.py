@@ -38,11 +38,25 @@ def test_age_aware_sl_min_profit_threshold():
     assert config.AGE_AWARE_SL_MAX_PNL_FRAC == 0.02
 
 
-def test_scalp_min_confidence_raised():
+def _reload_config_with_scalp(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setenv("SCALP_TIER_ENABLED", "true")
+    import config.risk as risk_mod
+    import config.signal as signal_mod
+
+    importlib.reload(risk_mod)
+    importlib.reload(signal_mod)
+    importlib.reload(sys.modules["config"])
+    return importlib.import_module("config")
+
+
+def test_scalp_min_confidence_raised(monkeypatch):
     """SCALP min_confidence 0.40 → 0.50. The 0.40-0.50 band was the
     anti-monotonic worst-WR cohort (~23-27% per gate_effectiveness §1
     score buckets 75-79 / 80-84). Tighter floor cuts that cohort."""
-    import config
+    config = _reload_config_with_scalp(monkeypatch)
     scalp = config.LEVERAGE_TIERS.get("SCALP")
     assert scalp is not None, "SCALP tier missing (SCALP_TIER_ENABLED?)"
     assert scalp["min_confidence"] >= 0.50, (
@@ -51,7 +65,7 @@ def test_scalp_min_confidence_raised():
     )
 
 
-def test_scalp_size_pct_v4_tune():
+def test_scalp_size_pct_v4_tune(monkeypatch):
     """SCALP size_pct has two documented lifecycle values:
       - 0.35 = LIVE design target (v5 2026-05-28, size_pct 0.16 → 0.35).
         Sizing math @ $130 pocket: 35% × 3x × 0.8% SL = ~$1.09 per SL,
@@ -61,7 +75,7 @@ def test_scalp_size_pct_v4_tune():
         scaled down for capital-preservation while LIVE-in-PAPER.
     Pin accepts either documented value; rejects undocumented drift
     (e.g. a typo to 0.16). SL/TP/leverage stay fixed across both."""
-    import config
+    config = _reload_config_with_scalp(monkeypatch)
     scalp = config.LEVERAGE_TIERS.get("SCALP")
     assert scalp is not None
     assert scalp["size_pct"] in (0.06, 0.35), (
@@ -76,7 +90,7 @@ def test_scalp_size_pct_v4_tune():
     assert scalp["sl_pct"] == 0.008
 
 
-def test_scalp_tier_economics_break_even_math():
+def test_scalp_tier_economics_break_even_math(monkeypatch):
     """Spot-check the break-even math after the v5 tune.
 
     R = avg_win/avg_loss = TP/SL = 1.3/0.8 = 1.625:1.
@@ -87,7 +101,7 @@ def test_scalp_tier_economics_break_even_math():
     This is a math contract — asserts the configured R:R so any
     future config edit that breaks SCALP economics fails loudly.
     """
-    import config
+    config = _reload_config_with_scalp(monkeypatch)
     scalp = config.LEVERAGE_TIERS["SCALP"]
     configured_r = scalp["tp_pct"] / scalp["sl_pct"]
     assert abs(configured_r - 1.625) < 0.01, (

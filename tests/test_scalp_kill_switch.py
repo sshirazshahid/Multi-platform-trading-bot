@@ -1,6 +1,7 @@
 """Kill-switch tests for the 2026-05-22 SCALP-tier ship.
 
-`SCALP_TIER_ENABLED` (env, default true) when flipped to false should:
+`SCALP_TIER_ENABLED` (env, default false as of blueprint Phase 1) when
+flipped to false should:
   - Drop the SCALP entry from `config.LEVERAGE_TIERS`.
   - Make `core/mcp_brain.py`'s Claude TP/SL clamp inert (raw values
     pass through unclamped on a non-SCALP futures entry).

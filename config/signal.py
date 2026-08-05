@@ -4,7 +4,7 @@ import os
 from config.modes import MODE_PROFILE
 from config.risk import LEVERAGE_TIERS
 
-SCALP_TIER_ENABLED = os.getenv("SCALP_TIER_ENABLED", "true").lower() != "false"
+SCALP_TIER_ENABLED = os.getenv("SCALP_TIER_ENABLED", "false").lower() == "true"
 
 # ── Signal source (De-Emotion 2026-08-04: no LLM on the decision path) ──────
 #   "tsmom"   - long-only TSMOM on validated majors (DEFAULT).

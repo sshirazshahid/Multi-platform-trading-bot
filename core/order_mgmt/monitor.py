@@ -15,6 +15,7 @@ from core.order_mgmt.helpers import (
     _should_fire_partial_tp,
     _tier_geometry_hold_active,
     _try_soft_close,
+    max_hold_force_flat_hours,
 )
 from core.risk_manager import load_age_cutoffs
 from exchanges.base import BaseExchange
@@ -638,6 +639,22 @@ class _MonitorMixin:
             # STALE with 0 full TPs; the wide targets never had time.
             _tier_hold = _tier_geometry_hold_active(pos, age_hours)
             _hold = _band_hold or _tier_hold
+
+            # Blueprint Phase 1: hard max-hold force-flat past family horizon.
+            # Band/tier: ACCURACY_TARGET_MODE / TIER max_hold_hours.
+            # Standard: RISK.max_position_age_hours. Bypasses _try_soft_close.
+            try:
+                _force_h = max_hold_force_flat_hours(pos, max_age_h)
+                if age_hours >= _force_h:
+                    logger.warning(
+                        f"[Orders] max_hold_force_flat: {pos.symbol} {pos.side} "
+                        f"age={age_hours:.1f}h >= {_force_h}h — hard close"
+                    )
+                    self.close_position(exchange, pos, "max_hold_force_flat", price)
+                    continue
+            except Exception as _mh_err:
+                logger.debug(f"[Orders] max_hold_force_flat skip: {_mh_err}")
+
             if _hold and age_hours >= min(max_age_h, max_stale_h):
                 logger.debug(
                     f"[Orders] {'ACCURACY band' if _band_hold else 'tier-geometry'} "

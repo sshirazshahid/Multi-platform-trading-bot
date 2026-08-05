@@ -85,6 +85,17 @@ class _EntryExecMixin:
             action["reject_reason"] = "kill_switch_active"
             return False
 
+        # Blueprint Phase 1: soft-stale latch blocks NEW entries only
+        # (forward-feed / API soft-stale). Opens keep running under SL/TP.
+        try:
+            from core.soft_stale_latch import soft_stale_entries_blocked
+
+            if soft_stale_entries_blocked():
+                action["reject_reason"] = "soft_stale_entry_block"
+                return False
+        except Exception as _sse:
+            logger.debug(f"[SoftStale] entry check skipped: {_sse}")
+
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
         # per-pair-side StoplossGuard. After a position closes via SL on
         # this (symbol, side):

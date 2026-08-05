@@ -655,6 +655,15 @@ class SelfHealingSupervisor:
                 "ok": False,
                 "reason": "action_not_allowlisted",
             }
+        if normalized is RecoveryAction.RECONCILE_POSITIONS:
+            if not self.config.enabled or not self.config.repair_enabled:
+                return {
+                    "type": "policy_block",
+                    "target": str(target),
+                    "ok": False,
+                    "reason": "recovery_disabled",
+                }
+            return self._reconcile_warehouse_orphans(target=str(target))
         if normalized is not RecoveryAction.RESTART_FEED:
             return {
                 "type": "policy_block",
@@ -683,6 +692,34 @@ class SelfHealingSupervisor:
             "target": str(target),
             "ok": bool(result.get("started")),
             "result": result,
+        }
+
+    def _reconcile_warehouse_orphans(self, *, target: str) -> dict[str, Any]:
+        """Bounded adapter: close learning-book orphans only (no exchange orders)."""
+        from core.warehouse_reconcile import reconcile_warehouse_orphans
+
+        wh = self.policy.workspace_root / "data" / "warehouse.sqlite"
+        pos = self.policy.workspace_root / "data" / "positions.json"
+        dry = bool(self.config.dry_run)
+        try:
+            result = reconcile_warehouse_orphans(
+                wh,
+                positions_path=pos,
+                dry_run=dry,
+            )
+        except Exception as exc:
+            return {
+                "type": RecoveryAction.RECONCILE_POSITIONS.value,
+                "target": target,
+                "ok": False,
+                "reason": f"reconcile_failed:{type(exc).__name__}",
+            }
+        return {
+            "type": RecoveryAction.RECONCILE_POSITIONS.value,
+            "target": target,
+            "ok": bool(result.get("ok")),
+            "result": result,
+            "dry_run": dry,
         }
 
     def _repair_runtime(self) -> list[dict[str, Any]]:

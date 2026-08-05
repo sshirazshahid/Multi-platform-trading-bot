@@ -34,6 +34,35 @@ def test_load_status_from_fixtures(tmp_path: Path) -> None:
     assert status["kill_switch"] is True
     assert status["incident_latch_present"] is False
     assert status["env"]["OPERATING_MODE"] == "PAPER"
+    assert status["regime_short_bias"]["live_short_authorized"] is False
+    assert status["regime_short_bias"]["log_only"] is True
+    assert status["soft_stale_entry_block"] is False
+
+
+def test_load_status_regime_and_liq_telemetry(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "data" / "heartbeat.json",
+        {"ts": "2026-08-05T12:00:00+00:00", "operating_mode": "PAPER"},
+    )
+    _write(
+        tmp_path / "data" / "regime_short_bias_latest.json",
+        {
+            "ts_utc": "2026-08-05T12:00:00Z",
+            "honesty": "Log-only",
+            "evaluation": {
+                "narrative": "SHORT_BIAS_ENV",
+                "any_cell_fired": True,
+                "fng_value": 27,
+                "long_usd_24h": 49e6,
+                "live_short_authorized": False,
+            },
+        },
+    )
+    _write(tmp_path / "data" / "liquidations_status.json", {"connected": True})
+    status = state.load_status(tmp_path)
+    assert status["regime_short_bias"]["narrative"] == "SHORT_BIAS_ENV"
+    assert status["regime_short_bias"]["fng_value"] == 27
+    assert status["liquidations_status"]["connected"] is True
 
 
 def test_load_positions_open_list(tmp_path: Path) -> None:

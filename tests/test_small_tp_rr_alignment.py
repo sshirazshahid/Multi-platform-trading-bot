@@ -6,7 +6,17 @@ from tests.bot_engine_source import bot_engine_source_for_grep
 from pathlib import Path
 
 
-def test_scalp_tier_rr_meets_global_minimum():
+def test_scalp_tier_rr_meets_global_minimum(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setenv("SCALP_TIER_ENABLED", "true")
+    import config.risk as risk_mod
+    import config.signal as signal_mod
+
+    importlib.reload(risk_mod)
+    importlib.reload(signal_mod)
+    importlib.reload(sys.modules["config"])
     from config import LEVERAGE_TIERS, RISK
 
     tier = LEVERAGE_TIERS["SCALP"]

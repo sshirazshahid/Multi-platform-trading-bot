@@ -110,7 +110,7 @@ Hard portfolio rails (charter): ≤3% risk/trade, ≤12% total exposure, −8% s
 | Funding | `funding_history`, carry gate log | 8h / harvest | F1 / probes |
 | Liquidations | `harvest_liquidations.py` → `liquidations_history.jsonl` | continuous WS | Research / prereg 41, 61 |
 | F&G | alternative.me via `record_regime_short_bias.py` → `news_cache` | hourly schtask | **No** (log-only) |
-| News | `news_scanner` / cache | ~30m | **No** on entries (De-Emotion) |
+| News | removed (`news_scanner` deleted; portfolio cycle sets `news_context={}`) | — | **No** on entries (De-Emotion) |
 | Trends | MCP EMA/ADX/RSI; TSMOM/breakout probes | cycle | Scoring / shadow |
 | Operator | Mission Control + watchdog email | continuous | Ops |
 
