@@ -837,6 +837,16 @@
   /* The empty deck is the NORMAL state - tens of thousands of candidates a day,
    * a handful of fills. Explain the gate rather than showing a placeholder. */
   function zeroState() {
+    if (authFailed || (ERR.positions instanceof AuthError)) {
+      return `<div class="empty"><h4>Locked — unlock to see the book</h4>` +
+        `<p>APIs returned unauthorized. This is not a flat book — enter a valid ` +
+        `<code>MISSION_CONTROL_TOKEN</code> to load positions.</p></div>`;
+    }
+    if (ERR.positions && !S.positions) {
+      return `<div class="empty"><h4>Book unavailable</h4>` +
+        `<p>Positions feed failed (${esc(ERR.positions.message || ERR.positions)}). ` +
+        `Not a confirmed flat book.</p></div>`;
+    }
     const c = S.candidates || {};
     const byDec = {};
     (c.by_decision || []).forEach((d) => { byDec[String(d.decision).toUpperCase()] = num(d.count) || 0; });
