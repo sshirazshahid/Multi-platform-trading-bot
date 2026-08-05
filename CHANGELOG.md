@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-08-05 — system blueprint + F&G/liq SHORT-bias log-only)
+- **Deep-research blueprint** (`docs/research/deep-research_trading_system_blueprint_2026-08-05.md`): end-to-end plan for setup, system design, MCP/tooling, continuous monitoring, stale/stuck handling, TA/backtest/sentiment, futures scalp + spot, strategy lifecycle, chart reading, and continuous rebuild loops — grounded in this bot + 20+ external sources.
+- **Prereg-61 F&G + long-liq SHORT-bias** (ACCRUE ONLY): `core/regime_short_bias.py`, `scripts/record_regime_short_bias.py`, hourly schtask `TradingBot-RegimeShortBias`, artifacts under `_workspace/strategy_pipeline/61_*`. Never authorizes live shorts; De-Emotion purity test now forbids importing `core.regime_short_bias` on the decision path.
+
 ### Added (2026-06-20 — review/harden pass: read-only MCP server + offline evidence-backed research labs)
 Audit/harden pass after a full review (3 internal audits + ~50 external sources + live data) that
 re-confirmed the bot has no measured entry edge and that the requested chart strategies (harmonic,
