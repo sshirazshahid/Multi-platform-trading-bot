@@ -115,6 +115,13 @@ def test_flag_on_exchange_held_tp_not_double_fired(monkeypatch):
     pos = _pos(tp=105.0, side="buy")
     pos._exchange_sl = True
     pos._exchange_tp = True
+    # The shared fixture uses open_time=1000.0 (epoch 1970), which reads as a
+    # ~56-year-old position. Harmless until the 2026-08-05 ops restructure
+    # added the 72h max_hold_force_flat backstop, which then fires on every
+    # fixture position and closed this one before the assertion could test
+    # what it is actually about. Age it realistically so the exchange-held-TP
+    # invariant is what gets exercised.
+    pos.open_time = time.time() - 600.0
     close = _run(om, pos, price=106.0, net_pct=+6.0)
     assert not close.called  # exchange owns the TP; early block + late TP both skip
 
