@@ -55,6 +55,18 @@ GEOMETRY_EPOCHS: tuple[tuple[str, float, str], ...] = (
         "tier-geometry time-exit hold active: STALE/AGE defer while planned "
         "R:R >= 1 inside 72h (supervisor respawn 2026-08-03 22:42:57 +05:00)",
     ),
+    (
+        "v3",
+        1786022386.0,
+        "blueprint ops restructure + entry-gate tightening (supervisor respawn "
+        "2026-08-06 18:19:46 +05:00). The Aug-4 process had loaded its modules "
+        "before 19 live files were edited on Aug 5, so this respawn is the "
+        "first to actually run them: max_hold_force_flat hard close, "
+        "soft-stale entry latch, orphan/warehouse reconcile — and, from the "
+        "boot banner, MCP_ENTRY_MIN_SCORE 50 -> 66 with SL cooldown ENABLED. "
+        "Entry frequency should drop materially; do not compare v3 trade "
+        "counts to v2 without accounting for that.",
+    ),
 )
 CURRENT_LABEL, FIX_EPOCH, CURRENT_NOTE = GEOMETRY_EPOCHS[-1]
 

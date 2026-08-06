@@ -25,6 +25,10 @@ from scripts.report_postfix_verdict import (
 
 V1_EPOCH = GEOMETRY_EPOCHS[0][1]
 V2_EPOCH = GEOMETRY_EPOCHS[1][1]
+# The CURRENT (open) cohort is always the last entry — never hard-code a
+# label here, or every future epoch stamp breaks these tests.
+CURRENT_EPOCH = GEOMETRY_EPOCHS[-1][1]
+CURRENT_LABEL_ = GEOMETRY_EPOCHS[-1][0]
 
 _DDL = """
 CREATE TABLE trades (
@@ -67,11 +71,13 @@ def test_trade_opened_before_epoch_is_excluded_even_if_it_closed_after(conn):
     _trade(conn, tid=2, ts_entry=V2_EPOCH + 60, ts_exit=V2_EPOCH + 900, pnl=-1.0)
 
     report = build_report(conn, now=V2_EPOCH + 7200)
-    current = report["cohorts"][-1]
+    # Target the epoch under test BY LABEL. Using cohorts[-1] silently retargets
+    # this guard onto whatever the newest epoch happens to be, which would let
+    # the leak it exists to catch pass unnoticed once a later epoch is stamped.
+    v2 = next(c for c in report["cohorts"] if c["epoch_label"] == "v2")
 
-    assert current["epoch_label"] == "v2"
-    assert current["resolved_n"] == 1, "pre-epoch entry leaked into the cohort"
-    assert current["net_after_cost_pnl"] == pytest.approx(-1.0)
+    assert v2["resolved_n"] == 1, "pre-epoch entry leaked into the cohort"
+    assert v2["net_after_cost_pnl"] == pytest.approx(-1.0)
 
 
 def test_epochs_are_reported_separately_never_pooled(conn):
@@ -86,8 +92,10 @@ def test_epochs_are_reported_separately_never_pooled(conn):
     assert by_label["v1"]["closed"] is True
     assert by_label["v2"]["resolved_n"] == 1
     assert by_label["v2"]["net_after_cost_pnl"] == pytest.approx(+3.0)
-    assert by_label["v2"]["closed"] is False
-    assert report["verdict"] == by_label["v2"]["verdict"], "headline must track current"
+    # Only the LAST epoch is open; every earlier one is bounded by its successor.
+    assert by_label["v2"]["closed"] is True
+    assert by_label[CURRENT_LABEL_]["closed"] is False
+    assert report["verdict"] == by_label[CURRENT_LABEL_]["verdict"],         "headline must track the current cohort"
 
 
 # ── provenance ─────────────────────────────────────────────────────────────
@@ -212,8 +220,8 @@ def test_exit_path_breakdown_counts_by_reason(conn):
 def test_epoch_provenance_is_pinned():
     labels = [e[0] for e in GEOMETRY_EPOCHS]
     epochs = [e[1] for e in GEOMETRY_EPOCHS]
-    assert labels == ["v1", "v2"]
-    assert epochs == [1785673514.0, 1785778977.0]
+    assert labels == ["v1", "v2", "v3"]
+    assert epochs == [1785673514.0, 1785778977.0, 1786022386.0]
     assert epochs == sorted(epochs), "epochs must be chronological"
     assert RESOLVED_TARGET == 30
     for _label, _epoch, note in GEOMETRY_EPOCHS:
