@@ -1,0 +1,106 @@
+{
+  "prereg_id": "cost_aware_accband_kappa_2026-07-31",
+  "expected_sha256": "8d94bd24583e5a2c93017d0d0eb5ac7b4a16d6d704437bb3c5d89f3f8fe6dae6",
+  "prereg_sha256": "8d94bd24583e5a2c93017d0d0eb5ac7b4a16d6d704437bb3c5d89f3f8fe6dae6",
+  "c_stress": 0.00315,
+  "cohort_families": [
+    "algo_det",
+    "algo",
+    "claude",
+    "systematic_v3_1"
+  ],
+  "rows_fetched": 1186,
+  "excluded_no_geometry": 2,
+  "excluded_null_metrics": 0,
+  "window": {
+    "first_exit": 1781985878.8401,
+    "last_exit": 1785979423.8765092
+  },
+  "baseline": {
+    "n": 1184,
+    "win_rate": 0.3302364864864865,
+    "mean_realized_pnl": -0.26578595697488766,
+    "mean_r_multiple": -0.1498310810810811,
+    "profit_factor": 0.2998958532589402
+  },
+  "cells": {
+    "1.5": {
+      "n": 439,
+      "win_rate": 0.30068337129840544,
+      "mean_realized_pnl": -0.32257364230535307,
+      "mean_r_multiple": -0.13345785876993166,
+      "profit_factor": 0.21617903299363814,
+      "insufficient": false,
+      "gates": {
+        "checks": {
+          "mean_realized_pnl_gt_0": false,
+          "mean_r_multiple_gt_0": false,
+          "profit_factor_gt_1": false,
+          "win_rate_in_band": false,
+          "delta_ev_gt_0": true
+        },
+        "delta_ev": 0.016373222311149432,
+        "all_pass": false
+      }
+    },
+    "2.0": {
+      "n": 425,
+      "win_rate": 0.3058823529411765,
+      "mean_realized_pnl": -0.3254752858033392,
+      "mean_r_multiple": -0.13181176470588235,
+      "profit_factor": 0.2141710589597438,
+      "insufficient": false,
+      "gates": {
+        "checks": {
+          "mean_realized_pnl_gt_0": false,
+          "mean_r_multiple_gt_0": false,
+          "profit_factor_gt_1": false,
+          "win_rate_in_band": false,
+          "delta_ev_gt_0": true
+        },
+        "delta_ev": 0.01801931637519874,
+        "all_pass": false
+      }
+    },
+    "2.5": {
+      "n": 2,
+      "win_rate": 0.0,
+      "mean_realized_pnl": -0.015975034780407234,
+      "mean_r_multiple": 0.0275,
+      "profit_factor": 0.0,
+      "insufficient": true,
+      "gates": {
+        "checks": {
+          "mean_realized_pnl_gt_0": false,
+          "mean_r_multiple_gt_0": true,
+          "profit_factor_gt_1": false,
+          "win_rate_in_band": false,
+          "delta_ev_gt_0": true
+        },
+        "delta_ev": 0.1773310810810811,
+        "all_pass": false
+      }
+    },
+    "3.0": {
+      "n": 1,
+      "win_rate": 0.0,
+      "mean_realized_pnl": -0.007998749999999858,
+      "mean_r_multiple": -0.01,
+      "profit_factor": 0.0,
+      "insufficient": true,
+      "gates": {
+        "checks": {
+          "mean_realized_pnl_gt_0": false,
+          "mean_r_multiple_gt_0": false,
+          "profit_factor_gt_1": false,
+          "win_rate_in_band": false,
+          "delta_ev_gt_0": true
+        },
+        "delta_ev": 0.13983108108108108,
+        "all_pass": false
+      }
+    }
+  },
+  "verdict": "NO_GO",
+  "run_utc": "2026-08-06T04:15:59.847706+00:00"
+}
