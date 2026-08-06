@@ -116,6 +116,13 @@ def test_ev_mult_zero_when_catastrophic_block_rearmed(monkeypatch):
     import config
     eng = _stub_engine_with_expectancy(
         {"mean": -0.80, "n": 8, "win_rate": 0.25}, monkeypatch)
+    # Patch the binding the gate actually reads. core/engine/sizing_gates.py
+    # pulls RISK in via `from core.engine.helpers import *`, capturing the dict
+    # OBJECT at import time; suites that call importlib.reload(config) rebind
+    # config.RISK to a NEW dict, after which patching config.RISK updates an
+    # object the gate never consults. Passed alone, failed in suite order.
+    import core.engine.sizing_gates as _sg
+    monkeypatch.setitem(_sg.RISK, "ev_catastrophic_block_enabled", True)
     monkeypatch.setitem(config.RISK, "ev_catastrophic_block_enabled", True)
     mult, reason = eng._ev_per_symbol_multiplier("BAD/USDT:USDT", "sell")
     assert mult == 0.0

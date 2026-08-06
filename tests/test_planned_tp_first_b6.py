@@ -68,6 +68,15 @@ def _reason(close_mock):
 
 
 def _set_flag(monkeypatch, on: bool):
+    # Patch the binding the code under test actually reads.
+    # core/order_mgmt/monitor.py does `from config import RISK`, capturing the
+    # dict OBJECT at import time. Several suites call importlib.reload(config),
+    # which rebinds config.RISK to a NEW dict — after that, patching
+    # config.RISK updates an object the monitor no longer looks at, so the flag
+    # silently fails to apply. These tests then passed alone and failed in
+    # full-suite order. Patching the monitor's own binding is reload-proof.
+    import core.order_mgmt.monitor as _mon
+    monkeypatch.setitem(_mon.RISK, "near_target_exit_enabled", on)
     monkeypatch.setitem(config.RISK, "near_target_exit_enabled", on)
 
 
