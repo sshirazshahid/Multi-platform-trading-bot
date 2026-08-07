@@ -22,7 +22,6 @@ import pytest
 
 from core.stat_tests import pbo, trial_pnl_matrix
 
-
 # ── construction ───────────────────────────────────────────────────────────
 
 def test_columns_are_all_trials_and_rows_are_the_index_union():

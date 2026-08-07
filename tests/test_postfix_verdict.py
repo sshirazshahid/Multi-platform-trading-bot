@@ -194,6 +194,16 @@ def test_timeout_flag_silent_when_barriers_dominate():
     assert out["timeout_interference"] is False
 
 
+def test_max_hold_force_flat_counts_as_a_time_exit():
+    """The v3 blueprint backstop is a TIME exit even when it books a profit
+    (it fires on breakeven-ratcheted runners) — omitting it would blind the
+    timeout-interference flag to the newest time-exit path."""
+    paths = {"max_hold_force_flat": 6, "stop_loss": 4}
+    out = classify(_summary(closed_outcomes=TIMEOUT_FLAG_MIN_N), _CLEAN, paths)
+    assert out["time_exit_share"] == pytest.approx(0.6)
+    assert out["timeout_interference"] is True
+
+
 # ── contamination guard must never claim a clean cohort it cannot prove ────
 
 def test_contamination_guard_reports_itself_inert(conn):

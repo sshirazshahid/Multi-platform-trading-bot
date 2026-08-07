@@ -84,8 +84,13 @@ VERDICTS = (
 )
 
 # Exit reasons that mean "time ran out", not "a barrier was hit".
+# MAX_HOLD_FORCE_FLAT added 2026-08-07: the blueprint restructure's hard
+# time-close (live in v3) — omitting it would blind the timeout-interference
+# flag to the newest time-exit path. Note it often fires on positions whose
+# stop has ratcheted past breakeven (tier hold intentionally releases them),
+# so its trades can be PROFITABLE time exits; share, not sign, is the signal.
 TIME_EXIT_REASONS = {"STALE", "SCALP_STALE_CLOSE", "AGE_LIMIT", "AGE_LOSS",
-                     "SCALP_TIME_WALL"}
+                     "SCALP_TIME_WALL", "MAX_HOLD_FORCE_FLAT"}
 
 
 def exit_path_breakdown(

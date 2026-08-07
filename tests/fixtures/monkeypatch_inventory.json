@@ -21,7 +21,6 @@
     "ACCURACY_FILE",
     "DECISION_LOG",
     "STATE_FILE",
-    "logger",
     "time"
   ],
   "dashboard": [
@@ -70,6 +69,8 @@
     "SPOT_STRATEGY",
     "STAR_SYMBOLS",
     "STRESSED_EXIT_COST_FRAC",
-    "UNIVERSE_FLOW_LOOSEN"
+    "TIER_GEOMETRY_TIME_EXIT_HOLD",
+    "UNIVERSE_FLOW_LOOSEN",
+    "__file__"
   ]
 }
