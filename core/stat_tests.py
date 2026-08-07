@@ -166,3 +166,55 @@ def pbo(returns: np.ndarray, n_partitions: int = 16) -> float:
             pbo_count += 1
         total += 1
     return pbo_count / total if total else 0.5
+
+
+def trial_pnl_matrix(
+    y: np.ndarray,
+    trials: dict,
+    *,
+    threshold: float = 0.5,
+) -> tuple:
+    """Build the (T, N) CSCV trial matrix from a full hyperparameter sweep.
+
+    Edge-queue row 8 (2026-08-03 advisor-conditioned): ``pbo()`` only measures
+    selection overfitting when its COLUMNS are the strategies that competed in
+    selection — the full (model, hyperparameter) grid, winners AND abandoned
+    cells. Feeding folds of the single winner (the trainer's previous
+    construction) measures nothing; core/promotion_gate.py:291 documented that
+    PBO from this pipeline was therefore untrustworthy.
+
+    Args:
+        y: shape (n_rows,) binary trade outcomes for the dataset rows.
+        trials: mapping ``trial_name -> {row_index: p_win}`` — the
+            out-of-sample predictions of EVERY trial evaluated in the sweep.
+        threshold: decision threshold; a trial "takes" a row iff p >= threshold.
+
+    Rows are the union of all trials' OOS indices in index order (walk-forward
+    indices are chronological, so this is time order). Cell values: +1 win /
+    -1 loss when the trial took the trade, 0.0 (flat) when it did not — a
+    trial that made no trade that period has zero PnL that period, which keeps
+    all columns on the same clock as CSCV requires.
+
+    Returns:
+        (matrix, trial_names) with ``matrix.shape == (T, len(trials))`` and
+        ``trial_names`` sorted for determinism.
+
+    Raises:
+        ValueError: fewer than two trials — selection overfitting is
+        undefined for a single candidate.
+    """
+    if len(trials) < 2:
+        raise ValueError(
+            f"trial_pnl_matrix needs >= 2 trials (got {len(trials)}): "
+            "PBO measures selection among competitors"
+        )
+    y_arr = np.asarray(y, dtype=float)
+    names = sorted(trials)
+    rows = sorted({int(i) for t in trials.values() for i in t})
+    mat = np.zeros((len(rows), len(names)), dtype=float)
+    row_pos = {idx: r for r, idx in enumerate(rows)}
+    for c, name in enumerate(names):
+        for idx, p in trials[name].items():
+            if float(p) >= threshold:
+                mat[row_pos[int(idx)], c] = 1.0 if y_arr[int(idx)] == 1 else -1.0
+    return mat, names

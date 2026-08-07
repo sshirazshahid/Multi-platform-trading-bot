@@ -41,7 +41,13 @@ if str(ROOT) not in sys.path:
 
 from core.calibration import IsotonicCalibrator  # noqa: E402
 from core.models import GBMModel, LRModel  # noqa: E402
-from core.stat_tests import bootstrap_ci, deflated_sharpe, pbo, sharpe  # noqa: E402
+from core.stat_tests import (  # noqa: E402
+    bootstrap_ci,
+    deflated_sharpe,
+    pbo,
+    sharpe,
+    trial_pnl_matrix,
+)
 from core.walk_forward import WalkForward  # noqa: E402
 from core.warehouse import get_warehouse  # noqa: E402
 
@@ -351,6 +357,10 @@ def train_one_market(
         return None
 
     # ── LR sweep ────────────────────────────────────────────────────
+    # Every trial's OOS predictions are RETAINED (not just the winner's):
+    # the CSCV/PBO trial matrix must contain the full grid that competed in
+    # selection, including the abandoned cells (edge-queue row 8).
+    all_trials: dict[str, dict[int, float]] = {}
     print(f"\nLR sweep — C grid {LR_C_GRID}")
     best_lr = None  # (C, oos, summary, fold_pnl)
     for C in LR_C_GRID:
@@ -368,6 +378,7 @@ def train_one_market(
             f"WR@0.55={s.get('wr_at_0.55', float('nan')) if not np.isnan(s.get('wr_at_0.55', float('nan'))) else float('nan'):.3f}  "
             f"DSR={s.get('deflated_sharpe', float('nan')):.2f}"
         )
+        all_trials[f"lr_C{C}"] = oos
         if (best_lr is None) or (s.get("auc", -1) > best_lr[2].get("auc", -1)):
             best_lr = (C, oos, s, mat)
     best_C, oos_lr, sum_lr, mat_lr = best_lr
@@ -391,6 +402,7 @@ def train_one_market(
             f"WR@0.55={s.get('wr_at_0.55', float('nan')):.3f}  "
             f"DSR={s.get('deflated_sharpe', float('nan')):.2f}"
         )
+        all_trials[f"gbm_lr{lr}"] = oos
         if (best_gbm is None) or (s.get("auc", -1) > best_gbm[2].get("auc", -1)):
             best_gbm = (lr, oos, s, mat)
     best_lrate, oos_gbm, sum_gbm, mat_gbm = best_gbm
@@ -427,24 +439,34 @@ def train_one_market(
     ens_n_55 = int((p_ens >= 0.55).sum())
     print(f"  AUC={ens_auc:.3f}  Brier={ens_brier:.3f}  WR@0.55={ens_wr_55:.3f} (n={ens_n_55})")
 
-    # ── PBO on the ensemble fold-pnl matrix ─────────────────────────
-    # Use the LR-best fold matrix as the PBO sample (GBM matrix could be
-    # stacked in but with only 4 hyperparam combos and small folds the
-    # PBO estimator is noisy; we report it as a directional signal).
+    # ── PBO on the TRUE trial matrix (edge-queue row 8, 2026-08-07) ──
+    # Previous construction fed the WINNING C's folds (transposed) to pbo()
+    # as if folds were strategies — the exact folds-as-strategies defect
+    # documented at core/promotion_gate.py:291 (that file is hash-frozen, so
+    # its stale note stands; this is the fix it pointed at). Columns are now
+    # the FULL (model x hyperparameter) grid — winners AND abandoned cells —
+    # rows time-aligned per-row PnL at the deployment decision threshold.
+    # Measurement repair only: gate thresholds untouched (a corrected PBO can
+    # reject more, never admit what the frozen gate refused).
     pbo_score = float("nan")
-    if mat_lr.shape[0] >= 2 and mat_lr.shape[1] >= 4:
-        try:
-            # pbo() expects an (n_obs, n_strategies) matrix — stack LR fold
-            # PnL across the C grid would be ideal, but with our grid sizing
-            # we approximate via the chosen C's fold matrix (transposed).
-            sample = mat_lr.T
-            sample = sample[~np.all(np.isnan(sample), axis=1)]
-            sample = np.where(np.isnan(sample), 0.0, sample)
-            if sample.shape[0] >= 4 and sample.shape[1] >= 2:
-                pbo_score = float(pbo(sample, n_partitions=min(8, sample.shape[0])))
-        except Exception as e:
-            print(f"  PBO compute skipped: {e}")
-    print(f"  PBO ~ {pbo_score:.3f}")
+    _pbo_n_trials = len(all_trials)
+    try:
+        _decision_thr = {"futures": 0.55, "spot": 0.58}.get(market, 0.55)
+        _tm, _tm_names = trial_pnl_matrix(y, all_trials, threshold=_decision_thr)
+        _T = _tm.shape[0]
+        _parts = 16 if _T >= 64 else (8 if _T >= 16 else 0)
+        if _parts:
+            pbo_score = float(pbo(_tm, n_partitions=_parts))
+            print(
+                f"  PBO (CSCV, {_pbo_n_trials} trials x {_T} rows, "
+                f"S={_parts}, thr={_decision_thr}) = {pbo_score:.3f}"
+            )
+        else:
+            print(f"  PBO skipped: only {_T} aligned OOS rows (<16)")
+    except Exception as e:
+        print(f"  PBO compute skipped: {e}")
+    if np.isnan(pbo_score):
+        print("  PBO ~ nan")
 
     if no_save:
         print("\n--no-save: skipping artifact + version-row write")
@@ -493,6 +515,10 @@ def train_one_market(
             "deflated_sharpe_lr": sum_lr.get("deflated_sharpe"),
             "deflated_sharpe_gbm": sum_gbm.get("deflated_sharpe"),
             "pbo": pbo_score,
+            # Additive (2026-08-07): how many grid trials the CSCV matrix
+            # contained. 8 = full LR C-grid + GBM lr-grid; a smaller number
+            # means some sweep cells errored and PBO covered fewer trials.
+            "pbo_n_trials": _pbo_n_trials,
             "n_oos_ensemble": int(len(common_idx)),
             "n_train": n_total,
             "wr_train": float(y.mean()),
