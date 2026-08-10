@@ -39,6 +39,53 @@ def test_load_status_from_fixtures(tmp_path: Path) -> None:
     assert status["soft_stale_entry_block"] is False
 
 
+def test_load_status_paper_research_telemetry(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "data" / "heartbeat.json",
+        {"ts": "2026-08-11T00:00:00+00:00", "operating_mode": "PAPER", "paper_trading_profile": "MAX_FLOW_BAND"},
+    )
+    _write(
+        tmp_path / ".env",
+        "OPERATING_MODE=PAPER\nPAPER_TRADING_PROFILE=MAX_FLOW_BAND\n"
+        "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE=paper_fallback\nSCALP_TIER_ENABLED=false\n",
+    )
+    _write(
+        tmp_path / "data" / "goal_progress.json",
+        {
+            "generated_utc": "2026-08-11T00:00:00+00:00",
+            "lanes": [
+                {
+                    "lane": "paper_futures_current_utc_day",
+                    "closed_outcomes": 5,
+                    "win_rate": 0.4,
+                    "expectancy_per_outcome": -0.25,
+                    "net_after_cost_pnl": -1.25,
+                    "profit_factor": 0.5,
+                    "target_status": "INSUFFICIENT_SAMPLE",
+                    "sample_mature": False,
+                },
+                {
+                    "lane": "listing_short_probe",
+                    "resolved": 1,
+                    "resolved_floor": 30,
+                    "floor_progress": "1/30",
+                    "forward_wr": 0.0,
+                },
+            ],
+        },
+    )
+    _write(tmp_path / "data" / "soft_stale_entry_latch.json", {"active": True, "reason": "test"})
+    status = state.load_status(tmp_path)
+    pr = status["paper_research"]
+    assert "geometry" in pr["honesty"].lower() or "not edge" in pr["honesty"].lower()
+    assert pr["paper_futures_utc_day"]["expectancy_per_outcome"] == -0.25
+    assert pr["paper_futures_utc_day"]["target_status"] == "INSUFFICIENT_SAMPLE"
+    assert any(p["lane"] == "listing_short_probe" and p["resolved"] == 1 for p in pr["probe_floors"])
+    assert pr["econ_gate_mode"] == "paper_fallback"
+    assert pr["scalp_tier_enabled"] is False
+    assert status["soft_stale_entry_block"] is True
+
+
 def test_load_status_regime_and_liq_telemetry(tmp_path: Path) -> None:
     _write(
         tmp_path / "data" / "heartbeat.json",

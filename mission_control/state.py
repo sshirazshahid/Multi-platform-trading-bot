@@ -59,6 +59,9 @@ _SAFE_ENV_KEYS = frozenset(
         "ENTRY_POLICY",
         "TRADING_MODE",
         "LOG_LEVEL",
+        "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE",
+        "SCALP_TIER_ENABLED",
+        "OUTAGE_FLATTEN_LOSERS_ENABLED",
     }
 )
 
@@ -259,6 +262,117 @@ def supervisor_liveness(
     }
 
 
+def paper_research_snapshot(root: Path | None = None) -> dict[str, Any]:
+    """PAPER expectancy + shadow probe floor summary for Mission Control.
+
+    Read-only. Honesty: AccBand WR is geometry research, not proven edge.
+    Probe floors are promotion-progress telemetry only (log-only lanes).
+    """
+    root = root or ROOT
+    goals = read_json(_resolve(root, GOAL_PATH), {})
+    funnel = read_json(_resolve(root, FUNNEL_PATH), {})
+    env = safe_env_flags(root)
+    soft_path = _resolve(root, SOFT_STALE_LATCH_PATH)
+    soft_raw = read_json(soft_path, {}) if soft_path.exists() else {}
+
+    paper_day: dict[str, Any] = {}
+    probe_floors: list[dict[str, Any]] = []
+    if isinstance(goals, dict):
+        for lane in goals.get("lanes") or []:
+            if not isinstance(lane, dict):
+                continue
+            name = str(lane.get("lane") or "")
+            if name == "paper_futures_current_utc_day":
+                paper_day = {
+                    "closed_outcomes": lane.get("closed_outcomes"),
+                    "win_rate": lane.get("win_rate"),
+                    "expectancy_per_outcome": lane.get("expectancy_per_outcome"),
+                    "net_after_cost_pnl": lane.get("net_after_cost_pnl"),
+                    "profit_factor": lane.get("profit_factor"),
+                    "target_status": lane.get("target_status"),
+                    "sample_mature": lane.get("sample_mature"),
+                    "win_rate_note": lane.get("win_rate_note"),
+                }
+            elif name.endswith("_probe") or "probe" in name or name in {
+                "listing_short_probe",
+                "unlock_short_probe",
+                "zfade_4h_cfg365",
+                "rsi2_4h_cfg226",
+                "pullback_ma20_4h",
+                "tsmom_20d_1h",
+                "tsmom_20d_4h",
+                "breakout_60d_4h",
+            }:
+                resolved = lane.get("resolved")
+                floor = lane.get("resolved_floor") or 30
+                try:
+                    resolved_n = int(resolved) if resolved is not None else 0
+                except (TypeError, ValueError):
+                    resolved_n = 0
+                try:
+                    floor_n = int(floor)
+                except (TypeError, ValueError):
+                    floor_n = 30
+                probe_floors.append(
+                    {
+                        "lane": name,
+                        "resolved": resolved_n,
+                        "resolved_floor": floor_n,
+                        "floor_progress": lane.get("floor_progress")
+                        or f"{resolved_n}/{floor_n}",
+                        "forward_wr": lane.get("forward_wr"),
+                    }
+                )
+
+    funnel_lanes: list[dict[str, Any]] = []
+    if isinstance(funnel, dict):
+        raw_lanes = funnel.get("lanes")
+        if isinstance(raw_lanes, list):
+            for row in raw_lanes:
+                if isinstance(row, dict) and row.get("lane"):
+                    funnel_lanes.append(
+                        {
+                            "lane": row.get("lane"),
+                            "state": row.get("state"),
+                            "resolved": row.get("resolved"),
+                            "floor_progress": row.get("floor_progress"),
+                        }
+                    )
+        elif isinstance(raw_lanes, dict):
+            for lane_id, row in raw_lanes.items():
+                if isinstance(row, dict):
+                    funnel_lanes.append(
+                        {
+                            "lane": lane_id,
+                            "state": row.get("state"),
+                            "resolved": row.get("resolved"),
+                            "floor_progress": row.get("floor_progress"),
+                        }
+                    )
+
+    return {
+        "honesty": (
+            "PAPER research telemetry only. AccBand WR is geometry, not edge. "
+            "Probe floors are log-only promotion progress. Never trade authority."
+        ),
+        "paper_futures_utc_day": paper_day,
+        "probe_floors": probe_floors,
+        "funnel_lanes": funnel_lanes,
+        "soft_stale_entry_block": soft_path.exists(),
+        "soft_stale_latch": soft_raw if isinstance(soft_raw, dict) else {},
+        "econ_gate_mode": env.get("MCP_DIRECTIONAL_ECONOMIC_GATE_MODE") or "strict",
+        "scalp_tier_enabled": (
+            str(env.get("SCALP_TIER_ENABLED") or "false").lower() == "true"
+        ),
+        "goals_generated_utc": goals.get("generated_utc")
+        if isinstance(goals, dict)
+        else None,
+        "funnel_generated_utc": funnel.get("generated_utc")
+        if isinstance(funnel, dict)
+        else None,
+    }
+
+
 def load_status(root: Path | None = None) -> dict[str, Any]:
     """Aggregate operational status for the Mission Control header."""
     root = root or ROOT
@@ -271,6 +385,7 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
     live_pid = read_json(_resolve(root, LIVE_PID_PATH), {})
     hb = hb if isinstance(hb, dict) else {}
     risk = risk if isinstance(risk, dict) else {}
+    research = paper_research_snapshot(root)
 
     # AUTHORITY: the heartbeat is what the RUNNING process reports. .env is only
     # intent — a long-running supervisor passes its inherited environ to children
@@ -347,6 +462,7 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
             ),
         },
         "liquidations_status": liq_status if isinstance(liq_status, dict) else {},
+        "paper_research": research,
     }
 
 

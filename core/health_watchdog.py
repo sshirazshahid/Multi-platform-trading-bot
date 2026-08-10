@@ -300,6 +300,7 @@ class HealthWatchdog:
             self._check_sl_placement_failed,
             self._check_loss_streak,
             self._check_model_gate_starving,
+            self._check_soft_stale_latch_stuck,
             self._check_model_pointer_valid,
             self._check_no_scan_progress,
             self._check_stuck_open_positions,
@@ -721,6 +722,38 @@ class HealthWatchdog:
                 {"opens_recent": opens_recent,
                  "window_hours": MODEL_STARVE_HOURS},
             )
+
+    def _check_soft_stale_latch_stuck(self) -> None:
+        """Warn if soft-stale entry block has been active for hours.
+
+        Soft-stale correctly blocks NEW opens; a latch that never clears may
+        mean feeds never recovered. Does not flatten positions.
+        """
+        path = Path("data/soft_stale_entry_latch.json")
+        if not path.exists():
+            self._edge_alert("soft_stale_latch_stuck", False, "WARN", "")
+            return
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            ts = float(doc.get("ts_unix") or 0.0)
+        except Exception:
+            self._alert(
+                "soft_stale_latch_stuck", "WARN",
+                "soft_stale_entry_latch.json present but unreadable — fail-closed "
+                "entry block may be stuck; inspect feeds and clear latch when healthy.",
+                {},
+            )
+            return
+        age_h = (time.time() - ts) / 3600.0 if ts > 0 else 999.0
+        if age_h >= 6.0:
+            self._alert(
+                "soft_stale_latch_stuck", "WARN",
+                f"Soft-stale entry latch active for {age_h:.1f}h — NEW opens blocked. "
+                "Open positions are held (no default loser-flatten). Check feeds.",
+                {"age_hours": round(age_h, 2), "reason": (doc or {}).get("reason")},
+            )
+        else:
+            self._edge_alert("soft_stale_latch_stuck", False, "WARN", "")
 
     def _check_model_pointer_valid(self) -> None:
         # The ML ensemble only drives live decisions on the MCP/Claude path.

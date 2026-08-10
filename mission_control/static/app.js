@@ -659,7 +659,41 @@
       { label: "Open positions", value: hb.open_positions ?? null, cls: "info", raw: hb.open_positions },
       { label: "Daily PnL", value: fmtSignedMoney(hb.daily_pnl), raw: num(hb.daily_pnl),
         cls: num(hb.daily_pnl) < 0 ? "danger" : num(hb.daily_pnl) > 0 ? "ok" : "info" },
+      { label: "Soft-stale", value: s.soft_stale_entry_block ? "BLOCK entries" : "Clear",
+        cls: s.soft_stale_entry_block ? "warn" : "ok",
+        title: "Soft feed/API stale blocks NEW opens only; does not flatten losers by default" },
+      { label: "EconGate", value: (s.paper_research && s.paper_research.econ_gate_mode) || "?",
+        cls: "info", title: "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE from .env (intent)" },
     ];
+
+    const pr = s.paper_research || {};
+    const day = pr.paper_futures_utc_day || {};
+    if (day.target_status || day.expectancy_per_outcome != null) {
+      const exp = day.expectancy_per_outcome;
+      const expCls = num(exp) < 0 ? "danger" : num(exp) > 0 ? "ok" : "info";
+      chips.push({
+        label: "PAPER day EV",
+        value: exp == null ? (day.target_status || "?") : `${Number(exp).toFixed(3)}R · ${day.target_status || "?"}`,
+        cls: expCls,
+        title: pr.honesty || "PAPER research telemetry — not edge",
+      });
+      chips.push({
+        label: "PAPER day WR",
+        value: day.win_rate == null ? null : `${(Number(day.win_rate) * 100).toFixed(1)}% (n=${day.closed_outcomes ?? "?"})`,
+        cls: "info",
+        title: day.win_rate_note || "Geometry/diagnostic WR — not guaranteed edge",
+      });
+    }
+    const floors = Array.isArray(pr.probe_floors) ? pr.probe_floors : [];
+    if (floors.length) {
+      const worst = floors.slice().sort((a, b) => (a.resolved || 0) - (b.resolved || 0))[0];
+      chips.push({
+        label: "Probe floor",
+        value: worst ? `${worst.lane}: ${worst.floor_progress || "?"}` : null,
+        cls: "info",
+        title: "Lowest resolved/30 among goal_progress probe lanes (log-only)",
+      });
+    }
 
     $("status-chips").innerHTML = chips
       .map((c) =>
@@ -688,6 +722,8 @@
     if (age !== null && age > 900)
       return set("warn", `Heartbeat is ${fmtAge(age)} old (expected under ~15m). The process may be hung.`);
     if (s.kill_switch) return set("warn", "Kill switch is ON — new entries are paused. Open positions keep monitoring.");
+    if (s.soft_stale_entry_block)
+      return set("warn", "Soft-stale entry latch is ON — NEW opens blocked until feeds recover. Open positions are held (no default loser-flatten).");
     return set("ok",
       `Healthy · ${s.mode || "?"} · profile ${s.paper_profile || "?"} · heartbeat ${fmtAge(age) || "?"} ago. Shadow probes are log-only and cannot place orders.`);
   }
@@ -788,6 +824,8 @@
         text: `Open-position count disagrees: the heartbeat reports ${s.open_positions_heartbeat}, positions.json holds ${s.open_positions_file}. One of them is wrong — check for a ghost or unreconciled position.` });
     (sup.warnings || []).forEach((w) => alerts.push({ cls: "warn", text: w }));
     if (s.kill_switch) alerts.push({ cls: "warn", text: "Kill switch ON — new entries paused by operator." });
+    if (s.soft_stale_entry_block)
+      alerts.push({ cls: "warn", text: "Soft-stale latch ON — NEW entries blocked (feeds/API soft-stale). Losers are not auto-flattened by default." });
     if (num(s.heartbeat_age_seconds) !== null && num(s.heartbeat_age_seconds) > 900)
       alerts.push({ cls: "danger", text: `Heartbeat stale (${fmtAge(s.heartbeat_age_seconds)}).` });
     // A STARVED lane is an alarm unless its own skip reasons prove it is idle

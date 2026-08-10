@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (2026-08-11 — evolve PAPER profit loop 1A/2A)
+- ADR `docs/superpowers/specs/2026-08-11-evolve-paper-profit-loop.md` + cleanup inventory (no mass deletes).
+- Mission Control `paper_research` status: PAPER day expectancy/WR, probe floors, soft-stale, econ-gate mode (telemetry only).
+- `scripts/run_research_loop_tick.py` fail-closed research ops tick (`TradingBot-ResearchLoopTick`); refuses auto strategy install / CONTROLLED_LIVE.
+- Watchdog warn when soft-stale latch stuck ≥6h.
+- Edge-queue advance note `_workspace/strategy_pipeline/64_edge_queue_advance_2026-08-11.md` (INSUFFICIENT_DATA / accrual-only).
+
 ### Added (2026-08-05 — blueprint Phase 1 ops restructure)
 - Warehouse orphan auto-close (`reconcile_flat`) under PAPER + `RECONCILE_POSITIONS` self-heal adapter.
 - Soft-stale entry latch (block NEW opens; outage loser-flatten default OFF).
