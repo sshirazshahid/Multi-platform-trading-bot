@@ -251,6 +251,18 @@ def test_entry_pair_leaves_the_connection_usable_after_a_rollback(wh):
     )[0]["n"] == 1
 
 
+def test_entry_pair_refuses_to_write_a_probe_row_with_no_decision(wh):
+    """A mis-typed kwarg must NOT silently degrade into a bare insert_row: a
+    probe row with no decision row takes the occupancy slot while leaving
+    nothing for the resolver — the very corruption this helper prevents."""
+    _pullback_schema(wh)
+    with pytest.raises(ValueError, match="no decision row"):
+        write_entry_pair(
+            wh, probe_table="shadow_pullback_probe", probe_row=_probe_row()
+        )
+    assert wh.query("SELECT COUNT(*) n FROM shadow_pullback_probe")[0]["n"] == 0
+
+
 @pytest.mark.parametrize(
     "module_name",
     [

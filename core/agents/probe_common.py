@@ -244,6 +244,15 @@ def write_entry_pair(warehouse, *, probe_table: str, probe_row: dict,
     rows = list(decisions or [])
     if decision is not None:
         rows.insert(0, decision)
+    if not rows:
+        # Fail loudly rather than degrade into a bare insert_row: a probe row
+        # with NO decision row is a silent no-op entry (nothing to resolve, but
+        # the occupancy slot is taken), which is the class of corruption this
+        # helper exists to prevent. Reachable only by a mis-typed kwarg.
+        raise ValueError(
+            f"write_entry_pair({probe_table}): no decision row — pass "
+            "decision= or decisions=, or use insert_row for a standalone row"
+        )
     conn = warehouse._conn()
     # isolation_level=None -> autocommit; BEGIN IMMEDIATE takes the write lock
     # up front so the write cannot interleave with another writer.
