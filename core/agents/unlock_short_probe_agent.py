@@ -64,10 +64,10 @@ from core.agents.probe_common import (
     _pos_float,
     concurrent_account_mtm,
     ensure_schema,
-    insert_row,
+    insert_row,  # standalone SKIP/MTM rows (an ENTRY uses write_entry_pair)
     iso_utc,
     unrealized_short_return,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen 08b constants (pre-registration + execution addendum) ─────────────
@@ -447,16 +447,23 @@ class UnlockShortProbeAgent:
 
         pid = f"us-{uuid.uuid4().hex[:10]}"
         horizon_bars = max(1, (sig["unlock_ts"] - entry_ts) // HOUR_S)
-        # raw arm: naked hold to unlock T (the screened strategy)
-        self._write_decision_row(
-            pid, symbol, venue, entry_ts, entry_px, horizon_bars, notional,
-            sl_px=0.0, model_version=ARM_MODEL_VERSIONS[sig["arm"]])
-        # charter-§2 8%-SL-Guardian counterfactual (binding condition 3)
-        self._write_decision_row(
-            f"{pid}-sl8", symbol, venue, entry_ts, entry_px, horizon_bars, notional,
-            sl_px=entry_px * (1.0 + SL_GUARDIAN_ADVERSE),
-            model_version=ARM_SL8_MODEL_VERSIONS[sig["arm"]])
-        self._write_probe_row(proposal_id=pid, decision="ENTER", now=now, **common)
+        # All THREE rows land together or not at all: the raw arm's naked hold
+        # to unlock T (the screened strategy), the charter-§2 8%-SL-Guardian
+        # counterfactual (binding condition 3), and the probe row holding the
+        # slot. A split write orphans a decision and desyncs the two arms.
+        self._write_probe_row(
+            proposal_id=pid, decision="ENTER", now=now,
+            decision_rows=[
+                self._decision_row(
+                    pid, symbol, venue, entry_ts, entry_px, horizon_bars, notional,
+                    sl_px=0.0, model_version=ARM_MODEL_VERSIONS[sig["arm"]]),
+                self._decision_row(
+                    f"{pid}-sl8", symbol, venue, entry_ts, entry_px, horizon_bars,
+                    notional, sl_px=entry_px * (1.0 + SL_GUARDIAN_ADVERSE),
+                    model_version=ARM_SL8_MODEL_VERSIONS[sig["arm"]]),
+            ],
+            **common,
+        )
         self._mark(key)
         return 1, 0
 
@@ -605,15 +612,16 @@ class UnlockShortProbeAgent:
         self._wh._conn().commit()
 
     # ── warehouse writes ─────────────────────────────────────────────────
-    def _write_decision_row(self, pid, symbol, venue, entry_ts, entry_px,
-                            horizon_bars, notional, *, sl_px, model_version) -> None:
-        """One shadow_decisions row the keystone resolver replays into
-        shadow_outcomes. side='sell'; tp_px=0 always (exit is the time barrier
-        at the SNAPSHOTTED unlock T via horizon_bars — a later calendar edit
-        can never move a logged exit). sim_pnl stays NULL: this probe does no
-        PnL projection; the resolver owns the after-cost net."""
-        write_shadow_decision(
-            self._wh, ts=entry_ts, model_version=model_version, symbol=symbol,
+    def _decision_row(self, pid, symbol, venue, entry_ts, entry_px,
+                      horizon_bars, notional, *, sl_px, model_version) -> dict:
+        """The shadow_decisions kwargs for the keystone resolver, which replays
+        the row into shadow_outcomes. side='sell'; tp_px=0 always (exit is the
+        time barrier at the SNAPSHOTTED unlock T via horizon_bars — a later
+        calendar edit can never move a logged exit). sim_pnl stays NULL: this
+        probe does no PnL projection; the resolver owns the after-cost net.
+        Built here, written by _write_probe_row's atomic write."""
+        return dict(
+            ts=entry_ts, model_version=model_version, symbol=symbol,
             side="sell", agent_id=self.name, proposal_id=pid, notional=notional,
             entry_px=entry_px, sl_px=sl_px, tp_px=0.0, venue=venue,
             timeframe=TIMEFRAME, horizon_bars=horizon_bars,
@@ -623,7 +631,10 @@ class UnlockShortProbeAgent:
                          arm, unlock_ts, unlock_ratio, event_tokens, calendar_source,
                          signal_ts, entry_ts, entry_px, stake_frac, notional_usd,
                          entry_spread_bps, funding_entry, quote_volume_usd, score,
-                         concurrent_open_at_entry) -> None:
+                         concurrent_open_at_entry, decision_rows=None) -> None:
+        """Write the probe row. ``decision_rows`` (ENTER only) pairs it with
+        its shadow_decisions rows in ONE transaction; the SKIP paths pass None
+        — they have no decision row and no position."""
         row = {
             "proposal_id": proposal_id, "base": base, "symbol": symbol,
             "venue": venue, "arm": arm, "decision": decision,
@@ -642,7 +653,13 @@ class UnlockShortProbeAgent:
         }
         # Plain INSERT (condition 5): a probe row is written exactly once and
         # never replaced by a later signal or calendar refresh.
-        insert_row(self._wh, "shadow_unlock_probe", row)
+        if decision_rows is None:
+            insert_row(self._wh, "shadow_unlock_probe", row)
+        else:
+            write_entry_pair(
+                self._wh, decisions=decision_rows,
+                probe_table="shadow_unlock_probe", probe_row=row,
+            )
 
     def _log_skip(self, sig: dict, decision: str, now: int, *,
                   venue: str = "", symbol: str = "") -> None:

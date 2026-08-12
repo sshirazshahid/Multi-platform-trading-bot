@@ -81,11 +81,10 @@ from core.agents.probe_common import (
     codex_position_units,
     ensure_schema,
     eval_gate,
-    insert_row,
     monitor_open_barriers,
     probe_tick,
     wilder_atr_last,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen Codex/Pine constants (Pine 17/18 + research/futures_backtest.py) ──
@@ -280,20 +279,9 @@ class TsmomProbeAgent:
         side = "buy" if sig > 0 else "sell"
         pid = f"tm-{uuid.uuid4().hex[:10]}"
 
-        self._write_decision_row(
-            pid,
-            symbol,
-            side,
-            latest_ts,
-            entry_px,
-            sl_px,
-            tp_px,
-            int(spec["max_hold_bars"]),
-            str(spec["tf"]),
-            notional,
+        self._write_entry(
+            timeframe=str(spec["tf"]),
             model_version=ARM_MODEL_VERSIONS[arm_key],
-        )
-        self._write_probe_row(
             proposal_id=pid,
             symbol=symbol,
             arm=arm_key,
@@ -344,35 +332,11 @@ class TsmomProbeAgent:
                        row=row, now=now)
 
     # ── warehouse writes ─────────────────────────────────────────────────
-    def _write_decision_row(
+    def _write_entry(
         self,
-        pid,
-        symbol,
-        side,
-        entry_ts,
-        entry_px,
-        sl_px,
-        tp_px,
-        horizon_bars,
+        *,
         timeframe,
-        notional,
-        *,
         model_version,
-    ) -> None:
-        """One shadow_decisions row the keystone resolver replays into
-        shadow_outcomes: SL-first, fees + slippage, censoring-guarded time exit
-        at the max-hold bar. sim_pnl stays NULL — this probe does no PnL
-        projection; the resolver owns the after-cost net."""
-        write_shadow_decision(
-            self._wh, ts=entry_ts, model_version=model_version, symbol=symbol,
-            side=side, agent_id=self.name, proposal_id=pid, notional=notional,
-            entry_px=entry_px, sl_px=sl_px, tp_px=tp_px, venue=self._venue,
-            timeframe=timeframe, horizon_bars=horizon_bars,
-        )
-
-    def _write_probe_row(
-        self,
-        *,
         proposal_id,
         symbol,
         arm,
@@ -390,6 +354,12 @@ class TsmomProbeAgent:
         score,
         now,
     ) -> None:
+        """The entry's TWO rows, written atomically (probe_common.
+        write_entry_pair): the shadow_decisions row the keystone resolver
+        replays into shadow_outcomes (SL-first, fees + slippage,
+        censoring-guarded time exit at the max-hold bar; sim_pnl stays NULL —
+        the resolver owns the after-cost net), and the probe row holding the
+        occupancy slot. Split writes could orphan the decision."""
         row = {
             "proposal_id": proposal_id,
             "symbol": symbol,
@@ -414,5 +384,17 @@ class TsmomProbeAgent:
             "closed_hint_reason": None,
             "created_ts": int(now),
         }
-        # Plain INSERT: an entry row is written exactly once, never replaced.
-        insert_row(self._wh, "shadow_tsmom_probe", row)
+        # Plain INSERT inside ONE transaction: an entry row is written exactly
+        # once, never replaced, and never without its decision row.
+        write_entry_pair(
+            self._wh,
+            decision=dict(
+                ts=signal_bar_ts, model_version=model_version, symbol=symbol,
+                side=side, agent_id=self.name, proposal_id=proposal_id,
+                notional=notional_usd, entry_px=entry_px, sl_px=sl_px,
+                tp_px=tp_px, venue=self._venue, timeframe=timeframe,
+                horizon_bars=max_hold_bars,
+            ),
+            probe_table="shadow_tsmom_probe",
+            probe_row=row,
+        )

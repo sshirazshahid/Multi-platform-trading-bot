@@ -78,6 +78,8 @@ import time
 import uuid
 from typing import Callable, Optional
 
+from loguru import logger
+
 from core.agents.bundle_mr_probe_agent import (
     SYMBOLS,  # frozen 5-major fail-closed basket (bundle-MR universe default)
     bundle_rsi_last,
@@ -91,10 +93,10 @@ from core.agents.probe_common import (
     codex_position_units,
     ensure_schema,
     eval_gate,
-    insert_row,
+    insert_row,  # standalone MTM rows (an ENTRY uses write_entry_pair)
     probe_tick,
     set_hint,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen owner-stated constants ────────────────────────────────────────────
@@ -277,26 +279,6 @@ class PullbackMomentumProbeAgent:
         notional = units * entry_px
         pid = f"pb-{uuid.uuid4().hex[:10]}"
 
-        # One shadow_decisions row the keystone resolver replays into
-        # shadow_outcomes. tp_px=0.0 = NO TP barrier (exits are condition-
-        # based; see header); horizon_bars starts at the 42-bar time stop and
-        # is tightened by the monitor when exit (a)/(b) fires.
-        write_shadow_decision(
-            self._wh,
-            ts=latest_ts,
-            model_version=self.model_version,
-            symbol=symbol,
-            side="buy",
-            agent_id=self.name,
-            proposal_id=pid,
-            notional=notional,
-            entry_px=entry_px,
-            sl_px=sl_px,
-            tp_px=0.0,
-            venue=self._venue,
-            timeframe=TIMEFRAME,
-            horizon_bars=MAX_HOLD_BARS,
-        )
         row = {
             "proposal_id": pid,
             "symbol": symbol,
@@ -322,8 +304,32 @@ class PullbackMomentumProbeAgent:
             "closed_hint_reason": None,
             "created_ts": int(now),
         }
-        # Plain INSERT: an entry row is written exactly once, never replaced.
-        insert_row(self._wh, "shadow_pullback_probe", row)
+        # The entry's TWO rows in ONE transaction: the shadow_decisions row
+        # the keystone resolver replays into shadow_outcomes (tp_px=0.0 = NO
+        # TP barrier — exits are condition-based, see header; horizon_bars
+        # starts at the 42-bar time stop and is tightened by the monitor when
+        # exit (a)/(b) fires), and this probe row holding the occupancy slot.
+        # Written separately, a failure between them orphans the decision.
+        write_entry_pair(
+            self._wh,
+            decision=dict(
+                ts=latest_ts,
+                model_version=self.model_version,
+                symbol=symbol,
+                side="buy",
+                agent_id=self.name,
+                proposal_id=pid,
+                notional=notional,
+                entry_px=entry_px,
+                sl_px=sl_px,
+                tp_px=0.0,
+                venue=self._venue,
+                timeframe=TIMEFRAME,
+                horizon_bars=MAX_HOLD_BARS,
+            ),
+            probe_table="shadow_pullback_probe",
+            probe_row=row,
+        )
         return 1
 
     # ── monitoring: per-bar MTM + condition exits + funding ──────────────
@@ -367,6 +373,18 @@ class PullbackMomentumProbeAgent:
                 if candles:
                     self._mon_seen[gate_key] = expected_bar
                 closes = [float(c[4]) for c in candles]
+                # Positional index of the ENTRY bar in this fetch. The
+                # resolver counts POSITIONAL forward bars over the candles it
+                # is handed, so a condition exit must be encoded the same way:
+                # a venue gap makes the calendar delta LARGER than the bars
+                # that will ever exist, and resolve_one's censoring guard
+                # (len(scan) < horizon -> None) then holds the row PENDING
+                # forever. None = the entry bar is not in this window; the
+                # calendar fallback below is then the only available count.
+                entry_idx = next(
+                    (j for j, cc in enumerate(candles) if int(cc[0]) // 1000 == entry_ts),
+                    None,
+                )
                 for i, c in enumerate(candles):
                     try:
                         bar_ts = int(c[0]) // 1000
@@ -409,9 +427,17 @@ class PullbackMomentumProbeAgent:
                     if reason is not None:
                         set_hint(self._wh, "shadow_pullback_probe",
                                  r["proposal_id"], bar_ts, reason)
-                        self._tighten_horizon(
-                            r["proposal_id"], (bar_ts - entry_ts) // BAR_S
-                        )
+                        if entry_idx is not None:
+                            exit_bars = i - entry_idx  # POSITIONAL, gap-safe
+                        else:
+                            exit_bars = (bar_ts - entry_ts) // BAR_S
+                            logger.debug(
+                                f"[PullbackProbe] {r['symbol']} "
+                                f"{r['proposal_id']}: entry bar absent from the "
+                                "monitor window — horizon tightened on the "
+                                "calendar delta, which a venue gap inflates"
+                            )
+                        self._tighten_horizon(r["proposal_id"], exit_bars)
                         hinted = True
                         break
             if not hinted and now >= cap_open + BAR_S:

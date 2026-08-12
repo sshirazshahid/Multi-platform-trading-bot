@@ -92,11 +92,10 @@ from core.agents.probe_common import (
     codex_position_units,
     ensure_schema,
     eval_gate,
-    insert_row,
     monitor_open_barriers,
     probe_tick,
     wilder_atr_last,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen Codex constants (deep_futures_research.py, confirmed 16:19 re-run) ─
@@ -279,8 +278,7 @@ class BreakoutProbeAgent:
         side = "buy" if sig > 0 else "sell"
         pid = f"bk-{uuid.uuid4().hex[:10]}"
 
-        self._write_decision_row(pid, symbol, side, latest_ts, entry_px, sl_px, tp_px, notional)
-        self._write_probe_row(
+        self._write_entry(
             proposal_id=pid,
             symbol=symbol,
             side=side,
@@ -320,21 +318,7 @@ class BreakoutProbeAgent:
                        row=row, now=now)
 
     # ── warehouse writes ─────────────────────────────────────────────────
-    def _write_decision_row(
-        self, pid, symbol, side, entry_ts, entry_px, sl_px, tp_px, notional
-    ) -> None:
-        """One shadow_decisions row the keystone resolver replays into
-        shadow_outcomes: SL-first, fees + slippage, censoring-guarded time
-        exit. sim_pnl stays NULL — the resolver owns the after-cost net."""
-        write_shadow_decision(
-            self._wh, ts=entry_ts, model_version=self.model_version,
-            symbol=symbol, side=side, agent_id=self.name, proposal_id=pid,
-            notional=notional, entry_px=entry_px, sl_px=sl_px, tp_px=tp_px,
-            venue=self._venue, timeframe=TIMEFRAME,
-            horizon_bars=RESOLVER_HORIZON_BARS,
-        )
-
-    def _write_probe_row(
+    def _write_entry(
         self,
         *,
         proposal_id,
@@ -352,6 +336,12 @@ class BreakoutProbeAgent:
         score,
         now,
     ) -> None:
+        """The entry's TWO rows, written atomically (probe_common.
+        write_entry_pair): the shadow_decisions row the keystone resolver
+        replays into shadow_outcomes (SL-first, fees + slippage,
+        censoring-guarded time exit; sim_pnl stays NULL — the resolver owns
+        the after-cost net), and the probe row holding the occupancy slot.
+        Split writes could orphan the decision — see write_entry_pair."""
         row = {
             "proposal_id": proposal_id,
             "symbol": symbol,
@@ -375,5 +365,18 @@ class BreakoutProbeAgent:
             "closed_hint_reason": None,
             "created_ts": int(now),
         }
-        # Plain INSERT: an entry row is written exactly once, never replaced.
-        insert_row(self._wh, "shadow_breakout_probe", row)
+        # Plain INSERT inside ONE transaction: an entry row is written exactly
+        # once, never replaced, and never without its decision row.
+        write_entry_pair(
+            self._wh,
+            decision=dict(
+                ts=signal_bar_ts, model_version=self.model_version,
+                symbol=symbol, side=side, agent_id=self.name,
+                proposal_id=proposal_id, notional=notional_usd,
+                entry_px=entry_px, sl_px=sl_px, tp_px=tp_px,
+                venue=self._venue, timeframe=TIMEFRAME,
+                horizon_bars=RESOLVER_HORIZON_BARS,
+            ),
+            probe_table="shadow_breakout_probe",
+            probe_row=row,
+        )

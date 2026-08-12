@@ -50,9 +50,9 @@ from core.agents.probe_common import (
     _pos_float,
     concurrent_account_mtm,
     ensure_schema,
-    insert_row,
+    insert_row,  # standalone SKIP/MTM rows (an ENTRY uses write_entry_pair)
     unrealized_short_return,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen rev3 constants (pre-registration §Sizing / §Universe / §Horizons) ──
@@ -674,8 +674,13 @@ class ListingShortProbeAgent:
                 skipped += 1
                 continue
             pid = f"ls-{uuid.uuid4().hex[:10]}"
-            self._write_decision_row(pid, sym, entry_ts, entry_px, H, notional, score)
-            self._write_probe_row(proposal_id=pid, decision="ENTER", now=now, **common)
+            # ENTER writes the decision + probe rows ATOMICALLY (a split write
+            # can orphan the decision — see probe_common.write_entry_pair).
+            self._write_probe_row(
+                proposal_id=pid, decision="ENTER", now=now,
+                decision_row=self._decision_row(pid, sym, entry_ts, entry_px, H, notional),
+                **common,
+            )
             entered += 1
         d["entered"] = True   # terminal rows written for every horizon
         return entered, skipped
@@ -777,14 +782,15 @@ class ListingShortProbeAgent:
         self._wh._conn().commit()
 
     # ── warehouse writes ─────────────────────────────────────────────────
-    def _write_decision_row(self, pid, sym, entry_ts, entry_px, horizon_days,
-                            notional, score) -> None:
-        """One shadow_decisions row the keystone resolver replays into
-        shadow_outcomes. side='sell', no SL/TP (naked, held to the horizon bar —
-        auditor B2 unlevered-3%-notional, no-SL variant). sim_pnl is left NULL:
-        this probe does no PnL projection; the resolver owns the after-cost net."""
-        write_shadow_decision(
-            self._wh, ts=entry_ts, model_version=self.model_version, symbol=sym,
+    def _decision_row(self, pid, sym, entry_ts, entry_px, horizon_days,
+                      notional) -> dict:
+        """The shadow_decisions kwargs for the keystone resolver, which replays
+        the row into shadow_outcomes. side='sell', no SL/TP (naked, held to the
+        horizon bar — auditor B2 unlevered-3%-notional, no-SL variant). sim_pnl
+        is left NULL: this probe does no PnL projection; the resolver owns the
+        after-cost net. Built here, written by _write_probe_row's atomic pair."""
+        return dict(
+            ts=entry_ts, model_version=self.model_version, symbol=sym,
             side="sell", agent_id=self.name, proposal_id=pid, notional=notional,
             entry_px=entry_px,
             sl_px=0.0,   # no stop: sl>0 checks in the resolver never fire
@@ -807,7 +813,11 @@ class ListingShortProbeAgent:
                          horizon_days, detected_ts, entry_ts, entry_px, listing_px,
                          stake_frac, notional_usd, day1_spread_bps, day1_funding_rate,
                          shortable, quote_volume_usd, pump_pct, score,
-                         concurrent_open_at_entry, shortable_basis=None) -> None:
+                         concurrent_open_at_entry, shortable_basis=None,
+                         decision_row=None) -> None:
+        """Write the probe row. ``decision_row`` (ENTER only) pairs it with its
+        shadow_decisions row in ONE transaction; the SKIP paths pass None —
+        they have no decision row and no position."""
         row = {
             "proposal_id": proposal_id, "symbol": symbol, "base": base,
             "horizon_days": int(horizon_days), "decision": decision,
@@ -827,7 +837,13 @@ class ListingShortProbeAgent:
             "concurrent_open_at_entry": int(concurrent_open_at_entry),
             "created_ts": int(now),
         }
-        insert_row(self._wh, "shadow_listing_probe", row, replace=True)
+        if decision_row is None:
+            insert_row(self._wh, "shadow_listing_probe", row, replace=True)
+        else:
+            write_entry_pair(
+                self._wh, decision=decision_row,
+                probe_table="shadow_listing_probe", probe_row=row, replace=True,
+            )
 
     def _log_skip(self, sym: str, decision: str, now: int, *, detected_ts,
                   entry_ts=0, entry_px=0.0, listing_px=0.0, pump_pct=0.0,

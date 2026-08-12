@@ -151,26 +151,33 @@ def ensure_schema(warehouse, schema_sql: str) -> None:
     conn.commit()
 
 
-def insert_row(warehouse, table: str, row: dict, *, replace: bool = False) -> None:
-    """Insert one dict-shaped row (column order = dict order). ``replace``
-    selects INSERT OR REPLACE for the probes whose rows may be re-written."""
+def _insert(conn, table: str, row: dict, *, replace: bool = False) -> None:
+    """Emit one INSERT on an EXISTING connection — no commit, so callers can
+    compose several writes into one transaction (see write_entry_pair)."""
     cols = ", ".join(row.keys())
     ph = ", ".join("?" * len(row))
     verb = "INSERT OR REPLACE" if replace else "INSERT"
-    conn = warehouse._conn()
     conn.execute(f"{verb} INTO {table} ({cols}) VALUES ({ph})", tuple(row.values()))
+
+
+def insert_row(warehouse, table: str, row: dict, *, replace: bool = False) -> None:
+    """Insert one dict-shaped row (column order = dict order). ``replace``
+    selects INSERT OR REPLACE for the probes whose rows may be re-written.
+
+    Self-committing — correct for a STANDALONE row (an MTM bar, a probe-only
+    SKIP row). An ENTRY writes two coupled rows and must use write_entry_pair
+    instead, or a failure between them leaves an orphan decision."""
+    conn = warehouse._conn()
+    _insert(conn, table, row, replace=replace)
     conn.commit()
 
 
-def write_shadow_decision(warehouse, *, ts, model_version, symbol, side, agent_id,
-                          proposal_id, notional, entry_px, sl_px, tp_px, venue,
-                          timeframe, horizon_bars) -> None:
-    """One shadow_decisions row the keystone resolver (core/shadow_resolver.py)
-    replays into shadow_outcomes. sim_pnl stays NULL — a probe does no PnL
-    projection; the resolver owns the after-cost net. sl_px/tp_px of 0.0 mean
-    "no barrier" (the resolver's sl>0/tp>0 checks never fire); the time exit
-    lands at the horizon bar."""
-    row = {
+def _shadow_decision_row(*, ts, model_version, symbol, side, agent_id,
+                         proposal_id, notional, entry_px, sl_px, tp_px, venue,
+                         timeframe, horizon_bars) -> dict:
+    """Build (never write) the shadow_decisions row — the single definition
+    shared by write_shadow_decision and the transactional write_entry_pair."""
+    return {
         "ts": int(ts),
         "model_version": model_version,
         "symbol": symbol,
@@ -196,7 +203,59 @@ def write_shadow_decision(warehouse, *, ts, model_version, symbol, side, agent_i
         "horizon_bars": int(horizon_bars),
         "label_status": "PENDING",
     }
-    insert_row(warehouse, "shadow_decisions", row)
+
+
+def write_shadow_decision(warehouse, **kwargs) -> None:
+    """One shadow_decisions row the keystone resolver (core/shadow_resolver.py)
+    replays into shadow_outcomes. sim_pnl stays NULL — a probe does no PnL
+    projection; the resolver owns the after-cost net. sl_px/tp_px of 0.0 mean
+    "no barrier" (the resolver's sl>0/tp>0 checks never fire); the time exit
+    lands at the horizon bar.
+
+    Standalone write. An ENTRY pairs this row with a probe-table row and must
+    go through write_entry_pair so a failure cannot orphan the decision."""
+    insert_row(warehouse, "shadow_decisions", _shadow_decision_row(**kwargs))
+
+
+def write_entry_pair(warehouse, *, probe_table: str, probe_row: dict,
+                     decision: Optional[dict] = None,
+                     decisions: Optional[list] = None,
+                     replace: bool = False) -> None:
+    """Write a probe ENTRY's rows ATOMICALLY — all of them or none.
+
+    A probe entry spans two tables: the shadow_decisions row(s) the resolver
+    replays into shadow_outcomes, and the probe-table row that holds the
+    one-position occupancy slot. Written separately (each self-committing) a
+    crash / lock / IntegrityError between them leaves an ORPHAN decision: the
+    resolver still resolves it — so it counts toward the >= 30-RESOLVED
+    promotion gate — while no probe row holds the slot, so the probe re-enters
+    the same signal. That is evidence corruption, not just a lost row, which
+    is why the write is transactional rather than merely reordered.
+
+    ``decision`` is one write_shadow_decision kwargs dict (minus the
+    warehouse); ``decisions`` takes several for a probe whose entry logs more
+    than one row (the unlock probe's raw arm + its SL-guardian counterfactual
+    must stand or fall together, or the arms disagree on what happened).
+    ``probe_row`` is the probe table's dict-shaped row and ``replace`` mirrors
+    insert_row's flag. Exceptions propagate after rollback — probe_tick logs
+    and the bar is retried, which is correct: no half-written entry is left
+    behind to be resolved.
+    """
+    rows = list(decisions or [])
+    if decision is not None:
+        rows.insert(0, decision)
+    conn = warehouse._conn()
+    # isolation_level=None -> autocommit; BEGIN IMMEDIATE takes the write lock
+    # up front so the write cannot interleave with another writer.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for d in rows:
+            _insert(conn, "shadow_decisions", _shadow_decision_row(**d))
+        _insert(conn, probe_table, probe_row, replace=replace)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 # ── Barrier-probe skeleton (tsmom / breakout) ────────────────────────────────
@@ -294,9 +353,16 @@ def eval_gate(agent, *, symbol: str, tf: str, bar_s: int, fetch_bars: int,
 
     candles = closed_candles(agent._ohlcv, agent._venue, symbol, tf, bar_s,
                              fetch_bars, now)
+    if not candles:
+        # The venue served NOTHING (transient error / empty response). This is
+        # not evidence about history length, so the boundary stays unmarked and
+        # the bar is retried next tick — marking it here silently DROPS a
+        # signal bar until the next boundary. Same convention as
+        # monitor_open_barriers' `if candles:` fetch gate below.
+        return None
     if len(candles) < min_bars:
-        # insufficient history — never guess a signal; won't change within
-        # this bar, so mark the boundary evaluated
+        # genuinely insufficient history — never guess a signal; it cannot
+        # lengthen within this bar, so mark the boundary evaluated
         seen[key] = expected_bar
         return None
     latest_ts = int(candles[-1][0]) // 1000

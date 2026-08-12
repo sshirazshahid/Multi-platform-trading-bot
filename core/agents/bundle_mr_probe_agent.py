@@ -92,10 +92,9 @@ from core.agents.probe_common import (
     accrue_funding,
     ensure_schema,
     eval_gate,
-    insert_row,
     monitor_open_barriers,
     probe_tick,
-    write_shadow_decision,
+    write_entry_pair,
 )
 
 # ── Frozen bundle constants (prereg.md + shortlist.json cfg365/cfg226) ───────
@@ -431,26 +430,6 @@ class _BundleMrProbeBase:
         side = "buy" if sig > 0 else "sell"
         pid = f"{self.PID_PREFIX}{uuid.uuid4().hex[:10]}"
 
-        # One shadow_decisions row the keystone resolver replays into
-        # shadow_outcomes: SL-first, fees + slippage, censoring-guarded time
-        # exit at the 12-bar time-stop. sim_pnl stays NULL — the resolver
-        # owns the after-cost net.
-        write_shadow_decision(
-            self._wh,
-            ts=latest_ts,
-            model_version=self.model_version,
-            symbol=symbol,
-            side=side,
-            agent_id=self.name,
-            proposal_id=pid,
-            notional=notional,
-            entry_px=entry_px,
-            sl_px=sl_px,
-            tp_px=tp_px,
-            venue=self._venue,
-            timeframe=TIMEFRAME,
-            horizon_bars=TSTOP_BARS,
-        )
         row = {
             "proposal_id": pid,
             "symbol": symbol,
@@ -475,8 +454,32 @@ class _BundleMrProbeBase:
             "closed_hint_reason": None,
             "created_ts": int(now),
         }
-        # Plain INSERT: an entry row is written exactly once, never replaced.
-        insert_row(self._wh, "shadow_bundle_mr_probe", row)
+        # The entry's TWO rows in ONE transaction: the shadow_decisions row
+        # the keystone resolver replays into shadow_outcomes (SL-first, fees +
+        # slippage, censoring-guarded time exit at the 12-bar time-stop;
+        # sim_pnl stays NULL — the resolver owns the after-cost net), and this
+        # probe row holding the occupancy slot. Written separately, a failure
+        # between them orphans the decision — see write_entry_pair.
+        write_entry_pair(
+            self._wh,
+            decision=dict(
+                ts=latest_ts,
+                model_version=self.model_version,
+                symbol=symbol,
+                side=side,
+                agent_id=self.name,
+                proposal_id=pid,
+                notional=notional,
+                entry_px=entry_px,
+                sl_px=sl_px,
+                tp_px=tp_px,
+                venue=self._venue,
+                timeframe=TIMEFRAME,
+                horizon_bars=TSTOP_BARS,
+            ),
+            probe_table="shadow_bundle_mr_probe",
+            probe_row=row,
+        )
         return 1
 
     # ── monitoring: per-bar MTM + occupancy hints + funding ──────────────
