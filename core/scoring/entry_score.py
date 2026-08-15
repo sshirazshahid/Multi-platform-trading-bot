@@ -65,6 +65,18 @@ def score_coin(*, data_coordinator, coin: str, data: dict, ei: dict) -> dict:
         if adx_4h < 15:
             _zero["reason"] = f"regime_chop(4h_adx={adx_4h:.0f}<15)"
             return _zero
+        # Upper bound added 2026-08-15 per frozen prereg 77
+        # (_workspace/strategy_pipeline/77_prereg_adx_band_scorer_alignment.md,
+        # sha256 12149d6e2efe...). This scorer selects FOR trend while the
+        # band-regime veto rejects adx_4h>30 as toxic, so 65.4% of everything
+        # it approved was vetoed at execution — 2,531 approvals, 0 opens, 38h
+        # idle. 30 is not a new number: it is the veto's own pre-registered
+        # bucket edge from screen 13_band_conditional. HONESTY: the surviving
+        # 20-30 band is itself significantly NEGATIVE (mean -0.1551/trade,
+        # 95% CI [-0.2232, -0.0871]) — this restores FLOW, never EDGE.
+        if adx_4h > 30:
+            _zero["reason"] = f"regime_toxic_trend(4h_adx={adx_4h:.0f}>30)"
+            return _zero
         if bb_width_4h < 1.0:
             _zero["reason"] = f"regime_squeeze(4h_bb={bb_width_4h:.1f}%<1.0%)"
             return _zero
