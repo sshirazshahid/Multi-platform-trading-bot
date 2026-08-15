@@ -1,0 +1,26 @@
+{
+ "blocks": 4384,
+ "events": 167,
+ "results": {
+  "design (buy .45 / sell .35)|buy": {
+   "n": 157,
+   "wr": 0.7197452229299363,
+   "mean_bps": -19.910828025477713
+  },
+  "design (buy .45 / sell .35)|sell": {
+   "n": 155,
+   "wr": 0.7225806451612903,
+   "mean_bps": -25.3483870967742
+  },
+  "realized payoff 0.243|buy": {
+   "n": 160,
+   "wr": 0.0,
+   "mean_bps": -26.711750000000006
+  },
+  "realized payoff 0.243|sell": {
+   "n": 157,
+   "wr": 0.0,
+   "mean_bps": -28.503694267515925
+  }
+ }
+}
