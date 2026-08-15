@@ -23,6 +23,10 @@ def _isolate_cooldown_state(tmp_path, monkeypatch):
     into the real data/ directory."""
     monkeypatch.setattr(
         hw, "COOLDOWN_STATE_PATH", tmp_path / "watchdog_cooldown_state.json")
+    # Same reason: the starvation check now scans LOG_DIR to name the real
+    # blocker, and the PRODUCTION log names a deliberate veto that suppresses
+    # the alert — which would silently invert these assertions.
+    monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "logs")
 
 
 class _FakeNotifier:

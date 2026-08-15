@@ -50,6 +50,11 @@ class _Risk:
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "COOLDOWN_STATE_PATH", tmp_path / "cd.json")
+    # Isolate the block-reason scan from the PRODUCTION logs/ directory: the
+    # real log names band_regime_filter, which suppresses the alert and would
+    # silently invert every assertion below. Tests that need a blocker patch
+    # _dominant_entry_block_reason explicitly.
+    monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "logs")
     # Production EconGate=strict treats zero opens as expected idle; these
     # unit tests assert the starvation signal itself, so force the check on.
     monkeypatch.setattr(
@@ -155,3 +160,46 @@ def test_entry_without_open_time_is_not_counted_as_recent(tmp_path, monkeypatch)
     n = _Notifier()
     _wd(n, _Risk(0.0))._check_model_gate_starving()
     assert len(n.sent) == 1, "missing open_time must not count as a recent open"
+
+
+# ── 2026-08-15: idleness caused by a DELIBERATE measured veto is not news ───
+# The alert fired hourly for 38h saying "the model gate may be starving for
+# signal" while the real cause was band_regime_filter correctly refusing a
+# trending tape (ADX>30, measured 59.0% WR vs 65.7% baseline; the 2026-08-15
+# replay of 312 blocked entries returned -19.9/-25.3 bps with CIs excluding
+# zero). Reporting a working safety rail as a malfunction trains the operator
+# to ignore the alert channel — the failure mode that made the 48h latch
+# starvation expensive to notice.
+
+def test_deliberate_regime_veto_suppresses_the_alert(tmp_path, monkeypatch):
+    """Zero opens BECAUSE a measured filter vetoed is expected, not starvation."""
+    _positions(tmp_path, monkeypatch, closed_ages_h=(9.0,))
+    monkeypatch.setattr(
+        HealthWatchdog, "_dominant_entry_block_reason",
+        lambda self: ("band_regime_filter", 170),
+    )
+    n = _Notifier()
+    _wd(n, _Risk(0.0))._check_model_gate_starving()
+    assert n.sent == [], (
+        "a deliberate, measured veto must not be reported as model starvation"
+    )
+
+
+def test_unexplained_idleness_still_alerts(tmp_path, monkeypatch):
+    """With no identifiable blocker the alert MUST still fire — that is the
+    genuinely diagnostic case the check exists for."""
+    _positions(tmp_path, monkeypatch, closed_ages_h=(9.0,))
+    monkeypatch.setattr(
+        HealthWatchdog, "_dominant_entry_block_reason", lambda self: (None, 0),
+    )
+    n = _Notifier()
+    _wd(n, _Risk(0.0))._check_model_gate_starving()
+    assert len(n.sent) == 1
+    assert "no identifiable" in n.sent[0][1].lower(), n.sent[0][1]
+
+
+def test_block_reason_scan_survives_missing_log(tmp_path, monkeypatch):
+    """No log directory must not crash the tick (fail-open to 'unknown')."""
+    monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "no_logs")
+    reason, count = _wd(_Notifier(), _Risk(0.0))._dominant_entry_block_reason()
+    assert reason is None and count == 0

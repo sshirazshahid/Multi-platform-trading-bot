@@ -50,6 +50,7 @@ Triggers (see WatchdogConfig for thresholds):
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -126,6 +127,16 @@ MODEL_POINTER_MARKETS    = ("futures", "spot")
 NO_SCAN_PROGRESS_SEC     = 15 * 60
 STUCK_OPEN_HOURS         = 24
 REPORTS_DIR              = Path("reports")
+# Bot logs, scanned by the starvation check to name the ACTUAL blocker before
+# alerting. A deliberate measured veto is not a malfunction (2026-08-15).
+LOG_DIR                  = Path("logs")
+# Entry blocks that are the system WORKING AS DESIGNED: a measured filter
+# refusing conditions it was calibrated to refuse. Idleness attributable to
+# these is expected, not starvation, and must not page the operator hourly.
+DELIBERATE_ENTRY_BLOCKS  = (
+    "band_regime_filter",           # ADX>30 / btc_vol<0.7 toxic-regime veto
+    "accband_research_daily_open_budget",  # the 12-opens/UTC-day research cap
+)
 # Persists per-check last-alert timestamps so cooldowns survive a restart
 # (otherwise every sticky WARN re-emails on each bounce). Runtime state.
 COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
@@ -657,6 +668,40 @@ class HealthWatchdog:
         except Exception:
             return False
 
+    def _dominant_entry_block_reason(self) -> tuple:
+        """(reason, hits) for the block that stopped the most entries today.
+
+        Reads today's bot log for the ``BLOCKED ... — <reason>`` lines every
+        entry gate emits. Returns (None, 0) when nothing is identifiable — an
+        unreadable log must degrade to "unexplained" (which still alerts),
+        never to a false all-clear.
+        """
+        try:
+            log = LOG_DIR / f"bot_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.log"
+            if not log.exists():                       # fall back to the newest
+                logs = sorted(LOG_DIR.glob("bot_*.log"))
+                if not logs:
+                    return None, 0
+                log = logs[-1]
+            counts: dict = {}
+            cutoff = time.time() - MODEL_STARVE_HOURS * 3600
+            with log.open("r", encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if "BLOCKED" not in line:
+                        continue
+                    stamp = _decision_ts_epoch(line[:19].strip().replace(" ", "T"))
+                    if stamp is not None and stamp < cutoff:
+                        continue
+                    m = re.search(r"BLOCKED[^\n]*?[—-]\s*([a-z_]+)", line)
+                    if m:
+                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+            if not counts:
+                return None, 0
+            best = max(counts.items(), key=lambda kv: kv[1])
+            return best[0], best[1]
+        except Exception:
+            return None, 0
+
     def _check_model_gate_starving(self) -> None:
         # Only nag when the bot isn't already in real drawdown — drawdown
         # makes the gate's caution rational and we don't want to encourage
@@ -715,12 +760,24 @@ class HealthWatchdog:
             if opened >= cutoff:
                 opens_recent += 1
         if opens_recent == 0:
+            # 2026-08-15: zero opens is not self-evidently a malfunction. When a
+            # measured filter is deliberately refusing the tape, alerting hourly
+            # trains the operator to ignore this channel — the same numbness that
+            # made a 48h latch starvation expensive to notice. Only page when the
+            # idleness is UNEXPLAINED.
+            reason, hits = self._dominant_entry_block_reason()
+            if reason in DELIBERATE_ENTRY_BLOCKS:
+                self._edge_alert("model_gate_starving", False, "INFO", "")
+                return
+            detail = (f"dominant block: {reason} ({hits} hits)" if reason
+                      else "no identifiable entry block in the logs")
             self._alert(
                 "model_gate_starving", "INFO",
                 f"No OPEN actions in the last {MODEL_STARVE_HOURS}h despite "
-                "non-drawdown state — model gate may be starving for signal.",
+                f"non-drawdown state — {detail}.",
                 {"opens_recent": opens_recent,
-                 "window_hours": MODEL_STARVE_HOURS},
+                 "window_hours": MODEL_STARVE_HOURS,
+                 "dominant_block": reason, "block_hits": hits},
             )
 
     def _check_soft_stale_latch_stuck(self) -> None:
