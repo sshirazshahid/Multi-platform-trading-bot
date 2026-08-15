@@ -13,7 +13,7 @@ import threading
 import ccxt
 from loguru import logger
 
-from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY
+from config import BITGET_API_KEY, BITGET_PASSPHRASE, BITGET_SECRET_KEY, BITGET_UTA
 from utils.http_redaction import redact_http_debug
 
 from .base import BaseExchange, validate_ohlcv
@@ -26,6 +26,16 @@ _PLACEHOLDERS = {
 }
 
 
+def _is_uta_classic_mismatch(exc: BaseException) -> bool:
+    """True when Bitget rejects Classic Account API on a UTA account (40085)."""
+    text = str(exc)
+    return (
+        "40085" in text
+        or "Unified Account mode" in text
+        or "Classic Account API is not supported" in text
+    )
+
+
 class BitgetClient(BaseExchange):
 
     # Default to ONE-WAY mode — Bitget accounts are one-way unless explicitly
@@ -34,12 +44,19 @@ class BitgetClient(BaseExchange):
     # NOTE: instance variable (not class variable) to avoid cross-profile contamination
     _is_oneway = True  # overridden per-instance in __init__
 
+    # Class-level default so a partially-constructed instance (tests build via
+    # __new__; a failed __init__ path) can never AttributeError inside
+    # fetch_open_conditionals/create_order — absent per-instance state reads
+    # as "classic account", the pre-UTA behavior.
+    _uta = False
+
     _TF_MAP = {"4h": "4Hutc", "1d": "1Dutc", "12h": "12Hutc", "6h": "6Hutc"}
 
     def __init__(self, api_key: str = None, secret: str = None,
                  passphrase: str = None):
         self._connected  = False
         self._is_oneway  = True   # Instance variable — safe for multi-profile
+        self._uta = False  # set True when UTA endpoints are required
         # 2026-06-04 — Reentrant lock guarding self.exchange.options["defaultType"]
         # (mirrors BinanceClient). Concurrent threads — the 10s SL/TP daemon, the
         # 5min portfolio cycle, and the MCP-brain ThreadPoolExecutor fanning
@@ -58,6 +75,12 @@ class BitgetClient(BaseExchange):
             testnet = False,
         )
 
+    def _set_uta(self, enabled: bool) -> None:
+        """Enable/disable ccxt Bitget UTA routing (options['uta'])."""
+        self._uta = bool(enabled)
+        if self.exchange is not None:
+            self.exchange.options["uta"] = self._uta
+
     def _init_exchange(self):
         key  = self.api_key.lower()
         sec  = self.secret.lower()
@@ -72,6 +95,7 @@ class BitgetClient(BaseExchange):
             self._connected = False
             return
 
+        uta_mode = BITGET_UTA  # True | False | "auto"
         try:
             self.exchange = ccxt.bitget({
                 "apiKey":     self.api_key,
@@ -80,13 +104,12 @@ class BitgetClient(BaseExchange):
                 "options": {
                     "defaultType":             "spot",
                     "adjustForTimeDifference": True,
-                    # Skip GET /api/v2/spot/public/coins during load_markets.
-                    # ccxt signs this call when API keys are present, and
-                    # Bitget intermittently returns an empty-body error
-                    # (ccxt surfaces it as "bitget GET <url>" with no detail).
-                    # We don't use currency metadata anywhere, so opting out
-                    # of this call removes the failure mode entirely.
+                    # Skip GET /api/v2/spot/public/coins during load_markets —
+                    # requires has['fetchCurrencies']=False below (options alone
+                    # are ignored by ccxt.Exchange.load_markets).
                     "fetchCurrencies":         False,
+                    # Force UTA endpoints when account is Unified Trading Account.
+                    "uta": bool(uta_mode is True),
                 },
                 "enableRateLimit": True,
                 "timeout":         20000,
@@ -96,6 +119,10 @@ class BitgetClient(BaseExchange):
             self.exchange   = None
             self._connected = False
             return
+
+        self.exchange.has["fetchCurrencies"] = False
+        if uta_mode is True:
+            self._set_uta(True)
 
         # Sync clock FIRST — Bitget rejects signed requests whose timestamp
         # drifts from their server, and some of its "public" endpoints get
@@ -132,13 +159,36 @@ class BitgetClient(BaseExchange):
         # mutating this account-wide setting before authorization completes.
 
         try:
-            self.exchange.fetch_balance()
+            self._authenticate_balance(uta_mode=uta_mode)
             self._connected = True
-            logger.info("[Bitget] Connected and authenticated.")
+            mode_label = "UTA" if self._uta else "classic"
+            logger.info(f"[Bitget] Connected and authenticated ({mode_label}).")
         except Exception as e:
-            logger.warning(f"[Bitget] Auth failed: {str(e)[:120]}")
+            logger.warning(f"[Bitget] Auth failed: {str(e)[:160]}")
             self.exchange   = None
             self._connected = False
+
+    def _authenticate_balance(self, *, uta_mode) -> None:
+        """Verify keys. Auto-switch to UTA on Classic-API 40085 rejection."""
+        assert self.exchange is not None
+        try:
+            self.exchange.fetch_balance()
+            return
+        except Exception as e:
+            if uta_mode is False or not _is_uta_classic_mismatch(e):
+                raise
+            if self._uta:
+                raise
+            logger.warning(
+                "[Bitget] Classic Account API rejected (likely UTA) — "
+                "enabling ccxt options['uta']=True and retrying auth"
+            )
+            self._set_uta(True)
+            try:
+                self.exchange.load_markets(reload=True)
+            except Exception as reload_exc:
+                logger.debug(f"[Bitget] UTA markets reload: {reload_exc}")
+            self.exchange.fetch_balance()
 
     def _describe_ccxt_error(self, e: Exception) -> str:
         """Expand bare ccxt errors with response body / status when available.
@@ -280,19 +330,41 @@ class BitgetClient(BaseExchange):
         with self._defaultType_lock:
             if market_type == "futures":
                 self.switch_to_futures()
-                for params in [{}, {"type": "swap"}, {"type": "umcbl"},
-                               {"type": "mix"}, {"productType": "USDT-FUTURES"}]:
-                    try:
-                        bal = self.exchange.fetch_balance(params) if params else self.exchange.fetch_balance()
-                        self.switch_to_spot()
-                        usdt = bal.get("USDT") or bal.get("free", {}).get("USDT")
-                        if usdt is not None:
+                last_err = None
+                try:
+                    for params in [{}, {"type": "swap"}, {"type": "umcbl"},
+                                   {"type": "mix"}, {"productType": "USDT-FUTURES"}]:
+                        try:
+                            bal = (self.exchange.fetch_balance(params) if params
+                                   else self.exchange.fetch_balance())
+                        except Exception as e:
+                            # Keep the REAL reason: a bare `pass` here once turned
+                            # five distinct venue errors into "all methods failed"
+                            # with no way to tell which call broke, or why.
+                            last_err = e
+                            continue
+                        # Accept ANY well-formed ccxt balance. Keying success on a
+                        # USDT figure discarded valid UTA responses: a Unified
+                        # Trading Account holding only alt-coins has no "USDT" key
+                        # at all, so a perfectly good balance was indistinguishable
+                        # from a total API failure (2026-08-15: logged "all methods
+                        # failed" every few seconds for hours while the venue was
+                        # healthy and answering on the FIRST attempt).
+                        if isinstance(bal, dict) and (
+                            "total" in bal or "free" in bal or "info" in bal
+                        ):
                             return bal
-                    except Exception:
-                        pass
-                self.switch_to_spot()
-                logger.debug("[Bitget] fetch_balance futures: all methods failed")
-                return {}
+                        last_err = last_err or TypeError(
+                            f"malformed balance response: {type(bal).__name__}"
+                        )
+                    logger.debug(
+                        "[Bitget] fetch_balance futures: all methods failed"
+                        + (f" — last error: {type(last_err).__name__}: "
+                           f"{str(last_err)[:160]}" if last_err else "")
+                    )
+                    return {}
+                finally:
+                    self.switch_to_spot()
             try:
                 return self.exchange.fetch_balance()
             except Exception as e:
@@ -344,9 +416,14 @@ class BitgetClient(BaseExchange):
         with self._defaultType_lock:
             self.switch_to_futures()
             try:
-                out = self.exchange.fetch_open_orders(
-                    symbol, params={"stop": True, "acknowledged": True,
-                                    "productType": "USDT-FUTURES"})
+                cond_params = {
+                    "stop": True,
+                    "acknowledged": True,
+                    "productType": "USDT-FUTURES",
+                }
+                if self._uta:
+                    cond_params["uta"] = True
+                out = self.exchange.fetch_open_orders(symbol, params=cond_params)
                 return out if isinstance(out, list) else None
             except Exception as e:
                 logger.debug(
@@ -368,6 +445,8 @@ class BitgetClient(BaseExchange):
                 self.switch_to_futures()
 
             _params = dict(params or {})
+            if self._uta:
+                _params.setdefault("uta", True)
 
             # For One-Way mode on FUTURES:
             # - Remove two-way params (positionSide, holdSide, tradeSide)
