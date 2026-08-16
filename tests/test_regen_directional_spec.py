@@ -296,5 +296,152 @@ def test_all_bases_rejected_fails_closed(tmp_path):
     assert spec_path.read_text(encoding="utf-8") == before
 
 
+# ── prereg 80: liquidity-gated universe widening ────────────────────────────
+# Frozen rule (_workspace/strategy_pipeline/80_prereg_universe_widening.md,
+# sha256 f7c38f5dd8ff...): a base is eligible when its max 24h quoteVolume
+# across venues >= the floor AND it is an active USDT perp on >= 2 venues;
+# the final universe is that set UNION the incumbents (never silently shrink).
+# Volume MUST come from live tickers — load_markets carries no volume, the
+# exact trap the 2026-07-20 regen note flags.
+
+def _tickers(vol_by_venue: dict) -> dict:
+    """{venue: {SYMBOL: quoteVolume}} -> the shape _volume_widened_bases takes."""
+    return {v: {s: {"quoteVolume": q} for s, q in d.items()}
+            for v, d in vol_by_venue.items()}
+
+
+def test_widening_requires_volume_floor_and_two_venues():
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({
+            "binance": {"AAA/USDT:USDT": 9e6, "BBB/USDT:USDT": 9e6,
+                        "CCC/USDT:USDT": 1e6},
+            "bybit":   {"AAA/USDT:USDT": 8e6},
+        }),
+        min_volume_usd=5e6,
+        min_venues=2,
+    )
+    assert "AAA" in got, "clears the floor and is listed on two venues"
+    assert "BBB" not in got, "listed on one venue only -> excluded"
+    assert "CCC" not in got, "below the volume floor -> excluded"
+
+
+def test_widening_uses_MAX_volume_across_venues():
+    """A base thin on one venue but deep on another is eligible — we trade the
+    venue with the book, so the max is the honest statistic."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"binance": {"XYZ/USDT:USDT": 1e6},
+                  "bybit": {"XYZ/USDT:USDT": 40e6}}),
+        min_volume_usd=5e6, min_venues=2)
+    assert "XYZ" in got
+
+
+def test_widening_never_drops_incumbents(tmp_path):
+    """THE binding rule: a thin incumbent must survive the widening.
+
+    Measured at prereg time: a naive $5M floor would have dropped 13 existing
+    spec members (incl. SEI and JUP, which carry forward unlock events)."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    spec = _mini_spec()
+    incumbents = {s.split("/")[0] for s in spec["symbols"]}
+    eligible = _volume_widened_bases(
+        _tickers({"binance": {"NEW/USDT:USDT": 9e6},
+                  "bybit": {"NEW/USDT:USDT": 9e6}}),
+        min_volume_usd=5e6, min_venues=2)
+    final = eligible | incumbents
+    assert incumbents <= final, "widening must never shrink the authorized set"
+    assert "NEW" in final
+
+
+def test_widening_ignores_dated_contracts():
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"binance": {"OLD/USDT:USDT-260925": 50e6},
+                  "bybit": {"OLD/USDT:USDT-260925": 50e6}}),
+        min_volume_usd=5e6, min_venues=2)
+    assert "OLD" not in got, "dated/expiry contracts are not perps"
+
+
+def test_widening_survives_a_venue_returning_nothing():
+    """One venue down must not empty the universe (fail-open per venue)."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"binance": {"AAA/USDT:USDT": 9e6},
+                  "bybit": {"AAA/USDT:USDT": 9e6},
+                  "bitget": {}}),
+        min_volume_usd=5e6, min_venues=2)
+    assert "AAA" in got
+
+
+def test_widened_regen_stamps_the_cohort_boundary():
+    """Prereg 80 §4 is binding: the n=36 cohort was measured on 44 bases, so
+    the widening boundary must stay recoverable forever or a later analysis
+    silently pools two different populations."""
+    spec = build_updated_spec(_mini_spec(), ["BTC", "ETH"], {},
+                              widen_min_volume_usd=5e6)
+    prov = spec["regen_provenance"][-1]
+    assert prov.get("universe_widened_utc"), "cohort boundary stamp missing"
+    assert prov.get("widen_min_volume_usd") == 5e6
+    assert "80" in str(prov.get("prereg", "")), "must cite the governing prereg"
+
+
+def test_unwidened_regen_carries_no_widening_stamp():
+    """A routine regen must NOT claim a cohort boundary that did not happen."""
+    prov = build_updated_spec(_mini_spec(), ["BTC"], {})["regen_provenance"][-1]
+    assert "universe_widened_utc" not in prov
+
+
+def test_widening_excludes_tradfi_bases_flagged_on_ANY_venue():
+    """Cross-venue metadata is inconsistent — verified 2026-08-16.
+
+    binance tags tokenized equities (TRADIFI_PERPETUAL) so pair_discovery
+    rejects them there, but bybit and bitget carry no such marker and
+    ACCEPTED SAMSUNG/MRVL/SOXL/NBIS. Widening must union the rejection: if
+    ANY venue says TradFi, the base is barred everywhere."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"bybit": {"SAMSUNG/USDT:USDT": 50e6, "OK/USDT:USDT": 9e6},
+                  "bitget": {"SAMSUNG/USDT:USDT": 50e6, "OK/USDT:USDT": 9e6}}),
+        min_volume_usd=5e6, min_venues=2,
+        exclude_bases={"SAMSUNG"},          # as derived from binance metadata
+    )
+    assert got == {"OK"}, f"TradFi base must be barred, got {got}"
+
+
+def test_widening_excludes_non_ascii_tickers():
+    """Live venues list CJK-named meme tokens (binance/bitget carry three).
+
+    They flow into symbol strings, warehouse rows and log lines, and one of
+    them crashed this script outright on a cp1252 console during the
+    prereg-80 dry run. Excluded from WIDENING candidacy only."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"binance": {"龙虾/USDT:USDT": 50e6,
+                              "OK/USDT:USDT": 9e6},
+                  "bitget": {"龙虾/USDT:USDT": 50e6,
+                             "OK/USDT:USDT": 9e6}}),
+        min_volume_usd=5e6, min_venues=2)
+    assert got == {"OK"}, f"non-ASCII base must be excluded, got {got}"
+
+
+def test_zero_floor_does_not_admit_zero_volume_bases():
+    """Guard against a misconfigured floor silently admitting dead markets."""
+    from scripts.regen_directional_spec import _volume_widened_bases
+
+    got = _volume_widened_bases(
+        _tickers({"binance": {"DEAD/USDT:USDT": 0.0},
+                  "bybit": {"DEAD/USDT:USDT": 0.0}}),
+        min_volume_usd=0.0, min_venues=2)
+    assert "DEAD" not in got
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

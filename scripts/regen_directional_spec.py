@@ -81,7 +81,8 @@ def derive_futures_bases(all_pairs: dict) -> tuple:
     return sorted(bases), stats
 
 
-def build_updated_spec(current: dict, bases: list, stats: dict) -> dict:
+def build_updated_spec(current: dict, bases: list, stats: dict,
+                       widen_min_volume_usd: float = 0.0) -> dict:
     """Return a new spec dict: symbols replaced, everything else preserved,
     provenance appended (capped history)."""
     spec = json.loads(json.dumps(current))  # deep copy, never mutate input
@@ -100,6 +101,14 @@ def build_updated_spec(current: dict, bases: list, stats: dict) -> dict:
         "removed": sorted(set(old_bases) - set(new_bases)),
         "exclusions": dict(stats),
     }
+    if widen_min_volume_usd:
+        # Prereg 80 §4 (binding): the n=36 / 83.3% WR cohort was measured on
+        # 44 bases. Post-widening trades are a DIFFERENT population, so the
+        # boundary must stay recoverable forever — any analysis spanning it
+        # reports pre/post split, never pooled.
+        provenance["universe_widened_utc"] = provenance["regenerated_utc"]
+        provenance["widen_min_volume_usd"] = float(widen_min_volume_usd)
+        provenance["prereg"] = "80_prereg_universe_widening (f7c38f5dd8ff)"
     spec["symbols"] = [f"{b}/USDT:USDT" for b in new_bases]
     history = list(spec.get("regen_provenance") or [])
     history.append(provenance)
@@ -138,6 +147,112 @@ def _candidate_bases(current_spec: dict) -> set:
         | set(pair_discovery.EXTENDED_CRYPTO)
         | {b for b in incumbents if b}
     )
+
+
+def _fetch_tickers_by_venue(venues=("binance", "bybit", "bitget")) -> dict:
+    """{venue: fetch_tickers()} via keyless public ccxt clients.
+
+    Read-only and per-venue fail-open: a venue that errors contributes
+    nothing rather than aborting the widening, mirroring _discover_live's
+    posture. Keyless by design — this reads public market data only and must
+    never touch account state.
+    """
+    import ccxt
+
+    out: dict = {}
+    markets: dict = {}
+    for name in venues:
+        try:
+            ex = getattr(ccxt, name)({"timeout": 30000,
+                                      "options": {"defaultType": "swap"}})
+            markets[name] = ex.load_markets()
+            out[name] = ex.fetch_tickers()
+        except Exception as exc:  # one venue down != no universe
+            print(f"[regen] ticker fetch skipped for {name}: "
+                  f"{type(exc).__name__}: {str(exc)[:80]}")
+    return {"tickers": out, "markets": markets}
+
+
+def _tradfi_bases_from_markets(markets_by_venue) -> set:
+    """Bases ANY venue's metadata identifies as TradFi/tokenized equity.
+
+    Cross-venue metadata is INCONSISTENT: binance tags these
+    (TRADIFI_PERPETUAL/COMMODITY, caught by pair_discovery's own asset
+    rejection) but bybit and bitget do not — verified 2026-08-16, where
+    SAMSUNG/MRVL/SOXL/NBIS were rejected on binance yet ACCEPTED on both
+    others. Widening candidacy therefore unions the rejection across venues:
+    if any venue says a base is TradFi, it is TradFi everywhere.
+
+    Scoped to widening candidacy. pair_discovery._market_rejection_reason has
+    six live runtime callers and is deliberately NOT modified here — changing
+    shared selection logic is outside prereg 80 (§6) and is filed as its own
+    finding.
+    """
+    tradfi: set = set()
+    for markets in (markets_by_venue or {}).values():
+        for market in (markets or {}).values():
+            if not isinstance(market, dict):
+                continue
+            base = pair_discovery._upper(market.get("base"))
+            if not base:
+                continue
+            reason = pair_discovery._market_rejection_reason(market, "futures")
+            if reason and str(reason).startswith("tradfi_asset"):
+                tradfi.add(base)
+    return tradfi
+
+
+def _volume_widened_bases(tickers_by_venue, *, min_volume_usd: float,
+                          min_venues: int = 2, exclude_bases=None) -> set:
+    """Bases eligible for the prereg-80 widening, from LIVE ticker volume.
+
+    Frozen rule (_workspace/strategy_pipeline/80_prereg_universe_widening.md,
+    sha256 f7c38f5dd8ff...): eligible when max 24h quoteVolume ACROSS venues
+    >= ``min_volume_usd`` AND the base trades as an active USDT perp on
+    >= ``min_venues`` venues. The caller unions this with the incumbents —
+    widening must never shrink the authorized set.
+
+    Volume comes from ``fetch_tickers``, never ``load_markets``: market
+    metadata carries no 24h volume (the trap the 2026-07-20 regen note
+    flags), which is why _candidate_bases could previously offer only the
+    bot's hand-maintained priority lists.
+
+    MAX across venues, not min: we route to the venue holding the book, so
+    the deepest venue is the honest statistic. Dated/expiry contracts are
+    excluded (not perps). A venue returning nothing is skipped, not fatal —
+    one venue outage must not empty the universe.
+    """
+    vol: dict = {}
+    venues: dict = {}
+    for venue, tickers in (tickers_by_venue or {}).items():
+        if not isinstance(tickers, dict):
+            continue
+        for symbol, row in tickers.items():
+            sym = str(symbol or "")
+            # USDT perps only; a "-<expiry>" tail means a dated contract.
+            if "/USDT" not in sym or "-" in sym.split(":")[-1]:
+                continue
+            base = sym.split("/", 1)[0].strip().upper()
+            # Non-ASCII tickers exist on live venues (binance/bitget list
+            # CJK-named meme tokens). They flow into symbol strings, warehouse
+            # rows and log lines, and crashed this very script on a cp1252
+            # console. Excluded from WIDENING candidacy only — incumbents and
+            # the shared rejection rules are untouched.
+            if not base or not base.isascii():
+                continue
+            try:
+                qv = float((row or {}).get("quoteVolume") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            venues.setdefault(base, set()).add(venue)
+            vol[base] = max(vol.get(base, 0.0), qv)
+    floor = max(float(min_volume_usd), 1.0)  # a 0 floor must not admit dead books
+    banned = {str(b).upper() for b in (exclude_bases or ())}
+    return {
+        b for b, q in vol.items()
+        if q >= floor and len(venues.get(b, ())) >= int(min_venues)
+        and b not in banned
+    }
 
 
 def _eligible_futures_symbols_from_markets(markets, candidate_bases) -> list:
@@ -202,10 +317,38 @@ def _discover_live(candidate_bases) -> dict:
     return out
 
 
+def _safe_print(msg: str) -> None:
+    """print() that survives a cp1252 console.
+
+    Some venues list bases with non-ASCII tickers. The legacy 44-base
+    universe happened to be all-ASCII, so this never surfaced; the prereg-80
+    widening (168 bases) hit it immediately and crashed the run AFTER
+    discovery succeeded. Report text must never be able to abort a spec
+    regeneration.
+    """
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        enc = (sys.stdout.encoding or "ascii")
+        print(msg.encode(enc, "replace").decode(enc, "replace"))
+
+
 def main(argv=None, *, discover_fn=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--spec", default=str(DEFAULT_SPEC_PATH), help="path to the spec JSON")
     parser.add_argument("--dry-run", action="store_true", help="print the diff without writing")
+    parser.add_argument(
+        "--widen-min-volume-usd", type=float, default=0.0,
+        help=(
+            "prereg 80: widen candidacy to EVERY base whose max 24h quoteVolume "
+            "across venues clears this floor and that trades as an active USDT "
+            "perp on >=2 venues, UNION the incumbents. 0 (default) keeps the "
+            "legacy CORE|EXTENDED|incumbents candidacy. Volume is read from live "
+            "fetch_tickers — load_markets carries none. Every existing rejection "
+            "rule (TradFi/meme/stable/quarantine) still applies afterwards, and "
+            "runtime universe_filter still enforces per-trade liquidity."
+        ),
+    )
     args = parser.parse_args(argv)
 
     spec_path = Path(args.spec)
@@ -215,7 +358,28 @@ def main(argv=None, *, discover_fn=None) -> int:
         if discover_fn is not None:
             all_pairs = discover_fn()
         else:
-            all_pairs = _discover_live(_candidate_bases(current))
+            candidates = _candidate_bases(current)
+            if args.widen_min_volume_usd > 0:
+                live = _fetch_tickers_by_venue()
+                tradfi = _tradfi_bases_from_markets(live["markets"])
+                widened = _volume_widened_bases(
+                    live["tickers"],
+                    min_volume_usd=args.widen_min_volume_usd,
+                    exclude_bases=tradfi,
+                )
+                if tradfi:
+                    print(f"[regen] cross-venue TradFi exclusion: "
+                          f"{len(tradfi)} bases barred from widening")
+                if not widened:
+                    print("[regen] FAIL-CLOSED: widening found no eligible "
+                          "bases (ticker fetch empty?); spec left untouched")
+                    return 1
+                before = len(candidates)
+                candidates = candidates | widened
+                print(f"[regen] prereg-80 widening: candidacy {before} -> "
+                      f"{len(candidates)} (floor "
+                      f"${args.widen_min_volume_usd:,.0f} 24h vol, >=2 venues)")
+            all_pairs = _discover_live(candidates)
     except Exception as exc:
         print(f"[regen] FAIL-CLOSED: discovery unavailable: {exc}; spec left untouched")
         return 1
@@ -227,7 +391,8 @@ def main(argv=None, *, discover_fn=None) -> int:
         )
         return 1
 
-    updated = build_updated_spec(current, bases, stats)
+    updated = build_updated_spec(current, bases, stats,
+                                 widen_min_volume_usd=args.widen_min_volume_usd)
     prov = updated["regen_provenance"][-1]
     try:
         route_count = _validate_routes(updated)
@@ -242,8 +407,10 @@ def main(argv=None, *, discover_fn=None) -> int:
         f"quarantined={stats['quarantined']}"
     )
     print(f"[regen] bases: {len(bases)} (routes: {route_count})")
-    print(f"[regen] added ({len(prov['added'])}): {', '.join(prov['added']) or '-'}")
-    print(f"[regen] removed ({len(prov['removed'])}): {', '.join(prov['removed']) or '-'}")
+    _safe_print(f"[regen] added ({len(prov['added'])}): "
+                f"{', '.join(prov['added']) or '-'}")
+    _safe_print(f"[regen] removed ({len(prov['removed'])}): "
+                f"{', '.join(prov['removed']) or '-'}")
 
     if args.dry_run:
         print("[regen] DRY-RUN: no changes written")
