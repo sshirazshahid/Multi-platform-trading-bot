@@ -22,10 +22,18 @@ alarmed. Two reasons it stayed invisible, both addressed here:
      suppress only up to a duration cap; past it, sustained single-reason
      idleness alerts regardless of classification.
 
-A third defect the postmortem surfaced and this pins: the live buffer's newest
-sample was 108 min old against a 3600s append interval, with 89 of 674 gaps
-over 2h. A stale numerator corrupts the ratio no matter which window the
-median uses.
+A third defect the postmortem surfaced: a stale numerator corrupts the ratio no
+matter which window the median uses. The threshold is 2x the configured 3600s
+append interval, i.e. 120 min — one full interval missed. Be precise about what
+that does and does not catch: the 108-min and 89-min readings observed during
+the postmortem are BELOW it and do not fire. What fires is the tail — measured
+over the live buffer's 675 gaps, the median is 62 min (healthy, one append per
+hour) but 13.2% exceed 120 min and the worst is 5,726 min (~4 days).
+
+Because that tail is common, staleness is edge-triggered: one alert per episode,
+re-armed when the feed recovers. On a plain cooldown the 4-day gap alone would
+have sent ~190 emails — reintroducing the alert numbness this file exists to
+prevent.
 
 Run: venv/Scripts/python.exe -m pytest tests/test_gate_value_verification.py -v
 """
@@ -114,6 +122,46 @@ def test_stale_buffer_alerts(tmp_path, monkeypatch):
     _wd(n)._verify_btc_vol_ratio(reported=0.5, buf=stale, atr=0.20)
     blob = " ".join(m for _, m in n.sent).lower()
     assert n.sent and "stale" in blob, f"stale buffer must alert, got {n.sent}"
+
+
+def test_stale_alert_is_edge_triggered(tmp_path, monkeypatch):
+    """One alert per stale episode, not one per tick.
+
+    13.2% of the live buffer's gaps exceed the threshold and the worst is
+    ~4 days; on a plain cooldown that single gap is ~190 emails."""
+    monkeypatch.setattr(hw, "COOLDOWN_STATE_PATH", tmp_path / "cd.json")
+    n = _Notifier()
+    wd = _wd(n)
+    stale = [[time.time() - 3 * 3600 - h * 3600, 0.40] for h in range(400, 0, -1)]
+    for _ in range(5):
+        wd._verify_btc_vol_ratio(reported=0.5, buf=stale, atr=0.20)
+        # Age every recorded cooldown past its window — what real elapsed time
+        # does. Without this the plain-cooldown path would also send once and
+        # the test would pass against the very code it is meant to reject.
+        for k in list(wd._state.last_alert):
+            wd._state.last_alert[k] -= 3601
+    assert len(n.sent) == 1, f"expected 1 alert per episode, got {len(n.sent)}"
+
+
+# ── 2b. the verifier must compute the SAME function as the gate ─────────────
+
+def test_min_samples_floor_is_mirrored(tmp_path, monkeypatch):
+    """current_ratio returns None below min_samples in-window; so must we.
+
+    Otherwise a buffer that is mostly older than 30d makes the gate abstain
+    while the verifier produces a number, and the guard cries drift at a
+    correctly-behaving gate — a false positive in the verification channel
+    is how verification channels get muted."""
+    monkeypatch.setattr(hw, "COOLDOWN_STATE_PATH", tmp_path / "cd.json")
+    n = _Notifier()
+    now = time.time()
+    # 10 recent samples (< min_samples=24) + 100 well outside the 30d window
+    buf = ([[now - d * 86400, 0.90] for d in range(140, 40, -1)]
+           + [[now - h * 3600, 0.40] for h in range(10, 0, -1)])
+    ok = _wd(n)._verify_btc_vol_ratio(reported=None, buf=buf, atr=0.20)
+    assert ok is True and n.sent == [], (
+        f"verifier must abstain below min_samples like the gate, got {n.sent}"
+    )
 
 
 def test_empty_buffer_does_not_crash_or_alert(tmp_path, monkeypatch):

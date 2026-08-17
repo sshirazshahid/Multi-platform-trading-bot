@@ -170,6 +170,13 @@ COOLDOWN_SEC = {
     "sl_placement_failed":   30 * 60,
     "loss_streak":           60 * 60,
     "model_gate_starving":   60 * 60,
+    # Both are edge-triggered (once per episode); these bound the re-fire
+    # after a condition clears and returns, and keep the key off the
+    # rsplit family-fallback, which would otherwise resolve
+    # gate_value_btc_vol_stale to a "gate_value_btc_vol" that has no entry
+    # either and silently take the 30-min generic default.
+    "gate_value_btc_vol":       60 * 60,
+    "gate_value_btc_vol_stale": 60 * 60,
     "model_pointer_invalid":  60 * 60,
     "no_scan_progress":      30 * 60,
     "stuck_open_positions":  60 * 60,
@@ -733,43 +740,60 @@ class HealthWatchdog:
         Fail-OPEN and quiet on missing data: an empty buffer is warmup, not a
         defect. Verification only ever alerts; it never changes the gate.
         """
+        try:
+            from config import BTC_VOL_PAUSE as _spec
+        except Exception:
+            return True                   # no spec to verify against
+
         now = time.time()
         cutoff = now - BTC_VOL_SPEC_WINDOW_SEC
-        newest = None
-        samples = []
+        newest, dropped, rows = None, 0, []
         for row in (buf or []):
             try:
                 ts, val = float(row[0]), float(row[1])
             except (TypeError, ValueError, IndexError, KeyError):
+                dropped += 1
                 continue
+            rows.append((ts, val))
             if newest is None or ts > newest:
                 newest = ts
-            if ts >= cutoff and val > 0:
-                samples.append(val)
-        if newest is None:
+        if newest is None or dropped:
+            # An empty buffer is warmup. Unparseable rows mean we cannot
+            # faithfully reproduce what the gate saw, and a verifier that
+            # guesses is worse than one that abstains. Neither is a defect.
             self._edge_alert("gate_value_btc_vol", False, "INFO", "")
-            return True                       # warmup / no data — fail open
+            self._edge_alert("gate_value_btc_vol_stale", False, "INFO", "")
+            return True
 
         age_min = (now - newest) / 60.0
-        if (now - newest) > BTC_VOL_APPEND_SEC * 2:
-            self._alert(
-                "gate_value_btc_vol_stale", "WARNING",
-                f"BTC vol baseline is stale: newest sample {age_min:.0f} min old "
-                f"against a {BTC_VOL_APPEND_SEC / 60:.0f} min append interval. The "
-                f"band-regime veto is gating entries on a numerator that may not "
-                f"reflect the live tape.",
-                {"newest_age_min": round(age_min, 1), "samples_30d": len(samples)},
-            )
+        append_sec = float(_spec.get("append_min_interval_sec", BTC_VOL_APPEND_SEC))
+        is_stale = (now - newest) > append_sec * 2
+        # Edge-triggered, NOT _alert: 13.2% of this buffer's historical gaps
+        # exceed the threshold and the worst is ~4 days. On a plain cooldown
+        # that one gap alone is ~190 emails — reintroducing exactly the
+        # numbness the 2026-08-15 suppression was meant to prevent.
+        self._edge_alert(
+            "gate_value_btc_vol_stale", is_stale, "WARNING",
+            f"BTC vol baseline is stale: newest sample {age_min:.0f} min old "
+            f"against a {append_sec / 60:.0f} min append interval. The "
+            f"band-regime veto is gating entries on a numerator that may not "
+            f"reflect the live tape.",
+            {"newest_age_min": round(age_min, 1), "samples": len(rows)},
+        )
+        if is_stale:
             return False
 
+        # Mirror current_ratio() EXACTLY — same window filter (no extra
+        # positivity test), same min_samples floor, same non-positive-median
+        # guard. A verifier that computes a slightly different function
+        # reports drift that isn't there, and a noisy verification channel
+        # gets muted like any other.
+        samples = [a for (ts, a) in rows if ts >= cutoff]
         expected = None
-        if samples and atr is not None:
-            try:
-                med = statistics.median(samples)
-                if med > 0 and float(atr) > 0:
-                    expected = float(atr) / med
-            except (TypeError, ValueError, statistics.StatisticsError):
-                expected = None
+        if len(samples) >= int(_spec.get("min_samples", 24)) and atr is not None:
+            med = statistics.median(samples)
+            if med > 0:
+                expected = float(atr) / med
 
         # Both sides agree there is no computable ratio -> nothing to verify.
         if expected is None and reported is None:
@@ -805,6 +829,7 @@ class HealthWatchdog:
 
     def _check_gate_value_drift(self) -> None:
         """Cross-check the band-regime veto against its own specification."""
+        from config import BTC_VOL_PAUSE as _spec
         from core.btc_vol_pause import extract_btc_atr_pct
 
         bvp = getattr(self._engine, "_btc_vol_pause", None)
@@ -815,7 +840,10 @@ class HealthWatchdog:
         self._verify_btc_vol_ratio(
             reported=bvp.current_ratio(cache),
             buf=list(getattr(bvp, "_buf", None) or []),
-            atr=extract_btc_atr_pct(cache, "1h"),
+            # Read the timeframe from the spec, never hardcode it: a config
+            # change would otherwise have the two sides comparing different
+            # series and alerting forever.
+            atr=extract_btc_atr_pct(cache, _spec.get("timeframe", "1h")),
         )
 
     def _check_model_gate_starving(self) -> None:
