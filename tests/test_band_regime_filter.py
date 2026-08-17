@@ -93,9 +93,12 @@ def flag_off(monkeypatch):
 # ── BtcVolPause.current_ratio (read-only baseline reuse) ─────────────────────
 
 def test_current_ratio_computes_atr_over_median(gate):
-    _warm(gate, atr=1.0, n=5)
-    assert gate.current_ratio(_cache(0.5)) == pytest.approx(0.5, abs=0.01)
-    assert gate.current_ratio(_cache(1.4)) == pytest.approx(1.4, abs=0.01)
+    # `now` must match the warmed timestamps: since 2026-08-17 the baseline is
+    # windowed to the last 30 days (config/gates.py spec), so samples warmed at
+    # t0=0 are 56 years stale and correctly excluded. Pass the same clock.
+    t = _warm(gate, atr=1.0, n=5)
+    assert gate.current_ratio(_cache(0.5), now=t) == pytest.approx(0.5, abs=0.01)
+    assert gate.current_ratio(_cache(1.4), now=t) == pytest.approx(1.4, abs=0.01)
 
 
 def test_current_ratio_none_on_missing_btc_data(gate):
@@ -194,7 +197,11 @@ def test_bvp_exception_fails_open(flag_on):
 def test_real_btc_vol_pause_wired_through_veto(flag_on, gate):
     """End-to-end with the REAL BtcVolPause: calm-below-median BTC tape
     (ratio < 0.7) vetoes; normal tape allows."""
-    _warm(gate, atr=1.0, n=5)
+    # Warm with RECENT timestamps: the veto calls current_ratio() with no `now`,
+    # so it windows against the real clock (30d baseline, config/gates.py spec).
+    # t0=0 samples would be 56 years stale and correctly excluded.
+    import time as _t
+    _warm(gate, atr=1.0, n=5, t0=_t.time() - 6 * 3600)
 
     class _Brain:
         _indicator_cache = _cache(0.5)  # ratio 0.5 vs median 1.0

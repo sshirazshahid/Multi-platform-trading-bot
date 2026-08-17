@@ -41,6 +41,12 @@ import json
 import os
 import statistics
 import time
+
+# The band-regime veto's baseline window. config/gates.py specifies
+# "BTC 1h ATR / 30d median" — the window screen 13 pre-registered — so this is
+# spec, not a tunable. buffer_max (1000 hourly samples ~= 42d) is a memory cap
+# and must never be mistaken for the statistical window (fixed 2026-08-17).
+_BASELINE_WINDOW_SEC = 30 * 24 * 3600
 from pathlib import Path
 
 from loguru import logger
@@ -157,20 +163,31 @@ class BtcVolPause:
             self._save()
         return False, "calm", info
 
-    def current_ratio(self, indicator_cache):
-        """BTC 1h ATR% divided by its trailing-median baseline, or None.
+    def current_ratio(self, indicator_cache, now: float | None = None):
+        """BTC 1h ATR% divided by its trailing 30-DAY median, or None.
 
         Read-only (no buffer append, no pause-state change) — the C.4 gate's
         update_and_evaluate() owns and maintains the baseline. Returns None on
-        missing BTC data, warmup (< min_samples), or a non-positive median;
-        callers MUST fail OPEN on None. Added 2026-07-12 for the band-lane
-        regime filter (bot_engine._band_regime_veto, screen 13_band_conditional).
+        missing BTC data, warmup (< min_samples in-window), or a non-positive
+        median; callers MUST fail OPEN on None. Added 2026-07-12 for the
+        band-lane regime filter (screen 13_band_conditional).
+
+        The 30-day window is the SPEC, not a tuning choice: config/gates.py
+        defines the veto as "BTC 1h ATR / 30d median < 0.7", which is what
+        screen 13 pre-registered. Until 2026-08-17 this took the median of the
+        WHOLE buffer, and buffer_max=1000 hourly samples is ~42 days — the live
+        buffer had reached 675 samples spanning 1,384h (58 days). In a
+        decaying-vol regime the extra-old readings sit higher, inflating the
+        median and depressing the ratio, so the veto fired on a window the
+        screen never authorised: measured 0.628 (58d baseline, BLOCKS) vs
+        0.730 (30d baseline, PASSES) — 80h of zero trades.
         """
         cfg = _cfg()
         atr = extract_btc_atr_pct(indicator_cache, cfg.get("timeframe", "1h"))
         if atr is None:
             return None
-        samples = [a for (_, a) in self._buf]
+        cutoff = (time.time() if now is None else float(now)) - _BASELINE_WINDOW_SEC
+        samples = [a for (ts, a) in self._buf if ts >= cutoff]
         if len(samples) < int(cfg.get("min_samples", 24)):
             return None
         median = statistics.median(samples)
