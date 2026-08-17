@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import statistics
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -137,6 +138,23 @@ DELIBERATE_ENTRY_BLOCKS  = (
     "band_regime_filter",           # ADX>30 / btc_vol<0.7 toxic-regime veto
     "accband_research_daily_open_budget",  # the 12-opens/UTC-day research cap
 )
+# ...but only for so long. A "deliberate" rail blocking CONTINUOUSLY for days is
+# a symptom, not a rail. The line above was added 2026-08-15 so a WORKING veto
+# would stop paging hourly; it also silenced a BROKEN one for 80h (the veto was
+# computing its baseline over 58 days instead of the spec's 30). Past this many
+# hours since the last OPEN, sustained single-reason idleness alerts regardless
+# of classification. Idle duration comes from positions.json, so the bound
+# survives a restart.
+DELIBERATE_BLOCK_MAX_HOURS = 24
+# ── Gate-value verification (2026-08-17) ────────────────────────────────────
+# The 80h outage was invisible because only ONE computation of the band-regime
+# ratio existed, so a wrong one looked exactly like a right one. The watchdog
+# now recomputes the SPEC quantity independently and alerts when the two
+# disagree. The duplication is the point: a second implementation is the only
+# thing that can catch the first one drifting from its pre-registration.
+GATE_VALUE_TOLERANCE     = 0.02          # abs ratio delta before it's drift
+BTC_VOL_SPEC_WINDOW_SEC  = 30 * 24 * 3600   # config/gates.py: "30d median"
+BTC_VOL_APPEND_SEC       = 3600             # BTC_VOL_PAUSE append interval
 # Persists per-check last-alert timestamps so cooldowns survive a restart
 # (otherwise every sticky WARN re-emails on each bounce). Runtime state.
 COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
@@ -311,6 +329,7 @@ class HealthWatchdog:
             self._check_sl_placement_failed,
             self._check_loss_streak,
             self._check_model_gate_starving,
+            self._check_gate_value_drift,
             self._check_soft_stale_latch_stuck,
             self._check_model_pointer_valid,
             self._check_no_scan_progress,
@@ -702,6 +721,103 @@ class HealthWatchdog:
         except Exception:
             return None, 0
 
+    def _verify_btc_vol_ratio(self, reported=None, buf=None, atr=None) -> bool:
+        """Independently recompute the band-regime veto's ratio. True = agrees.
+
+        `reported` is what BtcVolPause.current_ratio() returned, `buf` its
+        baseline ([[epoch_sec, atr_pct], ...]) and `atr` the live BTC 1h ATR%.
+        This recomputes ATR / median(last 30d) — the quantity config/gates.py
+        and screen 13 actually specify — and alerts if the gate's own answer
+        differs, or if the baseline has gone stale.
+
+        Fail-OPEN and quiet on missing data: an empty buffer is warmup, not a
+        defect. Verification only ever alerts; it never changes the gate.
+        """
+        now = time.time()
+        cutoff = now - BTC_VOL_SPEC_WINDOW_SEC
+        newest = None
+        samples = []
+        for row in (buf or []):
+            try:
+                ts, val = float(row[0]), float(row[1])
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+            if newest is None or ts > newest:
+                newest = ts
+            if ts >= cutoff and val > 0:
+                samples.append(val)
+        if newest is None:
+            self._edge_alert("gate_value_btc_vol", False, "INFO", "")
+            return True                       # warmup / no data — fail open
+
+        age_min = (now - newest) / 60.0
+        if (now - newest) > BTC_VOL_APPEND_SEC * 2:
+            self._alert(
+                "gate_value_btc_vol_stale", "WARNING",
+                f"BTC vol baseline is stale: newest sample {age_min:.0f} min old "
+                f"against a {BTC_VOL_APPEND_SEC / 60:.0f} min append interval. The "
+                f"band-regime veto is gating entries on a numerator that may not "
+                f"reflect the live tape.",
+                {"newest_age_min": round(age_min, 1), "samples_30d": len(samples)},
+            )
+            return False
+
+        expected = None
+        if samples and atr is not None:
+            try:
+                med = statistics.median(samples)
+                if med > 0 and float(atr) > 0:
+                    expected = float(atr) / med
+            except (TypeError, ValueError, statistics.StatisticsError):
+                expected = None
+
+        # Both sides agree there is no computable ratio -> nothing to verify.
+        if expected is None and reported is None:
+            self._edge_alert("gate_value_btc_vol", False, "INFO", "")
+            return True
+        if expected is None or reported is None:
+            self._edge_alert(
+                "gate_value_btc_vol", True, "WARNING",
+                f"Band-regime ratio existence mismatch: gate reported "
+                f"{reported!r} but the 30d spec recomputation gives {expected!r} "
+                f"({len(samples)} in-window samples).",
+                {"reported": reported, "expected": expected,
+                 "samples_30d": len(samples)},
+            )
+            return False
+
+        delta = abs(float(reported) - expected)
+        if delta > GATE_VALUE_TOLERANCE:
+            self._edge_alert(
+                "gate_value_btc_vol", True, "WARNING",
+                f"Band-regime ratio DRIFT: the gate reports {float(reported):.4f} "
+                f"but the 30d spec (config/gates.py) recomputes to {expected:.4f} "
+                f"(delta {delta:.4f}). One of the two is wrong — the veto's "
+                f"0.70 threshold sits between them often enough to idle the bot.",
+                {"reported": round(float(reported), 4),
+                 "expected": round(expected, 4), "delta": round(delta, 4),
+                 "samples_30d": len(samples), "atr": atr},
+            )
+            return False
+
+        self._edge_alert("gate_value_btc_vol", False, "INFO", "")
+        return True
+
+    def _check_gate_value_drift(self) -> None:
+        """Cross-check the band-regime veto against its own specification."""
+        from core.btc_vol_pause import extract_btc_atr_pct
+
+        bvp = getattr(self._engine, "_btc_vol_pause", None)
+        if bvp is None:
+            return
+        cache = getattr(getattr(self._engine, "mcp_brain", None),
+                        "_indicator_cache", None)
+        self._verify_btc_vol_ratio(
+            reported=bvp.current_ratio(cache),
+            buf=list(getattr(bvp, "_buf", None) or []),
+            atr=extract_btc_atr_pct(cache, "1h"),
+        )
+
     def _check_model_gate_starving(self) -> None:
         # Only nag when the bot isn't already in real drawdown — drawdown
         # makes the gate's caution rational and we don't want to encourage
@@ -750,6 +866,7 @@ class HealthWatchdog:
         elif isinstance(doc, list):
             entries = doc
         opens_recent = 0
+        newest_open = 0.0
         for e in entries:
             if not isinstance(e, dict):
                 continue
@@ -757,6 +874,8 @@ class HealthWatchdog:
                 opened = float(e.get("open_time"))
             except (TypeError, ValueError):
                 continue          # no usable open_time -> cannot count as recent
+            if opened > newest_open:
+                newest_open = opened
             if opened >= cutoff:
                 opens_recent += 1
         if opens_recent == 0:
@@ -766,8 +885,36 @@ class HealthWatchdog:
             # made a 48h latch starvation expensive to notice. Only page when the
             # idleness is UNEXPLAINED.
             reason, hits = self._dominant_entry_block_reason()
+            idle_h = ((time.time() - newest_open) / 3600.0
+                      if newest_open > 0 else None)
             if reason in DELIBERATE_ENTRY_BLOCKS:
-                self._edge_alert("model_gate_starving", False, "INFO", "")
+                # 2026-08-17: suppression is now time-bounded. Silencing a rail
+                # that had been blocking for 80h is what let a MISCOMPUTED
+                # baseline pass for a working one. We can only justify staying
+                # quiet while the idleness is short enough to be ordinary — and
+                # only when positions.json lets us bound it at all.
+                if idle_h is not None and idle_h < DELIBERATE_BLOCK_MAX_HOURS:
+                    self._edge_alert("model_gate_starving", False, "INFO", "")
+                    return
+                detail = (
+                    f"deliberate block '{reason}' ({hits} hits) has now held for "
+                    f"{idle_h:.0f}h, past the {DELIBERATE_BLOCK_MAX_HOURS}h "
+                    f"suppression cap — verify the gate is computing its "
+                    f"threshold correctly, not just that it is firing"
+                    if idle_h is not None else
+                    f"deliberate block '{reason}' ({hits} hits) and no OPEN has "
+                    f"ever been recorded, so the idle duration cannot be bounded"
+                )
+                self._alert(
+                    "model_gate_starving", "WARNING",
+                    f"No OPEN actions in the last {MODEL_STARVE_HOURS}h despite "
+                    f"non-drawdown state — {detail}.",
+                    {"opens_recent": opens_recent,
+                     "window_hours": MODEL_STARVE_HOURS,
+                     "dominant_block": reason, "block_hits": hits,
+                     "idle_hours": round(idle_h, 1) if idle_h is not None else None,
+                     "suppression_cap_hours": DELIBERATE_BLOCK_MAX_HOURS},
+                )
                 return
             detail = (f"dominant block: {reason} ({hits} hits)" if reason
                       else "no identifiable entry block in the logs")
