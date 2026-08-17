@@ -43,6 +43,27 @@ MCP_TP_GRACE_SEC: int = 1800
 # Default ON at 2% (looser than the old 1% halt — fires on a bad day, not on
 # routine bleed). Disable with DAILY_LOSS_BREAKER_ENABLED=false; tune with
 # DAILY_LOSS_BREAKER_PCT.
+# ==============================================================
+# EXTERNAL-POSITION ACTIONS (2026-08-18) — opt-in, default OFF
+# ==============================================================
+# An "external" position (source == "exchange") is one the position monitor
+# found on the venue but never opened: the owner's MANUAL futures position or
+# spot holding. Phase 39 (2026-05-09) already suppressed EXT CLOSE after it
+# accumulated -$20.09 over 44 trades at 30% WR — but EXT TAKE_PROFIT stayed
+# live. In CONTROLLED_LIVE that market-closes a manual futures position at
+# >=1% PnL / >=70% confidence, or market-SELLS the owner's actual coins at
+# >=80% confidence, driven by a score this repo measures as non-predictive
+# (mcp_score corr ~= -0.008).
+#
+# It could never be validated first: DRY_RUN no-ops the whole path, so PAPER
+# accrues no evidence either way, and the CONTROLLED_LIVE gate validates
+# configuration, not behaviour. Selling the owner's own coins is their call to
+# make explicitly, so this defaults OFF rather than being inherited by
+# omission. Enable with EXTERNAL_POSITION_ACTIONS_ENABLED=true.
+EXTERNAL_POSITION_ACTIONS_ENABLED = (
+    os.getenv("EXTERNAL_POSITION_ACTIONS_ENABLED", "false").lower() == "true"
+)
+
 DAILY_LOSS_BREAKER = {
     "enabled": os.getenv("DAILY_LOSS_BREAKER_ENABLED", "true").lower() == "true",
     "max_loss_pct": float(os.getenv("DAILY_LOSS_BREAKER_PCT", "0.02")),

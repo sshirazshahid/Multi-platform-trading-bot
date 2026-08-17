@@ -12,6 +12,12 @@ from core.engine.helpers import (
 
 
 class _MonitorsMixin:
+    # Asset-classification sets used by the exchange scan (restored 2026-08-14:
+    # the D5 split moved the methods from bot_engine.py but dropped these
+    # class attributes, so every monitor tick raised AttributeError).
+    _STABLECOINS = {"USDT", "BUSD", "USDC", "FDUSD", "TUSD", "DAI", "USDD"}
+    _COMMODITY_BASES = {"XAU", "XAG", "WTI", "CL"}
+
     def _check_all_sl_tp(self):
         """Check SL/TP for all open positions — parallel across exchanges."""
         # Maker-first (2026-07-11): pending virtual intents are entries WITHOUT
@@ -296,6 +302,21 @@ class _MonitorsMixin:
                                 f"requests at risk; check NTP/w32tm sync")
                     else:
                         self._consecutive_api_fails.pop(_drift_key, None)
+                    # 2026-08-12: clear a stale exchange-outage soft-stale
+                    # latch for THIS venue. The setter below (fails >= 5) had
+                    # no clearer — a bitget outage latched 894 fails and then
+                    # rejected every OPEN on every venue with
+                    # soft_stale_entry_block, surviving restarts (file-based).
+                    # Reason-scoped: forward_feeds* latches stay watchdog-owned.
+                    try:
+                        from core.soft_stale_latch import (
+                            clear_exchange_outage_latch,
+                        )
+
+                        clear_exchange_outage_latch(ex_name)
+                    except Exception as _lce:
+                        logger.debug(
+                            f"[Health] outage-latch clear skipped: {_lce}")
                     # Auto-resume if previously halted
                     if ex_name in self._exchange_halted:
                         self._exchange_halted.discard(ex_name)
@@ -1485,14 +1506,16 @@ class _MonitorsMixin:
                     mtype = pos_entry["market_type"]
 
                     if action in ("TAKE_PROFIT", "CLOSE"):
-                        # Phase 39 (2026-05-09): CLOSE disabled for external positions.
-                        # mcp_brain_close accumulated -$20.09 over 44 trades (30% WR).
-                        # The monitor was cutting positions early against subsequent
-                        # price action. SL, trailing_stop, and mcp_take_profit own
-                        # all exits now — CLOSE is demoted to logged-only.
-                        if action == "CLOSE":
+                        # These positions are the OWNER'S — discovered on the
+                        # venue, never opened by the bot. Acting on them sells
+                        # their actual coins, so both actions route through one
+                        # suppression decision (2026-08-18). Checked BEFORE the
+                        # PnL/confidence filters so a suppressed action cannot
+                        # reach _close_external_position by any path.
+                        _ext_block = self._external_action_suppressed(action)
+                        if _ext_block:
                             logger.info(
-                                f"[MCP-Brain] EXT CLOSE suppressed (Phase 39 policy): "
+                                f"[MCP-Brain] EXT {action} suppressed ({_ext_block}): "
                                 f"{pos_entry['symbol']} on {ex_name} conf={conf:.0%} — {reason[:60]}")
                             continue
                         if action == "TAKE_PROFIT":
@@ -1548,6 +1571,36 @@ class _MonitorsMixin:
             if sz > 0:
                 return True
         return False
+
+    def _external_action_suppressed(self, action: str) -> str:
+        """Reason this action must NOT execute on an EXTERNAL position, else "".
+
+        External == discovered on the venue, never opened by the bot: the
+        owner's manual futures position or spot holding. Two separate rules:
+
+        * CLOSE — suppressed unconditionally since Phase 39 (2026-05-09), on
+          measured evidence (-$20.09 over 44 trades, 30% WR, cutting positions
+          early against subsequent price action). Not flag-defeatable; SL,
+          trailing_stop and mcp_take_profit own exits.
+        * TAKE_PROFIT — opt-in, default OFF (2026-08-18). It market-closes a
+          manual futures position or market-SELLS the owner's coins on a score
+          measured non-predictive here (corr ~= -0.008), and DRY_RUN no-ops the
+          path so PAPER can never accrue evidence for or against it. Selling
+          someone's own holdings is their explicit call, not a default.
+
+        Config is read at CALL time: binding the flag at import would let a
+        stale capture defeat the gate.
+        """
+        if action == "CLOSE":
+            return "Phase 39 policy"
+        if action == "TAKE_PROFIT":
+            try:
+                from config import EXTERNAL_POSITION_ACTIONS_ENABLED as _ext_on
+            except ImportError:
+                _ext_on = False           # fail CLOSED — never sell on a config gap
+            if not _ext_on:
+                return "external-position actions disabled"
+        return ""
 
     def _close_external_position(self, ex_name: str, pos: dict, reason: str):
         """Close an exchange-discovered position NOT tracked internally.

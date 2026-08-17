@@ -3,5 +3,5 @@
   "core/kill_switch.py": "5799dd752a1a0bc75af3257736bc821beb172d38937b7dffbd074e913514fa37",
   "core/live_gate.py": "3aa77d10b89a57b427d2858af270c7b006be95a70185f98abaf6c1f03d3a472f",
   "core/promotion_gate.py": "2ba878b46d4858b73e13ddd62c4341d1b96ca333158b9f6e43901cd79c64faa6",
-  "core/risk_manager.py": "828de37615768a106abd4d26b921441e081a02f7c418ad6c73d03add9121b27c"
+  "core/risk_manager.py": "2e8a27309e99db991c5bf5d802063ece2ea113469449ce759a32943a51fa9437"
 }

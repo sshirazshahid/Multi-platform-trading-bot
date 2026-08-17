@@ -19,7 +19,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from config import RISK
+from config import OPERATING_MODE, RISK
 
 
 def _utc_today() -> date:
@@ -467,6 +467,10 @@ class RiskManager:
             # drop the save (values are replaced wholesale, never mutated
             # in place, so dict() suffices).
             "recent_sl_by_pair_side": dict(self._recent_sl_by_pair_side),
+            # Which mode produced these numbers (2026-08-18). Without it,
+            # _load_state cannot tell a paper peak from a real one — see the
+            # provenance check there. Purely additive; older readers ignore it.
+            "operating_mode": OPERATING_MODE,
             "timestamp": _time.time(),
         }
         try:
@@ -493,6 +497,31 @@ class RiskManager:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"[Risk] Could not load risk state: {e}")
+            self._honour_review_flag_if_present()
+            return
+
+        # ── PROVENANCE (2026-08-18) ────────────────────────────────────────
+        # peak_balance drives the drawdown halt, so state written by another
+        # mode is not merely stale, it is fiction. Measured on the live file:
+        # a PAPER peak of $15,568.86 against $5,000 of real capital would put
+        # CONTROLLED_LIVE at 67.9% drawdown on its first tick, versus a 0.08
+        # cap. A smaller paper peak fails the other way — under-reporting
+        # drawdown on real money.
+        #
+        # Legacy files carry no stamp. That is treated ASYMMETRICALLY on
+        # purpose: PAPER assumes an unstamped file is the paper research state
+        # it almost certainly is and keeps its history; CONTROLLED_LIVE
+        # refuses to guess, because guessing wrong costs money.
+        saved_mode = str(state.get("operating_mode") or "").upper()
+        if saved_mode != OPERATING_MODE and not (
+            saved_mode == "" and OPERATING_MODE != "CONTROLLED_LIVE"
+        ):
+            logger.warning(
+                f"[Risk] risk_state.json was written by "
+                f"{saved_mode or 'an unstamped (pre-2026-08-18) run'} but this "
+                f"process is {OPERATING_MODE} — starting fresh. Peak balance, "
+                f"daily PnL and pause ledgers do NOT carry across modes."
+            )
             self._honour_review_flag_if_present()
             return
 
