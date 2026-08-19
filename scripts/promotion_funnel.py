@@ -207,16 +207,40 @@ def classify_base(base: str) -> str:
     return "unclassified"
 
 
-def listing_lane_state(conn: sqlite3.Connection, now: float) -> LaneState:
+def listing_lane_state(conn: sqlite3.Connection, now: float,
+                       venue: str = "binance") -> LaneState:
+    # Prereg 86 venue pin: the FROZEN binance lane counts only its own rows.
+    # Historical (pre-86) rows have venue=NULL and are binance by construction,
+    # so the binance filter accepts NULL; other venues match exactly and can
+    # never pollute the frozen lane. Missing-column fallback keeps the funnel
+    # working against a warehouse the migrated agent has not touched yet.
+    if venue == "binance":
+        vfilter, vparams = "(venue IS NULL OR venue = ?)", ("binance",)
+    else:
+        vfilter, vparams = "venue = ?", (venue,)
     try:
-        rows = conn.execute(
-            "SELECT proposal_id, base, decision, created_ts FROM shadow_listing_probe"
-            " WHERE created_ts >= ?", (now - 30 * 86400,)).fetchall()
-        outcomes = conn.execute(
-            "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
-            "FROM shadow_listing_probe p JOIN shadow_outcomes o "
-            "ON o.proposal_id=p.proposal_id"
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                "SELECT proposal_id, base, decision, created_ts"
+                " FROM shadow_listing_probe"
+                f" WHERE created_ts >= ? AND {vfilter}",
+                (now - 30 * 86400, *vparams)).fetchall()
+            outcomes = conn.execute(
+                "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
+                "FROM shadow_listing_probe p JOIN shadow_outcomes o "
+                f"ON o.proposal_id=p.proposal_id WHERE {vfilter}",
+                vparams).fetchall()
+        except sqlite3.OperationalError:
+            if venue != "binance":
+                raise  # no venue column yet -> non-binance lanes have no rows
+            rows = conn.execute(
+                "SELECT proposal_id, base, decision, created_ts"
+                " FROM shadow_listing_probe WHERE created_ts >= ?",
+                (now - 30 * 86400,)).fetchall()
+            outcomes = conn.execute(
+                "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
+                "FROM shadow_listing_probe p JOIN shadow_outcomes o "
+                "ON o.proposal_id=p.proposal_id").fetchall()
         unique = {str(proposal_id): (float(net_pnl or 0), resolved_ts)
                   for proposal_id, net_pnl, resolved_ts in outcomes}
         resolved = len(unique)
@@ -249,8 +273,10 @@ def listing_lane_state(conn: sqlite3.Connection, now: float) -> LaneState:
         else:
             state, starvation_reason = "ACCRUING", None
             scope_only = False
+        lane_name = ("listing_short" if venue == "binance"
+                     else f"listing_short_{venue}")
         return LaneState(
-            "listing_short", state, resolved, wins,
+            lane_name, state, resolved, wins,
             (wins / resolved) if resolved else None,
             f"{resolved}/{RESOLVED_FLOOR}", round(rate, 3),
             round(eta, 1) if eta is not None else None,
@@ -269,7 +295,9 @@ def listing_lane_state(conn: sqlite3.Connection, now: float) -> LaneState:
             },
         )
     except sqlite3.Error as exc:
-        return LaneState("listing_short", "ERROR", detail={"error": str(exc)})
+        lane_name = ("listing_short" if venue == "binance"
+                     else f"listing_short_{venue}")
+        return LaneState(lane_name, "ERROR", detail={"error": str(exc)})
 
 
 def unlock_calendar_coverage(cal_dir: Path, now: float) -> dict:
@@ -550,6 +578,9 @@ def compute_all(paths: dict, now: float) -> dict:
         conn = sqlite3.connect(f"file:{paths['warehouse']}?mode=ro", uri=True)
         lanes += probe_lane_states(conn, now)
         lanes.append(listing_lane_state(conn, now))
+        # Prereg 86 observation lanes — separate, never pooled.
+        lanes.append(listing_lane_state(conn, now, venue="bybit"))
+        lanes.append(listing_lane_state(conn, now, venue="bitget"))
         conn.close()
     except sqlite3.Error as exc:
         lanes += [LaneState(l, "ERROR", detail={"error": str(exc)})

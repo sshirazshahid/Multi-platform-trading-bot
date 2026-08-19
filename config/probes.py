@@ -92,9 +92,18 @@ TIER_GEOMETRY_TIME_EXIT_HOLD = {
 # score — the binding conditions from 03_rev3_audit_findings.md. It places NO
 # orders and only runs inside the (already log-only) shadow lane, so it changes
 # ZERO live behaviour. Off restores the pre-probe shadow lane exactly.
+_LISTING_VENUE = os.getenv("SHADOW_LISTING_PROBE_VENUE", "binance")
+# Prereg 86 (2026-08-19, sha256 3c660f70…): optional csv of venues to OBSERVE.
+# One log-only agent instance per venue, each with its own identity/state; the
+# frozen binance lane never pools with the others. Default = the single legacy
+# venue, so an unset env is byte-identical to the pre-86 deployment.
+_LISTING_VENUES_RAW = os.getenv("SHADOW_LISTING_PROBE_VENUES", "")
 LISTING_SHORT_PROBE = {
     "enabled": os.getenv("SHADOW_LISTING_PROBE_ENABLED", "true").lower() == "true",
-    "venue": os.getenv("SHADOW_LISTING_PROBE_VENUE", "binance"),
+    "venue": _LISTING_VENUE,
+    "venues": tuple(
+        v.strip().lower() for v in _LISTING_VENUES_RAW.split(",") if v.strip()
+    ) or (_LISTING_VENUE,),
 }
 
 # ── Unlock-short shadow probe (pipeline 08b CONFIRMED-GO, 2026-07-11) ────────

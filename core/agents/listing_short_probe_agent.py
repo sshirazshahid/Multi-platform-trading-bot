@@ -307,7 +307,8 @@ CREATE TABLE IF NOT EXISTS shadow_listing_probe (
     realized_funding_rate_sum  REAL,
     last_funding_bucket        INTEGER,
     concurrent_open_at_entry   INTEGER,
-    created_ts                 INTEGER
+    created_ts                 INTEGER,
+    venue                      TEXT    -- NULL on pre-86 rows (= binance)
 );
 CREATE INDEX IF NOT EXISTS idx_listing_probe_horizon
     ON shadow_listing_probe(horizon_days, decision);
@@ -358,13 +359,25 @@ class ListingShortProbeAgent:
         self._balance = account_balance_provider
         self._now = now_fn
         self._venue = venue
+        # Prereg 86 (2026-08-19, sha256 3c660f70…): non-binance venues are
+        # OBSERVATION arms with their OWN identity and state. The binance
+        # instance keeps the exact historical identity/state path so all
+        # accrued evidence stays byte-compatible; suffixed model_versions make
+        # cross-venue pooling structurally impossible in shadow_decisions.
+        if venue != "binance":
+            self.model_version = f"listing_short_probe_{venue}_v1"
+            self.name = f"ListingShortProbeAgent_{venue}"
         # Read-only venue metadata for the scope gate. Injectable (tests, and a
         # future engine-side provider); the default resolves lazily on the
         # first new-listing decision — never at construction time.
         self._market_meta = market_meta_provider or (
             lambda sym: venue_market_meta(self._venue, sym)
         )
-        self._state_path = Path(state_path or DEFAULT_STATE_PATH)
+        default_state = (
+            DEFAULT_STATE_PATH if venue == "binance"
+            else f"data/shadow_listing_state_{venue}.json"
+        )
+        self._state_path = Path(state_path or default_state)
         # F3a (2026-07-29): column migration is DEFERRED to the first tick.
         # ALTERing the LIVE warehouse at construction time under bot_engine's
         # fail-open _build_probe meant a transient DB error (e.g. "database is
@@ -409,7 +422,7 @@ class ListingShortProbeAgent:
         conn = self._wh._conn()
         have = {r[1] for r in conn.execute(
             "PRAGMA table_info(shadow_listing_probe)").fetchall()}
-        for col, decl in (("shortable_basis", "TEXT"),):
+        for col, decl in (("shortable_basis", "TEXT"), ("venue", "TEXT")):
             if col not in have:
                 conn.execute(
                     f"ALTER TABLE shadow_listing_probe ADD COLUMN {col} {decl}")
@@ -836,6 +849,7 @@ class ListingShortProbeAgent:
             "realized_funding_rate_sum": 0.0, "last_funding_bucket": None,
             "concurrent_open_at_entry": int(concurrent_open_at_entry),
             "created_ts": int(now),
+            "venue": self._venue,   # prereg 86: non-pooling discriminator
         }
         if decision_row is None:
             insert_row(self._wh, "shadow_listing_probe", row, replace=True)

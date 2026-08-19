@@ -25,6 +25,21 @@ class _ProbesMixin:
                 ohlcv_provider=self._listing_ohlcv,
                 venue=str(cfg.get("venue", "binance")),
             ),
+            # Prereg 86: one OBSERVATION instance per configured venue. Each
+            # closure binds its venue so the shared engine providers serve the
+            # right client; the agent derives its own identity/state per venue.
+            "multi": lambda self, cfg: [
+                dict(
+                    markets_provider=(lambda v=v: self._listing_markets(v)),
+                    market_data_provider=(
+                        lambda sym, v=v: self._listing_market_data(sym, v)),
+                    ohlcv_provider=(
+                        lambda sym, tf, since, v=v:
+                        self._listing_ohlcv(sym, tf, since, v)),
+                    venue=v,
+                )
+                for v in (cfg.get("venues") or (cfg.get("venue", "binance"),))
+            ],
         },
         {
             "config": "UNLOCK_SHORT_PROBE",
@@ -187,13 +202,27 @@ class _ProbesMixin:
             import importlib
             mod_name, cls_name = spec["import_path"].split(":")
             cls = getattr(importlib.import_module(mod_name), cls_name)
-            probe = cls(
-                warehouse=wh,
-                account_balance_provider=self._shadow_free_balance,
-                **spec["kwargs"](self, cfg),
-            )
-            logger.info(spec["log"])
-            return [probe]
+            # Prereg 86: a spec may build MULTIPLE instances (one per venue).
+            # Every instance failure is isolated so one venue cannot take the
+            # others down; a spec without "multi" behaves exactly as before.
+            kwargs_list = (spec["multi"](self, cfg) if "multi" in spec
+                           else [spec["kwargs"](self, cfg)])
+            probes = []
+            for kw in kwargs_list:
+                try:
+                    probes.append(cls(
+                        warehouse=wh,
+                        account_balance_provider=self._shadow_free_balance,
+                        **kw,
+                    ))
+                    suffix = (f" venue={kw.get('venue')}"
+                              if len(kwargs_list) > 1 else "")
+                    logger.info(spec["log"] + suffix)
+                except Exception as e:
+                    logger.warning(
+                        f"[Engine] {spec['warn_label']} probe instance "
+                        f"({kw.get('venue', '?')}) init skipped: {e}")
+            return probes
         except Exception as e:
             logger.warning(f"[Engine] {spec['warn_label']} probe init skipped: {e}")
             return []
@@ -325,17 +354,19 @@ class _ProbesMixin:
             logger.debug(f"[UnlockProbe] ohlcv {venue} {symbol} failed: {e}")
             return []
 
-    def _listing_venue_client(self):
-        """The exchange client that supplies listing-probe market data (binance
-        USDT-M perps). READ-ONLY use only."""
-        try:
-            from config import LISTING_SHORT_PROBE
-            venue = str(LISTING_SHORT_PROBE.get("venue", "binance"))
-        except Exception:
-            venue = "binance"
+    def _listing_venue_client(self, venue: str = None):
+        """The exchange client that supplies listing-probe market data
+        (USDT-M perps). READ-ONLY use only. ``venue=None`` keeps the legacy
+        single-venue config default (prereg 86 passes it explicitly)."""
+        if venue is None:
+            try:
+                from config import LISTING_SHORT_PROBE
+                venue = str(LISTING_SHORT_PROBE.get("venue", "binance"))
+            except Exception:
+                venue = "binance"
         return (self.active_exchanges or {}).get(venue)
 
-    def _listing_markets(self) -> list:
+    def _listing_markets(self, venue: str = None) -> list:
         """Current tradeable Binance USDT-M perp unified symbols. Read-only.
 
         Reloads ccxt markets at most once per hour so brand-new crypto perps
@@ -344,18 +375,22 @@ class _ProbesMixin:
         (only symbols that slip in via incidental reloads would ever detect).
         """
         try:
-            ex = self._listing_venue_client()
+            ex = self._listing_venue_client(venue)
             client = getattr(ex, "exchange", None)
             if client is None:
                 return []
             import time as _time
             ttl = 3600.0
-            last = float(getattr(self, "_listing_markets_loaded_at", 0.0) or 0.0)
+            stamps = getattr(self, "_listing_markets_loaded", None)
+            if stamps is None:
+                stamps = self._listing_markets_loaded = {}
+            key = venue or "_default"
+            last = float(stamps.get(key, 0.0) or 0.0)
             now = _time.time()
             if (now - last) >= ttl or not getattr(client, "markets", None):
                 try:
                     client.load_markets(reload=True)
-                    self._listing_markets_loaded_at = now
+                    stamps[key] = now
                 except Exception as e:
                     logger.debug(f"[ListingProbe] load_markets reload failed: {e}")
                     # keep whatever snapshot we have; still better than []
@@ -372,12 +407,12 @@ class _ProbesMixin:
             logger.debug(f"[ListingProbe] markets fetch failed: {e}")
             return []
 
-    def _listing_market_data(self, symbol: str) -> dict:
+    def _listing_market_data(self, symbol: str, venue: str = None) -> dict:
         """Best bid/ask/last/quoteVolume + current funding rate for a perp.
         Read-only; fail-open to {} so a missing symbol simply skips."""
         out: dict = {}
         try:
-            ex = self._listing_venue_client()
+            ex = self._listing_venue_client(venue)
             if ex is None:
                 return out
             t = ex.fetch_ticker(symbol, market_type="futures") or {}
@@ -395,10 +430,11 @@ class _ProbesMixin:
             logger.debug(f"[ListingProbe] market_data {symbol} failed: {e}")
         return out
 
-    def _listing_ohlcv(self, symbol: str, timeframe: str, since_ms: int) -> list:
+    def _listing_ohlcv(self, symbol: str, timeframe: str, since_ms: int,
+                       venue: str = None) -> list:
         """Forward 1h candles for a listing since ``since_ms``. Read-only."""
         try:
-            ex = self._listing_venue_client()
+            ex = self._listing_venue_client(venue)
             if ex is None:
                 return []
             client = getattr(ex, "exchange", None)
