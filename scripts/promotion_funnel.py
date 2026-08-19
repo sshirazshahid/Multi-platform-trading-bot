@@ -232,15 +232,19 @@ def listing_lane_state(conn: sqlite3.Connection, now: float,
                 vparams).fetchall()
         except sqlite3.OperationalError:
             if venue != "binance":
-                raise  # no venue column yet -> non-binance lanes have no rows
-            rows = conn.execute(
-                "SELECT proposal_id, base, decision, created_ts"
-                " FROM shadow_listing_probe WHERE created_ts >= ?",
-                (now - 30 * 86400,)).fetchall()
-            outcomes = conn.execute(
-                "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
-                "FROM shadow_listing_probe p JOIN shadow_outcomes o "
-                "ON o.proposal_id=p.proposal_id").fetchall()
+                # No venue column yet (the agent migrates it in on its first
+                # tick). A column that does not exist holds zero non-binance
+                # rows BY DEFINITION — that is an empty lane, not an error.
+                rows, outcomes = [], []
+            else:
+                rows = conn.execute(
+                    "SELECT proposal_id, base, decision, created_ts"
+                    " FROM shadow_listing_probe WHERE created_ts >= ?",
+                    (now - 30 * 86400,)).fetchall()
+                outcomes = conn.execute(
+                    "SELECT p.proposal_id, o.net_pnl, o.resolved_ts "
+                    "FROM shadow_listing_probe p JOIN shadow_outcomes o "
+                    "ON o.proposal_id=p.proposal_id").fetchall()
         unique = {str(proposal_id): (float(net_pnl or 0), resolved_ts)
                   for proposal_id, net_pnl, resolved_ts in outcomes}
         resolved = len(unique)
