@@ -11,6 +11,20 @@ from core.engine.helpers import (
 )
 
 
+def _idle_by_policy_field(entry_policy):
+    """Owner-facing explanation of a by-design idle state, or None (2026-08-19)."""
+    if str(entry_policy or "").upper() not in ("SHADOW_ONLY", "PROTECT_ONLY"):
+        return None
+    from core.engine.helpers import (
+        IDLE_POLICY_BASIS,
+        IDLE_POLICY_NEXT_REVIEW,
+        IDLE_POLICY_ORIGIN,
+    )
+    return {"new_entries": "OFF", "origin": IDLE_POLICY_ORIGIN,
+            "basis": IDLE_POLICY_BASIS, "next_review": IDLE_POLICY_NEXT_REVIEW,
+            "resume": "ENTRY_POLICY=APPROVED_PAPER + supervisor restart"}
+
+
 class _MonitorsMixin:
     # Asset-classification sets used by the exchange scan (restored 2026-08-14:
     # the D5 split moved the methods from bot_engine.py but dropped these
@@ -155,6 +169,7 @@ class _MonitorsMixin:
             "operating_mode": _OPERATING_MODE,
             "dry_run": bool(DRY_RUN),
             "entry_policy": _ENTRY_POLICY,
+            "idle_by_policy": _idle_by_policy_field(_ENTRY_POLICY),
             "signal_source": _SIGNAL_SOURCE,
             "paper_trading_profile": _PAPER_TRADING_PROFILE,
             "paper_profile_started_at": _PAPER_PROFILE_STARTED_AT or None,
@@ -263,6 +278,29 @@ class _MonitorsMixin:
         self._retry_inactive_exchanges()
         for ex_name, exchange in list(self.active_exchanges.items()):
             try:
+                # Disconnected clients (Bitget 40085) return fetch_ticker {} —
+                # that is not a ticker outage. Reconnect first.
+                if hasattr(exchange, "_ok"):
+                    try:
+                        ready = bool(exchange._ok())
+                    except Exception:
+                        ready = bool(getattr(exchange, "_connected", False))
+                else:
+                    ready = bool(getattr(exchange, "_connected", True))
+                if not ready:
+                    logger.warning(
+                        f"[Health] {ex_name} not connected — reconnecting"
+                    )
+                    self._try_reconnect(ex_name, exchange)
+                    if hasattr(exchange, "_ok"):
+                        try:
+                            ready = bool(exchange._ok())
+                        except Exception:
+                            ready = bool(getattr(exchange, "_connected", False))
+                    else:
+                        ready = bool(getattr(exchange, "_connected", False))
+                    if not ready:
+                        raise Exception("not connected after reconnect")
                 t0 = time.time()
                 ticker = exchange.fetch_ticker("BTC/USDT", "spot")
                 latency_ms = (time.time() - t0) * 1000

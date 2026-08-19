@@ -302,6 +302,29 @@ from core.balance_utils import deployable_total as _deployable_total
 _STRUCTURAL_ERRORS = (ImportError, AttributeError, NameError)
 
 
+# 2026-08-19 council: the bot had been idle for 52h with the banner showing
+# only "EntryPolicy: SHADOW_ONLY". The FACT was visible; the REASON was not,
+# and the owner asked "why no trades" four times. Idle-by-design must say so,
+# say whose decision it was, and say when it will be revisited.
+IDLE_POLICY_ORIGIN = "owner directive 'maximize PAPER then cash', 2026-08-18"
+IDLE_POLICY_BASIS = ("cash beat every measured mask on 2,109 closed trades "
+                     "(_workspace/strategy_pipeline/73_plan_paper_then_cash.md)")
+IDLE_POLICY_NEXT_REVIEW = "Polymarket prereg screen, ~2026-09-08 (needs 2-4wk accrual)"
+
+
+def idle_by_policy_lines(entry_policy) -> list:
+    """Banner lines explaining a by-design idle state. Empty when trading."""
+    if str(entry_policy or "").upper() not in ("SHADOW_ONLY", "PROTECT_ONLY"):
+        return []
+    return [
+        f"  IdleByPolicy: NEW ENTRIES OFF by {IDLE_POLICY_ORIGIN}",
+        f"                basis: {IDLE_POLICY_BASIS}",
+        f"                shadow probes + Polymarket keep accruing; next review: "
+        f"{IDLE_POLICY_NEXT_REVIEW}",
+        "                to resume PAPER flow: ENTRY_POLICY=APPROVED_PAPER + supervisor restart",
+    ]
+
+
 def _boot_profile_log_lines() -> list:
     """One in-process boot log line per max-flow knob (2026-07-19 spec T5).
 
@@ -312,6 +335,9 @@ def _boot_profile_log_lines() -> list:
     try:
         from config import (
             ACCURACY_TARGET_MODE as _acc,
+        )
+        from config import (
+            ENTRY_POLICY as _entry_policy,
         )
         from config import (
             MCP_DIRECTIONAL_ECONOMIC_GATE as _egate,
@@ -348,6 +374,8 @@ def _boot_profile_log_lines() -> list:
         _smg = False
     lines = [
         f"  SignalSrc : {_sig}",
+        f"  EntryPolicy: {_entry_policy}",
+        *idle_by_policy_lines(_entry_policy),
         f"  Profile   : {_profile} (epoch={_epoch or 'n/a'})",
         f"  EntryFloor: MCP_ENTRY_MIN_SCORE={floor_txt}",
         f"  SLCooldown: {'enabled' if _sl_cd else 'DISABLED (sl_cooldown_disabled_by_profile)'}",
@@ -360,6 +388,10 @@ def _boot_profile_log_lines() -> list:
             f"  SmartMoney: {'ON (hard entry gate)' if _smg else 'OFF'}"
         ),
         f"  EconGate  : mode={_egate.get('mode', 'strict')}",
+        (
+            "  TradFi    : blocked (USDT-M oil/metal/stock perps; not CME; "
+            "tradfi_asset + AccBand scope — ANALYSIS_ONLY_ENFORCED is not the switch)"
+        ),
     ]
     try:
         from config import UNIVERSE_FLOW_LOOSEN as _ufl
