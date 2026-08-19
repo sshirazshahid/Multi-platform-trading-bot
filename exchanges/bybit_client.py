@@ -69,13 +69,17 @@ class BybitClient(BaseExchange):
                     "adjustForTimeDifference": True,
                     "recvWindow":              20000,
                     "brokerId":                "",
-                    # 2026-04-16: Disable fetchCurrencies — it hits
-                    # /v5/asset/coin/query-info which is aggressively
-                    # rate-limited and requires auth. Not needed for trading.
+                    # Documented intent: skip coin metadata. ccxt's load_markets
+                    # keys off has['fetchCurrencies'], not this option — we also
+                    # flip has[] below before load_markets.
                     "fetchCurrencies":         False,
                 },
                 "enableRateLimit": True,
             })
+            # ccxt load_markets calls fetch_currencies() iff has['fetchCurrencies']
+            # is True — that hits privateGetV5AssetCoinQueryInfo (rate-limited /
+            # auth-heavy). Trading does not need currency metadata.
+            self.exchange.has["fetchCurrencies"] = False
             # load_markets retry with backoff
             import time as _t
             for attempt in range(3):

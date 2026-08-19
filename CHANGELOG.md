@@ -8,6 +8,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (2026-08-18 — live checklist comment unsign)
+- `core/live_gate.py` and Mission Control `inspect_checklist`: any line
+  containing `<!--` is not a signature (unclosed HTML comments used to
+  parse as `Signed-By`). Checkbox and 30-day age checks unchanged.
+
+
+### Fixed (2026-08-11 — MAX_FLOW_BAND exit geometry misconfig)
+- Mission Control + research tick now flag when `PAPER` + `MAX_FLOW_BAND` runs with
+  `ACCURACY_TARGET_MODE=false` (wide TP rarely hits; stop_loss dominates).
+- `.env` restored: `ACCURACY_TARGET_MODE=true`, `BAND_REGIME_FILTER_ENABLED=true`
+  (supervisor restart required). MC **AccBand** chip + guidance banner.
+
+### Added (2026-08-11 — EV-first PAPER plan)
+- `core/paper_exit_geometry.py` + `scripts/diagnose_paper_exit_geometry.py`: read-only exit-geometry
+  rollup (mean_win/mean_loss, close_reason breakdown, EV diagnostic). Wired as research-loop `s5_exit_geometry`
+  with warnings when n≥10 and win/loss ratio < 1.0; Mission Control **Exit R ratio** chip.
+- `scripts/check_mature_cohort_gates.py`: mature-cohort gate for TP-exit-geometry replay (queue #6) —
+  research-loop `s6_mature_cohort`; no auto replay or TP/SL changes.
+- Prereg `67_prereg_oi_funding_veto` + `research/stage0_oi_funding_veto.py`: OI×funding INTERNAL veto
+  Stage-0 fire counts only (never MCP authority).
+- Accrual note `_workspace/strategy_pipeline/67_edge_queue_accrual_2026-08-11.md` (C2 Deribit, HL funding, F1 carry).
+
+### Fixed (2026-08-18 — Bitget UTA reconnect / empty-ticker false-outage)
+- Bitget 40085: rebuild a new ccxt client with `uta=True` (do not mutate Classic
+  options). Reconnect remembers UTA so health does not reconstruct Classic and
+  skip the auto-switch. Disconnected `_ok() False` no longer counts as
+  `Empty ticker (keys=[])`. Supervisor pins `BITGET_UTA=auto` when `.env` omits it.
+- UTA rebuild: `load_markets` must succeed (one retry, then raise). Do not set
+  `_connected=True` on an empty market cache.
+
+### Fixed (2026-08-11 — Bybit load_markets / Bitget UTA 40085)
+- Bybit: set `exchange.has['fetchCurrencies']=False` before `load_markets` so ccxt
+  no longer hits private `/v5/asset/coin/query-info` (options flag alone was ignored).
+- Bitget: auto-detect Unified Account (error 40085), enable ccxt `options['uta']=True`,
+  reload markets, retry auth. Env `BITGET_UTA=auto|true|false` (default auto).
+
+### Added (2026-08-11 — self-audit + junk cleanup)
+- `core/paper_stack_audit.py` + `scripts/audit_paper_stack.py`: structural Binance/Bybit/Bitget +
+  probe/evidence-rail audit (never auto CONTROLLED_LIVE). Wired into research-loop `s4_stack_audit`.
+- Mission Control whale harvest chip; `scripts/harvest_whale_events_runner.bat`.
+- Removed DELETE-CANDIDATE junk only: `.gitignore.bak-*`, `.claude/settings.local.json.bak-*`,
+  `research/pine_scripts/_tv_*.png` / `_tv_*_ui.txt` (kept `.pine` mirrors). No mass delete.
+
+### Added (2026-08-11 — whale event harvest log-only)
+- `core/whale_events.py` + `scripts/harvest_whale_events.py`: PIT whale/large-transfer accrual
+  (optional Whale Alert API + keyless BTC mempool + inbox). **Never** MCP/live authority.
+- ADR `docs/superpowers/specs/2026-08-11-whale-event-harvest-log-only.md`; MC `whale_events` telemetry;
+  purity forbid `core.whale_events`; schtask name `TradingBot-WhaleEventHarvest`.
+
 ### Added (2026-08-11 — evolve PAPER profit loop 1A/2A)
 - ADR `docs/superpowers/specs/2026-08-11-evolve-paper-profit-loop.md` + cleanup inventory (no mass deletes).
 - Mission Control `paper_research` status: PAPER day expectancy/WR, probe floors, soft-stale, econ-gate mode (telemetry only).

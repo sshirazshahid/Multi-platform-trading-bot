@@ -36,10 +36,12 @@ Triggers (see WatchdogConfig for thresholds):
      last LOSS_STREAK_WINDOW_MIN minutes. WARN.
 
   6. model_gate_starving
-     mcp_decisions.jsonl tail shows zero OPENs in the last
-     MODEL_STARVE_HOURS hours while RiskManager.daily_pnl > -2%.
-     INFO — the model gate has been blocking everything; not an
-     emergency, but operator should know.
+     positions.json shows zero OPENs in the last MODEL_STARVE_HOURS hours
+     while RiskManager.daily_pnl > -2%. INFO — unexplained idleness.
+     Suppressed when EconGate=strict OR ENTRY_POLICY is SHADOW_ONLY /
+     PROTECT_ONLY / OBSERVATION (zero OPENs is the intended latch).
+     Deliberate measured vetoes (band_regime_filter, daily open budget)
+     are silent only for DELIBERATE_BLOCK_MAX_HOURS.
 
   7. stuck_open_positions
      Warehouse trades stuck at status='OPEN' older than STUCK_OPEN_HOURS
@@ -281,6 +283,26 @@ def orphan_open_trade_rows(
 class WatchdogState:
     last_alert: dict[str, float] = field(default_factory=dict)
     last_cycle_count: int | None = None
+
+
+def expected_idle_no_new_exposure() -> bool:
+    """True when new directional OPENs are latched off by design.
+
+    SHADOW_ONLY / PROTECT_ONLY / OBSERVATION are owner cash/safety
+    postures. Zero OPENs is success, not model_gate_starving. Unlike
+    DELIBERATE_ENTRY_BLOCKS this is NOT 24h-capped — the latch can
+    stay on for weeks. Import failure does not suppress (alert).
+    """
+    try:
+        from config import ENTRY_POLICY, OPERATING_MODE
+    except Exception:
+        return False
+    if str(OPERATING_MODE or "").strip().upper() == "OBSERVATION":
+        return True
+    return str(ENTRY_POLICY or "").strip().upper() in (
+        "SHADOW_ONLY",
+        "PROTECT_ONLY",
+    )
 
 
 class HealthWatchdog:
@@ -694,6 +716,17 @@ class HealthWatchdog:
         except Exception:
             return False
 
+    @staticmethod
+    def _expected_idle_no_new_exposure() -> bool:
+        """True when new directional OPENs are latched off by design.
+
+        SHADOW_ONLY / PROTECT_ONLY / OBSERVATION are owner cash/safety
+        postures. Zero OPENs is success, not model_gate_starving. Unlike
+        DELIBERATE_ENTRY_BLOCKS this is NOT 24h-capped — the latch can
+        stay on for weeks. Import failure does not suppress (alert).
+        """
+        return expected_idle_no_new_exposure()
+
     def _dominant_entry_block_reason(self) -> tuple:
         """(reason, hits) for the block that stopped the most entries today.
 
@@ -717,6 +750,16 @@ class HealthWatchdog:
                         continue
                     stamp = _decision_ts_epoch(line[:19].strip().replace(" ", "T"))
                     if stamp is not None and stamp < cutoff:
+                        continue
+                    # [EntryPolicy] BLOCKED venue:symbol id: reason  — colon+space,
+                    # not an emdash. The emdash regex below would miss it and
+                    # report leftover universe_filter thin_book as dominant.
+                    m = re.search(
+                        r"\[EntryPolicy\] BLOCKED\b.+:\s+([a-z][a-z0-9_]*)\s*$",
+                        line.rstrip(),
+                    )
+                    if m:
+                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
                         continue
                     m = re.search(r"BLOCKED[^\n]*?[—-]\s*([a-z_]+)", line)
                     if m:
@@ -856,8 +899,10 @@ class HealthWatchdog:
                     return
             except Exception:
                 pass
-        if self._expected_idle_under_strict_econ_gate():
-            # Re-arm so a later flip to paper_fallback can alert again.
+        if (self._expected_idle_under_strict_econ_gate()
+                or self._expected_idle_no_new_exposure()):
+            # Re-arm so a later flip to paper_fallback / APPROVED_PAPER
+            # can alert again.
             self._edge_alert("model_gate_starving", False, "INFO", "")
             return
         # 2026-07-28: this counted mcp_decisions.jsonl records whose TOP-LEVEL

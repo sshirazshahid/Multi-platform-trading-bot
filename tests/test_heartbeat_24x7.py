@@ -23,6 +23,7 @@ def test_heartbeat_is_published_atomically_and_failures_are_visible():
     assert '"risk_profile"' in block
     assert '"aggregate_open_risk_pct"' in block
     assert '"operating_mode"' in block
+    assert '"entry_policy"' in block
     assert 'Path("data/heartbeat.json").write_text' not in block
 
 

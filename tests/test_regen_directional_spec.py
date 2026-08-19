@@ -112,6 +112,30 @@ def test_tradfi_flagged_market_rejected_by_metadata_not_list():
     assert _market_rejection_reason(_crypto_perp("ETH"), "futures") is None
 
 
+def test_bybit_symboltype_stock_rejected_as_tradfi():
+    """Bybit TradFi USDT-M perps flag info.symbolType=stock/commodity, not
+    Binance TRADIFI_PERPETUAL. A ticker absent from the static lists (HOOD)
+    must still reject as tradfi_asset."""
+    from core.pair_discovery import _is_tradfi_market, _market_rejection_reason
+
+    hood = {
+        "base": "HOOD",
+        "quote": "USDT",
+        "settle": "USDT",
+        "active": True,
+        "type": "swap",
+        "swap": True,
+        "symbol": "HOOD/USDT:USDT",
+        "info": {"symbolType": "stock", "status": "Trading"},
+    }
+    linear = _crypto_perp("ETH")
+    linear["info"] = {"symbolType": "linear", "status": "Trading"}
+    assert _is_tradfi_market(hood) is True
+    assert _market_rejection_reason(hood, "futures") == "tradfi_asset:HOOD"
+    assert _is_tradfi_market(linear) is False
+    assert _market_rejection_reason(linear, "futures") is None
+
+
 def test_eligible_futures_symbols_uncapped_candidacy_based():
     """Authorization derivation is UNCAPPED (the 25/venue ALL-mode cap is a
     scan budget, not an authorization rule) over the candidate bases, with

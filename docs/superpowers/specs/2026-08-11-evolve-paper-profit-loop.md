@@ -37,7 +37,7 @@ Only via evidence pipeline → log-only shadow → frozen `promotion_gate` + own
 `SCALP_TIER_ENABLED` stays default **false**. No new live scalp. AccBand short-hold = geometry research, not a scalp strategy.
 
 ### Self-upgrade (defined)
-Warehouse + learning reports; scheduled research tick + promotion funnel; self-heal adapters; **never** auto-promote to CONTROLLED_LIVE. Machine adaptive path remains gated by `SIGNAL_SOURCE`.
+Warehouse + learning reports; scheduled research tick + promotion funnel; self-heal adapters; **never** auto-promote to CONTROLLED_LIVE. Machine adaptive path remains gated by `SIGNAL_SOURCE`. Structural confidence check: `scripts/audit_paper_stack.py` (wired as research-loop `s4_stack_audit`).
 
 ## Non-goals
 - Delete everything / greenfield rewrite  

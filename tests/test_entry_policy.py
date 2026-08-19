@@ -18,8 +18,32 @@ from core.entry_policy import (
     load_live_approval,
     mode_profile_for,
     parse_allowlist,
+    resolve_dotenv_entry_policy,
     strategy_id_for_action,
 )
+
+
+def test_dotenv_entry_policy_fail_closes_when_omitted_or_blank():
+    assert resolve_dotenv_entry_policy(None) == "SHADOW_ONLY"
+    assert resolve_dotenv_entry_policy({}) == "SHADOW_ONLY"
+    assert resolve_dotenv_entry_policy({"ENTRY_POLICY": None}) == "SHADOW_ONLY"
+    assert resolve_dotenv_entry_policy({"ENTRY_POLICY": "  "}) == "SHADOW_ONLY"
+    assert resolve_dotenv_entry_policy({"ENTRY_POLICY": "approved_paper"}) == (
+        "APPROVED_PAPER"
+    )
+    assert resolve_dotenv_entry_policy({"ENTRY_POLICY": "SHADOW_ONLY"}) == (
+        "SHADOW_ONLY"
+    )
+
+
+def test_f1_standalone_runner_pins_entry_policy_from_dotenv():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_f1_carry_paper.py"
+    ).read_text(encoding="utf-8")
+    assert "resolve_dotenv_entry_policy" in source
+    assert 'os.environ["ENTRY_POLICY"]' in source
 
 
 def test_shadow_only_denies_new_orders_but_allows_reductions():

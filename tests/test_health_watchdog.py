@@ -27,6 +27,10 @@ def _isolate_cooldown_state(tmp_path, monkeypatch):
     # blocker, and the PRODUCTION log names a deliberate veto that suppresses
     # the alert — which would silently invert these assertions.
     monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(
+        hw.HealthWatchdog, "_expected_idle_no_new_exposure",
+        staticmethod(lambda: False),
+    )
 
 
 class _FakeNotifier:

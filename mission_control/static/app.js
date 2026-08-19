@@ -694,6 +694,35 @@
         title: "Lowest resolved/30 among goal_progress probe lanes (log-only)",
       });
     }
+    const eg = pr.exit_geometry || {};
+    const mf = pr.max_flow_band || {};
+    if (mf.paper_profile === "MAX_FLOW_BAND") {
+      chips.push({
+        label: "AccBand",
+        value: mf.accuracy_band_enabled ? "ON" : "OFF (misconfig)",
+        cls: mf.accuracy_band_enabled ? "ok" : "danger",
+        title: mf.honesty || "Compressed TP geometry for MAX_FLOW_BAND — restart supervisor after .env edit",
+      });
+    }
+    if (eg.win_loss_ratio != null) {
+      const wl = Number(eg.win_loss_ratio);
+      const tgt = Number(eg.target_win_loss_ratio || 1.5);
+      chips.push({
+        label: "Exit R ratio",
+        value: `${wl.toFixed(2)} / ${tgt.toFixed(2)} (n=${eg.n_closed ?? "?"})`,
+        cls: wl < 1.0 ? "danger" : wl < tgt ? "warn" : "ok",
+        title: eg.binding_note || eg.honesty || "mean_win/mean_loss — EV-first diagnostic",
+      });
+    }
+    const whale = s.whale_events || {};
+    chips.push({
+      label: "Whale harvest",
+      value: whale.present
+        ? `log-only · +${whale.added ?? "?"} (fetched ${whale.fetched ?? "?"})`
+        : "no status",
+      cls: whale.live_trade_authorized ? "danger" : "info",
+      title: whale.honesty || "Log-only whale/large-transfer accrual — never MCP authority",
+    });
 
     $("status-chips").innerHTML = chips
       .map((c) =>
@@ -714,6 +743,13 @@
     if (s.mode_divergent || s.profile_divergent)
       return set("warn",
         `The running bot reports ${s.mode || "?"} / ${s.paper_profile || "?"}, but .env says ${s.env_mode || "?"} / ${s.env_paper_profile || "?"}. A long-running supervisor never re-reads .env — the edit is NOT in effect until it is restarted.`);
+    const mf = (s.paper_research && s.paper_research.max_flow_band) || {};
+    if (mf.max_flow_misconfig_acc_off)
+      return set("danger",
+        "MAX_FLOW_BAND is active but AccBand (ACCURACY_TARGET_MODE) is OFF in .env — wide take-profits rarely hit and stop-losses dominate. Set ACCURACY_TARGET_MODE=true and restart the supervisor.");
+    if (s.paper_research && s.paper_research.exit_geometry && s.paper_research.exit_geometry.warn_low_win_loss_ratio)
+      return set("warn",
+        `Exit R bleed: win/loss ratio ${Number(s.paper_research.exit_geometry.win_loss_ratio).toFixed(2)} (target ≥1.5). Prioritize take-profit geometry / fewer stop-outs — not more entries.`);
     if (sup.alive === false)
       return set("warn", "No launcher_supervisor or main.py process is running. The bot is not trading.");
     if (sup.alive === null)

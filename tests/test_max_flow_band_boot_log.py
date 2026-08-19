@@ -17,6 +17,7 @@ import config
 def _lines(monkeypatch, **overrides):
     defaults = {
         "SIGNAL_SOURCE": "mcp",
+        "ENTRY_POLICY": "SHADOW_ONLY",
         "PAPER_TRADING_PROFILE": "STANDARD",
         "PAPER_PROFILE_STARTED_AT": "",
         "MCP_ENTRY_MIN_SCORE": None,
@@ -51,6 +52,7 @@ def test_boot_lines_reflect_max_flow_band_profile(monkeypatch):
         },
     )
     assert "SignalSrc : mcp" in text
+    assert "EntryPolicy: SHADOW_ONLY" in text
     assert "Profile   : MAX_FLOW_BAND" in text
     assert "epoch=1789000000.0" in text
     assert "EntryFloor: MCP_ENTRY_MIN_SCORE=50" in text
@@ -67,6 +69,7 @@ def test_boot_lines_reflect_max_flow_band_profile(monkeypatch):
 def test_boot_lines_defaults_describe_todays_behavior(monkeypatch):
     text = _lines(monkeypatch)
     assert "SignalSrc : mcp" in text
+    assert "EntryPolicy: SHADOW_ONLY" in text
     assert "Profile   : STANDARD" in text
     assert "EntryFloor: MCP_ENTRY_MIN_SCORE=default(66/65)" in text
     assert "SLCooldown: enabled" in text
@@ -74,11 +77,18 @@ def test_boot_lines_defaults_describe_todays_behavior(monkeypatch):
     assert "BandRegime: OFF" in text
     assert "SmartMoney: OFF" in text
     assert "AccBandNote:" not in text
+    assert "TradFi    : blocked" in text
+    assert "ANALYSIS_ONLY_ENFORCED is not the switch" in text
 
 
 def test_boot_lines_signal_source_tsmom_visible(monkeypatch):
     text = _lines(monkeypatch, SIGNAL_SOURCE="tsmom")
     assert "SignalSrc : tsmom" in text
+
+
+def test_boot_lines_entry_policy_is_process_ground_truth(monkeypatch):
+    text = _lines(monkeypatch, ENTRY_POLICY="APPROVED_PAPER")
+    assert "EntryPolicy: APPROVED_PAPER" in text
 
 
 def test_engine_init_emits_boot_lines():

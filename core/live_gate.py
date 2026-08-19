@@ -31,13 +31,11 @@ MODEL_POINTER_PATH = (
     / "ensemble_futures_latest.json"
 )
 
-# Matches `Signed-By: Owner Name 2026-12-31`, allowing a leading `<!-- ` /
-# trailing ` -->` pair so the repo can ship an example signature that is
-# explicitly commented out. Whitespace is flexible; the pattern still rejects
-# a line that's purely inside the example HTML comment because the matcher
-# below calls .strip() and re-checks the bracket structure.
+# Matches `Signed-By: Owner Name 2026-12-31`. HTML-comment wrappers
+# (`<!-- ... -->`, including a missing `-->`) are rejected in
+# `_line_is_signature` so a commented template cannot count as sign-off.
 _SIGN_RE = re.compile(
-    r"^\s*(?:<!--\s*)?Signed-By:\s*(?P<name>.+?)\s+(?P<date>\d{4}-\d{2}-\d{2})\s*(?:-->)?\s*$"
+    r"^\s*Signed-By:\s*(?P<name>.+?)\s+(?P<date>\d{4}-\d{2}-\d{2})\s*$"
 )
 
 
@@ -46,9 +44,9 @@ def _line_is_signature(line: str) -> tuple[str, date] | None:
     s = line.strip()
     if not s or s.startswith("#"):
         return None
-    # Reject commented-out examples explicitly — the repo ships one as a
-    # documented template and we don't want it to count as sign-off.
-    if s.startswith("<!--") and s.endswith("-->"):
+    # Reject commented-out examples — including an unclosed `<!--` with no
+    # `-->`, which used to match as a live signature.
+    if "<!--" in s:
         return None
     m = _SIGN_RE.match(s)
     if not m:

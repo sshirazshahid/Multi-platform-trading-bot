@@ -61,6 +61,10 @@ def _isolate(tmp_path, monkeypatch):
         HealthWatchdog, "_expected_idle_under_strict_econ_gate",
         staticmethod(lambda: False),
     )
+    monkeypatch.setattr(
+        HealthWatchdog, "_expected_idle_no_new_exposure",
+        staticmethod(lambda: False),
+    )
 
 
 def _positions(tmp_path, monkeypatch, *, open_ages_h=(), closed_ages_h=()):
@@ -203,3 +207,62 @@ def test_block_reason_scan_survives_missing_log(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "no_logs")
     reason, count = _wd(_Notifier(), _Risk(0.0))._dominant_entry_block_reason()
     assert reason is None and count == 0
+
+
+def test_shadow_only_latch_suppresses_starvation_nag(tmp_path, monkeypatch):
+    """ENTRY_POLICY=SHADOW_ONLY means zero OPENs is the cash latch working.
+
+    Must not page as model_gate_starving, and must not inherit the 24h
+    deliberate-block cap (the latch can stay on for weeks by design).
+    """
+    monkeypatch.setattr(
+        HealthWatchdog, "_expected_idle_no_new_exposure",
+        staticmethod(lambda: True),
+    )
+    _positions(tmp_path, monkeypatch, closed_ages_h=(9.0,))
+    n = _Notifier()
+    _wd(n, _Risk(0.0))._check_model_gate_starving()
+    assert n.sent == [], f"cash latch must not page as starvation: {n.sent}"
+
+
+def test_entry_policy_colon_reason_beats_thin_book(tmp_path, monkeypatch):
+    """[EntryPolicy] BLOCKED uses ': reason' not an emdash. The old regex
+    only captured 'BLOCKED … — thin_book' from universe_filter, so a
+    SHADOW_ONLY book was reported as thin_book (4 hits) starvation.
+    """
+    from datetime import datetime, timezone
+
+    logdir = tmp_path / "logs"
+    logdir.mkdir()
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    lines = []
+    for _ in range(10):
+        lines.append(
+            f"{stamp} | INFO | core.engine.entry_exec:_execute_open:137 | "
+            f"[EntryPolicy] BLOCKED binance:BTC/USDT:USDT mcp_registry: "
+            f"entry_policy_shadow_only\n"
+        )
+    for _ in range(4):
+        lines.append(
+            f"{stamp} | INFO | core.engine.entry_exec:_execute_open:946 | "
+            f"[Claude] BLOCKED by universe filter: FOO/USDT:USDT — "
+            f"thin_book:$900<$1200\n"
+        )
+    (logdir / f"bot_{today}.log").write_text("".join(lines), encoding="utf-8")
+    monkeypatch.setattr(hw, "LOG_DIR", logdir)
+    reason, hits = _wd(_Notifier(), _Risk(0.0))._dominant_entry_block_reason()
+    assert reason == "entry_policy_shadow_only"
+    assert hits == 10
+
+
+def test_expected_idle_no_new_exposure_follows_entry_policy(monkeypatch):
+    import config as cfg
+
+    monkeypatch.setattr(cfg, "ENTRY_POLICY", "SHADOW_ONLY")
+    monkeypatch.setattr(cfg, "OPERATING_MODE", "PAPER")
+    assert hw.expected_idle_no_new_exposure() is True
+    monkeypatch.setattr(cfg, "ENTRY_POLICY", "APPROVED_PAPER")
+    assert hw.expected_idle_no_new_exposure() is False
+    monkeypatch.setattr(cfg, "OPERATING_MODE", "OBSERVATION")
+    assert hw.expected_idle_no_new_exposure() is True

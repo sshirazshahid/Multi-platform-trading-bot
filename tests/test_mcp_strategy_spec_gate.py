@@ -203,6 +203,19 @@ def test_blocked_open_warning_records_the_blocked_routes():
 
     assert [action["symbol"] for action in result] == ["BTC/USDT:USDT"]
     assert scorer._last_blocked_open_routes == ["BZ@binance", "CL@bybit"]
+    assert scorer._last_block_reason == "tradfi_asset"
+
+
+def test_crypto_missing_from_spec_keeps_spec_gate_reason():
+    spec = _active_spec(symbols=["BTC/USDT"], venues=["binance"])
+    actions = [
+        _open("BTC/USDT:USDT", exchange="binance"),
+        _open("ETH/USDT:USDT", exchange="binance"),
+    ]
+    result, scorer, _ = _run([spec], actions=actions)
+    assert [action["symbol"] for action in result] == ["BTC/USDT:USDT"]
+    assert scorer._last_blocked_open_routes == ["ETH@binance"]
+    assert scorer._last_block_reason == "strategy_spec_route_not_approved"
 
 
 def test_non_open_research_action_is_not_suppressed_by_entry_spec_gate():

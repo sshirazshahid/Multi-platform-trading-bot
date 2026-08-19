@@ -118,30 +118,35 @@ def get_commodity_meta(symbol: str) -> dict:
 
 
 # ==============================================================
-# ANALYSIS-ONLY INSTRUMENTS (2026-06-02; entry block LIFTED 2026-06-11)
+# ANALYSIS-ONLY INSTRUMENTS (2026-06-02; env choke LIFTED 2026-06-11, then
+# superseded for TRADING by pair_discovery 2026-07-20)
 # Commodity + equity perpetuals that ARE live + liquid on Binance/Bybit/Bitget
 # (ccxt `XAU/USDT:USDT`, raw `XAUUSDT`). Originally hard-blocked from entries
 # (~5 months of history, no screened edge).
 #
-# 2026-06-11 (owner UNBLOCK directive #3: "unblock all symbols. add new symbols
-# which are listed on all connected exchanges"): the hard entry block is now
-# OPT-IN — default OFF; re-arm with ANALYSIS_ONLY_ENFORCED=true in .env.
-# These perps are listed on all 3 connected venues and are discovered in
-# TRADING_MODE=all, so with the block off they flow into the tradeable
-# universe like any crypto perp (MCP score / meta-filter / risk gates apply).
-# ⚠ They still have NO screened edge (2026-06-02 probe: noise-like).
+# 2026-06-11 (owner UNBLOCK directive #3) made `is_analysis_only()` OPT-IN via
+# ANALYSIS_ONLY_ENFORCED (default OFF). That flag is NOT a TradFi on-switch.
+# Load-bearing blocks that still reject these instruments:
+#   1. pair_discovery `_is_tradfi_market` → `tradfi_asset:{base}`
+#   2. empty COMMODITY_BASES/STOCK_BASES + `_DISABLED_BASES` (NATGAS, PAXG, …)
+#   3. AccBand funnel skip `analysis_only_accband_scope` (2026-07-30/31)
+#   4. directional StrategySpec regen (no BZ/CL routes)
+# 2026-07-20 honesty: BZ/CL `strategy_spec_route_not_approved` was correct —
+# they are Binance TRADIFI_PERPETUAL energy synthetics (4h funding), not CME
+# and not crypto. MCP-on-oil has no screened edge (2026-06-02 probe: noise-like).
 # The bases set is RETAINED as the perp-only instrument registry —
 # mcp_brain fetch routing and _collect_all_coins depend on it; do not empty it.
 # ==============================================================
 ANALYSIS_ONLY_ENFORCED = os.getenv("ANALYSIS_ONLY_ENFORCED", "false").lower() == "true"
 ANALYSIS_ONLY_BASES = {
-    # commodities (gold, silver, WTI, Brent, copper)
+    # commodities (gold, silver, WTI, Brent, copper, Henry Hub gas)
     "XAU",
     "XAG",
     "CL",
     "BZ",
     "COPPER",
     "WTI",
+    "NATGAS",
     # equity perps
     "TSLA",
     "NVDA",
@@ -158,8 +163,9 @@ ANALYSIS_ONLY_BASES = {
 def is_analysis_only(symbol: str) -> bool:
     """True if the symbol is entry-blocked as an analysis-only instrument.
 
-    Always False while ANALYSIS_ONLY_ENFORCED is off (2026-06-11 owner unblock —
-    see the section header above). When enforced, matches the ccxt perp form
+    Always False while ANALYSIS_ONLY_ENFORCED is off (2026-06-11 owner unblock).
+    That does **not** make TradFi tradeable: pair_discovery and AccBand scope
+    still reject these bases. When enforced, matches the ccxt perp form
     (`XAU/USDT:USDT`), the spot-name form (`XAU/USDT`), AND the raw exchange id
     (`XAUUSDT`) by EXACT base — so crypto-native tokens that merely share a
     prefix (e.g. XAUT = Tether Gold -> `XAUTUSDT`) are NOT caught.

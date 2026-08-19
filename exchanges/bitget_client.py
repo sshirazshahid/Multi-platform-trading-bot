@@ -81,6 +81,53 @@ class BitgetClient(BaseExchange):
         if self.exchange is not None:
             self.exchange.options["uta"] = self._uta
 
+    def _make_ccxt(self, *, uta: bool):
+        inst = ccxt.bitget({
+            "apiKey":     self.api_key,
+            "secret":     self.secret,
+            "password":   self._passphrase,
+            "options": {
+                "defaultType":             "spot",
+                "adjustForTimeDifference": True,
+                # Skip GET /api/v2/spot/public/coins during load_markets —
+                # requires has['fetchCurrencies']=False below (options alone
+                # are ignored by ccxt.Exchange.load_markets).
+                "fetchCurrencies":         False,
+                "uta": bool(uta),
+            },
+            "enableRateLimit": True,
+            "timeout":         20000,
+        })
+        inst.has["fetchCurrencies"] = False
+        return inst
+
+    def _rebuild_as_uta(self) -> None:
+        """Replace the Classic ccxt instance with a UTA one (40085 recovery).
+
+        A fresh ccxt has empty markets. Swallowing load_markets then continuing
+        auth lets `_connected=True` with no ticker universe — health treats
+        `_ok()` as healthy and empty `{}` tickers re-enter the 40085 loop.
+        """
+        self.exchange = self._make_ccxt(uta=True)
+        self._set_uta(True)
+        try:
+            self.exchange.load_time_difference()
+        except Exception as e:
+            logger.debug(f"[Bitget] UTA clock sync skipped: {e}")
+        for attempt in (1, 2):
+            try:
+                self.exchange.load_markets(reload=(attempt == 2))
+                return
+            except Exception as e:
+                detail = self._describe_ccxt_error(e)
+                if attempt == 1:
+                    logger.warning(
+                        f"[Bitget] UTA load_markets attempt 1 failed: {detail} — retrying"
+                    )
+                    continue
+                logger.error(f"[Bitget] UTA load_markets failed: {detail}")
+                raise
+
     def _init_exchange(self):
         key  = self.api_key.lower()
         sec  = self.secret.lower()
@@ -96,32 +143,24 @@ class BitgetClient(BaseExchange):
             return
 
         uta_mode = BITGET_UTA  # True | False | "auto"
+        # Reconnect must not rebuild Classic after we already learned UTA:
+        # `_uta` used to stay True while a new Classic client was constructed,
+        # then `_authenticate_balance` skipped the 40085 switch and looped.
+        if uta_mode is False:
+            self._uta = False
+            want_uta = False
+        else:
+            want_uta = (uta_mode is True) or bool(self._uta)
+
         try:
-            self.exchange = ccxt.bitget({
-                "apiKey":     self.api_key,
-                "secret":     self.secret,
-                "password":   self._passphrase,
-                "options": {
-                    "defaultType":             "spot",
-                    "adjustForTimeDifference": True,
-                    # Skip GET /api/v2/spot/public/coins during load_markets —
-                    # requires has['fetchCurrencies']=False below (options alone
-                    # are ignored by ccxt.Exchange.load_markets).
-                    "fetchCurrencies":         False,
-                    # Force UTA endpoints when account is Unified Trading Account.
-                    "uta": bool(uta_mode is True),
-                },
-                "enableRateLimit": True,
-                "timeout":         20000,
-            })
+            self.exchange = self._make_ccxt(uta=want_uta)
         except Exception as e:
             logger.error(f"[Bitget] ccxt.bitget() init failed: {e}")
             self.exchange   = None
             self._connected = False
             return
 
-        self.exchange.has["fetchCurrencies"] = False
-        if uta_mode is True:
+        if want_uta:
             self._set_uta(True)
 
         # Sync clock FIRST — Bitget rejects signed requests whose timestamp
@@ -169,10 +208,15 @@ class BitgetClient(BaseExchange):
             self._connected = False
 
     def _authenticate_balance(self, *, uta_mode) -> None:
-        """Verify keys. Auto-switch to UTA on Classic-API 40085 rejection."""
+        """Verify keys. Auto-rebuild a UTA ccxt client on Classic-API 40085."""
         assert self.exchange is not None
         try:
-            self.exchange.fetch_balance()
+            # Classic: no-arg fetch_balance(). Passing {} is still 1 extra
+            # positional and TypeError'd no-arg stubs, leaving Bitget down.
+            if self._uta:
+                self.exchange.fetch_balance({"uta": True})
+            else:
+                self.exchange.fetch_balance()
             return
         except Exception as e:
             if uta_mode is False or not _is_uta_classic_mismatch(e):
@@ -180,15 +224,11 @@ class BitgetClient(BaseExchange):
             if self._uta:
                 raise
             logger.warning(
-                "[Bitget] Classic Account API rejected (likely UTA) — "
-                "enabling ccxt options['uta']=True and retrying auth"
+                "[Bitget] Classic Account API rejected (40085) — "
+                "rebuilding ccxt client with uta=True and retrying auth"
             )
-            self._set_uta(True)
-            try:
-                self.exchange.load_markets(reload=True)
-            except Exception as reload_exc:
-                logger.debug(f"[Bitget] UTA markets reload: {reload_exc}")
-            self.exchange.fetch_balance()
+            self._rebuild_as_uta()
+            self.exchange.fetch_balance({"uta": True})
 
     def _describe_ccxt_error(self, e: Exception) -> str:
         """Expand bare ccxt errors with response body / status when available.

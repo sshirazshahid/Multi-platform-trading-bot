@@ -451,8 +451,11 @@ class _PortfolioStateMixin:
         result = (priority + others)[:40]
         # 2026-06-02: always include the analysis-only research instruments
         # (commodity/equity perps) beyond the cap so they are fetched + scored +
-        # warehoused for the eventual edge screen. They are hard-blocked from
-        # live entry in _execute_open, so analyzing them never risks a trade.
+        # warehoused. They are NOT a tradeable universe: pair_discovery rejects
+        # them as tradfi_asset/disabled_asset, AccBand skips ALLOW, and the
+        # directional spec has no BZ/CL routes. is_analysis_only() in
+        # _execute_open is a redundant choke (ANALYSIS_ONLY_ENFORCED default
+        # OFF) — do not read a False return as "TradFi is on".
         from config import ANALYSIS_ONLY_BASES
         for _b in sorted(ANALYSIS_ONLY_BASES):
             if _b not in result:

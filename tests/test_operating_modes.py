@@ -50,6 +50,15 @@ def test_example_comment_signature_does_not_count(tmp_path):
     assert ok is False
 
 
+def test_unclosed_html_comment_signature_does_not_count(tmp_path):
+    """A missing --> used to match Signed-By and count as live sign-off."""
+    f = tmp_path / "c.md"
+    today = date.today().isoformat()
+    _write(f, f"# Checklist\n\n<!-- Signed-By: Owner {today}\n")
+    ok, _ = is_checklist_signed(f)
+    assert ok is False
+
+
 def test_future_date_rejected(tmp_path):
     f = tmp_path / "c.md"
     future = (date.today() + timedelta(days=7)).isoformat()

@@ -365,6 +365,56 @@ def test_worker_environment_pins_research_knobs_from_dotenv(tmp_path):
     assert child["BROAD_UNIVERSE_PREFER_ABS_USDT_RANK"] == "true"
 
 
+def test_worker_environment_dotenv_shadow_only_beats_inherited_approved_paper(tmp_path):
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text(
+        "OPERATING_MODE=PAPER\nENTRY_POLICY=SHADOW_ONLY\n",
+        encoding="utf-8",
+    )
+    child = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={"ENTRY_POLICY": "APPROVED_PAPER"},
+    )
+    assert child["ENTRY_POLICY"] == "SHADOW_ONLY"
+
+
+def test_worker_environment_fail_closes_entry_policy_when_dotenv_omits_it(tmp_path):
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text("OPERATING_MODE=PAPER\n", encoding="utf-8")
+    child = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={"ENTRY_POLICY": "APPROVED_PAPER"},
+    )
+    assert child["ENTRY_POLICY"] == "SHADOW_ONLY"
+
+
+def test_worker_environment_pins_bitget_uta_auto_when_dotenv_omits_it(tmp_path):
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text("OPERATING_MODE=PAPER\n", encoding="utf-8")
+    child = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={"BITGET_UTA": "false"},
+    )
+    assert child["BITGET_UTA"] == "auto"
+
+
+def test_worker_environment_honors_dotenv_bitget_uta(tmp_path):
+    from scripts import launcher_supervisor
+
+    (tmp_path / ".env").write_text(
+        "OPERATING_MODE=PAPER\nBITGET_UTA=true\n",
+        encoding="utf-8",
+    )
+    child = launcher_supervisor._safe_worker_env(
+        tmp_path,
+        environ={"BITGET_UTA": "false"},
+    )
+    assert child["BITGET_UTA"] == "true"
+
+
 def test_worker_environment_coerces_pinned_research_profile_under_observation(tmp_path):
     """Pin from .env must not leave MAX_FLOW_BAND active under OBSERVATION."""
     from scripts import launcher_supervisor

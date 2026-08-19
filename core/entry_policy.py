@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Collection
+from typing import Collection, Mapping
 
 
 class EntryPolicy(str, Enum):
@@ -138,6 +138,22 @@ def parse_allowlist(raw: str | Collection[str] | None) -> frozenset[str]:
         return frozenset()
     values = raw.split(",") if isinstance(raw, str) else raw
     return frozenset(str(value).strip() for value in values if str(value).strip())
+
+
+def resolve_dotenv_entry_policy(
+    file_env: Mapping[str, str | None] | None,
+) -> str:
+    """Return the `.env` ENTRY_POLICY, fail-closed to SHADOW_ONLY if omitted.
+
+    python-dotenv does not override inherited variables. A parent process that
+    still has ENTRY_POLICY=APPROVED_PAPER would otherwise keep opening the
+    -EV MCP directional book after the owner flipped `.env` to SHADOW_ONLY,
+    or after deleting the key to use the source default.
+    """
+
+    raw = "" if file_env is None else file_env.get("ENTRY_POLICY")
+    value = str(raw or "").strip().upper()
+    return value or EntryPolicy.SHADOW_ONLY.value
 
 
 def strategy_id_for_action(action: dict, signal_source: str = "") -> str:

@@ -94,7 +94,9 @@ class _EntryExecMixin:
                 action["reject_reason"] = "soft_stale_entry_block"
                 return False
         except Exception as _sse:
-            logger.debug(f"[SoftStale] entry check skipped: {_sse}")
+            logger.warning(f"[SoftStale] entry check failed closed: {_sse}")
+            action["reject_reason"] = "soft_stale_entry_block"
+            return False
 
         # Phase 29 (2026-05-05): freqtrade-style post-SL CooldownPeriod +
         # per-pair-side StoplossGuard. After a position closes via SL on

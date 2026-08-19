@@ -27,6 +27,7 @@ FORBIDDEN_IMPORT_ROOTS = (
     "core.data_feeds.news_sentiment_feed",
     "core.data_feeds.twitter_feed",
     "core.regime_short_bias",  # prereg-61 log-only; never on entry path
+    "core.whale_events",  # whale harvest log-only; never on entry path
 )
 
 FORBIDDEN_SUBSTRINGS = (

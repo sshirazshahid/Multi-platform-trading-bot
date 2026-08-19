@@ -34,8 +34,15 @@ sys.path.insert(0, str(ROOT))
 # F1_EXECUTION_MODE in main) silently fell back to defaults in the scheduled
 # task. Must run BEFORE the module-level F1_UNIVERSE read.
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values, load_dotenv
     load_dotenv(ROOT / ".env")
+    from core.entry_policy import resolve_dotenv_entry_policy
+    # dotenv never overrides inherited vars. Pin ENTRY_POLICY from the file
+    # so a stale parent APPROVED_PAPER cannot keep F1 (or later config
+    # imports) opening after the owner flipped `.env` to SHADOW_ONLY.
+    os.environ["ENTRY_POLICY"] = resolve_dotenv_entry_policy(
+        dotenv_values(ROOT / ".env")
+    )
 except Exception:  # dotenv optional: env vars set by the shell still work
     pass
 

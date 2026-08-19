@@ -59,3 +59,39 @@ def test_reconnect_handles_exception():
     method_idx = src.index("def _try_reconnect(self")
     body = src[method_idx:method_idx + 1200]
     assert "except Exception" in body
+
+
+def test_disconnected_venue_reconnects_instead_of_empty_ticker():
+    """Bitget `_ok()` False returns `{}`; treating that as Empty ticker latched
+    exchange_outage:bitget for 80+ fails while auth was the real 40085."""
+    from unittest.mock import MagicMock
+
+    from core.engine.monitors import _MonitorsMixin
+
+    class Harness(_MonitorsMixin):
+        pass
+
+    client = MagicMock()
+    client._ok.return_value = False
+    client._connected = False
+    client.exchange = None
+    client.name = "Bitget"
+    client.fetch_ticker.return_value = {}
+
+    h = Harness()
+    h.active_exchanges = {"bitget": client}
+    h.exchanges = {"bitget": client}
+    h._consecutive_api_fails = {}
+    h._exchange_halted = set()
+    h._api_latency = {}
+    h._inactive_reconnect_at = {"bitget": 10**12}
+    h.tracker = MagicMock()
+    h.tracker.count_open.return_value = 0
+    h.notifier = MagicMock()
+    h.order_mgr = MagicMock()
+
+    h._check_exchange_health()
+
+    client._init_exchange.assert_called()
+    client.fetch_ticker.assert_not_called()
+    assert h._consecutive_api_fails.get("bitget", 0) >= 1

@@ -32,6 +32,9 @@ KILL_SWITCH_PATH = Path("data/KILL_SWITCH")
 SOFT_STALE_LATCH_PATH = Path("data/soft_stale_entry_latch.json")
 REGIME_SHORT_BIAS_PATH = Path("data/regime_short_bias_latest.json")
 LIQUIDATIONS_STATUS_PATH = Path("data/liquidations_status.json")
+WHALE_EVENTS_STATUS_PATH = Path("data/whale_events_status.json")
+EXIT_GEOMETRY_PATH = Path("data/paper_exit_geometry_latest.json")
+MATURE_COHORT_PATH = Path("data/mature_cohort_gates_latest.json")
 AUDIT_PATH = Path("data/mission_control_audit.jsonl")
 LIVE_PID_PATH = Path("data/mission_control_live_pid.json")
 CHECKLIST_PATH = Path("docs/CONTROLLED_LIVE_CHECKLIST.md")
@@ -42,9 +45,9 @@ WAREHOUSE_PATH = Path("data/warehouse.sqlite")
 CLOSED_RING_CAP = 500
 
 # Mirrors core/live_gate._SIGN_RE. Duplicated deliberately: Mission Control is
-# read-only and must not import any live rail module.
+# read-only and must not import any live rail module. HTML comments never count.
 _SIGNATURE_RE = re.compile(
-    r"^\s*(?:<!--\s*)?Signed-By:\s*(?P<name>.+?)\s+(?P<date>\d{4}-\d{2}-\d{2})\s*(?:-->)?\s*$"
+    r"^\s*Signed-By:\s*(?P<name>.+?)\s+(?P<date>\d{4}-\d{2}-\d{2})\s*$"
 )
 _UNCHECKED_RE = re.compile(r"^\s*-\s*\[\s\]\s+", flags=re.IGNORECASE)
 MAX_SIGNATURE_AGE_DAYS = 30
@@ -62,6 +65,8 @@ _SAFE_ENV_KEYS = frozenset(
         "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE",
         "SCALP_TIER_ENABLED",
         "OUTAGE_FLATTEN_LOSERS_ENABLED",
+        "ACCURACY_TARGET_MODE",
+        "BAND_REGIME_FILTER_ENABLED",
     }
 )
 
@@ -262,6 +267,32 @@ def supervisor_liveness(
     }
 
 
+def max_flow_band_env(root: Path | None = None) -> dict[str, Any]:
+    """Read MAX_FLOW_BAND posture from ``.env`` (intent — restart required in-process)."""
+    root = root or ROOT
+    raw = parse_env_file(root / ".env")
+    mode = str(raw.get("OPERATING_MODE") or "").upper()
+    profile = str(raw.get("PAPER_TRADING_PROFILE") or "")
+    acc_requested = str(raw.get("ACCURACY_TARGET_MODE") or "false").lower() == "true"
+    acc_enabled = (
+        acc_requested and mode == "PAPER" and profile == "MAX_FLOW_BAND"
+    )
+    band_regime = str(raw.get("BAND_REGIME_FILTER_ENABLED") or "false").lower() == "true"
+    misconfig = mode == "PAPER" and profile == "MAX_FLOW_BAND" and not acc_enabled
+    return {
+        "operating_mode": mode,
+        "paper_profile": profile,
+        "accuracy_target_requested": acc_requested,
+        "accuracy_band_enabled": acc_enabled,
+        "band_regime_filter_enabled": band_regime,
+        "max_flow_misconfig_acc_off": misconfig,
+        "honesty": (
+            "AccBand raises first-touch WR via compressed TP — geometry research, "
+            "not a profit guarantee. Requires supervisor restart to apply in-process."
+        ),
+    }
+
+
 def paper_research_snapshot(root: Path | None = None) -> dict[str, Any]:
     """PAPER expectancy + shadow probe floor summary for Mission Control.
 
@@ -274,6 +305,21 @@ def paper_research_snapshot(root: Path | None = None) -> dict[str, Any]:
     env = safe_env_flags(root)
     soft_path = _resolve(root, SOFT_STALE_LATCH_PATH)
     soft_raw = read_json(soft_path, {}) if soft_path.exists() else {}
+    exit_geo = read_json(_resolve(root, EXIT_GEOMETRY_PATH), {})
+    if not isinstance(exit_geo, dict) or not exit_geo.get("n_closed"):
+        try:
+            from core.paper_exit_geometry import (
+                analyze_closed_positions,
+                load_closed_from_positions,
+            )
+
+            exit_geo = analyze_closed_positions(
+                load_closed_from_positions(_resolve(root, POSITIONS_PATH))
+            )
+        except Exception:
+            exit_geo = {}
+    mature_gates = read_json(_resolve(root, MATURE_COHORT_PATH), {})
+    mf_env = max_flow_band_env(root)
 
     paper_day: dict[str, Any] = {}
     probe_floors: list[dict[str, Any]] = []
@@ -370,6 +416,42 @@ def paper_research_snapshot(root: Path | None = None) -> dict[str, Any]:
         "funnel_generated_utc": funnel.get("generated_utc")
         if isinstance(funnel, dict)
         else None,
+        "exit_geometry": {
+            "n_closed": exit_geo.get("n_closed") if isinstance(exit_geo, dict) else None,
+            "win_rate": exit_geo.get("win_rate") if isinstance(exit_geo, dict) else None,
+            "win_loss_ratio": exit_geo.get("win_loss_ratio")
+            if isinstance(exit_geo, dict)
+            else None,
+            "target_win_loss_ratio": exit_geo.get("target_win_loss_ratio")
+            if isinstance(exit_geo, dict)
+            else 1.5,
+            "expectancy_per_trade_usd": exit_geo.get("expectancy_per_trade_usd")
+            if isinstance(exit_geo, dict)
+            else None,
+            "warn_low_win_loss_ratio": bool(
+                isinstance(exit_geo, dict) and exit_geo.get("warn_low_win_loss_ratio")
+            ),
+            "binding_note": exit_geo.get("binding_note") if isinstance(exit_geo, dict) else None,
+            "live_trade_authorized": False,
+            "honesty": (
+                exit_geo.get("honesty")
+                if isinstance(exit_geo, dict)
+                else "Exit-geometry diagnostic — no TP/SL authority without prereg."
+            ),
+        },
+        "mature_cohort": {
+            "sample_mature": mature_gates.get("sample_mature")
+            if isinstance(mature_gates, dict)
+            else None,
+            "tp_exit_replay_unlocked": mature_gates.get("tp_exit_replay_unlocked")
+            if isinstance(mature_gates, dict)
+            else None,
+            "paper_day_n": mature_gates.get("paper_day_n")
+            if isinstance(mature_gates, dict)
+            else None,
+            "live_trade_authorized": False,
+        },
+        "max_flow_band": mf_env,
     }
 
 
@@ -413,6 +495,7 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
 
     regime = read_json(_resolve(root, REGIME_SHORT_BIAS_PATH), {})
     liq_status = read_json(_resolve(root, LIQUIDATIONS_STATUS_PATH), {})
+    whale_status = read_json(_resolve(root, WHALE_EVENTS_STATUS_PATH), {})
     soft_stale = _resolve(root, SOFT_STALE_LATCH_PATH).exists()
     regime_eval = {}
     if isinstance(regime, dict):
@@ -462,6 +545,23 @@ def load_status(root: Path | None = None) -> dict[str, Any]:
             ),
         },
         "liquidations_status": liq_status if isinstance(liq_status, dict) else {},
+        "whale_events": {
+            "present": bool(whale_status),
+            "updated_utc": whale_status.get("updated_utc") if isinstance(whale_status, dict) else None,
+            "added": whale_status.get("added") if isinstance(whale_status, dict) else None,
+            "fetched": whale_status.get("fetched") if isinstance(whale_status, dict) else None,
+            "sources_used": whale_status.get("sources_used") if isinstance(whale_status, dict) else None,
+            "has_whale_alert_key": whale_status.get("has_whale_alert_key")
+            if isinstance(whale_status, dict)
+            else None,
+            "live_trade_authorized": False,
+            "log_only": True,
+            "honesty": (
+                whale_status.get("honesty")
+                if isinstance(whale_status, dict)
+                else "Log-only whale/large-transfer accrual. No live wire."
+            ),
+        },
         "paper_research": research,
     }
 
@@ -819,7 +919,7 @@ def inspect_checklist(path: Path) -> tuple[bool, str, int]:
         s = raw.strip()
         if not s or s.startswith("#"):
             continue
-        if s.startswith("<!--") and s.endswith("-->"):
+        if "<!--" in s:
             continue
         m = _SIGNATURE_RE.match(s)
         if not m:
@@ -1156,6 +1256,10 @@ _REASON_PLAIN = {
         "Skipped — non-crypto base (tokenized equity / commodity perp). No "
         "screened edge: every strategy verdict was measured on crypto data"
     ),
+    "tradfi_asset": (
+        "Blocked by design — CEX TradFi USDT-M perp (oil / metal / stock), "
+        "not CME futures and not in the crypto directional universe"
+    ),
     "score_floor": "Scored below the entry score floor",
     # downstream terminal blocks
     "economic_gate_stressed_breakeven": (
@@ -1170,7 +1274,9 @@ _REASON_PLAIN = {
         "or spread / depth)"
     ),
     "strategy_spec_route_not_approved": (
-        "Blocked — no active paper StrategySpec authorises this venue/symbol route"
+        "Blocked — no active paper StrategySpec authorises this venue/symbol "
+        "route (crypto missing from the spec). TradFi oil/stock perps use "
+        "tradfi_asset instead — that is by design, not a hung spec"
     ),
     "strategy_not_approved_for_paper": (
         "Blocked — this strategy id is not on the approved paper-trading allowlist"
@@ -1184,6 +1290,10 @@ _REASON_PLAIN = {
 _REASON_PREFIX_PLAIN = (
     ("band_regime_filter:", "Blocked — the band regime filter vetoed this entry"),
     ("universe_filter_blocked:", "Blocked — live universe filter failed (chop / spread / depth)"),
+    ("tradfi_asset:", (
+        "Blocked by design — CEX TradFi USDT-M perp (oil / metal / stock), "
+        "not CME futures and not in the crypto directional universe"
+    )),
     ("meta_advisory:", "Advisory annotation from the meta-filter — NOT a rejection"),
 )
 
@@ -1207,6 +1317,8 @@ def reason_family(reason: str | None) -> str:
         return "scalp_score_below_floor"
     if raw.startswith("analysis_only_accband_scope"):
         return "analysis_only_accband_scope"
+    if raw.startswith("tradfi_asset"):
+        return "tradfi_asset"
     if raw.startswith("universe_filter_blocked"):
         return "universe_filter_blocked"
     if raw.startswith("band_regime_filter"):

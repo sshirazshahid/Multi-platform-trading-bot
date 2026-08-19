@@ -28,6 +28,15 @@ _EMPTY_UNIVERSE_WARNED = False
 _EXECUTION_SPEC_IDS = frozenset({"MCP_DIRECTIONAL_PAPER"})
 
 
+def _is_tradfi_analysis_base(base: str) -> bool:
+    """True for ANALYSIS_ONLY TradFi tickers (CL/BZ/XAU/TSLA/…), not crypto."""
+    try:
+        from config import ANALYSIS_ONLY_BASES
+    except ImportError:
+        return False
+    return bool(base) and str(base).upper() in ANALYSIS_ONLY_BASES
+
+
 class MCPStrategyScorer:
     """Deterministic, LLM-free portfolio scorer over approved StrategySpec(s)."""
 
@@ -40,6 +49,8 @@ class MCPStrategyScorer:
         self.warehouse = warehouse
         self._last_trade_actions: list = []
         self._last_research_actions: list = []
+        self._last_blocked_open_routes: list = []
+        self._last_block_reason: str = ""
         self._warn_if_universe_empty()
 
     def _warn_if_universe_empty(self) -> None:
@@ -91,6 +102,7 @@ class MCPStrategyScorer:
         routes, gate_reason = self._execution_routes()
         executable: list = []
         blocked_routes: list = []
+        blocked_tradfi: list = []
         futures_types = {"futures", "future", "perpetual", "perp", "swap"}
         for action in actions:
             if not isinstance(action, dict) or str(action.get("type") or "").upper() != "OPEN":
@@ -106,9 +118,22 @@ class MCPStrategyScorer:
                 executable.append(action)
             else:
                 blocked_routes.append(f"{base or '?'}@{venue or '?'}")
+                if _is_tradfi_analysis_base(base):
+                    blocked_tradfi.append(base)
         self._last_blocked_open_routes = blocked_routes
         if blocked_routes:
-            reason = gate_reason or "strategy_spec_route_not_approved"
+            # BZ/CL look like a hung StrategySpec ("route not approved") when
+            # they are ANALYSIS_ONLY TradFi perps excluded from the crypto
+            # spec by design. Name that so Mission Control does not read as a
+            # missing-config bug. Crypto bases still use the spec-gate reason.
+            all_blocked_tradfi = bool(blocked_tradfi) and (
+                len(blocked_tradfi) == len(blocked_routes)
+            )
+            if not gate_reason and all_blocked_tradfi:
+                reason = "tradfi_asset"
+            else:
+                reason = gate_reason or "strategy_spec_route_not_approved"
+            self._last_block_reason = reason
             detail = ", ".join(blocked_routes[:8])
             if len(blocked_routes) > 8:
                 detail += f" +{len(blocked_routes) - 8} more"
@@ -116,6 +141,8 @@ class MCPStrategyScorer:
                 f"[MCPScorer] execution spec gate blocked {len(blocked_routes)} OPEN "
                 f"action(s) [{detail}]: {reason}; research candidates remain available"
             )
+        else:
+            self._last_block_reason = ""
         return executable
 
     # ── main entry point (action-dict contract) ─────────────────────────

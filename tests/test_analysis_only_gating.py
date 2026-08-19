@@ -4,8 +4,12 @@ Owner observed that commodity/equity perps (XAU XAG CL BZ COPPER + TSLA NVDA
 AMZN AAPL GOOGL META MSFT MSTR COIN) ARE live perps on Binance/Bybit/Bitget
 (ccxt `XAU/USDT:USDT`, raw `XAUUSDT`). They were hard-blocked from entries
 (no screened edge). 2026-06-11 owner UNBLOCK directive ("unblock all symbols.
-add new symbols which are listed on all connected exchanges"): the block is
-now OPT-IN via ANALYSIS_ONLY_ENFORCED (default OFF — symbols tradeable).
+add new symbols which are listed on all connected exchanges"): `is_analysis_only()`
+is now OPT-IN via ANALYSIS_ONLY_ENFORCED (default OFF).
+
+That flag is NOT a TradFi on-switch. pair_discovery still rejects CL/BZ/NATGAS
+as disabled_asset / tradfi_asset, AccBand skips ALLOW, and the directional
+spec has no TradFi routes (2026-07-20 honesty correction).
 
 This pins:
   1. The default: block UNENFORCED -> is_analysis_only() is False for everything
@@ -13,6 +17,7 @@ This pins:
   3. _execute_open still consults the predicate (source-level)
   4. _collect_all_coins always includes analysis-only bases (source-level)
   5. mcp_brain OHLCV fetch has a perp fallback for perp-only instruments (source-level)
+  6. TradFi stays rejected by pair_discovery even when the env flag is off
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ def test_analysis_only_bases_cover_observed_instruments():
     # routing + _collect_all_coins) — it must stay populated even unblocked
     from config import ANALYSIS_ONLY_BASES
 
-    for b in ("XAU", "XAG", "CL", "BZ", "COPPER", "TSLA", "NVDA", "AMZN", "MSTR"):
+    for b in ("XAU", "XAG", "CL", "BZ", "COPPER", "NATGAS", "TSLA", "NVDA", "AMZN", "MSTR"):
         assert b in ANALYSIS_ONLY_BASES, f"{b} missing from ANALYSIS_ONLY_BASES"
 
 
@@ -52,6 +57,31 @@ def test_env_default_is_unenforced():
 
     if os.getenv("ANALYSIS_ONLY_ENFORCED") is None:
         assert config.ANALYSIS_ONLY_ENFORCED is False
+
+
+def test_tradfi_still_rejected_when_analysis_only_unenforced(monkeypatch):
+    """The June-11 env flag does not admit oil/stock perps into the universe."""
+    import config
+    from core.pair_discovery import _asset_rejection_reason, _market_rejection_reason
+
+    monkeypatch.setattr(config, "ANALYSIS_ONLY_ENFORCED", False)
+    assert config.is_analysis_only("CL/USDT:USDT") is False
+    assert config.is_analysis_only("NATGAS/USDT:USDT") is False
+    assert _asset_rejection_reason("CL", {}) == "disabled_asset:CL"
+    assert _asset_rejection_reason("NATGAS", {}) == "disabled_asset:NATGAS"
+    assert _market_rejection_reason(
+        {
+            "base": "HOOD",
+            "quote": "USDT",
+            "settle": "USDT",
+            "active": True,
+            "type": "swap",
+            "swap": True,
+            "symbol": "HOOD/USDT:USDT",
+            "info": {"symbolType": "stock"},
+        },
+        "futures",
+    ) == "tradfi_asset:HOOD"
 
 
 def test_is_analysis_only_matches_perp_and_spot_forms(monkeypatch):

@@ -25,6 +25,7 @@ import bot_helper  # noqa: E402
 from core.entry_policy import (  # noqa: E402
     STANDARD_PAPER_PROFILE,
     normalize_paper_profile,
+    resolve_dotenv_entry_policy,
 )
 from utils.process_lock import acquire_process_lock as _acquire_process_lock  # noqa: E402
 
@@ -141,7 +142,6 @@ def _safe_worker_env(
     # silently override the owner's intent (dotenv never overrides inherited).
     _PIN_KEYS = (
         "PAPER_TRADING_PROFILE",
-        "ENTRY_POLICY",
         "APPROVED_PAPER_STRATEGIES",
         "MCP_DIRECTIONAL_ECONOMIC_GATE_MODE",
         "MCP_ENTRY_MIN_SCORE",
@@ -166,6 +166,13 @@ def _safe_worker_env(
     if mode != "PAPER" and profile != STANDARD_PAPER_PROFILE:
         profile = STANDARD_PAPER_PROFILE
     child_env["PAPER_TRADING_PROFILE"] = profile
+    # Always pin: omission must not inherit a stale APPROVED_PAPER from the
+    # parent. .env wins; missing/blank fail-closes to SHADOW_ONLY.
+    child_env["ENTRY_POLICY"] = resolve_dotenv_entry_policy(file_env)
+    # Always pin: omission must not inherit BITGET_UTA=false (Classic-only)
+    # after the account has moved to Unified Trading Account (40085).
+    raw_uta = (file_env.get("BITGET_UTA") or "").strip()
+    child_env["BITGET_UTA"] = raw_uta if raw_uta else "auto"
     return child_env
 
 

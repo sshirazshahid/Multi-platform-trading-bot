@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,8 @@ def test_load_status_from_fixtures(tmp_path: Path) -> None:
     assert status["env"]["OPERATING_MODE"] == "PAPER"
     assert status["regime_short_bias"]["live_short_authorized"] is False
     assert status["regime_short_bias"]["log_only"] is True
+    assert status["whale_events"]["live_trade_authorized"] is False
+    assert status["whale_events"]["log_only"] is True
     assert status["soft_stale_entry_block"] is False
 
 
@@ -84,6 +87,8 @@ def test_load_status_paper_research_telemetry(tmp_path: Path) -> None:
     assert pr["econ_gate_mode"] == "paper_fallback"
     assert pr["scalp_tier_enabled"] is False
     assert status["soft_stale_entry_block"] is True
+    assert pr["exit_geometry"]["live_trade_authorized"] is False
+    assert pr["mature_cohort"]["live_trade_authorized"] is False
 
 
 def test_load_status_regime_and_liq_telemetry(tmp_path: Path) -> None:
@@ -362,6 +367,16 @@ def test_checklist_gate_is_read_only(tmp_path: Path) -> None:
     assert doc.read_text(encoding="utf-8") == before
 
 
+def test_inspect_checklist_rejects_unclosed_html_comment_signature(tmp_path: Path) -> None:
+    doc = tmp_path / "docs" / "CONTROLLED_LIVE_CHECKLIST.md"
+    doc.parent.mkdir(parents=True)
+    today = date.today().isoformat()
+    doc.write_text(f"<!-- Signed-By: Owner {today}\n", encoding="utf-8")
+    signed, _message, unchecked = state.inspect_checklist(doc)
+    assert signed is False
+    assert unchecked == 0
+
+
 def test_warehouse_is_opened_read_only(tmp_path: Path) -> None:
     """A write lock on warehouse.sqlite can stall the live bot."""
     import sqlite3
@@ -560,6 +575,10 @@ def test_reason_family_universe_filter_detail() -> None:
     )
     assert state.reason_family("band_regime_filter:adx_4h>30") == "band_regime_filter"
     assert state.decode_reason("analysis_only_accband_scope")["plain"] is not None
+    tradfi = state.decode_reason("tradfi_asset:BZ")
+    assert tradfi["family"] == "tradfi_asset"
+    assert tradfi["plain"] is not None
+    assert "by design" in tradfi["plain"].lower()
 
 
 def test_load_candidates_aggregates_legacy_score_floor_strings(tmp_path: Path) -> None:

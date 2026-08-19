@@ -213,6 +213,25 @@ jobs:
       - name: MCP import and tool-contract smoke
         run: python -m pytest tests/test_mcp_server_smoke.py -q
 
+  qtb-audit:
+    name: QTB audit (stdlib research stack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run QTB audit suite (43 tests)
+        run: python qtb/tests/test_suite.py -v
+
+      - name: QTB demo smoke (noise grid promotes 0)
+        run: |
+          python qtb/scripts/demo.py | tee /tmp/qtb_demo.out
+          grep -q "PROMOTED: 0" /tmp/qtb_demo.out
+
   security:
     name: Security
     runs-on: ubuntu-latest

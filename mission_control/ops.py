@@ -49,6 +49,7 @@ KNOWN_TASK_NAMES = frozenset(
         "TradingBot_DualModelLoop",
         "TradingBot-RegimeShortBias",
         "TradingBot-LiquidationHarvester",
+        "TradingBot-WhaleEventHarvest",
         "TradingBot-ResearchLoopTick",
         "TradingBot Weekly Retrain",
         "TradingBot-WeeklyResearch",

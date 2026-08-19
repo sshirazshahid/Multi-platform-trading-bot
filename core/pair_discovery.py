@@ -265,13 +265,20 @@ def _is_leveraged_token(base: str, market: Mapping) -> bool:
 
 
 _TRADFI_UNDERLYING_TYPES = {"COMMODITY", "EQUITY", "HK_EQUITY", "STOCK", "TRADFI"}
+_TRADFI_SYMBOL_TYPE_MARKERS = ("tradifi", "commodity", "stock", "equity")
 
 
 def _is_tradfi_market(market: Mapping) -> bool:
     """Detect venue-flagged TradFi (commodity/equity RWA) contracts from market
     metadata — e.g. binance BZ/USDT:USDT carries contractType=TRADIFI_PERPETUAL,
     underlyingType=COMMODITY. Metadata-driven so newly listed RWA tickers stay
-    out of this crypto-only universe without static-list maintenance."""
+    out of this crypto-only universe without static-list maintenance.
+
+    Bybit TradFi USDT-M perps often set info.symbolType to ``commodity`` /
+    ``stock`` instead of Binance's TRADIFI_PERPETUAL spelling. Those must
+    reject as tradfi_asset even when the ticker is absent from the static
+    disabled lists (HOOD, GC, …).
+    """
     if not isinstance(market, Mapping):
         return False
     info = market.get("info")
@@ -287,7 +294,16 @@ def _is_tradfi_market(market: Mapping) -> bool:
     subtypes = info.get("underlyingSubType")
     if not isinstance(subtypes, (list, tuple)):
         subtypes = [subtypes]
-    return any("tradfi" in str(subtype or "").lower() for subtype in subtypes)
+    if any("tradfi" in str(subtype or "").lower() for subtype in subtypes):
+        return True
+    for src in (info, market):
+        if not isinstance(src, Mapping):
+            continue
+        for field in ("symbolType",):
+            token = str(src.get(field) or "").lower()
+            if token and any(marker in token for marker in _TRADFI_SYMBOL_TYPE_MARKERS):
+                return True
+    return False
 
 
 def _asset_rejection_reason(base: str, market: Mapping) -> Optional[str]:

@@ -16,6 +16,16 @@ def test_paper_max_flow_band_knobs_resolve(monkeypatch: pytest.MonkeyPatch) -> N
 
     import config
 
+    # Reload env-driven submodules FIRST (the test_scalp_kill_switch idiom):
+    # reloading only the package re-imports stale submodule state, so a prior
+    # test's SCALP_TIER_ENABLED=true leaked in during full-suite runs.
+    import config.gates as gates_mod
+    import config.risk as risk_mod
+    import config.signal as signal_mod
+
+    importlib.reload(risk_mod)
+    importlib.reload(signal_mod)
+    importlib.reload(gates_mod)
     importlib.reload(config)
 
     assert config.OPERATING_MODE == "PAPER"

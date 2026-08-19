@@ -41,3 +41,12 @@ def test_research_loop_tick_writes_latest(tmp_path: Path) -> None:
     disk = json.loads(out.read_text(encoding="utf-8"))
     assert disk["s0"]["operating_mode_env"] == "PAPER"
     assert payload["honesty"]
+    assert "s4_stack_audit" in payload
+    assert payload["s4_stack_audit"]["live_trade_authorized"] is False
+    # tmp_path lacks full repo tree → audit should fail closed
+    assert payload["s4_stack_audit"]["ok"] is False
+    assert any("paper_stack_audit FAILED" in w for w in payload["warnings"])
+    assert "s5_exit_geometry" in payload
+    assert payload["s5_exit_geometry"]["live_trade_authorized"] is False
+    assert "s6_mature_cohort" in payload
+    assert payload["s6_mature_cohort"]["live_trade_authorized"] is False
