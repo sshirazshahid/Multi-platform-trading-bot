@@ -464,7 +464,19 @@ class _MakerFirstMixin:
         if not self._pending_maker:
             return
         cfg = _maker_first_cfg()
-        timeout = float(cfg.get("timeout_sec", 45))
+        # Align PAPER with LIVE (2026-08-19). When MAKER_ONLY governs the live
+        # executor (wait max_wait_sec, then SKIP with no market fallback —
+        # core/smart_executor.py), paper must do the SAME, or paper P&L is
+        # drawn from a ~2x-larger entry population (taker fallbacks live would
+        # never take). Reading the live knob here means the two paths cannot
+        # drift: flip MAKER_ONLY_ENABLED and both change together.
+        try:
+            from config import MAKER_ONLY as _mo
+            maker_only = bool(_mo.get("enabled", False))
+            mo_wait = float(_mo.get("max_wait_sec", 120))
+        except Exception:
+            maker_only, mo_wait = False, 120.0
+        timeout = mo_wait if maker_only else float(cfg.get("timeout_sec", 45))
         now = time.time()
         keys = [k for k, v in self._pending_maker.items()
                 if v.get("exchange") == exchange.name]
@@ -514,6 +526,23 @@ class _MakerFirstMixin:
                     f"[MakerFirst] {symbol} {side.upper()}: chase abandoned — "
                     f"price ran {ran * 100:.2f}% past signal {signal_px:.6g} "
                     f"(guard {_MAKER_CHASE_GUARD_PCT * 100:.1f}%)")
+                continue
+            if maker_only:
+                # Mirror live MAKER_ONLY: the resting maker never filled, so
+                # LIVE would SKIP with no market fallback. Paper does the same
+                # — booking a taker fill here is exactly the population
+                # divergence this alignment removes.
+                skipped = self._pending_maker.pop(key, None) or intent
+                self._maker_counters["maker_only_skip"] = (
+                    self._maker_counters.get("maker_only_skip", 0) + 1)
+                self._record_maker_nonfill(
+                    skipped, outcome="cancelled", reason="maker_only_skip")
+                self._persist_pending_maker()
+                self.last_open_reject = "maker_only_skip"
+                logger.info(
+                    f"[MakerFirst] {symbol} {side.upper()}: maker-only timeout "
+                    f"after {timeout:.0f}s — skipped, no taker fallback "
+                    f"(mirrors live MAKER_ONLY)")
                 continue
             self._finalize_maker_intent(
                 exchange, key, intent, "taker_fallback")

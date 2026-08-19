@@ -155,7 +155,10 @@ def test_chase_abandon_records_nonfill(mf_on, tmp_path, monkeypatch):
     ex = FakeExchange(ticker=_ticker())
     _open(om, ex)
     key = f"{ex.name}:{SYM}"
-    om._pending_maker[key]["created_ts"] = time.time() - 46
+    # Past the live MAKER_ONLY 120s window (default-on) so the intent times
+    # out; the runaway guard is checked BEFORE the maker-only skip, so a moved
+    # market still abandons as maker_chase_abandoned under either policy.
+    om._pending_maker[key]["created_ts"] = time.time() - 125
     ex.ticker = {"last": 100.45, "bid": 100.4, "ask": 100.5}
     om._resolve_pending_maker_entries(ex)
     assert om.last_open_reject == "maker_chase_abandoned"

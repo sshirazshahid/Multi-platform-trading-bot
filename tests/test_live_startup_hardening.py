@@ -247,6 +247,9 @@ def test_bitget_initialization_does_not_write_position_mode(monkeypatch):
     class RawBitget:
         def __init__(self):
             self.options = {}
+            # Real ccxt clients always expose `has`; _init_exchange writes
+            # has["fetchCurrencies"] = False (skip the coins endpoint).
+            self.has = {}
 
         def load_time_difference(self):
             return None
@@ -254,7 +257,10 @@ def test_bitget_initialization_does_not_write_position_mode(monkeypatch):
         def load_markets(self, reload=False):
             return {}
 
-        def fetch_balance(self):
+        def fetch_balance(self, *args, **kwargs):
+            # Accept the optional {"uta": True} arg so the test is robust to
+            # BITGET_UTA=true (real .env), which builds the client UTA-first
+            # and calls fetch_balance({"uta": True}) — not just classic no-arg.
             return {}
 
         def set_position_mode(self, *args, **kwargs):

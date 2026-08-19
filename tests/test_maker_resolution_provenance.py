@@ -72,6 +72,12 @@ def test_taker_fallback_terminal_provenance_receives_the_intent(
 ):
     import time as _time
 
+    import config
+    # Legacy taker-fallback path: only reachable when live MAKER_ONLY is off
+    # (2026-08-19 paper<->live alignment makes maker-only SKIP on timeout).
+    monkeypatch.setattr(
+        config, "MAKER_ONLY", {"enabled": False, "max_wait_sec": 120},
+        raising=False)
     om = _om(tmp_path)
     seen = _spy_terminal_recorder(om, monkeypatch)
     ex = FakeExchange(ticker=_ticker())

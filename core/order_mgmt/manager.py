@@ -124,7 +124,10 @@ class OrderManager(
         self._pending_maker_lock = threading.RLock()
         self._maker_resolving: set[str] = set()
         self._maker_counters: dict = {
-            "maker": 0, "taker_fallback": 0, "abandoned": 0}
+            "maker": 0, "taker_fallback": 0, "abandoned": 0,
+            # 2026-08-19: paper mirrors live MAKER_ONLY (skip on timeout,
+            # no taker fallback). Counts those live-faithful skips.
+            "maker_only_skip": 0}
         # Per-maker-fill measurement rows (signal_px vs fill_px delta) for
         # the soak readout; persisted alongside the counters, capped at 200.
         self._maker_fills: list = []

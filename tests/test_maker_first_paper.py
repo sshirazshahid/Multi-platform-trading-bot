@@ -80,6 +80,25 @@ def mf_off(monkeypatch):
         raising=False)
 
 
+@pytest.fixture
+def maker_only_on(monkeypatch):
+    """Live governs entries via MAKER_ONLY (skip on timeout, 120s window).
+    Paper must MIRROR that: skip on timeout, no taker fallback (2026-08-19)."""
+    import config
+    monkeypatch.setattr(
+        config, "MAKER_ONLY", {"enabled": True, "max_wait_sec": 120},
+        raising=False)
+
+
+@pytest.fixture
+def maker_only_off(monkeypatch):
+    """Legacy path: no live maker-only, so paper keeps the 45s taker fallback."""
+    import config
+    monkeypatch.setattr(
+        config, "MAKER_ONLY", {"enabled": False, "max_wait_sec": 120},
+        raising=False)
+
+
 def _om(tmp_path):
     om = OrderManager(tracker=MagicMock(), risk=MagicMock(),
                       notifier=MagicMock())
@@ -243,7 +262,8 @@ def test_sell_side_mirror(mf_on, tmp_path):
 
 # ── timeout / runaway ────────────────────────────────────────────────────────
 
-def test_timeout_falls_back_to_taker_at_current_price(mf_on, tmp_path):
+def test_timeout_falls_back_to_taker_at_current_price(mf_on, maker_only_off, tmp_path):
+    # Legacy path (no live maker-only): 45s timeout -> taker fallback.
     om = _om(tmp_path)
     ex = FakeExchange(ticker=_ticker())
     _open(om, ex)
@@ -265,7 +285,9 @@ def test_timeout_falls_back_to_taker_at_current_price(mf_on, tmp_path):
     assert om._maker_counters["taker_fallback"] == 1
 
 
-def test_runaway_market_abandons_chase(mf_on, tmp_path):
+def test_runaway_market_abandons_chase(mf_on, maker_only_off, tmp_path):
+    # Runaway guard protects the TAKER-FALLBACK path (legacy). Under
+    # maker-only, timeout skips anyway, so this is a maker_only_off scenario.
     om = _om(tmp_path)
     ex = FakeExchange(ticker=_ticker())
     _open(om, ex)
@@ -278,6 +300,53 @@ def test_runaway_market_abandons_chase(mf_on, tmp_path):
     assert om._pending_maker == {}
     assert om._maker_counters["abandoned"] == 1
     assert om.last_open_reject == "maker_chase_abandoned"
+
+
+# ── align paper with live: MAKER_ONLY -> skip on timeout, no taker fallback ──
+# 2026-08-19. Live governs entries via MAKER_ONLY (core/smart_executor.py:
+# 120s wait, then SKIP with no market fallback). Paper's 45s -> taker fallback
+# meant ~50% of paper entries (measured 171/344) were trades a live maker-only
+# run would NEVER have taken — paper P&L drawn from a different population than
+# live. Paper now MIRRORS live when MAKER_ONLY is enabled.
+
+def test_maker_only_skips_on_timeout_no_taker_fallback(mf_on, maker_only_on, tmp_path):
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker=_ticker())
+    _open(om, ex)
+    key = f"{ex.name}:{SYM}"
+    om._pending_maker[key]["created_ts"] = time.time() - 121  # past the 120s window
+    om._resolve_pending_maker_entries(ex)  # never traded through, not runaway
+    assert not om.tracker.add.called, (
+        "maker-only timeout must SKIP like live, not open a taker fallback")
+    assert om._pending_maker == {}
+    assert om._maker_counters["taker_fallback"] == 0
+    assert om._maker_counters.get("maker_only_skip") == 1
+    assert om.last_open_reject == "maker_only_skip"
+
+
+def test_maker_only_uses_the_120s_live_window_not_45s(mf_on, maker_only_on, tmp_path):
+    """At 60s a maker-only intent is STILL RESTING (live waits 120s), where
+    the legacy 45s path would already have resolved."""
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker=_ticker())
+    _open(om, ex)
+    key = f"{ex.name}:{SYM}"
+    om._pending_maker[key]["created_ts"] = time.time() - 60  # past 45, under 120
+    om._resolve_pending_maker_entries(ex)
+    assert key in om._pending_maker, "must still rest inside the 120s live window"
+    assert not om.tracker.add.called
+
+
+def test_maker_only_off_preserves_legacy_taker_fallback(mf_on, maker_only_off, tmp_path):
+    """Backward-compat: with no live maker-only, 45s timeout still taker-fills."""
+    om = _om(tmp_path)
+    ex = FakeExchange(ticker=_ticker())
+    _open(om, ex)
+    key = f"{ex.name}:{SYM}"
+    om._pending_maker[key]["created_ts"] = time.time() - 46
+    om._resolve_pending_maker_entries(ex)
+    assert _added_pos(om).entry_price >= 100.1  # taker fill happened
+    assert om._maker_counters["taker_fallback"] == 1
 
 
 # ── restart cleanliness ──────────────────────────────────────────────────────
