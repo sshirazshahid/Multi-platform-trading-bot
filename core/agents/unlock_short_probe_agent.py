@@ -404,9 +404,26 @@ class UnlockShortProbeAgent:
             return 0, 1
         venue, symbol = str(resolved[0]), str(resolved[1])
         md = self._market_data(venue, symbol) or {}
+        # 2026-08-19 BRICK REPAIR. This used to require `bid and ask`. binance
+        # USDT-M fetch_ticker returns bid=None/ask=None for EVERY symbol
+        # (verified live, BTC included), and binance is FIRST in
+        # _unlock_venue_order — so this lane could never enter a single event
+        # at any event rate. Its "0 ENTER in 5.5 weeks" was a NON-measurement,
+        # not a negative result: of the 3 in-window opportunities it ever had,
+        # SIGN W2 and GRVT W2 both died here. The sibling listing probe hit the
+        # identical brick and was repaired 2026-07-28; the fix was never
+        # ported. Reuse that classifier rather than re-deriving it: a traded
+        # price + quote volume is sufficient evidence of shortability, while
+        # no-book AND no-trade still fails CLOSED.
+        from core.agents.listing_short_probe_agent import (
+            classify_shortability,
+            day1_spread_bps,
+        )
+
         bid = _pos_float(md.get("bid"))
         ask = _pos_float(md.get("ask"))
-        if not (bool(md.get("active", True)) and bid and ask):
+        shortable, _basis = classify_shortability(md)
+        if not shortable:
             self._log_skip(sig, "SKIP_UNSHORTABLE", now, venue=venue, symbol=symbol)
             self._mark(key)
             return 0, 1
@@ -423,7 +440,10 @@ class UnlockShortProbeAgent:
         entry_ts, entry_px = entry
         funding = float(funding)
         score = unlock_short_score(sig["ratio"], funding)
-        spread_bps = (ask - bid) / ((ask + bid) / 2.0) * 1e4 if ask >= bid else 0.0
+        # NULL, never 0.0, when the venue publishes no book (binance USDT-M):
+        # a fabricated zero spread would pass any "spread must be tight" gate
+        # trivially — a fail-OPEN worse than the brick this repair removed.
+        spread_bps = day1_spread_bps(md)
         qv = _pos_float(md.get("quoteVolume")) or 0.0
         # Capital-scaling convention (audit §5): 3% of ACCOUNT equity,
         # UNLEVERED — no leverage multiplier exists anywhere in this probe.
@@ -643,7 +663,11 @@ class UnlockShortProbeAgent:
             "signal_ts": int(signal_ts), "entry_ts": int(entry_ts or 0),
             "entry_px": float(entry_px or 0.0), "stake_frac": float(stake_frac),
             "notional_usd": float(notional_usd),
-            "entry_spread_bps": float(entry_spread_bps),
+            # NULL-tolerant (2026-08-19): the spread is genuinely UNKNOWN when
+            # the venue publishes no book. The column is nullable REAL; storing
+            # NULL keeps "unknown" distinguishable from a real 0.0 spread.
+            "entry_spread_bps": (
+                None if entry_spread_bps is None else float(entry_spread_bps)),
             "funding_entry": float(funding_entry),
             "quote_volume_usd": float(quote_volume_usd), "score": float(score),
             "realized_funding_rate_sum": 0.0, "sl_cf_funding_rate_sum": 0.0,

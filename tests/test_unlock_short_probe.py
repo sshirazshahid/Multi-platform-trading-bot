@@ -234,6 +234,55 @@ def test_w1_enter_writes_raw_and_sl8_decision_rows(wh, tmp_path):
     assert sl8["model_version"] == "unlock_short_w1_sl8_v1"
 
 
+def test_quoteless_book_still_shortable_binance_brick(wh, tmp_path):
+    """THE BRICK (2026-08-19): binance USDT-M fetch_ticker returns bid=None and
+    ask=None for EVERY symbol — verified live, including BTC. This probe
+    required `bid and ask`, so it could NEVER enter on binance, and binance is
+    first in _unlock_venue_order. Its "0 ENTER in 5.5 weeks" was a
+    NON-MEASUREMENT, not a negative result: 2 of the 3 in-window opportunities
+    (SIGN W2, GRVT W2) died here. The sibling listing probe hit the identical
+    brick and was fixed 2026-07-28 (classify_shortability: fall back to
+    last+quoteVolume); that fix was never ported here.
+    """
+    p = _default_providers(W1_TARGET + 300)
+    # Exactly what binance really returns: no book, but a real traded price.
+    for k in list(p._market_data):
+        p._market_data[k] = {"bid": None, "ask": None, "last": 0.3164,
+                             "quoteVolume": 40_578_784.0,
+                             "funding_rate": 0.0004, "active": True}
+    probe = _make_probe(wh, p, tmp_path / "s.json")
+    assert probe.tick()["entered"] == 1, (
+        "a liquid perp with a traded price must be shortable without a book — "
+        "requiring bid/ask bricks the lane on binance")
+    rows = wh.query("SELECT * FROM shadow_decisions")
+    assert len(rows) == 2 and all(r["entry_px"] > 0 for r in rows)
+
+
+def test_genuinely_unquoted_market_is_still_skipped(wh, tmp_path):
+    """The repair must not become fail-OPEN: no book AND no trade = skip."""
+    p = _default_providers(W1_TARGET + 300)
+    for k in list(p._market_data):
+        p._market_data[k] = {"bid": None, "ask": None, "last": None,
+                             "quoteVolume": None,
+                             "funding_rate": 0.0004, "active": True}
+    probe = _make_probe(wh, p, tmp_path / "s.json")
+    assert probe.tick()["entered"] == 0
+    assert wh.query(
+        "SELECT * FROM shadow_unlock_probe WHERE decision='SKIP_UNSHORTABLE'"
+    ), "a market with neither quote nor trade must record SKIP_UNSHORTABLE"
+
+
+def test_inactive_market_is_skipped_even_with_a_price(wh, tmp_path):
+    """active=False must still veto, book or not."""
+    p = _default_providers(W1_TARGET + 300)
+    for k in list(p._market_data):
+        p._market_data[k] = {"bid": None, "ask": None, "last": 0.3164,
+                             "quoteVolume": 40_578_784.0,
+                             "funding_rate": 0.0004, "active": False}
+    probe = _make_probe(wh, p, tmp_path / "s.json")
+    assert probe.tick()["entered"] == 0
+
+
 def test_w2_enters_separately_at_t_minus_14(wh, tmp_path):
     # W1 window first
     p = _default_providers(W1_TARGET + 300)
