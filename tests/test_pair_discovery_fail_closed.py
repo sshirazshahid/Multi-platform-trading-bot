@@ -85,8 +85,10 @@ class _Exchange:
 
     def fetch_ohlcv(self, symbol, timeframe="1h", limit=100, market_type="spot"):
         self.ohlcv_calls.append((symbol, timeframe, limit, market_type))
-        count = 19 if timeframe == "1h" else 11
-        return _trending_candles(count)
+        # Honor the requested limit (2026-08-19): the range-stability check
+        # now asks for (lookback+2)*24 hourly bars to build UTC day groups;
+        # a fixed 19-bar reply would starve it into missing_range_data.
+        return _trending_candles(limit)
 
 
 def _valid_book():
@@ -97,10 +99,15 @@ def _valid_book():
 
 
 def _trending_candles(count: int):
+    # Hourly-spaced timestamps (2026-08-19): the range-stability check now
+    # groups 1h candles by UTC day, so bare indices (all inside day 0) would
+    # collapse to one group. 288 hourly bars span 12 UTC days; the steady
+    # uptrend keeps ER ~1.0 exactly as before.
     candles = []
     for index in range(count):
         close = 100.0 + index
-        candles.append([index, close - 0.25, close + 1.0, close - 1.0, close, 1_000])
+        candles.append(
+            [index * 3_600_000, close - 0.25, close + 1.0, close - 1.0, close, 1_000])
     return candles
 
 

@@ -19,11 +19,22 @@ def _ex_with_daily(candles):
     return ex
 
 
+_DAY_MS = 86_400_000
+_N = 0
+
+
 def _candle(close, high=None, low=None):
-    # [ts, open, high, low, close, vol]
+    # [ts, open, high, low, close, vol] — one bar per UTC day. Since 2026-08-19
+    # the filter groups 1h candles by UTC day (venue "1d" buckets are shifted
+    # on bitget); a single bar in a day IS that day's close/high/low, so each
+    # scenario's daily series carries over unchanged — the timestamps just
+    # became real instead of all-zero (all-zero collapses to one day-group).
+    global _N
     high = high if high is not None else close * 1.01
     low = low if low is not None else close * 0.99
-    return [0, close, high, low, close, 1000]
+    row = [_N * _DAY_MS, close, high, low, close, 1000]
+    _N += 1
+    return row
 
 
 def test_clean_uptrend_high_efficiency_passes():

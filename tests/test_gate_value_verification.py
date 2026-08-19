@@ -195,5 +195,49 @@ def test_suppression_cap_is_honoured_in_the_starvation_check():
     )
 
 
+# ── 2026-08-19: the chop-alert incident (367 hits = 3 symbols) ──────────────
+
+def test_chop_is_a_deliberate_block():
+    """The universe chop veto is a designed measured filter. With its ER now
+    computed on venue-independent UTC days, refusing chop IS the system
+    working; idleness under it must not page hourly — only past the cap."""
+    assert "chop" in hw.DELIBERATE_ENTRY_BLOCKS
+
+
+def test_capped_starvation_has_its_own_slower_cadence():
+    """Idle >24h is worth a nudge 4x/day, not hourly. The capped branch must
+    alert under its own key with a >=6h cooldown, or a long deliberate idle
+    re-trains the operator to ignore the channel (the 2026-08-15 numbness)."""
+    import inspect
+
+    assert hw.COOLDOWN_SEC.get("model_gate_starving_capped", 0) >= 6 * 3600
+    src = inspect.getsource(hw.HealthWatchdog._check_model_gate_starving)
+    assert "model_gate_starving_capped" in src
+
+
+def test_dominant_block_reports_unique_symbols(tmp_path, monkeypatch):
+    """'315 hits' was 3 symbols re-polled every 5-min cycle. The scan must
+    count unique symbols so the alert cannot dramatise polling inflation."""
+    import datetime as _dt
+
+    monkeypatch.setattr(hw, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(hw, "COOLDOWN_STATE_PATH", tmp_path / "cd.json")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    lines = []
+    for sym in ("ATOM/USDT", "ATOM/USDT", "ATOM/USDT", "BTC/USDT", "BTC/USDT"):
+        lines.append(
+            f"{stamp} | INFO | core.engine.entry_exec:_execute_open:943 | "
+            f"[Claude] BLOCKED by universe filter: {sym} — chop:ER=0.09<0.12")
+    (tmp_path / f"bot_{now.strftime('%Y-%m-%d')}.log").write_text(
+        "\n".join(lines), encoding="utf-8")
+    wd = _wd(_Notifier())
+    reason, hits = wd._dominant_entry_block_reason()
+    assert (reason, hits) == ("chop", 5)
+    assert wd._dominant_block_symbols == 2, (
+        "the scan must expose how many DISTINCT symbols produced the hits"
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

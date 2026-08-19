@@ -939,34 +939,56 @@ class UniverseFilter:
     def _check_range_stability(
         self, exchange, symbol: str, market_type: str
     ) -> tuple[Optional[float], Optional[float]]:
-        """Return range-of-change and efficiency, or explicit None values."""
+        """Return range-of-change and efficiency, or explicit None values.
+
+        2026-08-19: built from 1h candles grouped into UTC days — NEVER from
+        venue "1d" buckets. Bitget buckets daily candles on UTC+8 boundaries
+        (its "day" opens 16:00Z), so the venue-1d ER measured a DIFFERENT
+        quantity per venue: at the same instant ATOM read 0.079 on bitget vs
+        0.167 on binance/bybit, and the bot chop-blocked a live +6% breakout
+        for hours on a calendar artifact (367 blocks / 3 symbols / 6h).
+        1h timestamps are absolute, so grouping them by UTC day yields the
+        SAME spec quantity on every venue. Formula, lookback, and threshold
+        are unchanged; the current partial UTC day contributes its latest
+        hourly close (same forming-bar semantics binance's 1d had).
+        """
         required = self.RANGE_LOOKBACK_DAYS + 1
         try:
             candles = exchange.fetch_ohlcv(
                 symbol,
-                timeframe="1d",
-                limit=required,
+                timeframe="1h",
+                # one spare day so the oldest surviving UTC group is complete
+                limit=(required + 1) * 24,
                 market_type=market_type,
             )
         except Exception:
             return None, None
-        if not isinstance(candles, (list, tuple)) or len(candles) < required:
+        if not isinstance(candles, (list, tuple)) or not candles:
             return None, None
 
-        highs = []
-        lows = []
-        closes = []
-        for candle in candles[-required:]:
+        day_ms = 86_400_000
+        groups: dict[int, list] = {}
+        for candle in candles:
             if not isinstance(candle, (list, tuple)) or len(candle) < 5:
                 return None, None
             high = self._positive_float(candle[2])
             low = self._positive_float(candle[3])
             close = self._positive_float(candle[4])
+            try:
+                ts = int(candle[0])
+            except (TypeError, ValueError):
+                return None, None
             if high is None or low is None or close is None or high < low:
                 return None, None
-            highs.append(high)
-            lows.append(low)
-            closes.append(close)
+            groups.setdefault(ts // day_ms, []).append((ts, high, low, close))
+
+        if len(groups) < required:
+            return None, None
+        days = sorted(groups)[-required:]
+        highs = [max(h for _, h, _, _ in groups[d]) for d in days]
+        lows = [min(lo for _, _, lo, _ in groups[d]) for d in days]
+        # daily close = the day's LAST hourly close (forming day: latest bar)
+        closes = [max(groups[d])[3] for d in days]
 
         highest_high = max(highs)
         lowest_low = min(lows)

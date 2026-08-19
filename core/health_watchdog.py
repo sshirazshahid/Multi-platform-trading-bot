@@ -139,6 +139,11 @@ LOG_DIR                  = Path("logs")
 DELIBERATE_ENTRY_BLOCKS  = (
     "band_regime_filter",           # ADX>30 / btc_vol<0.7 toxic-regime veto
     "accband_research_daily_open_budget",  # the 12-opens/UTC-day research cap
+    # 2026-08-19: the universe chop veto (Kaufman ER < floor). Added AFTER its
+    # ER was made venue-independent (UTC-day grouping — bitget's shifted "1d"
+    # buckets had produced hours-stale false chop). A correctly computed chop
+    # refusal is the system working; the 24h cap below still bounds it.
+    "chop",
 )
 # ...but only for so long. A "deliberate" rail blocking CONTINUOUSLY for days is
 # a symptom, not a rail. The line above was added 2026-08-15 so a WORKING veto
@@ -179,6 +184,10 @@ COOLDOWN_SEC = {
     # either and silently take the 30-min generic default.
     "gate_value_btc_vol":       60 * 60,
     "gate_value_btc_vol_stale": 60 * 60,
+    # Idle past DELIBERATE_BLOCK_MAX_HOURS nudges 4x/day, not hourly — an
+    # hourly WARNING for a multi-day deliberate idle re-trains the operator
+    # to ignore the channel (the 2026-08-15 numbness, other direction).
+    "model_gate_starving_capped": 6 * 60 * 60,
     "model_pointer_invalid":  60 * 60,
     "no_scan_progress":      30 * 60,
     "stuck_open_positions":  60 * 60,
@@ -743,6 +752,7 @@ class HealthWatchdog:
                     return None, 0
                 log = logs[-1]
             counts: dict = {}
+            symbols: dict = {}
             cutoff = time.time() - MODEL_STARVE_HOURS * 3600
             with log.open("r", encoding="utf-8", errors="ignore") as fh:
                 for line in fh:
@@ -763,10 +773,19 @@ class HealthWatchdog:
                         continue
                     m = re.search(r"BLOCKED[^\n]*?[—-]\s*([a-z_]+)", line)
                     if m:
-                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+                        reason = m.group(1)
+                        counts[reason] = counts.get(reason, 0) + 1
+                        ms = re.search(r"BLOCKED[^:]*:\s+([A-Z0-9/]+)", line)
+                        if ms:
+                            symbols.setdefault(reason, set()).add(ms.group(1))
             if not counts:
+                self._dominant_block_symbols = 0
                 return None, 0
             best = max(counts.items(), key=lambda kv: kv[1])
+            # Hits count per-cycle RE-CHECKS of the same symbols ("polling
+            # inflation": 2026-08-19's "315 hits" was 3 symbols). Expose the
+            # distinct-symbol count so alerts cannot dramatise it.
+            self._dominant_block_symbols = len(symbols.get(best[0], ()))
             return best[0], best[1]
         except Exception:
             return None, 0
@@ -979,18 +998,24 @@ class HealthWatchdog:
                     f"ever been recorded, so the idle duration cannot be bounded"
                 )
                 self._alert(
-                    "model_gate_starving", "WARNING",
+                    "model_gate_starving_capped", "WARNING",
                     f"No OPEN actions in the last {MODEL_STARVE_HOURS}h despite "
                     f"non-drawdown state — {detail}.",
                     {"opens_recent": opens_recent,
                      "window_hours": MODEL_STARVE_HOURS,
                      "dominant_block": reason, "block_hits": hits,
+                     "block_symbols": getattr(self, "_dominant_block_symbols", None),
                      "idle_hours": round(idle_h, 1) if idle_h is not None else None,
                      "suppression_cap_hours": DELIBERATE_BLOCK_MAX_HOURS},
                 )
                 return
-            detail = (f"dominant block: {reason} ({hits} hits)" if reason
-                      else "no identifiable entry block in the logs")
+            _syms = getattr(self, "_dominant_block_symbols", None)
+            detail = (
+                f"dominant block: {reason} ({hits} hits across {_syms} "
+                f"symbol(s); hits count per-cycle re-checks)"
+                if reason and _syms
+                else f"dominant block: {reason} ({hits} hits)" if reason
+                else "no identifiable entry block in the logs")
             self._alert(
                 "model_gate_starving", "INFO",
                 f"No OPEN actions in the last {MODEL_STARVE_HOURS}h despite "
