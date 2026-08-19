@@ -5,7 +5,7 @@ Fetches REAL per-venue funding-rate history and stores it under
 re-wired dispersion + listing-short screens read (see
 research/screen_funding_dispersion.py and research/screen_listing_short.py).
 
-Two legs:
+Three legs:
 
   * dispersion : the F1 15-coin universe (research.funding_carry_lab
     F1_EXPANDED_UNIVERSE_2026_07_05) x 3 venues (binance, bybit, bitget),
@@ -13,6 +13,13 @@ Two legs:
   * listing    : Binance ONLY, the genuine post-backfill listing bases the
     listing-short screen itself identifies (research.screen_listing_short
     .genuine_listing_bases), since 2025-06-01.
+  * probe      : the SHADOW-PROBE universe on bybit, resolved from the same
+    spec artifact the probes use (bundle_mr_probe_agent.resolve_universe).
+    Added 2026-08-20: the probe universe was widened on 2026-07-20 but this
+    backfill was not, so probes warned "no usable realized funding history"
+    for symbols NEITHER other leg covers -- the remedy the warning named
+    could not work, and 33% of pending probe rows had no funding component
+    in their after-cost net.
 
 CSV schema (one file per venue-symbol): ts (unix seconds, int),
 funding_rate (float, per-interval decimal), venue (str), symbol (str ccxt id).
@@ -48,6 +55,9 @@ VENUES = ("binance", "bybit", "bitget")
 # Dispersion history floor (as far back as the venue serves; perps rarely predate this).
 DISPERSION_SINCE = "2021-01-01"
 LISTING_SINCE = "2025-06-01"
+# Probe rows are short-horizon (12-bar / 4h), so a 90d floor covers every
+# open row with margin while keeping the fetch cheap across ~144 symbols.
+PROBE_SINCE = "2026-05-01"
 
 
 def _ms(date_str: str) -> int:
@@ -258,6 +268,62 @@ def backfill_listing(since_ms: int) -> list[dict]:
     return report
 
 
+def _probe_bases(venue: str = "bybit") -> tuple:
+    """Bases of the SHADOW-PROBE universe, from the probes' own resolver.
+
+    2026-08-20: the bundle-MR probe universe was widened on 2026-07-20 (frozen
+    5-major basket -> spec-derived, ~144 symbols) but this backfill was never
+    extended, so every probe tick warned "no usable realized funding history"
+    for symbols NEITHER leg covered — the remedy the warning itself named could
+    not work. Measured: 27 of 82 pending bybit probe rows (33%) had no funding
+    history, so their after-cost net (what the promotion gate reads) was
+    missing its funding component.
+
+    Delegates to `bundle_mr_probe_agent.resolve_universe` — the SAME artifact
+    the probes resolve — so a future universe edit propagates here
+    automatically instead of silently drifting apart again.
+    """
+    from core.agents.bundle_mr_probe_agent import resolve_universe
+
+    symbols, _skipped = resolve_universe(venue=venue)
+    return tuple(dict.fromkeys(s.split("/")[0].strip().upper() for s in symbols))
+
+
+def backfill_probe(since_ms: int, venue: str = "bybit") -> list[dict]:
+    """Realized funding history for the shadow-probe universe."""
+    bases = _probe_bases(venue)
+    print(f"[probe] {len(bases)} probe-universe bases; venue={venue}", flush=True)
+    report: list[dict] = []
+    try:
+        ex = make_exchange(venue)
+        ex.load_markets()
+    except Exception as e:  # noqa: BLE001
+        print(f"[probe] {venue}: load_markets FAILED {type(e).__name__}: {e}", flush=True)
+        return [{"leg": "probe", "venue": venue, "base": b, "status": "venue_down",
+                 "rows": 0, "added": 0} for b in bases]
+    limit = PAGE_LIMIT.get(venue, 200)
+    for base in bases:
+        sym = _perp_symbol(base)
+        if sym not in ex.markets:
+            report.append({"leg": "probe", "venue": venue, "base": base,
+                           "status": "not_listed", "rows": 0, "added": 0})
+            continue
+        try:
+            rows = fetch_funding_history_paginated(ex, sym, since_ms, limit=limit)
+        except RuntimeError as e:
+            print(f"[probe] {venue} {base}: FETCH ERROR {e}", flush=True)
+            report.append({"leg": "probe", "venue": venue, "base": base,
+                           "status": "fetch_error", "rows": 0, "added": 0, "err": str(e)})
+            continue
+        total, added = write_history_csv(venue, base, sym, rows) if rows else (0, 0)
+        print(f"[probe] {venue} {base}: fetched={len(rows)} total={total} added={added}",
+              flush=True)
+        report.append({"leg": "probe", "venue": venue, "base": base,
+                       "status": "ok" if rows else "empty", "rows": total, "added": added})
+        time.sleep(0.05)
+    return report
+
+
 def _summarize(report: list[dict]) -> None:
     from collections import Counter
 
@@ -284,7 +350,8 @@ def main() -> None:
         pass
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--leg", choices=["dispersion", "listing", "all"], default="all")
+    ap.add_argument("--leg", choices=["dispersion", "listing", "probe", "all"],
+                    default="all")
     ap.add_argument("--since", default=None, help="YYYY-MM-DD floor (default per-leg)")
     args = ap.parse_args()
 
@@ -295,6 +362,9 @@ def main() -> None:
     if args.leg in ("listing", "all"):
         since = _ms(args.since) if args.since else _ms(LISTING_SINCE)
         report += backfill_listing(since)
+    if args.leg in ("probe", "all"):
+        since = _ms(args.since) if args.since else _ms(PROBE_SINCE)
+        report += backfill_probe(since)
     _summarize(report)
 
 
