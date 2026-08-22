@@ -149,5 +149,78 @@ def test_unknown_feed_name_in_records_still_gates():
     assert entry_gating_feeds(records) == ["brand_new_feed"]
 
 
+# ------------------------------------------- the WIRING, not just the helper
+# Adversarial review caught this gap: reverting health_watchdog's latch branch
+# from `gating_bad` back to `bad` -- restoring the entire defect -- left every
+# test above green, because they only exercised entry_gating_feeds() in
+# isolation. A helper that is correct but unused fixes nothing. These pin the
+# watchdog actually calling it.
+def _wd(tmp_path, monkeypatch, records):
+    import core.feed_health as fh
+    import core.health_watchdog as hw
+    import core.soft_stale_latch as ssl
+
+    latch = tmp_path / "soft_stale_latch.json"
+    monkeypatch.setattr(ssl, "SOFT_STALE_LATCH_PATH", latch)
+    monkeypatch.setattr(hw, "SOFT_STALE_LATCH_PATH", latch, raising=False)
+    monkeypatch.setattr(fh, "read_forward_feed_status", lambda *a, **k: records)
+
+    engine = type("E", (), {})()
+    wd = hw.HealthWatchdog(engine, notifier=None, warehouse_path=tmp_path / "wh.sqlite")
+    return wd, latch
+
+
+def test_watchdog_does_not_latch_when_only_skew_is_down(tmp_path, monkeypatch):
+    """THE wiring test. Revert `gating_bad` -> `bad` and this must fail."""
+    wd, latch = _wd(
+        tmp_path, monkeypatch,
+        [_rec("liquidations"), _rec("skew", connected=False), _rec("l2"), _rec("tv")],
+    )
+    wd._check_forward_feeds()
+    assert not latch.exists(), (
+        "the watchdog latched entries for a research-only feed -- the helper is "
+        "correct but the wiring still uses the wide list"
+    )
+
+
+def test_watchdog_still_latches_when_a_gating_feed_is_down(tmp_path, monkeypatch):
+    """The other half: protection must survive the narrowing."""
+    wd, latch = _wd(
+        tmp_path, monkeypatch,
+        [_rec("liquidations"), _rec("skew"), _rec("l2", connected=False), _rec("tv")],
+    )
+    wd._check_forward_feeds()
+    assert latch.exists(), "l2 died and entries were NOT blocked"
+    import json as _json
+
+    doc = _json.loads(latch.read_text(encoding="utf-8"))
+    assert doc.get("active") is True
+    assert doc["detail"]["feeds"] == ["l2"], "latch must name the gating feed only"
+
+
+def test_feed_staleness_does_not_clobber_another_subsystems_latch(tmp_path, monkeypatch):
+    """Observed live 2026-08-22: an `exchange_outage:binance` latch (fails=9)
+    was overwritten by `forward_feeds_stale/[skew]` four minutes later. The
+    clear branch matches startswith("forward_feeds"), so the next skew recovery
+    would DELETE a block a real exchange outage was holding."""
+    import json as _json
+
+    wd, latch = _wd(
+        tmp_path, monkeypatch,
+        [_rec("liquidations"), _rec("skew"), _rec("l2", connected=False), _rec("tv")],
+    )
+    latch.write_text(
+        _json.dumps({"active": True, "reason": "exchange_outage:binance",
+                     "ts_unix": 1.0, "detail": {"fails": 9}}),
+        encoding="utf-8",
+    )
+    wd._check_forward_feeds()
+    doc = _json.loads(latch.read_text(encoding="utf-8"))
+    assert doc["reason"] == "exchange_outage:binance", (
+        "feed staleness overwrote an exchange-outage latch; a later feed "
+        "recovery would then clear a block the outage still needed"
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

@@ -1404,6 +1404,19 @@ class HealthWatchdog:
             },
             grace_sec=FEED_GRACE_SEC,
         )
+        # 2026-08-22: a SECOND alert keyed on the gating subset. `_edge_alert`
+        # is a membership test on last_alert, so it fires once per episode --
+        # meaning a `forward_feeds_stale` alert already latched by a
+        # non-gating feed (skew) would SHADOW a later l2/tv/liquidations death:
+        # entries would be correctly blocked while no alert ever named the feed
+        # responsible. Purely additive; the alert above is unchanged.
+        self._edge_alert(
+            "entry_gating_feeds_stale", bool(gating_bad), "WARN",
+            f"entry-gating feed unhealthy — NEW ENTRIES BLOCKED: "
+            f"{', '.join(sorted(gating_bad))}",
+            {"gating_feeds": sorted(gating_bad)},
+            grace_sec=FEED_GRACE_SEC,
+        )
         # Blueprint Phase 1: soft-stale latch blocks NEW entries only.
         try:
             from core.soft_stale_latch import (
@@ -1414,10 +1427,36 @@ class HealthWatchdog:
             )
 
             if gating_bad:
-                set_soft_stale_latch(
-                    reason="forward_feeds_stale",
-                    detail={"feeds": list(sorted(gating_bad))},
-                )
+                # 2026-08-22: do NOT clobber a latch another subsystem owns.
+                # Observed live: an `exchange_outage:binance` latch (fails=9)
+                # was overwritten by `forward_feeds_stale/[skew]` 4 minutes
+                # later. Because the clear branch below matches
+                # startswith("forward_feeds"), the next skew recovery would
+                # then DELETE a block that a live exchange outage was holding,
+                # and re-arming it costs several more consecutive failures.
+                # Feed staleness must not be able to overwrite -- or launder --
+                # a different subsystem's reason for refusing entries.
+                _owner = ""
+                try:
+                    if soft_stale_entries_blocked():
+                        _owner = str(
+                            json.loads(
+                                SOFT_STALE_LATCH_PATH.read_text(encoding="utf-8")
+                            ).get("reason")
+                            or ""
+                        )
+                except Exception:
+                    _owner = ""
+                if _owner and not _owner.startswith("forward_feeds"):
+                    logger.debug(
+                        f"[Watchdog] soft-stale already held by {_owner!r}; "
+                        f"not overwriting with forward_feeds_stale"
+                    )
+                else:
+                    set_soft_stale_latch(
+                        reason="forward_feeds_stale",
+                        detail={"feeds": list(sorted(gating_bad))},
+                    )
             elif soft_stale_entries_blocked():
                 try:
                     doc = json.loads(SOFT_STALE_LATCH_PATH.read_text(encoding="utf-8"))

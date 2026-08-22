@@ -34,21 +34,31 @@ FORWARD_FEEDS: tuple[ForwardFeedSpec, ...] = (
         script="scripts\\harvest_skew.py",
         status_path="data\\skew_status.json",
         max_age_sec=20 * 60,
-        # 2026-08-22: RESEARCH-ONLY -- monitored, but does not gate entries.
-        # Measured on the live warehouse: this feed alone accounted for 219 of
-        # 465 entry decisions in one day (42.3% across the week) via
-        # soft_stale_entry_block / forward_feeds_stale. Its status payload reads
-        # {"connected": false, "total_polls": 0} -- sampled twice 95s apart the
-        # `updated` field advanced 62.4s, so the harvester is alive, retrying
-        # every ~60s, and has NEVER once succeeded. Its `fresh: true` times the
-        # failure record, not any data.
-        # Nothing in the live path consumes it: every `skew` reference under
-        # core/ is CLOCK skew or statistical SKEWNESS (_skew for the deflated
-        # Sharpe). The options-skew feed exists for
-        # research/screen_skew_shock_drift.py.
-        # `open_hours: 0` seals it -- an options feed with market hours is
-        # EXPECTED to sit disconnected off-hours, so gating 24/7 crypto entries
-        # on it is wrong by construction. Alerting is unchanged.
+        # 2026-08-22: RESEARCH-ONLY -- monitored and alerted on, but it does not
+        # gate entries.
+        #
+        # THE REASON, stated narrowly because a first pass at this comment got
+        # three things wrong and they are corrected here:
+        #   * `total_polls` is a PER-PROCESS counter (harvest_skew.py:205 sets
+        #     `polls = 0` inside main()), so `total_polls: 0` means "this
+        #     process has not polled yet", NOT "never worked". The feed has
+        #     produced data for weeks -- data/skew_history.jsonl is ~341KB.
+        #   * `open_hours` is `len(buckets)` (harvest_skew.py:185), a count of
+        #     in-memory hourly buckets awaiting flush. It is NOT market hours,
+        #     and Deribit crypto options trade 24/7.
+        #   * the soft-stale share is 13.3% ACROSS 2026-08-15..22, not 42%.
+        #     Skew-healthy days run 1.4-2.5%; 45-60% is the Aug 21-22 outage
+        #     window alone.
+        #
+        # What actually justifies the opt-out is narrower and survives: NOTHING
+        # IN THE LIVE DECISION PATH CONSUMES THIS FEED. Every `skew` reference
+        # under core/ is CLOCK skew (max_future_skew_seconds, max_clock_skew_ms)
+        # or statistical SKEWNESS (_skew feeding the deflated Sharpe). The
+        # options-skew data exists for research/screen_skew_shock_drift.py.
+        # A feed the live path never reads must not be able to refuse a trade --
+        # during its Aug 21-22 outage it refused 45-60% of entry decisions.
+        # It stays in FORWARD_FEEDS so monitoring, alerting and the self-healing
+        # restart all keep working.
         gates_entries=False,
     ),
     ForwardFeedSpec(

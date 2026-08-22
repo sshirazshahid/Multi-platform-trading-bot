@@ -85,7 +85,20 @@ class BinanceClient(BaseExchange):
                 self._connected = False
                 return
             self._connected = False
-            logger.error(f"[Binance] load_markets failed: {e}")
+            # 2026-08-22: log the exception TYPE, not just str(e). ccxt renders
+            # several distinct failures as a bare "binance GET <url>" with no
+            # body -- RequestTimeout, ExchangeNotAvailable and NetworkError are
+            # indistinguishable from the message alone. That cost a whole
+            # diagnosis pass: measured in isolation this exact call succeeds
+            # 8/8 in 6-8s, while in-process it failed 89 times today, 123 on
+            # 08-21 and 0 on 08-19 -- and the in-bot failures return in ~1s,
+            # which is neither a success nor the 30s timeout. The exception
+            # type is the one field that separates those hypotheses, and it was
+            # being thrown away.
+            logger.error(
+                f"[Binance] load_markets failed: {type(e).__name__}: {e} "
+                f"| repr={repr(e)[:300]}"
+            )
             return
 
         # ── Fix "Timestamp outside recvWindow" errors ──────────────────
