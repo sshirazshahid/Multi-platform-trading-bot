@@ -15,6 +15,11 @@ class ForwardFeedSpec:
     script: str
     status_path: str
     max_age_sec: int
+    # May this feed's ill health BLOCK live entries? Defaults to True so a feed
+    # added later gates unless someone opts it out deliberately (fail-closed).
+    # Opting out is only defensible when nothing in the live decision path reads
+    # the feed -- verify that, and record why, at the call site.
+    gates_entries: bool = True
 
 
 FORWARD_FEEDS: tuple[ForwardFeedSpec, ...] = (
@@ -29,6 +34,22 @@ FORWARD_FEEDS: tuple[ForwardFeedSpec, ...] = (
         script="scripts\\harvest_skew.py",
         status_path="data\\skew_status.json",
         max_age_sec=20 * 60,
+        # 2026-08-22: RESEARCH-ONLY -- monitored, but does not gate entries.
+        # Measured on the live warehouse: this feed alone accounted for 219 of
+        # 465 entry decisions in one day (42.3% across the week) via
+        # soft_stale_entry_block / forward_feeds_stale. Its status payload reads
+        # {"connected": false, "total_polls": 0} -- sampled twice 95s apart the
+        # `updated` field advanced 62.4s, so the harvester is alive, retrying
+        # every ~60s, and has NEVER once succeeded. Its `fresh: true` times the
+        # failure record, not any data.
+        # Nothing in the live path consumes it: every `skew` reference under
+        # core/ is CLOCK skew or statistical SKEWNESS (_skew for the deflated
+        # Sharpe). The options-skew feed exists for
+        # research/screen_skew_shock_drift.py.
+        # `open_hours: 0` seals it -- an options feed with market hours is
+        # EXPECTED to sit disconnected off-hours, so gating 24/7 crypto entries
+        # on it is wrong by construction. Alerting is unchanged.
+        gates_entries=False,
     ),
     ForwardFeedSpec(
         name="l2",
@@ -166,6 +187,22 @@ def is_source_available(
         return float(source_ts) + float(publish_lag_sec) <= float(now)
     except (TypeError, ValueError):
         return False
+
+
+def entry_gating_feeds(records: list[dict[str, Any]]) -> list[str]:
+    """Unhealthy feeds that are ALLOWED to block new entries.
+
+    ``unhealthy_forward_feeds`` answers "is this feed healthy?" and drives
+    monitoring. This answers the narrower question the soft-stale latch actually
+    needs: "is an unhealthy feed that the live path DEPENDS ON?" Conflating the
+    two is what let a research-only feed refuse 42% of a day's trades.
+
+    Fail-closed twice over: a feed absent from ``FORWARD_FEEDS`` is treated as
+    gating (a rename must not silently drop protection), and ``gates_entries``
+    defaults to True so only a deliberate opt-out removes a block.
+    """
+    opted_out = {s.name for s in FORWARD_FEEDS if not s.gates_entries}
+    return [n for n in unhealthy_forward_feeds(records) if n not in opted_out]
 
 
 def unhealthy_forward_feeds(records: list[dict[str, Any]]) -> list[str]:

@@ -167,7 +167,19 @@ BTC_VOL_APPEND_SEC       = 3600             # BTC_VOL_PAUSE append interval
 COOLDOWN_STATE_PATH      = Path("data/watchdog_cooldown_state.json")
 
 # Per-check cooldowns (seconds) — re-fire once after the cooldown elapses
+# Sentinel for "idle, and NO typed record says why". This is not a block reason;
+# it is the ABSENCE of one, and it is the most serious of the three states the
+# starvation check can report. Until 2026-08-20 this condition returned None and
+# rendered as the INFO line "no identifiable entry block in the logs" -- the same
+# severity as a healthy deliberate block, which is precisely how an unexplained
+# idle stayed invisible. It now alerts at WARNING under its own key.
+ENTRY_BLOCK_INSTRUMENTATION_GAP = "instrumentation_gap"
+
 COOLDOWN_SEC = {
+    # Slower than the 1h model_gate_starving cadence: this fires while something
+    # is genuinely unexplained, and paging hourly re-trains the operator to
+    # ignore the channel (the 2026-08-15 numbness this file exists to prevent).
+    "model_gate_instrumentation_gap": 6 * 60 * 60,
     "heartbeat_stale":       30 * 60,
     "carry_heartbeat_stale": 60 * 60,
     "carry_recovery_active": 60 * 60,
@@ -736,13 +748,147 @@ class HealthWatchdog:
         """
         return expected_idle_no_new_exposure()
 
-    def _dominant_entry_block_reason(self) -> tuple:
-        """(reason, hits) for the block that stopped the most entries today.
+    def _entry_block_from_warehouse(self) -> tuple:
+        """(reason, hits) from the TYPED decision_events store, or (None, 0).
 
-        Reads today's bot log for the ``BLOCKED ... — <reason>`` lines every
-        entry gate emits. Returns (None, 0) when nothing is identifiable — an
-        unreadable log must degrade to "unexplained" (which still alerts),
-        never to a false all-clear.
+        Authoritative, tried first. The log scan below can only see gates that
+        emit the literal token ``BLOCKED``, and most do not:
+
+          * ``BtcVolPause`` logs ``[BtcVolPause] WAIT -- ...`` at INFO
+            (core/engine/entry_exec.py:301)
+          * ``SoftStale`` logs NOTHING — the taken branch at
+            core/engine/entry_exec.py:92-95 has no logger call at all
+          * an upstream drought emits no per-candidate line by construction
+
+        Measured 2026-08-20: 139 OPEN proposals, 136 vetoed by btc_vol_pause,
+        3 silent, 0 executed -- while the log scan matched 0 of the 70 lines
+        containing "BLOCKED" (all 70 from an unrelated SelfHeal job). The
+        warehouse had the answer the whole time: 11/11 rows in the window named
+        ``btc_vol_pause``. Reuses the purpose-built reader rather than
+        re-implementing the SQL, so the ISO cutoff format stays consistent.
+        """
+        try:
+            from mcp_server.warehouse_reader import open_funnel_status
+            status = open_funnel_status(
+                lookback_hours=float(MODEL_STARVE_HOURS))
+        except Exception:
+            return None, 0
+        if not isinstance(status, dict) or not status.get("open_attempts"):
+            return None, 0
+        # Key names are "top_reject_reasons"/"drought_status" -- NOT "top"/
+        # "drought". Guessing them cost a silent (None, 0) on 2026-08-20: the
+        # funnel reported 18 open_attempts while this function returned "no
+        # answer", which would have rendered as an instrumentation_gap while the
+        # blocker was in fact known. Pinned by test below.
+        top = status.get("top_reject_reasons") or []
+        if not top:
+            return None, 0
+        best = top[0]
+        reason = str(best.get("reason") or "").strip()
+        if not reason:
+            return None, 0
+        # decision_events holds one row per terminal decision, so this is a true
+        # per-candidate count, not the polling-inflated log-line count.
+        self._dominant_block_symbols = 0
+        return reason, int(best.get("count") or 0)
+
+    def _entry_block_from_candidates(self) -> tuple:
+        """(reason_family, hits) from the UPSTREAM `candidates` table, or (None, 0).
+
+        `decision_events` only holds TERMINAL OPEN attempts. When the funnel dies
+        at SCORING -- before any candidate ever reaches entry_exec -- that table
+        is legitimately empty and `_entry_block_from_warehouse` correctly returns
+        nothing. The answer is one table away.
+
+        Measured 2026-08-21, the morning this was written: 14 cycles x 55 coins,
+        "No actions this cycle" every time, watchdog reporting "no identifiable
+        entry block" -- while `candidates` held 6,884 rows for that window:
+            regime_toxic_trend(4h_adx=36..47>30)   4,444  (64.6%)
+            analysis_only_accband_scope            2,055  (29.9%)
+            ALLOW                                    121   (1.8%)
+        ADX 36-47 against a pre-registered ceiling of 30: the market was in a
+        hard trend and the filter was refusing entries exactly as designed.
+
+        TWO TRAPS, both hit for real during that diagnosis:
+
+        1. `candidates.ts` is REAL (unix epoch), NOT an ISO string. Comparing it
+           against an ISO cutoff in SQLite matches ZERO rows and DOES NOT RAISE
+           (numeric affinity sorts below text). That produced a false "0 rows in
+           6h" reading on a table holding 6,884. Always compare epoch-to-epoch.
+        2. Reasons must be grouped into FAMILIES. Ungrouped, those 4,444 rows
+           split across ~12 distinct ADX values, so the true 64.6% dominant
+           block renders as a 434-row also-ran beneath a 2,055-row constant.
+        """
+        try:
+            import sqlite3
+            from mcp_server.warehouse_reader import DEFAULT_DB_PATH
+            cutoff = time.time() - MODEL_STARVE_HOURS * 3600  # EPOCH, see trap 1
+            conn = sqlite3.connect(str(DEFAULT_DB_PATH))
+            try:
+                rows = conn.execute(
+                    "SELECT skip_reason, COUNT(*) FROM candidates "
+                    "WHERE ts >= ? AND COALESCE(decision,'') != 'ALLOW' "
+                    "AND COALESCE(skip_reason,'') != '' "
+                    "GROUP BY skip_reason",
+                    (cutoff,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return None, 0
+        if not rows:
+            return None, 0
+        fam: dict = {}
+        for reason, count in rows:
+            key = re.sub(r"\d+", "N", str(reason))  # see trap 2
+            fam[key] = fam.get(key, 0) + int(count or 0)
+        if not fam:
+            return None, 0
+        best = max(fam.items(), key=lambda kv: kv[1])
+        self._dominant_block_symbols = 0
+        return best[0], best[1]
+
+    def _dominant_entry_block_reason(self) -> tuple:
+        """(reason, hits) for the block that stopped the most entries.
+
+        Order: typed warehouse rows, then the legacy log scan, then the
+        ``ENTRY_BLOCK_INSTRUMENTATION_GAP`` sentinel. NEVER returns None -- an
+        unexplained idle is its own named state that alerts at WARNING, because
+        "nothing was blocked" and "we cannot tell what blocked it" are opposite
+        conditions and must not collapse into one INFO message. They did until
+        2026-08-20, which is how this class of failure stayed quiet.
+        """
+        # UPSTREAM first, and ALWAYS stashed even when a downstream reason wins.
+        # The two counts are DIFFERENT UNITS and must not be compared as if they
+        # were: `candidates` counts per-coin-per-cycle evaluations, while
+        # decision_events counts terminal OPEN attempts. Measured 2026-08-21:
+        # 4,459 upstream (regime_toxic_trend, ADX 36-47 vs a ceiling of 30) vs
+        # 119 downstream (btc_vol_pause). Reporting only the terminal reason
+        # hides that ~97% never reached the gate at all; reporting only the
+        # larger number would compare apples to oranges. So the terminal reason
+        # stays primary (it is the last thing that stopped a real candidate) and
+        # the upstream reason travels with it in the alert context.
+        up_reason, up_hits = self._entry_block_from_candidates()
+        self._upstream_block = (up_reason, up_hits) if up_reason else None
+
+        reason, hits = self._entry_block_from_warehouse()
+        if reason:
+            return reason, hits
+        if up_reason:
+            return up_reason, up_hits
+        reason, hits = self._entry_block_from_logs()
+        if reason:
+            return reason, hits
+        self._dominant_block_symbols = 0
+        return ENTRY_BLOCK_INSTRUMENTATION_GAP, 0
+
+    def _entry_block_from_logs(self) -> tuple:
+        """(reason, hits) by scanning today's bot log, or (None, 0).
+
+        SECONDARY source, kept as a fallback for gates that write a log line but
+        no warehouse row. Structurally fragile (see the failure class documented
+        on _entry_block_from_warehouse), so it must never be the only source and
+        its (None, 0) must never reach the caller as an all-clear.
         """
         try:
             log = LOG_DIR / f"bot_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.log"
@@ -1009,20 +1155,44 @@ class HealthWatchdog:
                      "suppression_cap_hours": DELIBERATE_BLOCK_MAX_HOURS},
                 )
                 return
+            if reason == ENTRY_BLOCK_INSTRUMENTATION_GAP:
+                # Neither decision_events NOR the log can name a blocker. That is
+                # NOT an all-clear -- it means the bot is idle and the system
+                # cannot say why. Escalate; never let this share the INFO
+                # cadence of a healthy, well-understood deliberate block.
+                self._alert(
+                    "model_gate_instrumentation_gap", "WARNING",
+                    f"No OPEN actions in the last {MODEL_STARVE_HOURS}h and NO "
+                    f"typed record of why — decision_events has no terminal OPEN "
+                    f"row in the window and the log names no block. The bot is "
+                    f"idle for an UNEXPLAINED reason: either the funnel died "
+                    f"upstream of the entry gate (no candidate was ever "
+                    f"proposed) or the instrumentation is broken. This is an "
+                    f"observability failure, not a clean idle.",
+                    {"opens_recent": opens_recent,
+                     "window_hours": MODEL_STARVE_HOURS,
+                     "dominant_block": None,
+                     "state": ENTRY_BLOCK_INSTRUMENTATION_GAP},
+                )
+                return
             _syms = getattr(self, "_dominant_block_symbols", None)
             detail = (
                 f"dominant block: {reason} ({hits} hits across {_syms} "
                 f"symbol(s); hits count per-cycle re-checks)"
                 if reason and _syms
-                else f"dominant block: {reason} ({hits} hits)" if reason
-                else "no identifiable entry block in the logs")
+                else f"dominant block: {reason} ({hits} hits)")
             self._alert(
                 "model_gate_starving", "INFO",
                 f"No OPEN actions in the last {MODEL_STARVE_HOURS}h despite "
                 f"non-drawdown state — {detail}.",
                 {"opens_recent": opens_recent,
                  "window_hours": MODEL_STARVE_HOURS,
-                 "dominant_block": reason, "block_hits": hits},
+                 "dominant_block": reason, "block_hits": hits,
+                 # Different unit from block_hits: per-coin-per-cycle scoring
+                 # eliminations, vs terminal OPEN attempts. Carried so the
+                 # operator can see the funnel died upstream (2026-08-21:
+                 # 4,459 upstream vs 119 terminal -- ~97% never reached the gate).
+                 "upstream_block": getattr(self, "_upstream_block", None)},
             )
 
     def _check_soft_stale_latch_stuck(self) -> None:
@@ -1203,11 +1373,20 @@ class HealthWatchdog:
 
     def _check_forward_feeds(self) -> None:
         try:
-            from core.feed_health import read_forward_feed_status, unhealthy_forward_feeds
+            from core.feed_health import (
+                entry_gating_feeds,
+                read_forward_feed_status,
+                unhealthy_forward_feeds,
+            )
         except Exception:
             return
         records = read_forward_feed_status(Path("."))
         bad = unhealthy_forward_feeds(records)
+        # 2026-08-22: ALERT on any unhealthy feed (unchanged), but only BLOCK
+        # entries on feeds the live path depends on. `skew` is research-only and
+        # has never connected -- it alone refused 219 of 465 entry decisions in
+        # a day. Alerting stays loud, so ungating is not silencing.
+        gating_bad = entry_gating_feeds(records)
         self._edge_alert(
             "forward_feeds_stale", bool(bad), "WARN",
             f"forward feed status unhealthy: {', '.join(sorted(bad))}",
@@ -1234,10 +1413,10 @@ class HealthWatchdog:
                 soft_stale_entries_blocked,
             )
 
-            if bad:
+            if gating_bad:
                 set_soft_stale_latch(
                     reason="forward_feeds_stale",
-                    detail={"feeds": list(sorted(bad))},
+                    detail={"feeds": list(sorted(gating_bad))},
                 )
             elif soft_stale_entries_blocked():
                 try:
