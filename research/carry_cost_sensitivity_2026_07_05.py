@@ -53,15 +53,15 @@ sys.path.insert(0, str(ROOT))
 
 from core.carry_runner import DEFAULT_SLIP_FRAC  # noqa: E402
 from core.cost_model import fee_rate, round_trip_cost, round_trip_fee  # noqa: E402
+
+# Reuse today's scan machinery verbatim: fetcher, symbols, COST_FRAC and the
+# imported scripts/f1_replay_historical.py reference replay (scan._frh).
+from research import carry_universe_scan_2026_07_05 as scan  # noqa: E402
 from research.funding_carry_lab import (  # noqa: E402
     F1_COST_MULT,
     F1_MIN_EDGE_BPS,
     round_trip_cost_pct,
 )
-
-# Reuse today's scan machinery verbatim: fetcher, symbols, COST_FRAC and the
-# imported scripts/f1_replay_historical.py reference replay (scan._frh).
-from research import carry_universe_scan_2026_07_05 as scan  # noqa: E402
 
 SYMBOLS = scan.SYMBOLS
 MS_PER_YEAR = scan.MS_PER_YEAR

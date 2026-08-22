@@ -4,7 +4,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "validate_evidence_manifest.py"
 SPEC = importlib.util.spec_from_file_location("validate_evidence_manifest", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)

@@ -7,11 +7,10 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
 import re
 import tempfile
+from pathlib import Path
 from typing import Any
-
 
 TRUE_FIELDS = (
     "point_in_time_data",

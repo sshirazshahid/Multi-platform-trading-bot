@@ -12,7 +12,6 @@ import math
 from pathlib import Path
 from typing import Any
 
-
 REQUIRED_TRUE_PATHS = (
     "universe.point_in_time_master",
     "universe.includes_delisted",

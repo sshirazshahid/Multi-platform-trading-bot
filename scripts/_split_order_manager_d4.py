@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -262,18 +261,17 @@ from exchanges.base import BaseExchange
 
 def _extract_class_methods(source: str) -> tuple[str, dict[str, ast.FunctionDef], str, str]:
     tree = ast.parse(source)
-    mod_pre: list[str] = []
-    mod_post: list[str] = []
+    # 2026-08-22 (ruff F841): mod_pre/mod_post/in_class were assigned and never
+    # read — leftovers from an earlier draft of this one-shot splitter. Removed
+    # rather than silenced; nothing downstream referenced them.
     methods: dict[str, ast.FunctionDef] = {}
     init_src = ""
-    in_class = False
     class_end = len(source)
 
     lines = source.splitlines(keepends=True)
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "OrderManager":
-            in_class = True
             for item in node.body:
                 if isinstance(item, ast.FunctionDef):
                     start = item.lineno - 1

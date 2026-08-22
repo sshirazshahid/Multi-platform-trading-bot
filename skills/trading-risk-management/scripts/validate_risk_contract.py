@@ -7,10 +7,9 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any
-
 
 BOOL_REQUIREMENTS = (
     "default_fail_closed",

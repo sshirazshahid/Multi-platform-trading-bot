@@ -50,7 +50,6 @@ from core.calibration import IsotonicCalibrator  # noqa: E402
 from core.decision.monte_carlo import block_bootstrap  # noqa: E402  (circular block resampler)
 from core.models import GBMModel, LRModel  # noqa: E402
 from scripts.train_models import (  # noqa: E402
-    FEATURE_KEYS,
     GBM_LR_GRID,
     LR_C_GRID,
     _effective_embargo,

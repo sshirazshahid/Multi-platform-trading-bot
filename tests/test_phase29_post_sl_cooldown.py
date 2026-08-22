@@ -37,13 +37,13 @@ fire independently.
 """
 from __future__ import annotations
 
-from tests.bot_engine_source import bot_engine_source_for_grep
-from tests.order_manager_source import order_manager_impl_source
-
 import time as _t
 from pathlib import Path
 
 import pytest
+
+from tests.bot_engine_source import bot_engine_source_for_grep
+from tests.order_manager_source import order_manager_impl_source
 
 
 @pytest.fixture(autouse=True)

@@ -11,11 +11,10 @@ Run:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -24,9 +23,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
-from research.screen_cftc_options_pressure import residualize_against_lags  # noqa: E402
 from research.screen_listing_short import (  # noqa: E402
-    MAX_PBO,
     MIN_DSR,
     MIN_OOS_WR,
     _dsr_prob,

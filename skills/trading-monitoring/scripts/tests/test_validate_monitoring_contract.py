@@ -4,7 +4,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "validate_monitoring_contract.py"
 SPEC = importlib.util.spec_from_file_location("validate_monitoring_contract", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)

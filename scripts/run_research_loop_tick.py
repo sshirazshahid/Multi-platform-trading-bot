@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.paper_exit_geometry import run_diagnostic  # noqa: E402
+from core.paper_stack_audit import run_audit  # noqa: E402
 from mission_control.state import (  # noqa: E402
     FUNNEL_PATH,
     GOAL_PATH,
@@ -33,11 +35,8 @@ from mission_control.state import (  # noqa: E402
     file_meta,
     max_flow_band_env,
     paper_research_snapshot,
-    read_json,
     safe_env_flags,
 )
-from core.paper_exit_geometry import run_diagnostic  # noqa: E402
-from core.paper_stack_audit import run_audit  # noqa: E402
 from scripts.check_mature_cohort_gates import check_mature_cohort  # noqa: E402
 
 OUT_PATH = Path("data/research_loop_tick_latest.json")

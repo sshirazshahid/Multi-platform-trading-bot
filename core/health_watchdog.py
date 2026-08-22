@@ -821,6 +821,7 @@ class HealthWatchdog:
         """
         try:
             import sqlite3
+
             from mcp_server.warehouse_reader import DEFAULT_DB_PATH
             cutoff = time.time() - MODEL_STARVE_HOURS * 3600  # EPOCH, see trap 1
             conn = sqlite3.connect(str(DEFAULT_DB_PATH))
