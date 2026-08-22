@@ -33,132 +33,9 @@
 * Do not invent or hallucinate market reasons for price actions. If data is missing or ambiguous, state that it is missing.
 
 
-# Role and Persona
-You are an expert software engineering agent. You possess deep knowledge of software design patterns, clean code principles, and efficient debugging.
+## Task Artifacts
 
-# Core Directives
-1. **Goal-Driven Execution:** Do not just write code; define verifiable success criteria. For "Add validation", write a test, then write the code to make it pass. For "Refactor X", ensure tests pass before and after the change.
-2. **Context Management:** Only read the files necessary for the current task. If a task spans multiple files, explore the dependency graph first. Do not dump the entire codebase into the prompt, as it leads to noisy self-evaluation.
-3. **Verification over Explanation:** Verify your assumptions by running the code (or writing a test script) before returning the final solution.
-
-# Coding Guidelines
-- **DRY & KISS:** Keep solutions modular, readable, and simple. 
-- **Error Handling:** Anticipate failures and implement graceful error handling.
-- **Documentation:** Write clear, concise docstrings for classes and functions, and update markdown documentation if public APIs change.
-
-# Output Format
-- Keep your conversational responses concise.
-- Provide the final edited code with clear boundaries (e.g., proper markdown code blocks).
-- State clearly if a task requires multiple iterative steps or git commits.
-
-
-
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
-Tradeoff: These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
-#1. Think Before Coding
-Don't assume. Don't hide confusion. Surface tradeoffs.
-Before implementing:
-State your assumptions explicitly. If uncertain, ask.
-If multiple interpretations exist, present them - don't pick silently.
-If a simpler approach exists, say so. Push back when warranted.
-If something is unclear, stop. Name what's confusing. Ask.
-
-#2. Simplicity First
-Minimum code that solves the problem. Nothing speculative.
-No features beyond what was asked.
-No abstractions for single-use code.
-No "flexibility" or "configurability" that wasn't requested.
-No error handling for impossible scenarios.
-If you write 200 lines and it could be 50, rewrite it.
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-#3. Surgical Changes:
-Touch only what you must. Clean up only your own mess.
-When editing existing code:
-Don't "improve" adjacent code, comments, or formatting.
-Don't refactor things that aren't broken.
-Match existing style, even if you'd do it differently.
-If you notice unrelated dead code, mention it - don't delete it.
-When your changes create orphans:
-Remove imports/variables/functions that YOUR changes made unused.
-Don't remove pre-existing dead code unless asked.
-The test: Every changed line should trace directly to the user's request.
-
-#4. Goal-Driven Execution
-Define success criteria. Loop until verified.
-Transform tasks into verifiable goals:
-"Add validation" → "Write tests for invalid inputs, then make them pass"
-"Fix the bug" → "Write a test that reproduces it, then make it pass"
-"Refactor X" → "Ensure tests pass before and after"
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
----
-These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
-## Workflow Orchestration
-
-### 1. Plan Mode Default
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately
-- Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
-
-### 2. Subagent Strategy
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
-
-### 3. Self-Improvement Loop
-- After ANY correction from the user: update tasks/lessons.md with the pattern
-- Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
-
-### 4. Verification Before Done
-- Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant\
-- Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-
-### 5. Demand Elegance (Balanced)
-- For non-trivial changes: pause and ask "is there a more elegant way?"
-- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes -- don't over-engineer
-- Challenge your own work before presenting it
-
-### 6. Autonomous Bug Fixing
-- When given a bug report: just fix it. Don't ask for hand-holding
-- Point at logs, errors, failing tests -- then resolve them
-- Zero context switching required from the user
-- Go fix failing CI tests without being told how
-
-## Task Management
-
-1. Plan First: Write plan to tasks/todo.md with checkable items
-2. Verify Plan: Check in before starting implementation
-3. Track Progress: Mark items complete as you go
-4. Explain Changes: High-level summary at each step
-5. Document Results: Add review section to tasks/todo.md
-6. Capture Lessons: Update tasks/lessons.md after corrections
-
-## Core Principles
-
-- Simplicity First: Make every change as simple as possible. Impact minimal code.
-- No Laziness: Find root causes. No temporary fixes. Senior developer standards.
-- Minimal Impact: Only touch what's necessary. No side effects with new bugs.
-
-
-
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
+- Plan work in `tasks/todo.md`; after any correction from the user, record the pattern in `tasks/lessons.md` and review it at session start.
 
 ## Repository Purpose
 
@@ -323,131 +200,41 @@ decisions beat the live path on the honest gate (`core/promotion_gate.py`:
 MIN_DSR≥0.10, MAX_PBO≤0.5, OOS-WR≥0.55, AUC≥0.60). Never promote on a no-edge
 signal — use `trading_bot_shadow_vs_live` to watch the comparison.
 
-## Common Development Commands
+## Test and Tooling Gotchas
 
-### Running the Bot
+- Skill tests are PER-SKILL because of module-name collisions (`scorer.py`, `helpers.py`): `python -m pytest skills/<name>/scripts/tests/ -v`. The root `conftest.py` evicts conflicting module names and pushes the active skill's `scripts/` to the front of `sys.path`.
+- The `docs-completeness` pre-commit hook blocks commits when a new skill lacks its generated doc pages (`python3 scripts/generate_skill_docs.py --skill <name>`, then both skill catalogs and both READMEs).
 
-```bash
-# Paper mode (default)
-python main.py
+## Standing directive: the four-lens check (owner, 2026-08-22)
 
-# Status check (no engine start)
-python main.py --status
+Owner directive: "always do thoroughly Fundamental Analysis (FA), Technical
+Analysis (TA), Sentiment Analysis, Order FLOW for any coin stock pair oil gold
+silver". Honour it — but honour it HONESTLY. A 9-agent audit (2026-08-22) mapped
+what each lens actually does here. State the lens's real status; never imply an
+input is steering a decision when it is not.
 
-# Dashboard
-python dashboard.py
-```
+| Lens | Collected | Reaches a live decision? | Measured |
+|---|---|---|---|
+| **TA** | yes | **YES** — the 4 required conditions ARE the entry (`core/scoring/entry_score.py:174`); side chosen at `:136`; ATR stop. **TP is NOT TA-derived** — overwritten by fixed geometry (`core/scoring/helpers.py:33`) | score↔profit \|r\|<0.07; indicator-confluence "refuted on own data" (ledger:27) |
+| **FA** | yes, heavily | **~1%** — only `funding_rate`, as feature 13/15 of the ensemble → `core/economic_entry_gate.py:321`. Every explicit funding/OI bonus+veto is OFF and has fired 0 times | funding direction "IR 0.248, NO_EDGE" (ledger:30) |
+| **Order flow** | yes | **Cost filter, not direction.** Live: thin-book/spread/slippage vetoes. Directional `ob_imbalance` is feature 15/15 and is 0.0 for 82.2% of rows | VPIN CONFIRMED_NO_GO; L2 "no directional information" (ledger:49,52) |
+| **Sentiment** | partly | **NO.** `core/engine/cycle.py:40` `news_context = {}`; `symbol_news_sentiment=None` hardcoded, callee says "Deprecated (De-Emotion); ignored if passed" | "sentiment paths are inert, measured over 30 days" |
 
-### Running Tests
+⚠ **`core/scoring/data_sources.py:125` computes `sentiment` as clamped price
+momentum.** It is TA wearing a sentiment label — never cite it as sentiment.
 
-```bash
-# All skill tests (bulk, uses importlib mode to handle name collisions)
-python -m pytest
+⚠ **THE ARITHMETIC THAT EXPLAINS THE LOSS.** `ACCURACY_TARGET_MODE` sets
+`tp_frac_buy=0.45` / `tp_frac_sell=0.35`: the bot risks 1 to make 0.45. Required
+break-even win rate is then **74–99%**, and at SL <=1% under stressed costs it
+exceeds **100% — mathematically unwinnable**. Actual WR is 52.5%. The measured
+avg-win/avg-loss ratio of 0.38 is not a market outcome, it IS this config.
+Ledgered as `AccBand frac dual goal — CONFIRMED_NO_GO, 0/12 cells`: WR-in-band
+and after-cost profit are mutually exclusive on the measured no-edge path.
+Quote this before proposing any signal work — the geometry binds first.
 
-# Single skill tests
-python -m pytest skills/position-sizer/scripts/tests/ -v
-
-# Bot-level tests
-python -m pytest tests/ -v
-
-# Specific bot test
-python -m pytest tests/test_warehouse.py -v
-
-# With coverage
-python -m pytest --cov=skills --cov-report=term-missing
-```
-
-### Backtesting
-
-```bash
-# V3 backtest (current scoring engine)
-python backtest_v3.py
-
-# Auto-backtest (parameter sweep)
-python auto_backtest.py
-```
-
-### Linting
-
-```bash
-# Ruff check + format (matches CI)
-ruff check skills/ scripts/
-ruff format --check skills/ scripts/
-
-# Codespell
-codespell --toml pyproject.toml skills/ scripts/
-```
-
-### Pre-commit Hooks
-
-```bash
-pre-commit install && pre-commit install --hook-type pre-push
-```
-
-Pre-commit: trailing-whitespace, end-of-file-fixer, check-yaml, check-toml, check-merge-conflict, check-added-large-files (500KB), ruff (lint+format), codespell, detect-secrets, no-absolute-paths, skill-frontmatter, docs-completeness.
-Pre-push: pytest (all skill tests via `scripts/run_all_tests.sh`).
-
-### CI Pipeline (`.github/workflows/ci.yml`)
-
-Three jobs on PR/push to main: `lint` (ruff + codespell), `test` (per-skill pytest + coverage), `security` (bandit SAST + detect-secrets).
-
-### Dependencies
-
-Bot: `requirements.txt` — ccxt, pandas, numpy, python-dotenv, loguru, rich, schedule, requests, websockets.
-Skills: `pyproject.toml` — jsonschema, pyyaml, scipy. Dev: pytest, ruff, bandit, detect-secrets, codespell, pre-commit.
-
-## Skill System Architecture
-
-### Skill Structure
-
-Each skill in `skills/` follows:
-```
-<skill-name>/
-├── SKILL.md              # Required: YAML frontmatter (name + description) + workflow instructions
-├── references/           # Knowledge bases (markdown) loaded into Claude's context
-├── scripts/             # Executable Python scripts (not auto-loaded)
-└── assets/              # Templates and resources for output
-```
-
-`name` in frontmatter must match directory name. Instructions use imperative form ("Analyze the chart", not "You should analyze").
-
-### Creating a New Skill
-
-Use the skill-creator plugin, then complete ALL of:
-1. `python3 scripts/generate_skill_docs.py --skill <name>` (generates EN + JA doc pages, updates indexes)
-2. Add to catalog category sections in `docs/en/skill-catalog.md` and `docs/ja/skill-catalog.md`
-3. Add to API Requirements Matrix in both catalogs
-4. Add to `README.md` and `README.ja.md`
-5. Add API key requirements if applicable
-
-The `docs-completeness` pre-commit hook blocks commits if doc pages are missing.
-
-### Skill Testing
-
-```bash
-# Tests are per-skill due to module name collisions (scorer.py, helpers.py, etc.)
-python -m pytest skills/<name>/scripts/tests/ -v
-```
-
-
-The root `conftest.py` handles sys.path isolation: evicts conflicting module names and pushes the active skill's `scripts/` to front of sys.path.
-
-### API Keys for Skills
-
-Some skills require paid APIs. Key environment variables:
-- `FMP_API_KEY` — Financial Modeling Prep (earnings, economic calendar, dividend screeners)
-- `FINVIZ_API_KEY` — FINVIZ Elite (optional speedup for dividend screeners)
-- `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` — Alpaca (portfolio manager only)
-
-See the API Requirements table in `README.md` for per-skill requirements.
-
-### Skill Self-Improvement Loop
-
-Automated pipeline: `scripts/run_skill_improvement_loop.py` (round-robin selection, auto scoring via `dual-axis-skill-reviewer`, Claude CLI improvement, quality gate, PR creation). Daily at 05:00 via launchd.
-
-### Skill Auto-Generation Pipeline
-
-`scripts/run_skill_generation_pipeline.py` — Weekly: mine session logs + score ideas. Daily: design highest-scoring idea as a complete skill PR.
+**So a four-lens check means:** report all four, label each live / cost-filter /
+research-only / disconnected, cite the measured verdict, and never present a
+disconnected lens as if it informed the call.
 
 ## Gotchas and Non-Obvious Behavior
 
@@ -497,110 +284,6 @@ All skill outputs saved to `reports/` directory. Filename: `<skill>_<analysis-ty
 Code and analysis outputs in English. README available in English and Japanese. User interactions may be in Japanese.
 
 ---
-
-# Ruflo Multi-Agent Integration
-
-When to lean on Ruflo's coordination layer (added 2026-05-03 after `ruflo init`).
-
-## Agent Comms (SendMessage-First Coordination)
-
-Named agents coordinate via `SendMessage`, not polling or shared state.
-
-```
-Lead (you) ←→ architect ←→ developer ←→ tester ←→ reviewer
-              (named agents message each other directly)
-```
-
-### Spawning a Coordinated Team
-
-```javascript
-// ALL agents in ONE message, each knows WHO to message next
-Agent({ prompt: "Research the codebase. SendMessage findings to 'architect'.",
-  subagent_type: "researcher", name: "researcher", run_in_background: true })
-Agent({ prompt: "Wait for 'researcher'. Design solution. SendMessage to 'coder'.",
-  subagent_type: "system-architect", name: "architect", run_in_background: true })
-Agent({ prompt: "Wait for 'architect'. Implement it. SendMessage to 'tester'.",
-  subagent_type: "coder", name: "coder", run_in_background: true })
-Agent({ prompt: "Wait for 'coder'. Write tests. SendMessage results to 'reviewer'.",
-  subagent_type: "tester", name: "tester", run_in_background: true })
-Agent({ prompt: "Wait for 'tester'. Review code quality and security.",
-  subagent_type: "reviewer", name: "reviewer", run_in_background: true })
-
-// Kick off the pipeline
-SendMessage({ to: "researcher", summary: "Start", message: "[task context]" })
-```
-
-### Patterns
-
-| Pattern | Flow | Use When |
-|---------|------|----------|
-| **Pipeline** | A → B → C → D | Sequential dependencies (feature dev) |
-| **Fan-out** | Lead → A, B, C → Lead | Independent parallel work (research) |
-| **Supervisor** | Lead ↔ workers | Ongoing coordination (complex refactor) |
-
-### Rules
-
-- ALWAYS name agents — `name: "role"` makes them addressable
-- ALWAYS include comms instructions in prompts — who to message, what to send
-- Spawn ALL agents in ONE message with `run_in_background: true`
-- After spawning: STOP, tell user what's running, wait for results
-- NEVER poll status — agents message back or complete automatically
-
-## When to Swarm
-
-- **YES**: 3+ files, new features, cross-module refactoring, API changes, security review, performance work
-- **NO**: single file edits, 1-2 line fixes, docs updates, config changes, simple questions
-
-For trading-bot work specifically: most fixes are single-file or 2-3 file. Reach for swarm only on bigger initiatives like the Phase A multi-agent shadow build (which spans 12+ files).
-
-## Agent Routing
-
-| Task | Agents | Topology |
-|------|--------|----------|
-| Bug Fix | researcher, coder, tester | hierarchical |
-| Feature | architect, coder, tester, reviewer | hierarchical |
-| Refactor | architect, coder, reviewer | hierarchical |
-| Performance | perf-engineer, coder | hierarchical |
-| Security | security-architect, auditor | hierarchical |
-
-## Memory & Learning (optional, daemon-required)
-
-When the Ruflo daemon is running, MCP tools become available for cross-session memory:
-
-```bash
-# Before any task
-npx @claude-flow/cli@latest memory search --query "[task keywords]" --namespace patterns
-npx @claude-flow/cli@latest hooks route --task "[task description]"
-
-# After success
-npx @claude-flow/cli@latest memory store --namespace patterns --key "[name]" --value "[what worked]"
-npx @claude-flow/cli@latest hooks post-task --task-id "[id]" --success true --store-results true
-```
-
-## Background Workers
-
-| Worker | When |
-|--------|------|
-| `audit` | After security changes |
-| `optimize` | After performance work |
-| `testgaps` | After adding features |
-| `map` | Every 5+ file changes |
-| `document` | After API changes |
-
-```bash
-npx @claude-flow/cli@latest hooks worker dispatch --trigger audit
-```
-
-## Setup (already done; commands here for reference)
-
-```bash
-ruflo init --start-all                       # already run; populated .claude/ + .claude-flow/
-npx @claude-flow/cli@latest doctor           # health check
-npx @claude-flow/cli@latest daemon start     # for hooks/memory features (run in own terminal)
-```
-
-The trading bot itself does NOT use Ruflo — Ruflo is purely for me (Claude Code) to coordinate development work on the bot. Bot runtime is independent.
-
 ### gstack
 use the /browse skill from gstack for all web browsing, never use mcp__claude-in-chrome__* tools, and lists the available skills: /office-hours, /plan-ceo-review, /plan-eng-review, /plan-design-review, /design-consultation, /design-shotgun, /design-html, /review, /ship, /land-and-deploy, /canary, /benchmark, /browse, /connect-chrome, /qa, /qa-only, /design-review, /setup-browser-cookies, /setup-deploy, /setup-gbrain, /retro, /investigate, /document-release, /document-generate, /codex, /cso, /autoplan, /plan-devex-review, /devex-review, /careful, /freeze, /guard, /unfreeze, /gstack-upgrade, /learn. Then ask the user if they also want to add gstack to the current project so teammates get it.
 ---
@@ -611,40 +294,5 @@ use the /browse skill from gstack for all web browsing, never use mcp__claude-in
 
 **Trigger:** For any request to research, screen, apply, or implement trading strategies/patterns (including "update the program" with strategies, or re-running/refining previous strategy work), use the `strategy-evidence-pipeline` skill. Questions about already-refuted families are answered directly from the `refuted-families-ledger` skill — conversationally, without launching workflows.
 
-**변경 이력:**
-| 날짜 | 변경 내용 | 대상 | 사유 |
-|------|----------|------|------|
-| 2026-07-08 | 초기 구성: 4 agents (strategy-scout, edge-screener, honesty-auditor, shadow-integrator) + 4 skills (ledger, screening, shadow-probe, orchestrator) | 전체 | /harness 요청; 2026-07-08 deep-research 후속 |
-| 2026-07-08 | Live spawn tests (Phase 6-3/6-4) deferred | 검증 | API session limit; structural validation only this pass |
-| 2026-07-08 | CLAUDE.md restored from 94fb521 after accidental overwrite by CLAUDE-FABLE-5.md rename (plugin-install window); replaced content preserved in claude_md_replaced_backup_2026-07-08.md | CLAUDE.md | working-copy corruption recovery |
-| 2026-07-09 | Maiden run: dispersion + listing-short screens → both INSUFFICIENT_DATA (audit-confirmed); artifacts in _workspace/strategy_pipeline/, screens in research/ | 파이프라인 | 3-venue funding overlap = 5d BTC/ETH only; 0/103 listings funding-covered — funding-history backfill queued |
-| 2026-07-09 | Rev2 re-screen on backfilled funding (scripts/backfill_funding_history.py, 137 venue-symbol CSVs): listing-short = CONFIRMED_NO_GO (sizing-only ledger row; signal robust, MC maxDD gate fails), dispersion = NO_GO action upheld but screener cost model audited UNSAFE (per-fold round-trip artifact; sign IS persistent) — no ledger row | 파이프라인 | honesty-auditor 03_rev2_audit_findings.md; follow-ups: binance∩bybit long-hold dispersion re-screen (REQUIRED) + capital-scaled listing-short as NEW pre-registration |
-| 2026-07-09 | Rev3 follow-ups: capital-scaled listing-short (3%/12% cap, account equity curve) = **CONFIRMED_GO** — the pipeline's first — strictly as unlevered log-only shadow probe (true concurrent-MTM maxDD 0.10–0.14, ~2× the screen's 0.073; 3× leverage would breach 0.25 → UNSAFE); dispersion binance∩bybit hold-until-flip = CONFIRMED_NO_GO (OOS-WR 0.378 < 0.55; positive mean is fat-tail artifact) → ledger row added | 파이프라인 | honesty-auditor 03_rev3_audit_findings.md; shadow probe must log per-bar intra-hold MTM + emit discriminating score (AUC gate otherwise un-computable) |
-| 2026-07-09 | Phase 3 integration SHIPPED (2d42173): ListingShortProbeAgent in shadow lane via ShadowRunner extra_probes hook — all 6 binding conditions met; score = tanh(pump/0.50)+10·funding8h frozen pre-outcome; 2,659 tests; activates on next bot restart | shadow-integrator | 04_integration_report.md; promotion needs frozen gate on ≥30 resolved + owner sign-off |
-| 2026-07-12 | 13_band_conditional screen (16 pre-registered buckets, Bonferroni m=16, 14,555 resolved band outcomes): 0 GO — positive selection refuted (ledger row added; f4/f5 INSUFFICIENT_DATA await forward backfills). The two toxic-regime findings shipped as `BAND_REGIME_FILTER_ENABLED` (config default false, .env true): band-lane-ONLY veto inside the `_acc_mode_on` carve-out — 4h ADX>30 (WR 59.0% vs 65.7%) / BTC 1h ATR ratio<0.7 (WR 55.6%); fail-open, reject_reasons `band_regime_filter:*`. HONESTY: WR-band protection + bleed reduction, NOT edge — every bucket stays after-cost negative | 파이프라인 | screen research/screen_band_conditional.py; tests test_band_regime_filter.py; deep_breakout/shadow lanes verified untouched |
-| 2026-07-11 | Phase 1-3 full run on 4 new scout candidates (07_scout_candidates.md): funding-settlement-window timing = NO_GO (OOS-WR 0.510<0.55, sign-unstable across folds/venues), ETH quarterly-basis leg-swap = NO_GO (MC P>0 0.683<0.95), pre-unlock capital-scaled short (W1 T-28d/W2 T-14d, 3%/12% unlevered) = **CONFIRMED_GO** (pipeline's 2nd) — audit flagged fragile n (32/36 really ~19/22 independent bets via SUI/GUN monthly-cliff pseudo-replication) and single-regime profit (100% from 2025-26, 2023 net-negative) as binding caveats, not disqualifying; integrated as UnlockShortProbeAgent (core/agents/), 6 binding conditions in code, W3 arm NOT implemented (failed AUC gate); 2,850→2,871 tests; **staged, not committed** | 파이프라인 | 09_audit_candidate2_final.md, 10_integration_report_candidate2.md; unlock calendar needs `--forward-days 60` backfill before next restart or probe starts silent |
-| 2026-07-11 | Owner-directed TSMOM-20d regime-watch probe (Codex external backtest, bot_weight 0.0): TsmomProbeAgent (core/agents/tsmom_probe_agent.py) — **NOT a pipeline GO; TSMOM remains a REFUTED family (long-only TSMOM 2026-06-15, textbook trend 0/40 OOS 2026-06-13) and the Codex evidence does NOT meet the reopen bar (~1.8-month single-regime OOS, ~90-run sweep winner with no multiplicity control, prior period −17.4% / 0% profitable)** — log-only forward paper test, BTC/ETH/SOL bybit perps, two arms scored separately (tsmom_20d_1h_v1: 480/120/168 bars; tsmom_20d_4h_v1: 120/30/42), momentum-sign + 5d-EMA side filter, 2×ATR(14) stop / 2R target / 7d max hold at signal-bar close, notational 1%-risk sizing, frozen score tanh(\|mom20d\|/0.10); Pine-vs-reference flip divergence resolved to the reference backtest's no-overlap rule; expectation NO-PROMOTE (promotion only via frozen gate on ≥30 RESOLVED/arm + owner sign-off); +23 tests; **staged, not committed** | shadow-integrator | 11_integration_report_tsmom.md; owner directive — a log-only forward test is the only honest instrument that could someday meet the reopen bar |
-| 2026-07-11 | Owner-directed breakout-60d probe (Codex deep-run winner, same directive): BreakoutProbeAgent (core/agents/breakout_probe_agent.py) — **NOT a pipeline GO; textbook trend/breakout remains a REFUTED family (0/40 OOS 2026-06-13; donchian F in Codex's own first sweep). Deep run is the family's strongest external evidence (5-6yr×10 markets, 2× cost survival, 9/9 parameter cells stable around the (2.2, 3.0) spec confirmed by the 16:19 --finalize-only re-run) BUT winner was selected on burned holdout across 20 candidates and Codex's OWN MC fails our frozen gates (P>0 91.5%<0.95; maxDD p95 42.5%>0.25); ~30-35% WR by design conflicts with the owner's ≥65% WR-floor preference** — log-only forward paper test, 10 majors bybit 4h, arm breakout_60d_4h_v1 (shifted prior-360-bar channel, 2.2×ATR(14) stop, 3R target, 126-bar hold → 127-bar entry-inclusive scan, signal-bar-close fill), frozen score tanh(penetration/0.02) from the cache distribution (median 0.0137, n=1,604); expectation NO-PROMOTE; +15 tests (2,871→2,909 total with TSMOM); **staged, not committed** | shadow-integrator | 11_integration_report_tsmom.md §breakout; Codex's own creation gate requires forward paper trading — this probe is that instrument |
-| 2026-07-17 | Futures+spot deep-research run (owner-directed 3-model debate: Sonnet 4.6/Opus 4.8/Fable 5 attack each verdict, Fable reconciles — one-run deviation from Fable-only policy, debate stage only): 3 scouts → 4 pre-registered screens → 12 adversarial audits. **0 GO.** Wrapper-discount NO_GO (p95 21–28bps < 50bps floor), F1-percentile-selectivity NO_GO (79% harvest forfeit, 2×-cost negative; CI/fold gates demoted by debate), stablecoin-depeg NO_GO (mean/AUC oppose in cost-space; regime≠events) → 3 scoped ledger rows; delisting forced-flow INSUFFICIENT_DATA (n=34<30/variant; ALPACA squeeze −22.4× stake; new ledger "Open" section, reopen ~1–2yr). Reopen-bar sweep: nothing qualifies, 3 evidence touch-ups applied. Binding process rules added to pipeline skill: prereg commit/hash BEFORE run; persist raw fee-API artifacts. ⚠ Run's key alert: **F1 incumbent structurally idle** — 0 entries/49,384 live gate checks, edges −25 to −41bps, carry Sharpe externally reported negative for 2025 (arXiv 2510.14435). Artifacts 14_–17_ in _workspace/strategy_pipeline/ | 파이프라인 | 17_integration_report_2026-07-16.md (no-op); 16_debate_15{a,b,c,d}*.md; owner report in session |
-| 2026-07-19 | Owner-directed bundle-test MR probes (cloud paper_bundle_test deliverables, same directive pattern as 07-11): ZfadeProbeAgent (zfade_4h_cfg365_v1, CANDIDATE) + Rsi2TrackerProbeAgent (rsi2_4h_cfg226_v1, TRACKER) in core/agents/bundle_mr_probe_agent.py — **NOT a pipeline GO: cfg365 FAILED the bundle's own gate G2 (OOS WR 70-71% ABOVE the frozen 63-67 band) and is a 1-of-432 sweep survivor → plausible-unconfirmed; cfg226 was in/near band but net NEGATIVE OOS — kept solely to measure the band-vs-profit tension forward** — log-only forward paper tests, BTC/ETH/SOL/BNB/XRP bybit 4h perps: cfg365 z20 ±1.5 fade WITH EMA200 trend side, TP 1.0×ATR14 / SL 2.4×ATR14; cfg226 RSI(2) 10/90 with-trend, TP 0.8×ATR14 / SL 2.0×ATR14; both 12-bar time-stop, signal-bar-close entry, notational 3% stake; indicator math mirrors the reference harness EXACTLY (SMA-ATR14 not Wilder, no-min_periods EMA200 with 210-bar gate, dn==0→50 RSI, ddof=1 zscore); frozen pre-outcome scores tanh(\|z\|/3.0) / tanh((10−RSI2)/10); distinct agent_ids because both arms are 4h → funnel lanes zfade_4h_cfg365 + rsi2_4h_cfg226; expectation NO-PROMOTE (promotion only via frozen gate on ≥30 RESOLVED/arm + owner sign-off); +26 tests (suite 3,546 passed; 3 pre-existing failures in owner-modified order_manager/_execute_open/dashboard code, untouched); committed c9ed5b5 on branch probe/bundle-mr-shadow-2026-07-19 (only feature hunks staged; unrelated owner working-tree mods left unstaged); bot restarted 17:30Z−5 — new boot log shows both probes registered | shadow-integrator | owner directive "implement these strategies" + cloud bundle report; a log-only forward test is the honest instrument for an unconfirmed 1-of-432 survivor |
-| 2026-07-20 | Owner-approved probe universe widening SHIPPED (T1-T4, docs/superpowers/specs/2026-07-20-probe-universe-widening-design.md): both bundle-MR probes derive symbols from the active PAPER-futures spec artifact (MCP_DIRECTIONAL_PAPER bases x bybit via core.strategy_spec routes) — boot resolved 40/44 symbols, 4 bases skipped in ONE aggregated warning (FTM/MKR/PEPE/TON no live bybit USDT-perp); FAIL-CLOSED to the frozen 5-major basket on missing/invalid/zero-route spec (test-pinned); accrual cohort KEPT and disclosed via funnel detail.universe_widened_utc (static deploy-date stamp, both lanes) so any promotion dossier carries the universe change; log-only lane, zero live-path changes; restart verified in-process 04:53:27 | shadow-integrator | owner AskUserQuestion 2026-07-20; per-pair dilution + forward-learned generalization accepted on record; T1 ba10ddc / T2 4e59431 |
-| 2026-07-20 | Deep-audit fix bundle SHIPPED (verified audit: **7 confirmed / 0 refuted**, all fixes TDD red→green, owner-directed restart): F1 virtual_wallet lev-1 futures SIGN-FLIP fixed — futures margin branch now applies at ALL leverages, open+close (0087c78); F2 promotion-funnel run_gate dsr/pbo un-bricked — DSR computed via own proxy vs MIN_DSR, PBO informational-with-note, dossier leg can fire on real evidence (4f0795f); F3 MCP_ENTRY_MIN_SCORE + SL_COOLDOWN_ENABLED profile-gated to PAPER+MAX_FLOW_BAND like the T3 geometry knob (c64486a); F4 repo-integrity — committed strategy_program+contracts (imported by committed entry_policy/order_manager), kill-switch fail-CLOSED OSError hunk, pair_discovery fail-closed rewrite incl. INCIDENT_QUARANTINE_BASES consumer, + 5 test files; 5 further untracked-but-HEAD-imported modules flagged, left to their owners (69f4fc2); F5 scorer loud STARTUP-UNIVERSE-EMPTY warning — silent-idle class that cost 8h on 07-19 (86447c8); F6 watchdog ISO-ts parsing — 6h zero-OPENs starvation alert fires again (8bf11f0); F7 eta=Noned + entries_48h 2000-line cap fixed (77244d9); F8 funnel task restaggered :35→:40 (schtasks, no repo change). Suite 3,594✓/1 skip/3 failed — all 3 attributed NOT-OURS (uncommitted conftest wallet fixture; order_manager/bot_engine in-flight pins). Restart 06:34:44Z verified in-process: MAX_FLOW_BAND banner (EntryFloor 50, SLCooldown DISABLED, AccBand ON), 6 probe registrations, bundle-MR 40-symbol line, universe check OK (44 bases), 0 HALTED | 봇 코어 | journal/2026-07-20.md §06:34Z; 2026-07-20 verified deep audit, owner-authorized program update |
-| 2026-07-20 | Spec-gate starvation fix SHIPPED (owner "ultrathink and fix it" on BZ/CL `strategy_spec_route_not_approved` blocks): NEW `scripts/regen_directional_spec.py` derives MCP_DIRECTIONAL_PAPER symbols from the bot's OWN eligibility rules — candidacy = CORE∪EXTENDED_CRYPTO∪incumbents, kept iff an eligible USDT-perp on ≥1 venue via CALLING `pair_discovery._market_rejection_reason` (uncapped: the ALL-mode 25/venue cap is a scan budget, not an authorization rule; load_markets carries no volume so liquidity stays runtime universe_filter's job), fresh INCIDENT_QUARANTINE_BASES, atomic write, --dry-run, fail-closed on venue outage/empty/invalid. HONESTY CORRECTION: BZ is NOT crypto — binance `TRADIFI_PERPETUAL/COMMODITY` (Brent, in ANALYSIS_ONLY_BASES like CL); its block was correct-by-design, so pair_discovery gained metadata-driven `tradfi_asset:*` rejection (+ BZ/PAXG/XAUT statics) and the scorer warning now NAMES blocked routes. Regen: 44→44 bases, +FET/HBAR/JUP/RENDER/TAO/VET, −DOGE/PEPE/WIF (meme) / FTM/MKR/TON (no eligible perp); spec JSON under data/ (gitignored), provenance appended in-file. Restart 22:32:58 verified in-process: bundle-MR probe universe 40→43 (skipped only FET, no bybit perp — probe universe follows every spec regen), universe check OK 44 routes; first cycle 22:35:03 blocked exactly `[BZ@binance, CL@binance]`, zero crypto-native blocks. +17 tests | 봇 코어 | journal/2026-07-20.md §22:35Z; owner directive 22:11 |
-| 2026-07-22 | Dual-model per-pair FUTURES adjudication (owner-directed: Codex GPT-5.6-Sol + Fable 5 — independent scouts, shared 44-pair dossier from local data, independent verdicts, 1 policed rebuttal round, Fable reconciliation): **first-pass agreement 28/44; final: 5 FIT_BAND_PAPER / 22 FIT_WITH_GAPS / 14 DATA_STARVED / 2 COST_UNFIT (TRX 0.46 move/cost, BNB) / 1 EXCLUDE (FET — no live bybit perp, readmit on route verification); 0 GO, nothing promoted.** Candidates: C1 CFTC options-pressure QUEUED-FOR-SCREEN (Fable's hardened prereg binding — delta-adjustment control, t+1/2/3 joint multiplicity, ETF-era split; expectation NO_GO), C2 Deribit gamma-expiry INSUFFICIENT_DATA (chain archive or ≥30 forward events; 08:00-reversal substitute forbidden), C3 quarter-hour imbalance QUEUED-BEHIND-C1 (Codex-modified measurement pilot). ⚠ A1: heartbeat profile AGGRESSIVE_RESEARCH does NOT activate band knobs (config gate pinned) — ALL FIT verdicts conditional on restoring PAPER+MAX_FLOW_BAND; owner decision. Dossier: 19 pairs lack funding history, 19 have 51.6d-stale 1h OHLCV (backfill = the top FIT_WITH_GAPS remediation). Vocabulary policing collapsed Codex's 12 EXCLUDEs→1; debate demonstrably added signal both directions (Codex: 2 novel candidates + adverse TSMOM study; Fable: delta-adjustment artifact + A1). Artifacts 18_* in _workspace/strategy_pipeline/ | 파이프라인 | 18_debate_pair_verdicts.md + 18_final_pair_verdicts.json; reconciler session-limit fallback = sequential main-loop per pipeline error protocol |
-| 2026-07-21 | Economic-gate paper_fallback SHIPPED (owner "Still no trades?" — layer-12 terminal blocker): `_apply_mcp_directional_economic_gate` blocked 100% of MCP_DIRECTIONAL_PAPER entries with `economic_gate_model_missing` because `data/models/ensemble_futures_latest.json` is a pre-manifest May-25 artifact with NO top-level `manifest` key ("latest pointer missing ModelManifest", promotion_gate.py:784; would also fail ~57d staleness + pbo=1.0) — no futures model has EVER legitimately passed promotion, validator is CORRECT, nothing was faked. Fix: new knob `MCP_DIRECTIONAL_ECONOMIC_GATE_MODE` ∈ {strict (default = fail-closed unchanged), paper_fallback} in the gate dict, honored ONLY under PAPER+MAX_FLOW_BAND (F3 profile gate); in fallback with no promoted model the gate skips the model-probability term and admits iff the bracket's TP clears the SAME stressed costs (1.5x fee/2x slip/exit floor: geometric breakeven_wr<1.0; else `economic_gate_stressed_breakeven`). Model path resumes automatically on any legitimate promotion; boot banner gained `EconGate : mode=` line. HONESTY: restores PAPER research flow, NOT edge — 30d directional expectancy stays ≈ −0.24R. +16 tests (42✓ across both gate files; same 2 pre-existing decision-provenance failures NOT-OURS); commit also tracks the F4-class untracked-but-HEAD-imported `core/economic_entry_gate.py`, `tests/test_economic_entry_gate.py`, `.env.example`. FOLLOW-ON exposed by the very first fill (INJ maker, 07:15:58Z): `_finalize_maker_intent` built ctx WITHOUT `maker_intent`, so open_position's terminal provenance write got `{}` → "candidate symbol is missing" → `latch_incident` HALTED all new entries after ONE fill — layer-13; fixed by carrying the intent in ctx (+2 TDD tests, latch archived, second restart verified) | 봇 코어 | journal/2026-07-21.md §07:00Z; owner standing directive: aggressive PAPER, WR 59-67 band |
-| 2026-07-22 | Owner "Start doing PAPER trading" bundle SHIPPED: (1) **directional-PAPER 22.4h zero-OPEN starvation root-caused** — the `TradingBot-24x7` schtask action itself carried `--paper-profile aggressive-research`, silently overriding .env's MAX_FLOW_BAND since the 07-21 20:24Z relaunch (task-definition variant of the supervisor env gotcha; CONFIRMS A1 from the 07-22 adjudication) → task action rewritten flag-less (`run --restart`, .env = the launcher's designed single activation surface), restart verified in-process 18:55:19Z (MAX_FLOW_BAND banner, EntryFloor 50, SLCooldown DISABLED, AccBand 0.35/0.30, EconGate paper_fallback), first directional fills +20min (ADA 19:13Z); (2) **PullbackMomentumProbeAgent** (probe #7, `core/agents/pullback_momentum_probe_agent.py`, arm `pullback_ma20_rsi14_4h_v1`, funnel lane `pullback_ma20_4h`) — owner's stated MA20/RSI14 pullback rules as a log-only shadow probe on the shared 43-sym spec universe: SMA50>SMA200 gate, close>SMA20 ∧ RSI14↑55-cross entry, RSI>70 / close<SMA20 / entry−1.5×SMA-ATR14 stop / 42-bar time-stop exits, 1%-risk notational sizing, frozen score tanh((RSI14−55)/15); **NOT a pipeline GO** (family REFUTED; same-day reopen-bar web sweep negative — adverse anchor arXiv 2606.00060 Warsaw walk-forward: momentum +31% gross → −46% net of 10bps, Holm-corrected); config gate `SHADOW_PULLBACK_PROBE_ENABLED` (getattr silent-skip trap), resolver funding provider extended to `shadow_pullback_probe`, 25 new TDD tests (112 targeted + 183 slice + 85 post-fix green, adversarial verifier passed; residual documented: downtime past bar 42 can resolve a condition exit as the time exit); (3) **standing dual-model loop** (owner: both models challenge, both-agree → implement, /loop) — protocol `_workspace/strategy_pipeline/19_dual_model_loop_protocol.md`: Fable+Codex (codex-cli 0.144.5) independent verdicts + 1 policed rebuttal, both-agree rule for ANY action, implementations log-only, promotion owner-signed, S0 health check each wakeup, scout ≤1/UTC-day | 봇 코어 | journal/2026-07-22.md §18:55Z; workflow wf_8b315837-041 |
-| 2026-07-23 | C1 CFTC asset-manager options-pressure screen CLOSED **CONFIRMED_NO_GO** (expectation met): harvest PRE TFF FutOnly+Combined CME BTC (704+704 rows, `data/cftc_cot/`), prereg hashed before outcomes (`2765e269…`), after-cost screen 0/6 residual variants pass; best H2_long_on_pos MC P>0 0.886<0.95 + maxDD p95 0.776>0.25. No probe / no MCP / no live-path change. Ledger row added. Artifacts 20_*; next queue item remains C3 quarter-hour imbalance | 파이프라인 | 20_audit_c1 + 20_integration_report_c1 (no-op) |
-| 2026-07-25 | VPIN jump-risk veto FULL screen (owner override skip Stage-0) CLOSED **CONFIRMED_NO_GO**: prereg `27_*` hash OK; harvest Binance aggTrades→`data/aggtrades_vpin/`; mean VPIN≈0.127 → θ grid never fires; 0/4 ΔEV; no probe. Ledger row added. Next queue: C2 gamma-expiry | 파이프라인 | 27_screen/audit/integration_vpin + 36_owner_override |
-| 2026-07-28 | Clamp-print zero-information screen (ai-reviewer-approved Candidate 2) CLOSED via full pipeline in one day: prereg v2 `39_*` (sha256 `dda32c8cf71d…`) committed 4be03ad BEFORE outcomes after v1 (38_) was BURNED for pre-computing them; TDD screen `research/screen_clamp_print.py` (12 tests); Codex round-1 **INVALID_RUN** caught a cross-venue outcome leak (66.9% of rows) my tests missed — fixed, regression-tested, rerun under the same frozen prereg; corrected result **9/9 testable cells falsify the formal null** (OR_MH 1.55–7.83) but dual-model both-agree interprets it as **venue default-state persistence, NOT positioning information** (`39_verdict_reconciled`); ledger measurement row added; clamp-aware filter = log-only telemetry only; no trade use, no F1 change, decision use needs a NEW prereg. Earlier same day: probe funding accrual repaired (settlement-replay via funding_history, was booking live prints per 8h wall-clock — evidence path only, $0 realized), research_brief median-delta annualizer, carry_runner/funding_history `or 8.0` fabrications removed, listing_short unbricked (bid/ask-less binance ticker + tradfi gate; 25/25 historical "unshortable" rows were tokenized equities) — all activated at the 18:59Z owner restart, which also revealed blacklist `_sl_counts` is in-memory-only (AAVE 2/3 reset; persistence fix pending owner) | 파이프라인 | 39_screen_clamp_print + 39_verdict_codex{,_final} + 39_verdict_reconciled |
-| 2026-08-18 | Nine OSS stacks researched (Freqtrade/Qlib/TensorTrade/Backtrader/Lean/VectorBT/FinRL/Hummingbot/Nautilus) — **not installed**. Bounded PAPER expectancy loop: 8 replay masks on 2,109 closed futures; **winner=cash** (net 0 vs baseline −593.52); maker/score/side filters all −EV; lookahead hold-filter ineligible. No runtime flag. Artifacts `docs/superpowers/specs/2026-08-18-oss-stack-lessons.md`, `_workspace/strategy_pipeline/72_bench_opt_loop_*`, `scripts/bench_paper_expectancy_loop.py` | 측정 | TensorTrade frequency+cost; Qlib with/without cost; Freqtrade lookahead |
-| 2026-08-18 | Past-trade autopsy (n=2,109): stop_loss −648.55 dominates; score corr −0.018; MFE/MAE 0.81; OSS catalogs not reopened. Plan: PAPER max **is** cash. `.env` `ENTRY_POLICY` APPROVED_PAPER→**SHADOW_ONLY** (new exposure off, closes allowed, CONTROLLED_LIVE false). Supervisor restart required. Artifacts `73_plan_paper_then_cash.md`, `scripts/plan_paper_trade_autopsy.py` | 측정 | owner: maximize PAPER then cash |
-| 2026-08-18 | Recency re-scout of the same nine OSS catalogs (Firecrawl/Exa/GitHits unavailable; web+raw README). **0 candidates.** Hummingbot now ships Condor (LLM→execution) — extra STOP vs TradingAgents 2026-08-16. No install, no prediction MCP on trade path, SHADOW_ONLY held. Artifacts `75_scout_oss_catalogs_*`, `75_integration_report_oss_no_op.md` | 파이프라인 | owner /deep-research nine stacks + start trading ASAP |
-| 2026-08-18 | Universal evidence-pipeline deep-research (any coin/pair/commodities, futures L/S, spot, grid, copy, TradFi). **0 candidates.** Pipeline already exists (hashed prereg → Stage-0 → after-cost → DSR/PBO → log-only shadow → frozen gate). Any-universe is a multiplicity attack (DSR threshold rises with N). Grid EV≈0 before fees (arXiv 2506.11921) — ledger STOP stands. Copy follower WR ~coin-flip (vendor 90d). BZ/CL stay `ANALYSIS_ONLY`. SHADOW_ONLY held; no grid/copy/TradFi flags. Artifacts `76_deep_research_universal_evidence_pipeline_*`, `76_scout_candidates.md`, `76_integration_report_no_op.md` | 파이프라인 | owner /deep-research profitable evidence pipeline |
-| 2026-08-18 | TradFi inventory on connected venues (Binance/Bybit/Bitget). **0 candidates.** Products are USDT-M perps (CL/BZ/NATGAS/XAU/stocks, typically 4h funding) plus unwired CFD/MT5 and tokens — not CME, not shares. Keep `tradfi_asset:*`. CME-perp arb = INSUFFICIENT_DATA (new prereg). SHADOW_ONLY held. Artifacts `79_deep_research_tradfi_connected_exchanges_*`, `79_scout_candidates.md`, `79_integration_report_no_op.md` | 파이프라인 | owner /deep-research TradFi on all connected exchanges |
-| 2026-08-18 | Owner sign-off to 24x7-trade coins with 5–200 USDT daily range + hourly/daily/weekly patterns. Council **no-op**. Dollar band is not % edge; ~hundreds of USDT-M perps not 10k; pattern×TF×coin = refuted sweep. No scanner (look-ahead). SHADOW_ONLY held. Artifacts `80_deep_research_dollar_range_patterns_*`, `80_council_trade_everything.md`, `80_operating_plan.md`, `80_integration_report_no_op.md` | 파이프라인 | owner /deep-research /council /plan-tune implement |
-| 2026-08-18 | Why TradFi is blocked: **correct-by-design** (USDT-M 4h-funded synthetics, not CME). Scout **0**. Honesty fix only: scorer `tradfi_asset` (no hung-spec mislabel), boot banner, Bybit `symbolType`, NATGAS in AccBand registry. `tradfi_asset:*` + SHADOW_ONLY held. Artifacts `81_deep_research_why_tradfi_blocked_*`, `81_scout_candidates.md`, `81_integration_report_no_op.md` | 파이프라인 | owner /deep-research Why TradFi is blocked? Identify and fix |
-| 2026-08-18 | Owner audit + team-builder + deep-research to start aggressive profitable PAPER. **REJECT OPENs.** Local 2,109 PAPER futures lose to cash; 2026 retail-perp WFOs agree. Soft-stale latch check fail-closed. SHADOW_ONLY held. Artifacts `82_deep_research_aggressive_paper_*`, `82_scout_candidates.md`, `82_beginner_trading_plan.md`, `82_integration_report_no_op.md` | 파이프라인 | owner /team-builder /deep-research aggressive PAPER |
-| 2026-08-18 | Deep-research [awesome-systematic-trading](https://github.com/paperswithbacktest/awesome-systematic-trading). **0 candidates.** Directory of libs (overlap do-not-install) + Sharpe-ranked papers; crypto rows = hour-of-day STOP + 0.5 bps rebalance. No pwb-toolbox. SHADOW_ONLY held. Artifacts `83_deep_research_awesome_systematic_trading_*`, `83_scout_candidates.md`, `83_integration_report_no_op.md` | 파이프라인 | owner /deep-research awesome-systematic-trading |
-| 2026-08-18 | Owner-directed after-cost test of that catalog's two crypto specs. Overnight BTC 22:00–00:00: n=1,180, mean −20.1 bps, **NO_GO** (hour-of-day stays STOP). Rebalance overlay: 15/27 names, 0/2 arms, mean −11.5/−16.1 bps/day, **NO_GO**. QC 0.5 bps not used. No probe. SHADOW_ONLY held. Artifacts `84_prereg_*`, `84_screen_*`, `84_audit_pwb_two_strategies.md`, `84_integration_report_no_op.md` | 파이프라인 | owner: test the 2 strategies in awesome-systematic-trading |
-| 2026-08-19 | Prereg 86 multi-venue listing-short OBSERVATION arms (bybit/bitget) SHIPPED: one log-only instance per venue (suffixed model_version `listing_short_probe_<venue>_v1`, per-venue state files), `shadow_listing_probe.venue` column (NULL=legacy binance), frozen binance funnel lane venue-PINNED (`venue IS NULL OR 'binance'`) + separate `listing_short_bybit/bitget` lanes — **NOT a pipeline GO; expectation NO_GO** (cross-listed tokens lack day-1 discovery; prereg sha256 3c660f70…, committed 31d6a23 BEFORE activation). Motivation: binance crypto-native listing rate collapsed to ~1.5/mo (51/53 recent listings tokenized equities) — venue breadth raises OBSERVED event rate, never thresholds. Same day: unlock-probe shortability BRICK repaired (eb710b0) + probe re-enabled + calendar weekly→daily | 파이프라인 | owner directive PAPER evidence on all connected exchanges |
-| 2026-08-19 | `model_gate_starving` / `thin_book` (4 hits) was a **false alarm**: SHADOW_ONLY is the real block; watchdog regex missed `[EntryPolicy] …: entry_policy_shadow_only`. Expected-idle + colon parser. Depth / ENTRY_POLICY unchanged. Artifacts `85_deep_research_model_gate_starving_thin_book_*` | 봇 코어 | owner /deep-research watchdog thin_book and fix |
+**변경 이력:** moved out of always-loaded context 2026-08-22. The full 43-row pipeline changelog (2026-07-08 → 2026-08-19) is preserved verbatim in git: `git show HEAD~1:CLAUDE.md`. Live verdicts are in the `refuted-families-ledger` skill; run artifacts are in `_workspace/strategy_pipeline/`.
+
