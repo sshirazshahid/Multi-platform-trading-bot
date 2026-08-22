@@ -36,7 +36,12 @@ def test_execute_open_soft_stale_exception_fails_closed() -> None:
 
     src = bot_engine_implementation_source(method="_execute_open")
     idx = src.index("soft_stale_entries_blocked")
-    block = src[idx : idx + 700]
+    # Window widened 700→1600 (2026-08-22): the branch now carries the incident
+    # comment explaining WHY it must log (a scored ETH proposal vanished between
+    # the OPEN line and "Cycle complete: 0/1 actions executed", with nothing in
+    # between), pushing the asserted tokens to +1213/+1253/+1353. The assertions
+    # and the check order they pin are unchanged.
+    block = src[idx : idx + 1600]
     assert "entry check skipped" not in block
     assert "soft_stale_entry_block" in block
     assert "return False" in block

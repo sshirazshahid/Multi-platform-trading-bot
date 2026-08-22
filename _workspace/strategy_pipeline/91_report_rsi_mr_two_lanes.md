@@ -85,7 +85,8 @@ both directions.
 | 10 | EURUSD | 4h | 5 | 35 | long | 70 | none | 48 | 7.00 | 111.0 | 0.700 | 2.34 | 0.132 | 414.5 | 656 | 1.20 |
 
 **43,624 of 624,288 combos (7.0%) beat buy-and-hold on both Sharpe and total
-return.** Their median exposure is 57.7% of bars.
+return.** Their median exposure is 57.7% of bars — and see the SPY section
+below for what "beats buy-and-hold" turns out to mean on the deepest panel.
 
 ### Why not one row of that is evidence
 
@@ -146,6 +147,34 @@ gets easier to see. This one is inversely proportional to sample size — the
 signature of a search fitting noise. **The 9.56 Sharpe and the 0.42 Sharpe are
 the same strategy family on the same instrument.** Only the amount of history
 it had to hide in changed.
+
+### The one result that looked real — and what it actually was
+
+RSI mean-reversion on US equity indices is a *published* effect, and SPY daily
+is the deepest equity panel here (8,447 bars, 33.6 years). It is also the one
+place a cross-era test could be run, so it was:
+
+| | winner of 1993–2009 | winner of 2010–2026 |
+|---|---|---|
+| in its own era | annSharpe **+2.48** (n=761) | annSharpe **+3.95** (n=664) |
+| in the *other* era | **+2.53** | **+1.70** |
+
+Both survive the era they were not fitted on. That is the only thing in this
+entire study that behaved like a real effect, so it got its own test rather
+than being folded into the general conclusion. Three measurements killed it:
+
+- **It loses to buy-and-hold on money.** Best SPY-1d combo over 33.6 years:
+  **+1528.3%**. Buy-and-hold: **+1635.6%**. The Sharpe looks 4.6× better
+  (2.51 vs 0.55) — the dollars are worse.
+- **Exposure 114.5%.** It is in the market *more than fully invested*, on an
+  instrument that rose ~16×. A Sharpe that survives every era is what tracking
+  a rising asset looks like; it is beta wearing a timing strategy's clothes.
+- **Its own null: percentile 0.** Real best per-trade Sharpe **0.3846**,
+  against a null median of **1.0111** and a max of **1.5987**. On the deepest
+  panel in the study, the best of 27,552 combos was beaten by **all 20** noise
+  surrogates.
+
+Cross-era survival is not evidence when the thing surviving is the market.
 
 No leaderboard file was written, deliberately: a ranked artifact outlives the
 caveats attached to it.

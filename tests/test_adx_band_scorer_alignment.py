@@ -54,12 +54,54 @@ def _score(adx_4h: float) -> dict:
                       data={"funding": {}, "orderbook": {}}, ei=_ei(adx_4h))
 
 
+def _cohort(monkeypatch, enabled: bool) -> None:
+    """Force the ADX demo cohort on or off for one test.
+
+    2026-08-22: the owner-authorised demo cohort
+    (89_owner_decision_directional_kill_date.md) makes the >30 veto
+    CONDITIONAL, so a test that leaves the flag ambient no longer pins
+    anything — it reports whichever posture the environment happens to be in.
+    Every test below states which world it is in. core/scoring/entry_score.py
+    imports this lazily at the veto site, so patching the module attribute is
+    what the veto actually reads.
+    """
+    import config.gates as gates
+
+    monkeypatch.setattr(
+        gates, "ADX_DEMO_COHORT",
+        {"enabled": enabled, "requested_enabled": enabled,
+         "cohort_tag": "adx_demo_ungated_v1"},
+    )
+
+
 # ── the fix ──────────────────────────────────────────────────────────────
-def test_adx_above_30_is_rejected_by_the_scorer():
-    """THE change: the scorer must stop proposing veto-doomed entries."""
+def test_adx_above_30_is_rejected_by_the_scorer(monkeypatch):
+    """THE change: the scorer must stop proposing veto-doomed entries.
+
+    Pinned with the demo cohort OFF — the default posture, and the one prereg
+    77 specifies. With the cohort armed this rejection is deliberately
+    suspended; that world is pinned separately below.
+    """
+    _cohort(monkeypatch, False)
     r = _score(34.0)
     assert r["score"] == 0, "adx_4h>30 must not produce a scored candidate"
     assert "30" in r["reason"], r["reason"]
+
+
+def test_demo_cohort_suspends_the_upper_bound_and_stamps_the_candidate(monkeypatch):
+    """The armed cohort lets adx>30 through — and must SAY so on the candidate.
+
+    An ungated cohort indistinguishable from normal flow would poison every
+    downstream attribution. The ``adx_demo`` stamp is what keeps the two
+    populations separable after the fact.
+    """
+    _cohort(monkeypatch, True)
+    r = _score(34.0)
+    assert r["score"] > 0, "the armed demo cohort must not be vetoed at >30"
+    assert r.get("adx_demo") is True, (
+        "a cohort candidate must be stamped adx_demo=True, or its outcomes are "
+        "indistinguishable from ordinary flow"
+    )
 
 
 def test_adx_at_exactly_30_is_not_rejected_by_the_upper_bound():
@@ -88,8 +130,12 @@ def test_mid_band_is_not_rejected_by_the_regime_gate():
             f"adx={adx} must survive the regime gate, got {reason!r}")
 
 
-def test_rejection_reason_is_diagnosable():
+def test_rejection_reason_is_diagnosable(monkeypatch):
     """The reason must name the threshold so an operator can tell this apart
-    from the chop rejection in the skip histogram."""
+    from the chop rejection in the skip histogram.
+
+    Cohort OFF: with it armed there is no rejection to describe.
+    """
+    _cohort(monkeypatch, False)
     r = _score(45.0)
     assert "adx" in r["reason"].lower() and "30" in r["reason"]

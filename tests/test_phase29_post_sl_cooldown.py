@@ -262,7 +262,11 @@ def test_execute_open_checks_cooldown_early():
     # Widened 3500→4300 (2026-07-12): the entries-only kill switch (an even
     # cheaper, entries-global early exit) now sits BEFORE the cooldown check;
     # check order relative to MCP/risk eval is unchanged.
-    head = src[eo_idx:eo_idx + 4300]
+    # Widened 4300→7000 (2026-08-22): the kill-switch (+3613) and soft-stale
+    # (+3863) branches gained the logger calls and incident comments the
+    # "silent rejection" fix required, moving the cooldown check to +5982.
+    # Both still sit BEFORE it; order relative to MCP/risk eval is unchanged.
+    head = src[eo_idx:eo_idx + 7000]
     assert "self.risk.is_sl_cooldown_active(" in head
 
 
