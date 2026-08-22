@@ -17,15 +17,18 @@ drawdown, against buy-and-hold's Sharpe of 1.20.**
 It is noise, and this time that is not an opinion. Two independent
 demonstrations, then a real measurement:
 
-1. That winner sits at the **80th percentile** of what the *identical search*
-   produces on randomised noise. Nothing reached the 95th. On SPY 4h the
-   noise's best (3.16) **beat the real data's best (1.30) by 2.4×**.
+1. The best result on that panel sits at the **80th percentile** of what the
+   *identical search* produces on randomised noise. Nothing reached the 95th.
+   On SPY 4h the noise's best (3.16) **beat the real data's best (1.30) by
+   2.4×**. (The 80 belongs to the panel's best *per-trade* Sharpe — the
+   statistic the null is measured in — not literally to the row displayed at
+   #1, which ranks on the annualised figure and sits lower still.)
 2. Across the 22 panels, the best Sharpe found is **inversely proportional to
    how much data the panel has** (corr −0.304). Same grid, same rules: give it
    more history and the edge evaporates — EURUSD 22.8×, CRUDE 4.2×, GOLD 3.1×,
    SPY 2.8×.
 3. The separate pre-registered test that *can* resolve returns:
-   **no edge above 18.8 bps per trade.**
+   **no edge above 30.1 bps per trade.**
 
 That third line is the thing four previous rounds could not produce.
 
@@ -59,6 +62,31 @@ context. It reached far past the 5,000-bar cap that throttled every prior run:
 Result: minimum detectable effect fell from **oracle Sharpe 4.79 to 0.671** — a
 **7× improvement**, and the first time in five attempts the question was
 answerable at all.
+
+### Which lever actually did it
+
+Worth stating precisely, because it corrects the pre-run expectation and
+changes the advice for next time. The oracle-Sharpe metric reduces
+algebraically to `MDE_Z / √(calendar years)`: substituting
+`MDE_R = MDE_Z·σ/√n` and `trades_per_year = n/years`, **both σ and n cancel**
+(verified identical to 1e-9). Power here is a function of the multiplicity
+correction and the **calendar span alone** — not of how many trades you take.
+
+| lever | change | contribution |
+|---|---|---|
+| **Data depth** | 2.19 years → 28.4 years | **3.6×** |
+| Cell reduction | 43,680 → 8 cells (`MDE_Z` 5.71 → 3.58) | 1.6× |
+
+**Depth was the binding constraint.** At 43,680 cells on this data the oracle
+would still have reached **1.071 — inside the 1.5 bar.** The plan's pre-run
+extrapolation claimed 43,680 cells stayed unresolvable at ~2.34; the
+measurement says otherwise, and the measurement wins.
+
+The cell reduction still earns its place — it tightens the detectable effect
+from roughly **48 bps to 30 bps**, and it is what keeps best-of-N inflation,
+DSR and PBO honest. Lane 1 is the live demonstration of what happens without
+it. But if there is one instruction to carry forward, it is *get deeper data*,
+not *ask fewer questions*.
 
 ---
 
@@ -202,7 +230,7 @@ which is what makes a negative result mean something.
 
 ### The outcome
 
-**Verdict: `NO_EDGE_ABOVE_18.8_BPS` per trade.** 0 of 8 cells clear; 0 of 8
+**Verdict: `NO_EDGE_ABOVE_30.1_BPS` per trade.** 0 of 8 cells clear; 0 of 8
 have a positive risk-adjusted mean; best null percentile 92, against a 95 bar.
 
 | cell | n | mean R | mean bps | WR | PF | OOS-WR | null% | DSR | breakeven cost × |
@@ -297,7 +325,7 @@ compounds costs without adding edge. **No code path was changed, no gate was
 touched, no threshold was moved.** Everything here is research-only.
 
 The standing ledger verdict is unchanged — RSI mean-reversion stays refuted —
-but it now carries a number it did not have before: **no edge above 18.8 bps
+but it now carries a number it did not have before: **no edge above 30.1 bps
 per trade**, measured on an instrument proven to detect an effect of that size
 83.5% of the time.
 

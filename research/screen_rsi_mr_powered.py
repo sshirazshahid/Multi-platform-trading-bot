@@ -417,6 +417,17 @@ def stage0(panels: dict, rng: np.random.Generator) -> tuple[dict, list[dict]]:
     years = float(np.median(spans)) if spans else 1.0
     mde_R = MDE_Z * sigma_R / np.sqrt(n_med) if n_med > 0 else float("inf")
     per_year = n_med / years if years > 0 else 0.0
+    # NOTE, because it changes what this gate is actually measuring: this
+    # reduces algebraically to MDE_Z / sqrt(years). Substituting
+    # mde_R = MDE_Z*sigma/sqrt(n) and per_year = n/years, both sigma and n
+    # cancel -- taking more trades lowers the MDE and raises the annualisation
+    # by the same factor. So POWER here is a function of the multiplicity
+    # correction and the CALENDAR SPAN alone, not of trade count.
+    # Consequence, verified: at 43,680 cells MDE_Z rises 3.576 -> 5.707 and
+    # oracle only reaches 1.071 -- still inside the 1.5 bar on this data. Data
+    # DEPTH was the binding constraint (3.6x), not the cell reduction (1.6x).
+    # The cell reduction still matters, but for the OTHER controls: it is what
+    # keeps best-of-N inflation, DSR and PBO honest.
     oracle_sharpe = (mde_R / sigma_R) * np.sqrt(per_year) if sigma_R > 0 else float("inf")
 
     # ---- SIZE (prereg 91 §1): the SURROGATE-REFERENCED percentile test ----
@@ -521,6 +532,7 @@ def evaluate(real: dict, surrogate_reps: list[dict], stage: dict) -> dict:
             "mean_bps": float((p["gross"] - p["cost"]).mean() * 1e4) if R.size else 0.0,
             "mean_R_2x_cost": float(_net_R(p, 2.0).mean()) if R.size else 0.0,
             "breakeven_cost_mult": be_mult,
+            "mean_risk": float(p["risk"].mean()) if R.size else 0.0,
             "avg_bars_held": float(p["bars_held"].mean()) if R.size else 0.0,
             "oos_wr": float((oos > 0).mean()) if oos.size else 0.0,
             "null_pctile": pct,
@@ -542,11 +554,19 @@ def evaluate(real: dict, surrogate_reps: list[dict], stage: dict) -> dict:
         )
         cells.append(cd)
 
-    # MDE in bps: convert the risk-unit MDE with the observed median R->bps
-    # scale (median atr_frac across cells), so the verdict carries a number a
-    # human can compare against a spread.
-    scales = [c["mean_bps"] / c["mean_R"] for c in cells if c["mean_R"]]
-    mde_bps = stage["mde_R"] * abs(float(np.median(scales))) if scales else float("nan")
+    # MDE in bps, so the verdict carries a number comparable to a spread.
+    # R = return / atr_frac, so the R->bps factor is median(atr_frac) * 1e4.
+    #
+    # NOT the median of the per-cell ratio mean_bps/mean_R. That ratio-of-means
+    # divides by a mean_R that sits near zero in some cells and flips sign in
+    # others (measured: -135.1 and -20.4 among the eight), and taking abs() of
+    # the median silently rescues them. It read 18.79 bps where the correct
+    # conversion reads 30.15 -- and understating the MDE OVERSTATES what the
+    # screen ruled out, which is the exact overclaim this design exists to
+    # prevent. The verdict sentence quotes this number, so it gets the honest
+    # estimator.
+    risks = [c["mean_risk"] for c in cells if c["mean_risk"] > 0]
+    mde_bps = stage["mde_R"] * float(np.median(risks)) * 1e4 if risks else float("nan")
     any_clear = any(c["clears"] for c in cells)
     return {
         "cells": sorted(cells, key=lambda d: -d["mean_R"]),
