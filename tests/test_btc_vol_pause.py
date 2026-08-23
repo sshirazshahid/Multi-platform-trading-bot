@@ -102,6 +102,77 @@ def test_elevated_extends_the_wait(gate):
     assert gate.update_and_evaluate(_cache(1.0), now=spike_t + 1900)[0] is True
 
 
+def test_elevated_band_cannot_pin_the_pause_indefinitely(gate):
+    """A cooldown must not outlive its trigger.
+
+    Sustained elevated-but-not-spiking vol re-armed ``pause_until`` on EVERY
+    evaluation, so a clear_minutes=30 cooldown became open-ended. Measured live
+    2026-08-23: the bot had been paused 10.3h -- 20x its configured cooldown --
+    with the last genuine spike 10.3h earlier and BTC 1h ATR at 0.68% = 1.89x
+    its 30d median, i.e. BELOW the 2.0x bar the gate itself uses to define
+    dangerous vol. A bot with empty state would have traded at that same ATR;
+    only the pause history held it. The baseline here stays calm-dominated
+    (30 calm vs 12 elevated appends) so the median cannot drift and mask this.
+    """
+    t = _warm(gate, atr=1.0, n=30)
+    spike_t = t + 60
+    assert gate.update_and_evaluate(_cache(2.5), now=spike_t)[0] is True
+
+    # 12 hours of elevated-but-never-spiking vol, evaluated every 5 minutes.
+    last = None
+    for step in range(1, 145):
+        last = gate.update_and_evaluate(_cache(1.6), now=spike_t + step * 300)
+
+    paused, reason, info = last
+    assert info["median"] == pytest.approx(1.0), "median drifted; test is invalid"
+    assert paused is False, (
+        f"still paused 12h after a 30m cooldown with no new spike: {reason}"
+    )
+
+
+def test_bounded_cooldown_still_honours_a_fresh_spike(gate):
+    """Bounding the wait must not let a genuine spike through."""
+    t = _warm(gate, atr=1.0, n=30)
+    spike_t = t + 60
+    gate.update_and_evaluate(_cache(2.5), now=spike_t)
+    for step in range(1, 145):
+        gate.update_and_evaluate(_cache(1.6), now=spike_t + step * 300)
+    # released above; a NEW spike must pause again immediately
+    paused, reason, _ = gate.update_and_evaluate(_cache(2.5), now=spike_t + 145 * 300)
+    assert paused is True
+    assert "spike" in reason
+
+
+def test_spike_at_is_recovered_from_the_buffer_on_restart(gate, tmp_path):
+    """A restart must not clear a legitimate pause, nor re-pin a stale one.
+
+    State written before spike_at existed has no record of when the spike was.
+    Guessing "no spike" would release on every restart; the buffer already
+    holds the answer, so recover it from there.
+    """
+    import json
+
+    t = _warm(gate, atr=1.0, n=30)
+    spike_t = t + 60
+    gate.update_and_evaluate(_cache(2.5), now=spike_t)          # real spike
+    for step in range(1, 13):                                    # 1h elevated
+        gate.update_and_evaluate(_cache(1.6), now=spike_t + step * 300)
+
+    # Simulate legacy state: drop spike_at, keep buf + an active pause.
+    raw = json.loads((tmp_path / "data" / "btc_vol_state.json").read_text())
+    raw.pop("spike_at", None)
+    (tmp_path / "data" / "btc_vol_state.json").write_text(json.dumps(raw))
+
+    revived = BtcVolPause()
+    assert revived._spike_at == 0.0, "fixture did not actually drop spike_at"
+
+    # 1h after a genuine spike is INSIDE the 240m cap -> must stay paused.
+    paused, reason, _ = revived.update_and_evaluate(
+        _cache(1.6), now=spike_t + 13 * 300)
+    assert paused is True, f"restart cleared a legitimate pause: {reason}"
+    assert revived._spike_at == pytest.approx(spike_t), "spike time not recovered"
+
+
 def test_missing_btc_fails_open(gate):
     _warm(gate, atr=1.0, n=5)
     assert gate.update_and_evaluate({"ETH": {"1h": {"atr_pct": 9.0}}}, now=99999)[0] is False

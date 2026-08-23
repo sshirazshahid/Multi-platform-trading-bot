@@ -240,6 +240,12 @@ BTC_VOL_PAUSE = {
     "vol_spike_mult": float(os.getenv("BTC_VOL_SPIKE_MULT", "2.0")),
     "hysteresis_mult": float(os.getenv("BTC_VOL_HYSTERESIS_MULT", "1.5")),
     "clear_minutes": float(os.getenv("BTC_VOL_CLEAR_MIN", "30")),
+    # Ceiling on how long ONE spike may keep vetoing entries. Without it the
+    # cooldown re-arms on every evaluation while ATR sits in [clear, spike)
+    # and never expires -- measured 2026-08-23 holding entries 10.3h on a
+    # 30-minute cooldown. Does NOT loosen either threshold: a fresh spike
+    # still pauses instantly, and calm still resumes early.
+    "max_pause_minutes": float(os.getenv("BTC_VOL_MAX_PAUSE_MIN", "240")),
     "min_samples": int(os.getenv("BTC_VOL_MIN_SAMPLES", "24")),  # ~1d warmup (hourly)
     "append_min_interval_sec": 3600,
     "buffer_max": 1000,

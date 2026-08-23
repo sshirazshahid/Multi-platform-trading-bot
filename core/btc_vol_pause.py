@@ -81,6 +81,10 @@ class BtcVolPause:
     def __init__(self):
         self._buf: list[list[float]] = []   # [[ts, atr_pct], ...] trailing baseline
         self._pause_until: float = 0.0
+        # When the last GENUINE spike (atr >= spike) fired. The cooldown is
+        # bounded relative to this, never to the last extension -- otherwise a
+        # cooldown re-arms itself forever and stops being a cooldown.
+        self._spike_at: float = 0.0
         self._load()
 
     # ── persistence ────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ class BtcVolPause:
                 d = json.loads(_STATE.read_text(encoding="utf-8"))
                 self._buf = [list(x) for x in d.get("buf", [])]
                 self._pause_until = float(d.get("pause_until", 0.0))
+                self._spike_at = float(d.get("spike_at", 0.0))
         except Exception as e:
             logger.debug(f"[BtcVolPause] load skipped: {e}")
 
@@ -97,8 +102,10 @@ class BtcVolPause:
         try:
             _STATE.parent.mkdir(parents=True, exist_ok=True)
             tmp = _STATE.with_name(_STATE.name + ".tmp")
-            tmp.write_text(json.dumps({"buf": self._buf, "pause_until": self._pause_until}),
-                           encoding="utf-8")
+            tmp.write_text(
+                json.dumps({"buf": self._buf, "pause_until": self._pause_until,
+                            "spike_at": self._spike_at}),
+                encoding="utf-8")
             os.replace(tmp, _STATE)
         except Exception as e:
             logger.debug(f"[BtcVolPause] save skipped: {e}")
@@ -148,11 +155,13 @@ class BtcVolPause:
         spike = float(cfg.get("vol_spike_mult", 2.0)) * median
         clear = float(cfg.get("hysteresis_mult", 1.5)) * median
         clear_sec = float(cfg.get("clear_minutes", 30)) * 60.0
+        max_pause_sec = float(cfg.get("max_pause_minutes", 240)) * 60.0
         info = {"atr": round(atr, 3), "median": round(median, 3),
                 "spike": round(spike, 3), "clear": round(clear, 3)}
 
         if atr >= spike:
             self._pause_until = now + clear_sec
+            self._spike_at = now
             self._save()
             return (True,
                     f"BTC vol spike: 1h ATR {atr:.2f}% >= {spike:.2f}% "
@@ -161,10 +170,48 @@ class BtcVolPause:
         # within the post-spike cooldown window
         if now < self._pause_until:
             if atr > clear:
-                # still elevated (between clear and spike) -> extend the wait
-                self._pause_until = now + clear_sec
+                # Still elevated (between clear and spike) -> extend the wait,
+                # but ONLY up to max_pause_minutes since the last genuine spike.
+                #
+                # 2026-08-23: unbounded, this line made the gate a LATCH, not a
+                # cooldown. It re-armed pause_until on EVERY evaluation (~5 min),
+                # so clear_minutes was unreachable whenever ATR sat in the
+                # [clear, spike) band -- and BTC sits there ~50% of the time.
+                # Measured live: paused 10.3h on a clear_minutes=30 cooldown
+                # (20x configured) with the last true spike 10.3h earlier and
+                # ATR at 1.89x median, BELOW the 2.0x bar this gate itself uses
+                # to define dangerous vol. A bot with empty state would have
+                # traded at that same ATR; only the pause history held it.
+                # The spike trigger and the clear threshold are UNCHANGED --
+                # this bounds how long a past spike may keep vetoing, nothing else.
+                if self._spike_at <= 0.0:
+                    # State written before spike_at existed, or a restart. Do NOT
+                    # fail open here: we have the ATR buffer, so recover the real
+                    # spike time from it rather than guessing. Guessing "no spike"
+                    # would clear a legitimate pause on every restart; guessing
+                    # "just spiked" would re-pin the very latch this bounds.
+                    self._spike_at = next(
+                        (ts for ts, a in reversed(self._buf) if a >= spike), 0.0
+                    )
+                    if self._spike_at > 0.0:
+                        logger.info(
+                            f"[BtcVolPause] recovered spike_at from buffer: "
+                            f"{(now - self._spike_at) / 60:.0f}m ago (ATR >= {spike:.2f}%)"
+                        )
+                spike_age = now - self._spike_at if self._spike_at > 0.0 else float("inf")
+                if spike_age < max_pause_sec:
+                    self._pause_until = now + clear_sec
+                    self._save()
+                    return (True,
+                            f"BTC vol still elevated: 1h ATR {atr:.2f}% > {clear:.2f}%",
+                            info)
+                # Cooldown has outlived its trigger and vol is not spiking.
+                self._pause_until = 0.0
                 self._save()
-                return True, f"BTC vol still elevated: 1h ATR {atr:.2f}% > {clear:.2f}%", info
+                return (False,
+                        f"BTC vol elevated ({atr:.2f}%) but no spike for "
+                        f"{spike_age / 60:.0f}m >= max_pause "
+                        f"{max_pause_sec / 60:.0f}m -- resuming", info)
             # calm again, but honour the timed wait ("wait for sometime")
             mins = int((self._pause_until - now) / 60) + 1
             if dirty:
