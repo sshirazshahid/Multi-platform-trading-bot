@@ -179,3 +179,67 @@ def test_wired_into_execute_open_new_entries_only():
     assert "BtcVolPause" in body, "BTC vol pause must be gated inside _execute_open"
     assert "update_and_evaluate" in body
     assert "defaulting to ALLOW" in body  # fail-open idiom
+
+
+# ── 2026-08-20: the Aug-17 window bug, still live in the GATE itself ──────────
+
+def test_spike_baseline_uses_the_30d_spec_window_not_the_whole_buffer(gate):
+    """The pause gate must median the 30-DAY window, like current_ratio() does.
+
+    2026-08-17 postmortem fixed `current_ratio()` (band-lane veto) to window the
+    baseline at 30 days -- config/gates.py pre-registers "BTC 1h ATR / 30d median".
+    `update_and_evaluate()` reads the SAME buffer and was never fixed:
+
+        current_ratio      :190  samples = [a for (ts, a) in self._buf if ts >= cutoff]
+        update_and_evaluate:129  samples = [a for (_, a) in self._buf]   <- no cutoff
+
+    buffer_max=1000 hourly samples is ~42d, and the LIVE buffer on 2026-08-20 held
+    700 samples spanning 60.8 days. In a decaying-vol regime the older readings sit
+    HIGHER, so the un-windowed median is inflated and the spike threshold with it --
+    the gate is more PERMISSIVE than the screen authorised. Measured on the live
+    buffer that day: whole-buffer median 0.43% (threshold 0.86%) vs 30d-spec median
+    0.36% (threshold 0.72%). ATR 0.92% tripped both, so the verdict was unchanged
+    that day -- but any ATR in [0.72, 0.86) is a silent unauthorised entry.
+    """
+    now = 1_000_000_000.0
+    day = 86400.0
+    # 30 OLD readings at 1.00%, 40-69 days back: OUTSIDE the 30d spec window.
+    gate._buf = [[now - (40 + i) * day, 1.00] for i in range(30)]
+    # 30 RECENT readings at 0.30%, inside the window (0.5-day spacing).
+    gate._buf += [[now - (i * 0.5) * day, 0.30] for i in range(1, 31)]
+    gate._buf.sort(key=lambda row: row[0])
+
+    # 30d median = 0.30 -> spec spike = 0.60. Whole-buffer median ~0.65 -> ~1.30.
+    # ATR 0.70 sits BETWEEN them: spec says PAUSE, un-windowed says allow.
+    paused, reason, info = gate.update_and_evaluate(_cache(0.70), now=now)
+
+    assert paused is True, (
+        f"30d-spec baseline must pause at ATR 0.70% (spike=0.60%); "
+        f"got allow -- gate is medianing the whole buffer. reason={reason} info={info}"
+    )
+    assert info.get("median") == pytest.approx(0.30, abs=0.02), (
+        f"baseline median must come from the 30d window (0.30), got {info.get('median')}"
+    )
+
+
+def test_gate_and_current_ratio_share_one_baseline_window(gate):
+    """Two readings of the same buffer must not disagree about the window.
+
+    A gate with two implementations of its own baseline is the 2026-08-17 failure
+    mode: one can be wrong while the other looks right, and nothing detects it.
+    """
+    now = 1_000_000_000.0
+    day = 86400.0
+    gate._buf = [[now - (45 + i) * day, 1.00] for i in range(30)]
+    gate._buf += [[now - (i * 0.5) * day, 0.30] for i in range(1, 31)]
+    gate._buf.sort(key=lambda row: row[0])
+
+    ratio = gate.current_ratio(_cache(0.60), now=now)
+    _, _, info = gate.update_and_evaluate(_cache(0.60), now=now)
+
+    assert ratio is not None and info.get("median")
+    implied = 0.60 / float(info["median"])
+    assert implied == pytest.approx(ratio, rel=0.05), (
+        f"current_ratio implies median {0.60 / ratio:.3f} but the gate used "
+        f"{info['median']:.3f} -- the two paths are windowing differently"
+    )

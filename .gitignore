@@ -49,6 +49,10 @@ data/derivs_history.jsonl
 
 # Transient agent / tool state (Ruflo swarm, worktrees, vector + agent DBs)
 .claude-flow/
+# 2026-08-22: `claude-flow config init` writes this at the repo root. Local tool
+# state, not project source, and this repo is PUBLIC — ignore it alongside
+# .claude-flow/ above. (Checked: the generated file holds no credentials.)
+claude-flow.config.json
 .swarm/
 .claude/worktrees/
 .pytest_tmp/

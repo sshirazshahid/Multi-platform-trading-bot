@@ -126,7 +126,19 @@ class BtcVolPause:
                 self._buf = self._buf[-cap:]
             dirty = True
 
-        samples = [a for (_, a) in self._buf]
+        # 30-DAY window, not the whole buffer. This is the SPEC (config/gates.py
+        # pre-registers "BTC 1h ATR / 30d median"), and it is the same cutoff
+        # current_ratio() applies below. Until 2026-08-20 this line read
+        # `[a for (_, a) in self._buf]` -- un-windowed -- so the gate and
+        # current_ratio disagreed about their own baseline while reading one buffer.
+        # buffer_max=1000 hourly samples is ~42d and the live buffer had reached 700
+        # samples spanning 60.8 days; in a decaying-vol regime the older readings sit
+        # HIGHER, inflating the median and RAISING the spike threshold, i.e. the gate
+        # was more PERMISSIVE than screen 13 authorised (measured 2026-08-20:
+        # whole-buffer median 0.43% -> threshold 0.86% vs 30d-spec 0.36% -> 0.72%).
+        # The 2026-08-17 postmortem fixed current_ratio() and missed this path.
+        cutoff = now - _BASELINE_WINDOW_SEC
+        samples = [a for (ts, a) in self._buf if ts >= cutoff]
         if len(samples) < int(cfg.get("min_samples", 24)):
             if dirty:
                 self._save()

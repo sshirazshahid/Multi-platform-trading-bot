@@ -74,9 +74,28 @@ def score_coin(*, data_coordinator, coin: str, data: dict, ei: dict) -> dict:
         # bucket edge from screen 13_band_conditional. HONESTY: the surviving
         # 20-30 band is itself significantly NEGATIVE (mean -0.1551/trade,
         # 95% CI [-0.2232, -0.0871]) — this restores FLOW, never EDGE.
+        _adx_demo = False
         if adx_4h > 30:
-            _zero["reason"] = f"regime_toxic_trend(4h_adx={adx_4h:.0f}>30)"
-            return _zero
+            # ADX demo cohort (2026-08-21, owner-authorised; see
+            # config.gates._adx_demo_cohort_enabled and
+            # _workspace/strategy_pipeline/89_owner_decision_directional_kill_date.md).
+            # The guard is FAIL-CLOSED: requested AND PAPER AND DRY_RUN AND NOT
+            # CONTROLLED_LIVE. We consult the RESOLVED flag, NEVER os.getenv here --
+            # reading the env var at this site would let one .env line bypass a risk
+            # veto with no mode checks at all.
+            # This lifts ONLY this veto; every gate below still applies in full.
+            # It restores FLOW, never EDGE: the band it opens is measurably WORSE
+            # than the 20-30 band, which the comment above already records as
+            # significantly negative. Expected outcome is faster losses. That is
+            # the entire point of the lane -- it is a falsification instrument.
+            try:
+                from config.gates import ADX_DEMO_COHORT as _ADX_DEMO
+            except Exception:
+                _ADX_DEMO = {"enabled": False}
+            if not _ADX_DEMO.get("enabled"):
+                _zero["reason"] = f"regime_toxic_trend(4h_adx={adx_4h:.0f}>30)"
+                return _zero
+            _adx_demo = True
         if bb_width_4h < 1.0:
             _zero["reason"] = f"regime_squeeze(4h_bb={bb_width_4h:.1f}%<1.0%)"
             return _zero
@@ -673,6 +692,12 @@ def score_coin(*, data_coordinator, coin: str, data: dict, ei: dict) -> dict:
             "confidence": round(confidence * _weekday_mult, 2),
             "reason": reason,
             "_weekday_mult": _weekday_mult,
+            # Cohort marker. True ONLY when the fail-closed ADX demo guard let a
+            # 4h-ADX>30 candidate through. Everything downstream that separates
+            # demo rows from evidence keys off this. Isolation is best-effort
+            # (owner accepted that residual), but the MARK is not optional --
+            # without it the lane pools silently into the evidence lane.
+            "adx_demo": _adx_demo,
         }
 
 def score_coin_scalp(coin: str, data: dict, ei: dict) -> dict:

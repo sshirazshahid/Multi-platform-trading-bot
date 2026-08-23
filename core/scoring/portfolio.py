@@ -59,6 +59,26 @@ def algorithmic_portfolio(brain, coins, data, exchange_indicators,
                 continue  # Guaranteed to be rejected downstream
             ei = exchange_indicators.get(coin, {})
             if not ei:
+                # Record the drop. Every OTHER elimination in this loop leaves a
+                # typed candidates row; until 2026-08-21 this one left nothing,
+                # so the per-cycle denominator was unknowable and a degraded
+                # indicator feed was indistinguishable from a quiet market.
+                # Measured live that day: universe 55 coins every cycle while
+                # "Exchange indicators: N coins" alternated 13 / 40 -- i.e.
+                # 15-42 of 55 (27-76%) vanished silently, every cycle.
+                # Fail-soft: telemetry must never be able to halt trading.
+                if get_warehouse is not None:
+                    try:
+                        get_warehouse().record_candidate(
+                            exchange="*",
+                            symbol=f"{coin}/USDT",
+                            market_type="futures",
+                            strategy_family="systematic_v3_1",
+                            decision="SKIP",
+                            skip_reason="no_indicator_data",
+                        )
+                    except Exception:
+                        pass
                 continue  # No indicator data
             # AccBand PAPER funnel: do not ALLOW ANALYSIS_ONLY TradFi bases
             # (MSFT/NVDA/…) — they pollute allow-rate without a screened edge.

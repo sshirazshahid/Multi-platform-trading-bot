@@ -82,6 +82,16 @@ class _EntryExecMixin:
         # the file resumes entries without a restart.
         from core.kill_switch import entries_halted
         if entries_halted():
+            # 2026-08-21: this refused entries SILENTLY. core.kill_switch logs
+            # the STATE CHANGE, which is not the same as saying why THIS entry
+            # died -- an operator watching the log saw a scored proposal vanish
+            # between "[MCP-Algo] OPEN ..." and "Cycle complete: 0/N executed".
+            # A kill switch halting entries invisibly is the worst version of
+            # that, so this is WARNING rather than INFO.
+            logger.warning(
+                f"[KillSwitch] BLOCKED open {ex_name}:{symbol} {side} - "
+                "data/KILL_SWITCH present; remove the file to resume entries"
+            )
             action["reject_reason"] = "kill_switch_active"
             return False
 
@@ -91,6 +101,22 @@ class _EntryExecMixin:
             from core.soft_stale_latch import soft_stale_entries_blocked
 
             if soft_stale_entries_blocked():
+                # 2026-08-21: THE reported defect. This branch refused entries
+                # with no log line at all, so the log read:
+                #   [MCP-Algo] OPEN ETH/USDT buy score=78 layers=8/7 conf=95%
+                #   [Claude] Cycle complete: 0/1 actions executed
+                # Consecutive lines -- a scored proposal vanishing with no
+                # stated reason. The only clue was "[SoftStale] entries
+                # resumed" appearing AFTERWARDS, i.e. the latch had been on
+                # during the cycle. The reject_reason was always written to
+                # decision_events, so the machine could explain itself; a human
+                # reading the log could not, and that gap cost hours of the
+                # "model_gate_starving / no identifiable entry block" hunt.
+                logger.info(
+                    f"[SoftStale] BLOCKED open {ex_name}:{symbol} {side} - "
+                    "forward-feed/API soft-stale latch active; entries resume "
+                    "when feeds are fresh (open positions keep SL/TP running)"
+                )
                 action["reject_reason"] = "soft_stale_entry_block"
                 return False
         except Exception as _sse:

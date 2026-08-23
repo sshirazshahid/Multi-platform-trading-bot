@@ -1,7 +1,83 @@
 """Accuracy band, MCP gates, model gate, economic entry gate."""
 import os
 
-from config.modes import OPERATING_MODE, PAPER_TRADING_PROFILE
+from config.modes import (
+    CONTROLLED_LIVE_ENABLED,
+    DRY_RUN,
+    OPERATING_MODE,
+    PAPER_TRADING_PROFILE,
+)
+
+
+def _adx_demo_cohort_enabled(
+    requested: bool,
+    operating_mode: str,
+    dry_run: bool,
+    controlled_live_enabled: bool,
+) -> bool:
+    """Fail-CLOSED arming guard for the ADX demo cohort (falsification lane).
+
+    2026-08-21, owner-authorised verbally and recorded in
+    ``_workspace/strategy_pipeline/89_owner_decision_directional_kill_date.md``
+    Section 5, after a four-voice council and a design review that returned
+    NO-GO twice.
+
+    WHAT THIS ARMS: lifting the ``regime_toxic_trend`` veto (4h ADX > 30) in
+    ``core/scoring/entry_score.py``, which currently refuses 64.6% of all
+    candidate evaluations. It lifts THAT VETO ONLY. Every other gate -- risk,
+    sizing, liquidation buffer, kill switch, spread, staleness, DRY_RUN --
+    still applies in full.
+
+    THE ENV TOGGLE ALONE CAN NEVER ARM IT. All four conditions must hold:
+    requested AND OPERATING_MODE == PAPER AND DRY_RUN AND NOT
+    CONTROLLED_LIVE_ENABLED. A mode flip disarms it with no code change. This
+    matters because a risk veto is being bypassed: a toggle that could do that
+    by itself would be a way to disable a safety control by editing one line
+    of .env.
+
+    HONESTY (binding, and the owner accepted all of it before authorising):
+      * This lane is expected to LOSE MONEY FASTER. That is its PURPOSE. The
+        comment above the veto it lifts already records that even the
+        SURVIVING 20-30 ADX band is significantly negative (mean -0.1551 per
+        trade, 95% CI [-0.2232, -0.0871]); screen 13_band_conditional measured
+        all three ADX buckets unprofitable after cost. This lane opens the
+        worse band. It restores FLOW, never EDGE.
+      * Its sample size is UNKNOWABLE in advance -- lifting the veto only
+        reaches the scorer; a candidate must still clear score >= 66 AND
+        layers_ok >= 6, and no score has ever been computed for an ADX > 30
+        symbol. So it settles NOTHING formally.
+      * Its results can NEVER be promotion evidence, may never be pooled into
+        a screen, and no amount of its P&L -- good or bad -- authorises real
+        capital. A profitable week was agreed IN ADVANCE to mean nothing.
+      * Isolation is BEST-EFFORT, not structural, and the owner accepted that
+        residual explicitly: demo P&L still lands in the paper-equity figure
+        (core/virtual_wallet.py) and the daily count/PnL/WR notification
+        (core/order_mgmt/closing.py), because those are keyed only by exchange
+        and by close_reason respectively.
+    """
+    return (
+        bool(requested)
+        and str(operating_mode).upper() == "PAPER"
+        and bool(dry_run)
+        and not bool(controlled_live_enabled)
+    )
+
+
+_ADX_DEMO_REQUESTED = (
+    os.getenv("ADX_DEMO_COHORT_ENABLED", "false").lower() == "true"
+)
+ADX_DEMO_COHORT = {
+    "enabled": _adx_demo_cohort_enabled(
+        _ADX_DEMO_REQUESTED, OPERATING_MODE, DRY_RUN, CONTROLLED_LIVE_ENABLED
+    ),
+    # Kept separate so an operator can see a toggle was SET but correctly
+    # REFUSED (e.g. someone flips it while CONTROLLED_LIVE is armed).
+    "requested_enabled": _ADX_DEMO_REQUESTED,
+    # The marker written onto a bypassed candidate so its rows stay
+    # identifiable downstream. Isolation is best-effort; the MARK is not
+    # optional -- without it the lane silently pools with evidence.
+    "cohort_tag": "adx_demo_ungated_v1",
+}
 
 def _accuracy_geometry_enabled(
     requested: bool, operating_mode: str, paper_profile: str

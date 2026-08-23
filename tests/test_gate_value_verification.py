@@ -72,6 +72,13 @@ def _wd(notifier):
     wd._risk = None
     wd._state = hw.WatchdogState()
     wd._first_seen = {}
+    # ISOLATION (2026-08-21): stub both typed readers on the INSTANCE so no unit
+    # test reads the live data/warehouse.sqlite and asserts against whatever the
+    # running bot is blocked on this minute. Instance-level (not class-level) so
+    # inspect.getsource() source-pins still see the real functions. Tests that
+    # exercise a reader simply monkeypatch it, which overrides these.
+    wd._entry_block_from_warehouse = lambda: (None, 0)
+    wd._entry_block_from_candidates = lambda: (None, 0)
     return wd
 
 
@@ -232,6 +239,10 @@ def test_dominant_block_reports_unique_symbols(tmp_path, monkeypatch):
     (tmp_path / f"bot_{now.strftime('%Y-%m-%d')}.log").write_text(
         "\n".join(lines), encoding="utf-8")
     wd = _wd(_Notifier())
+    # 2026-08-20: the typed warehouse path now runs FIRST and would answer from
+    # live decision_events. Silence it so this test still exercises what it was
+    # written to cover -- the LOG scan's unique-symbol counting.
+    monkeypatch.setattr(wd, "_entry_block_from_warehouse", lambda: (None, 0))
     reason, hits = wd._dominant_entry_block_reason()
     assert (reason, hits) == ("chop", 5)
     assert wd._dominant_block_symbols == 2, (
@@ -241,3 +252,186 @@ def test_dominant_block_reports_unique_symbols(tmp_path, monkeypatch):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ── 2026-08-20: "no identifiable entry block in the logs" ────────────────────
+#
+# The live alert that triggered this work:
+#   [Watchdog/INFO] model_gate_starving — No OPEN actions in the last 6h
+#   despite non-drawdown state — no identifiable entry block in the logs.
+#
+# Measured that day: 139 OPEN proposals, 136 vetoed by btc_vol_pause, 3 killed
+# silently, 0 executed. The log scan matched 0 of the 70 lines containing
+# "BLOCKED" (all 70 came from an unrelated SelfHeal job), because BtcVolPause
+# logs "[BtcVolPause] WAIT" and SoftStale logs nothing at all. Meanwhile
+# decision_events held 11/11 rows naming btc_vol_pause. The answer existed;
+# the watchdog was looking in the wrong place and reported None.
+
+def test_dominant_block_never_returns_none(monkeypatch):
+    """None is not an answer. An unexplained idle is its own NAMED state.
+
+    Returning None let "nothing blocked us" and "we cannot tell what blocked
+    us" render as one INFO line. Those are opposite conditions.
+    """
+    wd = _wd(_Notifier())
+    monkeypatch.setattr(wd, "_entry_block_from_warehouse", lambda: (None, 0))
+    monkeypatch.setattr(wd, "_entry_block_from_logs", lambda: (None, 0))
+    reason, hits = wd._dominant_entry_block_reason()
+    assert reason is not None, "must never return None"
+    assert reason == hw.ENTRY_BLOCK_INSTRUMENTATION_GAP
+
+
+def test_typed_warehouse_beats_log_scraping(monkeypatch):
+    """decision_events is authoritative; the log scan is only a fallback.
+
+    Today's real numbers: warehouse knew btc_vol_pause, the log did not.
+    """
+    wd = _wd(_Notifier())
+    monkeypatch.setattr(
+        wd, "_entry_block_from_warehouse", lambda: ("btc_vol_pause", 136))
+    monkeypatch.setattr(
+        wd, "_entry_block_from_logs",
+        lambda: (_ for _ in ()).throw(AssertionError("log scan must not run")))
+    assert wd._dominant_entry_block_reason() == ("btc_vol_pause", 136)
+
+
+def test_log_scan_is_still_used_when_warehouse_is_silent(monkeypatch):
+    """Fallback must survive: some gates log but write no warehouse row."""
+    wd = _wd(_Notifier())
+    monkeypatch.setattr(wd, "_entry_block_from_warehouse", lambda: (None, 0))
+    monkeypatch.setattr(wd, "_entry_block_from_logs", lambda: ("chop", 5))
+    assert wd._dominant_entry_block_reason() == ("chop", 5)
+
+
+def test_instrumentation_gap_alerts_at_warning_not_info():
+    """Severity inversion fix: the LEAST understood state must be the loudest.
+
+    Before this, an unexplained idle alerted INFO while a correctly-identified
+    deliberate block alerted WARNING -- exactly backwards.
+    """
+    assert hw.COOLDOWN_SEC.get("model_gate_instrumentation_gap", 0) >= 6 * 3600
+    import inspect
+    src = inspect.getsource(hw.HealthWatchdog._check_model_gate_starving)
+    assert "ENTRY_BLOCK_INSTRUMENTATION_GAP" in src
+    assert '"model_gate_instrumentation_gap", "WARNING"' in src, (
+        "the unexplained-idle state must alert at WARNING"
+    )
+    assert "no identifiable entry block in the logs" not in src, (
+        "the old null-message must be gone -- it collapsed two opposite states"
+    )
+
+
+def test_warehouse_path_reuses_the_purpose_built_reader():
+    """Source pin: do not re-implement the decision_events SQL.
+
+    open_funnel_status already handles the ISO cutoff format correctly;
+    a hand-rolled datetime('now') cutoff string-compares below any 'T' row
+    and silently widens the window.
+    """
+    import inspect
+    src = inspect.getsource(hw.HealthWatchdog._entry_block_from_warehouse)
+    assert "open_funnel_status" in src
+    assert "SELECT" not in src.upper(), "must not hand-roll the query"
+
+
+def test_warehouse_key_names_are_pinned_to_the_real_reader(monkeypatch):
+    """Contract pin: the funnel reader's ACTUAL dict keys, not guessed ones.
+
+    2026-08-20: this function was written against invented keys ("top",
+    "drought"). open_funnel_status really returns "top_reject_reasons" and
+    "drought_status", so it silently returned (None, 0) on 18 real
+    open_attempts -- rendering a KNOWN blocker as an instrumentation_gap.
+    The other unit tests missed it because they monkeypatched this very
+    function, mocking away the thing that was broken.
+    """
+    import mcp_server.warehouse_reader as wr
+    fake = {
+        "lookback_hours": 6.0,
+        "open_attempts": 18,
+        "top_reject_reasons": [{"reason": "btc_vol_pause", "count": 17},
+                               {"reason": "soft_stale_entry_block", "count": 1}],
+        "top_reject_families": [],
+        "drought_status": "mixed_blocks",
+    }
+    monkeypatch.setattr(wr, "open_funnel_status", lambda **kw: fake)
+    wd = _wd(_Notifier())
+    # This test needs the REAL reader (that is the point -- it pins the key
+    # names). _wd() stubs it for isolation, so drop the stub and fall back to
+    # the class implementation, with open_funnel_status faked above.
+    del wd._entry_block_from_warehouse
+    assert wd._entry_block_from_warehouse() == ("btc_vol_pause", 17)
+
+
+def test_real_reader_actually_exposes_those_keys():
+    """If open_funnel_status is ever renamed, fail HERE, not silently at 3am."""
+    import inspect
+    from mcp_server import warehouse_reader as wr
+    src = inspect.getsource(wr.open_funnel_status)
+    for key in ('"open_attempts"', '"top_reject_reasons"'):
+        assert key in src, f"open_funnel_status no longer returns {key}"
+
+
+# ── 2026-08-21: the funnel can die UPSTREAM, where decision_events is empty ──
+#
+# Live that morning: 14 cycles x 55 coins, "No actions this cycle" every time,
+# and the watchdog again emitted "no identifiable entry block in the logs".
+# But the warehouse held 6,884 candidate rows for the window:
+#     regime_toxic_trend(4h_adx=36..47>30)   4,444  (64.6%)  <- the real answer
+#     analysis_only_accband_scope            2,055  (29.9%)
+#     ALLOW                                    121   (1.8%)
+# decision_events had NO terminal OPEN row, because nothing ever reached
+# entry_exec. So the downstream reader (open_funnel_status) correctly returned
+# nothing -- and the answer was one table away the whole time.
+
+def test_candidates_table_answers_when_decision_events_is_empty(monkeypatch):
+    """Upstream deaths must still be named. decision_events cannot see them."""
+    wd = _wd(_Notifier())
+    monkeypatch.setattr(wd, "_entry_block_from_warehouse", lambda: (None, 0))
+    monkeypatch.setattr(
+        wd, "_entry_block_from_candidates",
+        lambda: ("regime_toxic_trend(4h_adx=N>N)", 4444))
+    monkeypatch.setattr(
+        wd, "_entry_block_from_logs",
+        lambda: (_ for _ in ()).throw(AssertionError("log scan must not run")))
+    reason, hits = wd._dominant_entry_block_reason()
+    assert reason == "regime_toxic_trend(4h_adx=N>N)"
+    assert hits == 4444
+
+
+def test_candidates_reader_uses_EPOCH_not_iso_cutoff():
+    """candidates.ts is REAL unix-epoch, NOT an ISO string.
+
+    Comparing a REAL column against an ISO string in SQLite matches ZERO rows
+    and does NOT raise -- numeric affinity sorts below text. That exact trap
+    produced a false "0 rows in 6 hours" reading during this diagnosis, on a
+    table that actually held 6,884 rows. Pin it so nobody reintroduces it.
+    """
+    import inspect
+    src = inspect.getsource(hw.HealthWatchdog._entry_block_from_candidates)
+    assert "time.time()" in src or "timestamp()" in src, (
+        "cutoff must be epoch seconds, matching candidates.ts REAL affinity"
+    )
+    assert "strftime" not in src and "isoformat" not in src, (
+        "an ISO cutoff silently matches nothing against a REAL ts column"
+    )
+
+
+def test_skip_reasons_are_grouped_into_families():
+    """`adx=43>30` and `adx=41>30` are ONE cause, not two.
+
+    Ungrouped, the live histogram splits 4,444 rows across ~12 distinct ADX
+    values, so the true dominant block (64.6%) looks like a 434-row also-ran
+    beneath analysis_only_accband_scope (2,055). Grouping is what makes the
+    alert name the right thing.
+    """
+    import inspect
+    src = inspect.getsource(hw.HealthWatchdog._entry_block_from_candidates)
+    assert "re.sub" in src, "numeric variants must be normalised into families"
+
+
+def test_allow_rows_are_not_counted_as_a_block():
+    """decision='ALLOW' is the opposite of a block; counting it would report
+    'ALLOW' as the reason entries are starving."""
+    import inspect
+    src = inspect.getsource(hw.HealthWatchdog._entry_block_from_candidates)
+    assert "ALLOW" in src, "the query/filter must explicitly exclude ALLOW rows"

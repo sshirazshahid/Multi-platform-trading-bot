@@ -42,6 +42,32 @@ class _Notifier:
         self.sent.append((title, message))
 
 
+@pytest.fixture(autouse=True)
+def _no_production_warehouse(monkeypatch):
+    """Isolate: this module tests the LOG scan, never the live warehouse.
+
+    2026-08-20 -- when _dominant_entry_block_reason gained a typed
+    decision_events path that runs BEFORE the log scan, these tests began
+    reading the real data/warehouse.sqlite and asserting against whatever the
+    live bot happened to be blocked on that minute. A unit test must never
+    depend on production state. Silencing the warehouse path here makes the log
+    scan the subject under test, which is what this file was written to cover.
+
+    The warehouse path has its own dedicated coverage (including a pin on the
+    reader's actual dict keys) in tests/test_gate_value_verification.py.
+    """
+    monkeypatch.setattr(
+        HealthWatchdog, "_entry_block_from_warehouse", lambda self: (None, 0),
+    )
+    # 2026-08-21: a THIRD typed source was added (the upstream `candidates`
+    # table). Stub it too, or these log-scan tests read the live warehouse and
+    # assert against whatever the running bot is blocked on this minute. Each
+    # new source must be added here -- that is the cost of the fallback chain.
+    monkeypatch.setattr(
+        HealthWatchdog, "_entry_block_from_candidates", lambda self: (None, 0),
+    )
+
+
 class _Risk:
     def __init__(self, daily_pnl=0.0):
         self.daily_pnl = daily_pnl
@@ -121,12 +147,25 @@ def test_open_position_also_counts(tmp_path, monkeypatch):
 # ── the alert must still work when genuinely starving ───────────────────────
 
 def test_genuine_starvation_still_alerts(tmp_path, monkeypatch):
-    """No opens inside the window, not in drawdown -> the alert is real."""
+    """No opens inside the window, not in drawdown -> the alert is real.
+
+    This scenario configures NO blocker at all (no log lines, and the autouse
+    fixture silences the warehouse), so the honest state is
+    ENTRY_BLOCK_INSTRUMENTATION_GAP: idle, with nothing able to say why. Since
+    2026-08-20 that reports under its own key at WARNING rather than sharing
+    the INFO model_gate_starving line with well-understood deliberate blocks.
+    The requirement here is unchanged -- genuine starvation MUST alert exactly
+    once -- and the severity is now higher, not lower.
+    """
     _positions(tmp_path, monkeypatch, closed_ages_h=(9.0, 12.0))
     n = _Notifier()
     _wd(n, _Risk(0.0))._check_model_gate_starving()
     assert len(n.sent) == 1
-    assert "model_gate_starving" in n.sent[0][0]
+    title = n.sent[0][0]
+    assert "model_gate" in title, title
+    assert "instrumentation_gap" in title, (
+        f"unexplained idle must use the escalated key, got {title}")
+    assert "WARNING" in title, f"must not be INFO: {title}"
 
 
 def test_drawdown_suppresses_the_nag(tmp_path, monkeypatch):
@@ -190,23 +229,45 @@ def test_deliberate_regime_veto_suppresses_the_alert(tmp_path, monkeypatch):
 
 
 def test_unexplained_idleness_still_alerts(tmp_path, monkeypatch):
-    """With no identifiable blocker the alert MUST still fire — that is the
-    genuinely diagnostic case the check exists for."""
+    """With no identifiable blocker the alert MUST still fire -- that is the
+    genuinely diagnostic case the check exists for.
+
+    2026-08-20: that state is now the NAMED sentinel
+    ENTRY_BLOCK_INSTRUMENTATION_GAP instead of None, and it escalates to
+    WARNING under its own alert key. It used to render as an INFO line reading
+    "no identifiable entry block in the logs" -- the same severity as a healthy
+    deliberate block, which is precisely how an unexplained idle stayed
+    invisible. The requirement this test encodes (unexplained => MUST alert) is
+    unchanged and now stronger.
+    """
     _positions(tmp_path, monkeypatch, closed_ages_h=(9.0,))
     monkeypatch.setattr(
-        HealthWatchdog, "_dominant_entry_block_reason", lambda self: (None, 0),
+        HealthWatchdog, "_dominant_entry_block_reason",
+        lambda self: (hw.ENTRY_BLOCK_INSTRUMENTATION_GAP, 0),
     )
     n = _Notifier()
     _wd(n, _Risk(0.0))._check_model_gate_starving()
-    assert len(n.sent) == 1
-    assert "no identifiable" in n.sent[0][1].lower(), n.sent[0][1]
+    assert len(n.sent) == 1, f"unexplained idle must alert exactly once: {n.sent}"
+    blob = " ".join(str(part) for part in n.sent[0]).lower()
+    assert "unexplained" in blob, n.sent[0]
+    assert "instrumentation_gap" in blob or "observability" in blob, n.sent[0]
 
 
 def test_block_reason_scan_survives_missing_log(tmp_path, monkeypatch):
-    """No log directory must not crash the tick (fail-open to 'unknown')."""
+    """No log directory must not crash the tick.
+
+    2026-08-20: fail-open no longer means None. A missing log with nothing in
+    the warehouse either is the ENTRY_BLOCK_INSTRUMENTATION_GAP state -- named,
+    and alerting -- because "we cannot tell" must never be reported as "nothing
+    blocked us".
+    """
     monkeypatch.setattr(hw, "LOG_DIR", tmp_path / "no_logs")
-    reason, count = _wd(_Notifier(), _Risk(0.0))._dominant_entry_block_reason()
-    assert reason is None and count == 0
+    wd = _wd(_Notifier(), _Risk(0.0))
+    monkeypatch.setattr(wd, "_entry_block_from_warehouse", lambda: (None, 0))
+    reason, count = wd._dominant_entry_block_reason()
+    assert reason == hw.ENTRY_BLOCK_INSTRUMENTATION_GAP
+    assert count == 0
+    assert reason is not None, "must never degrade to a null all-clear"
 
 
 def test_shadow_only_latch_suppresses_starvation_nag(tmp_path, monkeypatch):
