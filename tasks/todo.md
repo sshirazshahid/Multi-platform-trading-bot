@@ -626,3 +626,15 @@ Plan: Harden Existing Trading Bot (Statistical Contract). Scope = HARDEN only (n
 
 **Restart:** Kill `launcher_supervisor` / `main.py` if running, then `auto_restart.bat` or `TradingBot.bat --supervise`. Verify boot lines: `SignalSrc : mcp`, Profile MAX_FLOW_BAND, AccBandNote, BandRegime ON, SmartMoney ON, EconGate paper_fallback.
 
+
+## 2026-09-25 — owner: "build a 24x7 profitable bot, paper first" (honest scope)
+- [x] Pipeline Phase 0-4 re-run on current state: no +EV trading lane (92_*, 69_*); F1 gate needs
+      ~104% APR funding vs ~6.5% today; stablecoin yield (~3.6-3.7%) dominates carry now → 93_*
+- [x] PAPER idle-cash yield ledger `core/idle_yield.py` (hourly job, separate file, fail-closed)
+- [x] Plain-English owner scoreboard `core/owner_scoreboard.py` (23:55 UTC job + email, CLI, .bat [S])
+- [x] Owner guide `docs/owner/START_HERE.md`
+- [ ] OWNER-GATED: set `ENTRY_POLICY=SHADOW_ONLY` in `.env` + reboot (stops executing the measured
+      −EV directional book in PAPER; hypotheses keep accruing as shadow decisions)
+- [ ] OWNER-GATED: any REAL savings deposit (exchange/platform counterparty risk; separate decision)
+- [ ] VERIFY on the owner box after merge: data/idle_yield.json shows rate status "ok"
+      (DefiLlama chart endpoint shape was not reachable from the cloud session)

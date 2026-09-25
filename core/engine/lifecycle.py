@@ -160,6 +160,8 @@ class _LifecycleMixin:
         schedule.every(_pos_mon_sec).seconds.do(self._run_mcp_position_monitor)
         schedule.every(LEARN_INTERVAL).seconds.do(self._run_learning)
         schedule.every(6).hours.do(self._run_promotion_funnel)
+        # PAPER-only idle-cash yield ledger (separate file; never the trading wallet).
+        schedule.every(1).hours.do(self._run_idle_yield)
         try:
             from config import ENABLE_DCA, ENABLE_REBALANCE
         except ImportError:
@@ -179,6 +181,8 @@ class _LifecycleMixin:
         # Daily self-check at midnight UTC
         schedule.every().day.at("00:00", "UTC").do(self._daily_self_check)
         schedule.every().day.at("00:00", "UTC").do(self._daily_summary)
+        # Owner's plain-English scoreboard, near the END of the UTC day it reports.
+        schedule.every().day.at("23:55", "UTC").do(self._run_owner_scoreboard)
         # Health watchdog tick — once per minute. Cheap, in-process.
         if self.watchdog is not None:
             schedule.every(60).seconds.do(self.watchdog.tick)

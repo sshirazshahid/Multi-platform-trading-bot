@@ -101,6 +101,8 @@ The legacy `DRY_RUN` flag is derived: `DRY_RUN = (OPERATING_MODE != "CONTROLLED_
 - `auto_mutator.py` — Auto-blacklists symbols with high loss rates; blocks shorts when counter-trend losses cluster
 - `correlation_manager.py` — Cross-asset correlation tracking; reduces position size for correlated assets
 - `news_scanner.py` — Crypto news monitoring (30 min cycle)
+- `idle_yield.py` — PAPER-only idle-cash yield ledger (hourly engine job). Books what idle paper cash would earn at a public stablecoin rate (DefiLlama Aave-v3 USDC base APY) in its OWN file; never credits the trading wallet; no rate → no accrual. Yield, not trading edge (`_workspace/strategy_pipeline/93_*`)
+- `owner_scoreboard.py` — plain-English daily owner scoreboard (23:55 UTC engine job → `reports/owner_scoreboard_<date>.md` + email; CLI `scripts/owner_scoreboard.py`; TradingBot.bat option [S]). Read-only. Owner guide: `docs/owner/START_HERE.md`
 
 **Other (vestigial / backtest-only):**
 - `blacklist_manager.py`, `market_regime.py`, `kelly_sizer.py`, `arbitrage_engine.py` — present but not called from the active Claude Portfolio pipeline
@@ -172,6 +174,7 @@ All settings centralized. Loaded from `.env` via `python-dotenv`. Key sections:
 - `spot_portfolio.json` — Spot holdings state
 - `promotion_funnel.json` — hourly funnel snapshot: per-lane state/floor-progress toward the frozen promotion gate (written by `scripts/promotion_funnel.py`)
 - `strategy_specs/*.json` — StrategySpec artifacts; an `active-paper` futures spec here IS the route-gate authorization for directional paper OPENs (cached at boot)
+- `idle_yield.json` — idle-cash yield ledger (separate from `virtual_wallet.json`; label says "not trading profit")
 - `goal_progress.json` — daily goal report lanes (UTC-day WR/profitability vs the 63–67% target, `target_status` field)
 - `carry_positions.json` / `carry_gate_log.jsonl` — F1 carry runner state + per-check net-edge log (the funnel's F1 regime-watch reads the latter)
 - `heartbeat.json` — includes `paper_trading_profile` + `paper_profile_started_at` (cohort epoch)

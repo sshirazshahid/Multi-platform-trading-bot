@@ -183,6 +183,7 @@ echo   [J]  Fix ghost/phantom positions
 echo  -----------------------------------------------------------------------
 echo   [Y] Arbitrage backtest
 echo   [X] Send email report  [W] Test email
+echo   [S] My scoreboard - plain English: is the bot making money?
 echo  -----------------------------------------------------------------------
 echo   [0] Exit
 echo  -----------------------------------------------------------------------
@@ -209,6 +210,7 @@ if /i "!CHOICE!"=="J" goto :fix_ghosts
 if /i "!CHOICE!"=="Y" goto :arb_bt
 if /i "!CHOICE!"=="X" goto :email_send
 if /i "!CHOICE!"=="W" goto :email_test
+if /i "!CHOICE!"=="S" goto :scoreboard
 goto :menu
 :run_bot
 cls
@@ -468,6 +470,15 @@ goto :menu
 :bt_all
 echo.
 "%VENV_PYTHON%" backtest.py --strategy "!STRAT!" --symbol "!SYM!" --all-exchanges --days "!DAYS!"
+echo.
+pause
+goto :menu
+:scoreboard
+cls
+echo.
+cd /d "%BOT_DIR%"
+if not exist "%VENV_PYTHON%" goto :err_setup
+"%VENV_PYTHON%" "%BOT_DIR%scripts\owner_scoreboard.py"
 echo.
 pause
 goto :menu

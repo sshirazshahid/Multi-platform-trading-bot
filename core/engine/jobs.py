@@ -40,6 +40,44 @@ class _JobsMixin:
         except Exception as e:
             logger.debug(f"[Engine] promotion_funnel refresh skipped: {e}")
 
+    def _run_idle_yield(self):
+        """PAPER-only, fail-soft: book stablecoin yield on idle paper cash.
+
+        Separate ledger (data/idle_yield.json) — the trading wallet is only
+        READ, never credited, so no trading-lane evidence or sizing changes.
+        Yield, not trading edge (_workspace/strategy_pipeline/93_*)."""
+        try:
+            from core import idle_yield
+
+            idle_usd = float(self.order_mgr.wallet.total_balance())
+            out = idle_yield.run_idle_yield_tick(idle_usd, paper=bool(DRY_RUN))
+            if out.get("earned_usd"):
+                logger.debug(
+                    f"[IdleYield] +${out['earned_usd']:.4f} on ${idle_usd:,.2f} idle "
+                    f"@ {out.get('apy_pct')}% APY")
+        except Exception as e:
+            logger.debug(f"[IdleYield] tick skipped: {e}")
+
+    def _run_owner_scoreboard(self):
+        """Daily plain-English owner scoreboard: reports/ file + email. Read-only, fail-soft."""
+        try:
+            import html
+
+            from core import owner_scoreboard
+
+            path = owner_scoreboard.write_scoreboard()
+            logger.info(f"[Scoreboard] written: {path}")
+            notifier = getattr(self, "notifier", None)
+            if notifier is not None:
+                body = html.escape(path.read_text(encoding="utf-8"))
+                notifier.send(
+                    "Daily scoreboard (plain English)",
+                    "<pre style='font-family:Consolas,monospace;font-size:13px;"
+                    f"white-space:pre-wrap;'>{body}</pre>",
+                )
+        except Exception as e:
+            logger.debug(f"[Scoreboard] skipped: {e}")
+
     def _run_optimizer(self):
         from core.auto_optimizer import AutoOptimizer
         logger.info("[Engine] Starting auto-optimization...")
