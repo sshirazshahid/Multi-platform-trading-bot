@@ -5,6 +5,7 @@
 Read-only over the bot's data/ files; safe to run while the bot is running.
 Also available from TradingBot.bat, option [S].
 """
+
 from __future__ import annotations
 
 import sys
